@@ -414,6 +414,7 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 | metricKey | text | |
 | threshold | numeric? | null이면 이 단계는 값 없음 |
 | off | bool default false | 이 단계에서 지표 끄기 |
+| periodSec, statistic | int?, enum? | 콘솔 지정 주기(60·300·900·3600)와 통계. 없으면 정의값(D-27) |
 | evalM, evalN | int? | `1 ≤ M ≤ N ≤ 10`. 잠긴 정의(SEV-1, period ≥ 3600)는 무시(alarm-rules §2-4) |
 | updatedBy, updatedAt | | |
 
