@@ -410,6 +410,9 @@ select.inp{max-width:100%}
 /* D-30 + scale additions */
 .oc-paged{flex-wrap:wrap;max-width:100%}
 .pill.cz{background:var(--accent-t);color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.pill.hp.ar{background:var(--amber-t);color:var(--amber);box-shadow:inset 0 0 0 1px var(--amber)}
+.lvl{display:inline-flex;align-items:center;gap:5px;font:700 11px var(--mono);letter-spacing:.04em;white-space:nowrap}.lvl.unr{color:var(--red)}.lvl.ar{color:var(--amber)}
+.t tr.amb td:first-child{box-shadow:inset 3px 0 0 var(--amber)}
 .pill.hp{background:var(--red-t);color:var(--red);box-shadow:inset 0 0 0 1px var(--red);white-space:normal;height:auto;min-height:20px}
 .pill.cu{background:var(--soft);color:var(--ink2);box-shadow:inset 0 0 0 1px var(--deco)}
 .pl-bulk{display:flex;align-items:center;gap:10px;padding:8px 16px;border-bottom:1px solid var(--rule);background:var(--soft);flex-wrap:wrap}
@@ -1592,9 +1595,16 @@ function pagingHealth(c){var f=[],rs=responders(c),st=c.steps;
     for(var i=0;i<n;i++){var s=s0+i*slotLen(r),w=who(r,s);if(isP(w)&&!pageable(per(w)))gaps.push(r.n+' '+shiftSpan(r,s)+': '+nm(w)+' is Notify only');}});
   if(gaps.length)f.push({k:'gap',d:'Nobody is paged first for '+gaps.join('; ')+'.'});
   return f;}
-function healthCell(c){var f=pagingHealth(c);return f.length?'<span class="row" style="gap:4px">'+f.map(function(x){return '<span class="pill hp">'+HF[x.k]+'</span>';}).join('')+'</span>':'<span class="st res"><span class="mk chk"></span>OK</span>';}
-function healthBanner(c){var f=pagingHealth(c);if(!f.length)return '';
-  return '<div class="banner red" style="align-items:flex-start"><span class="st trig" style="padding-top:2px"><span class="mk tri"></span></span><div style="flex:1;min-width:0"><b>'+esc(c.n)+' can\'t be paged reliably · '+pl(f.length,'problem')+'</b>'+f.map(function(x){return '<div class="sm" style="margin-top:4px"><b>'+HF[x.k]+'.</b> '+esc(x.d)+'</div>';}).join('')+'</div></div>';}
+/* D-32: two levels. UNREACHABLE = no step reaches anyone on a verified channel; AT_RISK = other problems */
+var LV={unr:{t:'Unreachable',mk:'dot',d:'No step reaches anyone with a verified contact'},ar:{t:'At risk',mk:'tri',d:'Some step depends on unverified or expired contacts, or a rotation gap'}};
+function healthLevel(c){var f=pagingHealth(c);if(!f.length)return null;
+  return c.steps.some(function(s){return idsNow(c,s.to).some(function(id){return canReach(id,s.how);});})?'ar':'unr';}
+function lvRank(c){var l=healthLevel(c);return l==='unr'?0:l==='ar'?1:2;}
+function bySev(a){return a.map(function(c,i){return [c,i];}).sort(function(x,y){return lvRank(x[0])-lvRank(y[0])||x[1]-y[1];}).map(function(x){return x[0];});}
+function lvTag(l){return '<span class="lvl '+l+'"><span class="mk '+LV[l].mk+'"></span>'+LV[l].t.toUpperCase()+'</span>';}
+function healthCell(c){var f=pagingHealth(c),l=healthLevel(c);return f.length?'<span class="row" style="gap:4px">'+lvTag(l)+f.map(function(x){return '<span class="pill hp'+(l==='ar'?' ar':'')+'">'+HF[x.k]+'</span>';}).join('')+'</span>':'<span class="st res"><span class="mk chk"></span>OK</span>';}
+function healthBanner(c){var f=pagingHealth(c);if(!f.length)return '';var l=healthLevel(c);
+  return '<div class="banner '+(l==='unr'?'red':'amber')+'" style="align-items:flex-start"><span class="st '+(l==='unr'?'trig':'warn')+'" style="padding-top:2px"><span class="mk '+LV[l].mk+'"></span></span><div style="flex:1;min-width:0"><b>'+LV[l].t+' · '+(l==='unr'?esc(c.n)+' can\'t be paged at all':esc(c.n)+' may not be paged reliably')+' · '+pl(f.length,'problem')+'</b><div class="xs mut">'+LV[l].d+'.</div>'+f.map(function(x){return '<div class="sm" style="margin-top:4px"><b>'+HF[x.k]+'.</b> '+esc(x.d)+'</div>';}).join('')+'</div></div>';}
 
 /* ===== shared people list (Needs action) ===== */
 var CHS=['Slack','Email','SMS','Voice'];
@@ -1658,7 +1668,7 @@ function renderTabs(){
   $$('.js-now').forEach(function(e){e.textContent=D.now.label;});}
 
 /* ===== On-call › Now ===== */
-var NW={q:'',p:'',f:'',prob:null};
+var NW={q:'',p:'',f:'',prob:null,lv:''};
 function rotCard(rid){var r=R(rid),s=slotNow(r),w=who(r,s),u=r.scope==='MSP'?rotUsers(rid):[cust(r.c)];
   return '<div class="card"><div class="card-b"><div class="row"><span class="pill'+(r.scope==='MSP'?'':' cu')+'">'+(r.scope==='MSP'?'Shared MSP':'Customer')+'</span><a class="b sm" href="'+(r.scope==='MSP'?'#rotations?r='+rid:'#customer-resp?c='+r.c)+'">'+esc(r.n)+'</a></div>'+
     '<div class="row" style="margin-top:10px"><span class="av on">'+per(w).i+'</span><div><div class="b">'+esc(nm(w))+(isP(w)?' <span class="pill cu">'+esc(cust(per(w).c).n)+'</span>':'')+'</div><div class="xs faint">'+untilTxt(r,s)+' · next '+esc(fn(who(r,s+slotLen(r))))+'</div></div></div>'+
@@ -1671,15 +1681,15 @@ function renderNow(){
   var ps=$('#now-p');if(ps.options.length<2)Object.keys(D.staff).forEach(function(k){ps.add(new Option(D.staff[k].n,k));});
   if(NW.prob===null)NW.prob=D.customers.length>10;
   var probs=D.customers.filter(function(c){return pagingHealth(c).length;});
-  $('#now-prob').innerHTML='<label class="chip'+(NW.prob?' on':'')+'" style="cursor:pointer"><input type="checkbox" class="js-prob"'+(NW.prob?' checked':'')+' style="margin:0"> Only customers with problems<span class="n">'+probs.length+'</span></label>'+(D.customers.length>10?'<span class="xs faint">on by default above 10 customers</span>':'');
+  $('#now-prob').innerHTML='<label class="chip'+(NW.prob?' on':'')+'" style="cursor:pointer"><input type="checkbox" class="js-prob"'+(NW.prob?' checked':'')+' style="margin:0"> Only customers with problems<span class="n">'+probs.length+'</span></label>'+[['unr'],['ar']].map(function(o){var k=o[0],n=probs.filter(function(c){return healthLevel(c)===k;}).length;return '<span class="chip'+(NW.lv===k?' on':'')+'" data-lv="'+k+'" role="button"><span class="lvl '+k+'"><span class="mk '+LV[k].mk+'"></span></span>'+LV[k].t+'<span class="n">'+n+'</span></span>';}).join('')+(D.customers.length>10?'<span class="xs faint">on by default above 10 customers</span>':'');
   $('#now-f').innerHTML=[['','All']].concat(Object.keys(STYLE).map(function(k){return [k,STYLE[k]];})).map(function(o){var n=o[0]?D.customers.filter(function(c){return c.style===o[0];}).length:D.customers.length;return '<span class="chip'+(NW.f===o[0]?' on':'')+'" data-f="'+o[0]+'">'+o[1]+'<span class="n">'+n+'</span></span>';}).join('');
   var rows=D.customers.filter(function(c){
-    if(NW.q&&c.n.toLowerCase().indexOf(NW.q)<0)return false;if(NW.f&&c.style!==NW.f)return false;if(NW.prob&&!pagingHealth(c).length)return false;
+    if(NW.q&&c.n.toLowerCase().indexOf(NW.q)<0)return false;if(NW.f&&c.style!==NW.f)return false;if(NW.prob&&!pagingHealth(c).length)return false;if(NW.lv&&healthLevel(c)!==NW.lv)return false;
     if(NW.p&&responders(c).indexOf(NW.p)<0&&!c.steps.some(function(s){return idsNow(c,s.to).indexOf(NW.p)>=0;}))return false;return true;});
-  $('#now-n').textContent=rows.length+' of '+D.customers.length;
+  rows=bySev(rows);$('#now-n').textContent=rows.length+' of '+D.customers.length;
   $('#now-t tbody').innerHTML=rows.map(function(c){var s0=c.steps[0],ids=idsNow(c,s0.to),rs=responders(c),cp=custPeople(c.id).filter(pageable).length,hf=pagingHealth(c);
     var then=c.steps.slice(1).map(function(s,i){return '<div class="oc-then"><span class="mono faint">'+s.at+' min</span> <span>'+howTxt(s.how)+' '+tgtTxt(c,s.to,true)+'</span></div>';}).join('')||'—';
-    return '<tr'+(hf.length?' class="hot"':'')+'><td data-l="Customer"><div><a class="ttl" href="#customer-resp?c='+c.id+'">'+esc(c.n)+'</a>'+(hf.length?'<div style="margin-top:4px">'+healthCell(c)+'</div>':'')+'</div></td><td data-l="Ordering"><div>'+planBadge(c)+'</div></td>'+
+    return '<tr'+(hf.length?' class="'+(healthLevel(c)==='unr'?'hot':'amb')+'"':'')+'><td data-l="Customer"><div><a class="ttl" href="#customer-resp?c='+c.id+'">'+esc(c.n)+'</a>'+(hf.length?'<div style="margin-top:4px">'+healthCell(c)+'</div>':'')+'</div></td><td data-l="Ordering"><div>'+planBadge(c)+'</div></td>'+
       '<td data-l="Paged first"><div><div class="row" style="gap:6px">'+ids.slice(0,4).map(function(id){return '<span class="av'+(id===NW.p?' on':'')+'" title="'+esc(nm(id))+'">'+per(id).i+'</span>';}).join('')+'<span class="sm">'+esc(names(ids,3))+'</span></div><div class="xs faint">'+howTxt(s0.how)+' · '+(s0.to.type==='ROTATION'?'on shift in '+esc(R(s0.to.id).n):s0.to.type==='ALL'?'all at once':'named person')+'</div></div></td>'+
       '<td data-l="Then" class="xs"><div>'+then+'</div></td><td data-l="Responders" class="r sm"><div><span class="mono">'+rs.length+'</span>'+(cp?' <span class="xs faint">incl. '+pl(cp,'customer person','customer people')+'</span>':'')+'</div></td></tr>';}).join('')||'<tr><td colspan="5" class="sm mut">'+(NW.prob?'No customer has a paging problem. Untick “Only customers with problems” to see all.':'No customers match.')+'</td></tr>';}
 
@@ -2025,11 +2035,11 @@ function renderCustomers(){
     '<div class="plist">'+na.slice(0,3).map(function(p){return '<div><div style="flex:1;min-width:0"><div class="b">'+esc(p.n)+' <span class="xs faint">'+esc(cust(p.c).n)+' · '+esc(p.roles.join(', '))+'</span></div><div class="row" style="margin-top:4px">'+badCh(p).map(function(k){return chip(k,p.ch[k]);}).join('')+'</div></div></div>';}).join('')+
     '<div><div style="flex:1" class="xs mut">'+(na.length-3>0?'+'+(na.length-3)+' more · ':'')+Object.keys(byC).map(function(k){return esc(cust(k).n)+' '+byC[k];}).join(' · ')+'. '+NA_DEF+'</div></div></div>';
   var probs=D.customers.filter(function(c){return pagingHealth(c).length;});
-  $('#cu-f').innerHTML=[['','All',D.customers.length],['prob','Paging problems',probs.length]].map(function(o){return '<span class="chip'+(CU.f===o[0]?' on':'')+'" data-f="'+o[0]+'" role="button">'+o[1]+'<span class="n">'+o[2]+'</span></span>';}).join('');
-  $('#cu-fn').textContent='Paging problems = '+Object.keys(HF).map(function(k){return HF[k];}).join(', ')+'.';
-  $('#cu-t tbody').innerHTML=D.customers.filter(function(c){return (!q||c.n.toLowerCase().indexOf(q)>=0)&&(!CU.f||pagingHealth(c).length);}).map(function(c){
+  $('#cu-f').innerHTML=[['','All',D.customers.length],['unr','Unreachable',probs.filter(function(c){return healthLevel(c)==='unr';}).length],['ar','At risk',probs.filter(function(c){return healthLevel(c)==='ar';}).length]].map(function(o){return '<span class="chip'+(CU.f===o[0]?' on':'')+'" data-f="'+o[0]+'" role="button">'+(o[0]?'<span class="lvl '+o[0]+'"><span class="mk '+LV[o[0]].mk+'"></span></span>':'')+o[1]+'<span class="n">'+o[2]+'</span></span>';}).join('');
+  $('#cu-fn').textContent='Unreachable = '+LV.unr.d.toLowerCase()+'. At risk = '+LV.ar.d.toLowerCase()+'. Unreachable sorts first.';
+  $('#cu-t tbody').innerHTML=bySev(D.customers.filter(function(c){return (!q||c.n.toLowerCase().indexOf(q)>=0)&&(!CU.f||healthLevel(c)===CU.f);})).map(function(c){
     var n=byC[c.id]||0,rs=responders(c),ids=idsNow(c,c.steps[0].to);
-    return '<tr class="'+(c.inc.indexOf('SEV-1')>=0?'hot':c.inc.indexOf('SEV-2')>=0?'esc':'')+'"><td data-l="Customer"><a class="ttl" href="#customer-resp?c='+c.id+'">'+esc(c.n)+'</a><div class="org mono">'+esc(c.dom)+'</div></td>'+
+    var hl=healthLevel(c);return '<tr class="'+(hl==='unr'||c.inc.indexOf('SEV-1')>=0?'hot':c.inc.indexOf('SEV-2')>=0?'esc':hl==='ar'?'amb':'')+'"><td data-l="Customer"><a class="ttl" href="#customer-resp?c='+c.id+'">'+esc(c.n)+'</a><div class="org mono">'+esc(c.dom)+'</div></td>'+
       '<td data-l="Open incidents" class="sm">'+c.inc+'</td><td data-l="Sources" class="sm">'+c.src+'</td>'+
       '<td data-l="Connection">'+(c.conn==='ok'?'<span class="st res"><span class="mk chk"></span>All roles OK</span>':'<span class="st esc"><span class="mk tri"></span>'+c.conn+'</span>')+'</td>'+
       '<td data-l="Coverage"><div class="mono sm">'+c.cov+'</div><div class="org">'+c.covn+'</div></td>'+
@@ -2084,7 +2094,8 @@ function bindStatic(){
   $('#oc-q').addEventListener('input',renderLookup);
   $('#now-q').oninput=function(){NW.q=this.value.trim().toLowerCase();renderNow();};
   $('#now-p').onchange=function(){NW.p=this.value;renderNow();};
-  $('#now-prob').onchange=function(e){if(e.target.classList.contains('js-prob')){NW.prob=e.target.checked;renderNow();}};
+  $('#now-prob').onchange=function(e){if(e.target.classList.contains('js-prob')){NW.prob=e.target.checked;if(!NW.prob)NW.lv='';renderNow();}};
+  $('#now-prob').onclick=function(e){var d=e.target.closest('[data-lv]');if(d){NW.lv=NW.lv===d.dataset.lv?'':d.dataset.lv;if(NW.lv)NW.prob=true;renderNow();}};
   $('#now-f').onclick=function(e){var d=e.target.closest('[data-f]');if(d){NW.f=d.dataset.f;renderNow();}};
   $('#rt-sw').onclick=function(e){var s=e.target.closest('[data-r]');if(s){RT.r=s.dataset.r;RE.open=false;renderRotations();}};
   bindRotEdit();
