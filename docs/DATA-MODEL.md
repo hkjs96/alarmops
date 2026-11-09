@@ -50,7 +50,7 @@
 - 세션은 앱 쿠키(서명 JWT 또는 DB 세션 — 미결 Q-DM-03). open 모드(SSO 없음)는 두지 않는다(org-tenant 새 구현 4).
 
 ### Contact (알림 대상 인원, D-29)
-로그인 계정과 별개. `kind`로 둘로 나뉜다: `INTERNAL`(MSP 직원, 팀·로테이션·페이징 대상) / `CUSTOMER`(고객 담당자, 알림만. `ContactScope`로 범위 지정).
+로그인 계정과 별개. `kind`로 둘로 나뉜다: `INTERNAL`(MSP 직원) / `CUSTOMER`(고객 사람). 둘 다 `Responder`로 고객에 붙고, CUSTOMER도 Responder.role=PAGEABLE이면 단계·로테이션 대상이 된다(D-31 개정).
 
 | 필드 | 타입 | 비고 |
 |---|---|---|
@@ -66,9 +66,9 @@
 | createdAt, updatedAt | | |
 
 - UQ(slackUserId) where not null, IX(customerId), IX(kind).
-- `CUSTOMER`는 TeamMember·RotationMember·Override·Assignment(contactId)에 들어갈 수 없다(앱 검증 + 트리거, D-29). Phone 칩은 SMS·Voice 두 채널로 표시.
+- `CUSTOMER` Contact는 **자기 고객**의 Responder·고객 로테이션·단계에만 들어갈 수 있다(다른 고객·MSP 로테이션 금지, 앱 검증 + 트리거). 단계·로테이션 대상이 되려면 Responder.role = PAGEABLE. Phone 칩은 SMS·Voice 두 채널로 표시.
 
-### ContactScope (고객 담당자 범위, D-29)
+### ContactScope (고객 사람이 알림받는 범위, D-29)
 | 필드 | 타입 | 비고 |
 |---|---|---|
 | id | PK | |
@@ -76,25 +76,39 @@
 | contactId | FK Contact (Cascade) | kind = CUSTOMER만 |
 | scopeType | enum `CUSTOMER, PROJECT, SERVICE` | |
 | scopeId | text | |
-| role | enum `NOTIFY, APPROVER, PORTAL_USER` | 한 사람이 여러 행 가능. APPROVER = 자동 조치 승인(D-15) |
+| role | enum `NOTIFY, APPROVER, PORTAL_USER` | 한 사람이 여러 행 가능. APPROVER = 자동 조치 승인(D-15). 호출 여부는 여기가 아니라 Responder.role |
 | createdAt | | |
 
 - UQ(contactId, scopeType, scopeId, role), IX(customerId, scopeType, scopeId).
 - 해석: 리소스 → Service → Project → Customer 순으로 **모두 합친다**(Assignment와 달리 가장 구체적인 하나가 아님). 화면의 "Inherited from …"과 알림 대상 계산은 같은 함수.
 
-### Team / TeamMember
-| Team | 타입 | 비고 |
-|---|---|---|
-| id | text PK | |
-| customerId | text? FK | null = 내부 팀 |
-| name | text | UQ(customerId, name) |
-| timezone | text default `Asia/Seoul` | 잘못된 값이면 `Asia/Seoul`로 해석(oncall R2-4) |
+### ~~Team / TeamMember~~ (삭제, D-31 개정)
+팀 개념 없음. 대신 고객별 `Responder`, 저장된 직원 묶음 `ResponderTemplate`, `Rotation(scope)`.
 
-| TeamMember | 타입 | 비고 |
+### Responder (고객별 응답자, D-30·D-31 개정)
+| 필드 | 타입 | 비고 |
 |---|---|---|
-| teamId | FK Team (Cascade) | PK(teamId, contactId) |
-| contactId | FK Contact (Cascade) | |
-| order | int | 로테이션 순서 = 유일한 순서(D-28). 현재 당번을 맨 앞에 두고 이 순서로 꼬리를 만든다(oncall R1-4, R2-1) |
+| customerId | FK Customer (Cascade) | PK(customerId, contactId) |
+| contactId | FK Contact (Cascade) | INTERNAL 또는 그 고객의 CUSTOMER |
+| role | enum `PAGEABLE, NOTIFY_ONLY` | INTERNAL은 항상 PAGEABLE. NOTIFY_ONLY는 단계·로테이션·전원에서 빠짐 |
+| source | enum `TEMPLATE, DIRECT` | TEMPLATE이면 templateId |
+| templateId | text? FK ResponderTemplate | 템플릿에서 온 행. 템플릿 멤버 변경 시 이 행이 추가·삭제됨(DIRECT 행은 유지) |
+| createdBy, createdAt | | |
+
+- "Everyone in Responders" = 이 고객의 role=PAGEABLE 전원(활성 Leave 대체 적용 후). Auto-fix approver·Portal은 ContactScope.role.
+- IX(contactId) — People 화면 "customers covered".
+
+### ResponderTemplate / ResponderTemplateMember
+| ResponderTemplate | 타입 | 비고 |
+|---|---|---|
+| id, name | | UQ(name). 예: Infra core |
+| updatedBy, updatedAt, version | | 변경 시 If-Match |
+
+| ResponderTemplateMember | 비고 |
+|---|---|
+| templateId, contactId | PK. INTERNAL만 |
+
+Customer.responderTemplateId text? FK — 고객이 쓰는 템플릿(하나, 선택).
 
 ### Customer
 | 필드 | 타입 | 비고 |
@@ -155,10 +169,10 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 | customerId | FK | 비정규화 |
 | scopeType | enum `CUSTOMER, PROJECT, SERVICE, ACCOUNT` | 네 단계 중 정확히 한 곳(oncall R1-1) |
 | scopeId | text | 해당 행 id |
-| contactId / teamId | text? | 정확히 하나(CHECK) |
+| contactId | text | (teamId 삭제, D-31 개정) |
 | order | int | 0 = 1순위 |
 
-- UQ(scopeType, scopeId, contactId), UQ(scopeType, scopeId, teamId)(known-bugs 7-4). IX(customerId).
+- UQ(scopeType, scopeId, contactId)(known-bugs 7-4). IX(customerId). 페이징 대상 해석에는 쓰지 않는다(PagingConfig가 담당), Org & owners 표시용.
 - 해석: 가장 구체적인 단계 하나만 통째로(R1-2), 상속 표시와 알림 해석은 같은 함수(R1-3, 1b27f2f).
 
 ### RoutingRule
@@ -169,8 +183,7 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 | namespace, metric, resource | text? | `*` 글롭, 대소문자 무시 |
 | severities | text[] | 비면 와일드카드 |
 | serviceId | text? | |
-| teamId | FK Team | 매치 시 그 팀의 "지금 순서" |
-| escalationPolicyId | text? FK | 매치 시 쓸 정책(없으면 기본) |
+| pagingConfigId | text? FK PagingConfig | 매치 시 쓸 단계(없으면 service › project › customer 해석) |
 | enabled | bool | |
 
 ## 2. 수집 · 알림 · 인시던트
@@ -293,8 +306,8 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 | mttaSec, mttrSec | int? | I-5 |
 | memberCount, eventCount | int | 구성원 최대 200(I-4) |
 | accountIds, resourceTypes | text[] | 채널 조건 매칭(I-4, 71aa6e2) |
-| assignmentSnapshot | jsonb? | `{capturedAt, level, chain, order[{contactId,name,team,shift}], rule}`(oncall R3-1). 연락 수단은 저장하지 않음(R3-2) |
-| escalationPolicyId | text? FK | 발화 시점 고정 |
+| assignmentSnapshot | jsonb? | `{capturedAt, pagingConfigId, level, steps[{index,atMin,targetType,targetId,resolved[{contactId,name,via}]}], leaveApplied[]}`(oncall R3-1). 연락 수단은 저장하지 않음(R3-2) |
+| pagingConfigId | text? FK PagingConfig | 발화 시점 고정 |
 | escalationStep | int default 0 | 현재 단계 인덱스 |
 | escalationRepeat | int default 0 | 사다리를 몇 번 돌았나(D-20) |
 | escalationBaseAt | timestamptz? | 직전 통지 시각(oncall R4-2) |
@@ -527,81 +540,89 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 
 - UQ(customerId, resourceId, action) where status in (`PENDING_APPROVAL`,`APPROVED`,`EXECUTING`) — 같은 리소스에 동시 요청 하나.
 
-## 5. 온콜 · 에스컬레이션 (D-11)
+## 5. 온콜 · 에스컬레이션 (D-11, D-30·D-31 개정)
 
-### Schedule
-| 필드 | 타입 | 비고 |
-|---|---|---|
-| id, customerId? | | null = 내부 |
-| teamId | FK Team | 팀당 스케줄(oncall R2) |
-| name | text | |
-| timezone | text | 팀 시간대 기본 |
-
-### Rotation (시프트)
-| 필드 | 타입 | 비고 |
-|---|---|---|
-| id, scheduleId | | |
-| days | smallint[] | 0=일 … 6=토, 시작 요일 기준(oncall R2-2) |
-| startMin, endMin | smallint | 0..1440, `endMin ≤ startMin`이면 자정 넘김 |
-| priority | int | 겹치면 큰 것 |
-| enabled | bool | |
-
-| RotationMember | 비고 |
-|---|---|
-| rotationId, contactId, order | PK(rotationId, contactId) |
-
-순환 교대(주 단위 핸드오프)는 AH에 없었다 → 미결(Q-DM-14).
-
-### Override (대체 근무)
-| 필드 | 타입 | 비고 |
-|---|---|---|
-| id, scheduleId, contactId | | |
-| startAt, endAt | timestamptz | `[startAt, endAt)`, 겹치면 늦게 시작한 것(R2-3) |
-| reason, createdBy | |
-| kind | enum `COVER, SWAP` default COVER | D-28 |
-| status | enum `PENDING, ACCEPTED, DECLINED, CANCELLED` default PENDING | 해석에는 ACCEPTED만 쓴다(D-28) |
-| requestedAt, respondedAt | timestamptz? | | |
-
-- IX(scheduleId, startAt, endAt). 결과 순서: 수락된 대체 근무 > 시프트 > 로테이션 순서 꼬리(R2-1, D-28).
-
-### EscalationPolicy
+### Rotation
 | 필드 | 타입 | 비고 |
 |---|---|---|
 | id | PK | |
-| customerId | text? | null = MSP 기본 정책 |
+| scope | enum `MSP, CUSTOMER` | MSP = 공용(On-call › Rotations, 여러 고객이 참조), CUSTOMER = 그 고객 전용 |
+| customerId | text? FK | scope=CUSTOMER면 필수(CHECK) |
 | name | text | UQ(customerId, name) |
-| repeatCount | int default **1** | 사다리 끝에서 처음으로 돌아가는 횟수(D-20). 0 = 반복 없음 |
-| renotifyAfterAckSec | int? | ack 후 미해결 재알림(R5-2). null이면 SuppressionPolicy 값 |
-| isDefault | bool | 고객사당 하나(부분 UQ(customerId) where isDefault) |
-| teamId | text? FK Team | 팀 기본 정책(D-28). 고객사 정책은 팀 정책의 프리셋만 바꾼 것 |
-| preset | enum `STANDARD, URGENT, QUIET, CUSTOM` default STANDARD | D-28. STANDARD/URGENT/QUIET이면 단계는 프리셋에서 생성, 단계를 직접 고치면 CUSTOM |
+| cadence | enum `DAILY, WEEKLY` | |
+| handoverDow, handoverMin | smallint | 예: 매일 09:00, 월 10:00 |
+| anchorAt | timestamptz | 1번 멤버가 시작한 교대 |
+| timezone | text default `Asia/Seoul` | |
+
+| RotationMember | 비고 |
+|---|---|
+| rotationId, contactId, order | PK(rotationId, contactId). MSP 로테이션은 INTERNAL만. CUSTOMER 로테이션은 INTERNAL + 그 고객의 PAGEABLE Responder |
+
+당번 = members[(교대 번호) mod N] → 수락된 Override → 활성 Leave 대체 순으로 덮는다.
+
+### Override (대체 근무, 한 로테이션)
+| 필드 | 타입 | 비고 |
+|---|---|---|
+| id, rotationId, contactId | | contactId = 대신 서는 사람 |
+| startAt, endAt | timestamptz | `[startAt, endAt)` |
+| reason, createdBy | |
+| kind | enum `COVER, SWAP` | D-28 유지 |
+| status | enum `PENDING, ACCEPTED, DECLINED, CANCELLED` | 해석에는 ACCEPTED만 |
+| requestedAt, respondedAt | timestamptz? | |
+
+### Leave (휴가 대체, 모든 고객·로테이션, D-31 개정)
+| 필드 | 타입 | 비고 |
+|---|---|---|
+| id | PK | |
+| contactId | FK Contact | 자리를 비우는 직원 |
+| replacementId | FK Contact | 대체자(INTERNAL) |
+| startDate, endDate | date | KST, 양끝 포함 |
+| createdBy, createdAt, cancelledAt? | | |
+| bulkChangeId | FK BulkChange | 적용 시 미리보기 결과 |
+
+해석 시점 적용(행을 복사하지 않음): 기간 중 ① PERSON 단계의 contactId → replacementId ② ALL_RESPONDERS에서 contactId 제외, replacementId 포함(이미 있으면 중복 없음) ③ 로테이션 시프트의 당번이 contactId면 replacementId. 끝나면 자동 원복.
+
+### BulkChange (일괄 변경 감사, 추가만)
+| 필드 | 타입 | 비고 |
+|---|---|---|
+| id | PK | |
+| kind | enum `LEAVE_REPLACE, ADD_STAFF, TEMPLATE_UPDATE` | |
+| actorId | FK User | |
+| params | jsonb | `{contactId, replacementId, from, to}` / `{contactId, customerIds[]}` / `{templateId, added[], removed[]}` |
+| preview | jsonb | 적용 시점 미리보기 `{customers[{id, effects[]}], rotations[{id, shifts[]}], totals}` — 화면 문구 그대로 |
+| previewHash | text | 미리보기 이후 데이터가 바뀌면 적용 409 |
+| createdAt | | AuditLog에도 한 줄 |
+
+### PagingConfig (고객·프로젝트·서비스별 단계, 구 EscalationPolicy)
+| 필드 | 타입 | 비고 |
+|---|---|---|
+| id | PK | |
+| customerId | FK | |
+| scopeType | enum `CUSTOMER, PROJECT, SERVICE` | UQ(scopeType, scopeId). CUSTOMER 행은 고객당 필수 1개, 나머지는 선택 덮어쓰기 |
+| scopeId | text | |
+| style | enum `ALL_AT_ONCE, CUSTOMER_ROTATION, SHARED_ROTATION, CUSTOM` | 화면 표시·편집기 시작점 |
+| plan | enum `STANDARD, URGENT, QUIET` | 시작 템플릿 이름 |
+| edited | bool | 템플릿에서 만든 뒤 단계를 고쳤으면 true("(edited)") |
+| repeatCount | int default 1 | D-20 |
+| renotifyAfterAckSec | int? | |
+| version, updatedBy, updatedAt | | If-Match |
+
+해석: 리소스의 service › project › customer 중 **처음 있는 행 하나**(합치지 않음). Incident에는 발화 시점 pagingConfigId와 단계 스냅샷을 고정.
 
 ### EscalationStep
 | 필드 | 타입 | 비고 |
 |---|---|---|
-| id, policyId | | |
-| index | int | UQ(policyId, index) |
-| waitMin | int | 직전 통지 시각 기준 간격(oncall R4-2) |
-| target | enum `SNAPSHOT_NEXT, SNAPSHOT_ALL, CONTACT, TEAM, SCHEDULE` | SNAPSHOT_NEXT = 얼린 순서의 다음 사람(AH 동작) |
-| targetId | text? | |
-| channels | text[] | `SLACK_CHANNEL, SLACK_DM, SMS, VOICE, EMAIL`(D-11) |
-| advanceOnAllFail | bool default false | 모든 채널 실패 시 즉시 다음 단계(oncall 새 구현 5, 정책값) |
+| id, pagingConfigId | | |
+| index | int | UQ(pagingConfigId, index) |
+| atMin | int | 인시던트 시작 기준 분(화면 "At") |
+| targetType | enum `PERSON, ROTATION, ALL_RESPONDERS` | D-30 개정 |
+| targetId | text? | PERSON → contactId(그 고객 PAGEABLE Responder 또는 INTERNAL), ROTATION → rotationId(MSP 또는 그 고객 CUSTOMER), ALL_RESPONDERS → null |
+| channels | text[] | `SLACK_CHANNEL, SLACK_DM, SMS, VOICE, EMAIL` |
+| advanceOnAllFail | bool default false | |
 
-- 프리셋(D-28): STANDARD 0분 Slack → 2분 SMS → 7분 다음 사람 전화 → 12분 전원 / URGENT 0분 전화 → 5분 다음 사람 전화 / QUIET 0분 Slack.
+- 시작 템플릿(코드 상수): STANDARD 0 Slack P → 2 SMS P → 7 Call P → 12 Call ALL / URGENT 0 Call P → 5 Call ALL / QUIET 0 Slack P → 15 Slack ALL. P = 첫 대상(로테이션 또는 ALL). ALL_AT_ONCE면 마지막 ALL 단계는 생략.
 - 뮤트 종료 직후 밀린 단계 처리(R4-6)는 미결(Q-DM-15).
-
-### CustomerEscalation (고객의 팀·계획 선택, D-30·D-31)
-| 필드 | 타입 | 비고 |
-|---|---|---|
-| customerId | PK FK Customer | 고객당 1행 |
-| teamId | FK Team | MSP 직원 팀(고객 전용 팀 없음, D-31) |
-| planPolicyId | FK EscalationPolicy | 팀의 계획(Standard/Urgent/Quiet) |
-| timingPolicyId | text? FK EscalationPolicy | 고객 단위 타이밍. 계획 단계 복사본(`customerId` 설정, `preset=CUSTOM`, `basedOnPolicyId`). null = 팀 계획 그대로 |
-| updatedBy, updatedAt | | |
-
-- 해석: 서비스에 팀 지정이 있으면 그 팀·계획(고객 타이밍 미적용) → 없으면 CustomerEscalation(timingPolicyId ?? planPolicyId).
-- 팀 계획 PUT 시 영향 고객 = planPolicyId가 같고 timingPolicyId가 null인 고객. timingPolicyId가 있는 고객은 `excludedCustomers`로 응답.
-- EscalationPolicy에 `basedOnPolicyId text? FK` 추가(고객 타이밍이 어느 계획에서 복사됐는지 표시).
+- 구 `Schedule`, `CustomerEscalation`, `EscalationPolicy.teamId/preset/basedOnPolicyId`, target `SNAPSHOT_NEXT/SNAPSHOT_ALL/TEAM/SCHEDULE`은 삭제.
 
 ## 6. 통지
 
@@ -718,15 +739,20 @@ erDiagram
     Customer ||--o{ Contact : "customer contacts"
     Contact ||--o{ ContactScope : "notified for"
     User |o--o| Contact : links
-    Team ||--o{ TeamMember : has
-    Contact ||--o{ TeamMember : in
+    Customer ||--o{ Responder : has
+    Contact ||--o{ Responder : "responds for"
+    ResponderTemplate ||--o{ ResponderTemplateMember : has
+    ResponderTemplate |o--o{ Responder : source
     Customer ||--o{ Assignment : scopes
-    Team ||--o{ Schedule : has
-    Schedule ||--o{ Rotation : has
+    Customer |o--o{ Rotation : "CUSTOMER scope"
     Rotation ||--o{ RotationMember : has
-    Schedule ||--o{ Override : has
-    EscalationPolicy ||--o{ EscalationStep : has
-    RoutingRule }o--|| Team : routes
+    Rotation ||--o{ Override : has
+    Contact ||--o{ Leave : away
+    BulkChange ||--o{ Leave : applies
+    Customer ||--o{ PagingConfig : "customer/project/service"
+    PagingConfig ||--o{ EscalationStep : has
+    EscalationStep }o--o| Rotation : "ROTATION target"
+    RoutingRule }o--o| PagingConfig : routes
 
     CloudAccount ||--o{ Resource : contains
     Resource ||--o{ ManagedAlarm : monitored_by
@@ -743,7 +769,7 @@ erDiagram
     Incident ||--o{ IncidentAlert : groups
     Alert ||--o{ IncidentAlert : member
     Incident ||--o{ IncidentEvent : timeline
-    Incident }o--o| EscalationPolicy : uses
+    Incident }o--o| PagingConfig : uses
     Incident ||--o{ NotificationJob : outbox
     NotificationJob ||--o{ NotificationLog : results
     Incident ||--o{ SlackMessage : threads

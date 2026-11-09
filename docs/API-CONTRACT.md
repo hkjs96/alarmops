@@ -42,7 +42,7 @@ Slack ──▶ POST /api/slack/interactive        문자·음성 업체 ──�
 | 필터 | `?customerId=&status=&severity=` 등. 빈 파라미터는 무시(9-6) |
 | ID in URL | 리소스 키처럼 `/`·`:`가 들어가는 값은 base64url(9-4) |
 | 범위 | 모든 조회에 서버가 구한 customerId 집합 적용. 범위 밖 단건은 **404**(존재를 드러내지 않음, org-tenant R3-3). 범위 안이지만 역할 부족은 403 |
-| 낙관적 잠금 | 수정 요청은 `If-Match: <version>` 필수인 리소스: Incident, ManagedAlarm, EscalationPolicy, ThresholdDefault. 불일치 409 `VERSION_CONFLICT` |
+| 낙관적 잠금 | 수정 요청은 `If-Match: <version>` 필수인 리소스: Incident, ManagedAlarm, PagingConfig, ResponderTemplate, ThresholdDefault. 불일치 409 `VERSION_CONFLICT` |
 | 멱등 | 생성·상태 변경 POST는 `Idempotency-Key` 헤더 허용(24시간 보관). 같은 키 재요청은 첫 응답 재생 |
 | 감사 | 쓰기 요청은 모두 AuditLog 1행 |
 
@@ -155,7 +155,7 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 | Incident.status ≠ TRIGGERED | 건너뜀(ack가 멈춘다) | oncall R6-3 |
 | 점검 창이 덮고 severity ≠ SEV-1 | 건너뜀, 단계 유지, `muted++` | D-17, R4-6 |
 | `now − escalationBaseAt ≥ step.waitMin` | 선점(`WHERE version=?`) → IncidentEvent(기준 시각 포함 문구) → 채널별 NotificationJob | R4-2, R4-3, R4-5 |
-| 마지막 단계 이후 `escalationRepeat < policy.repeatCount` | step=0, repeat+1, 처음부터 | D-20 (기본 1회) |
+| 마지막 단계 이후 `escalationRepeat < pagingConfig.repeatCount` | step=0, repeat+1, 처음부터 | D-20 (기본 1회) |
 | 반복도 끝남 | `escalationDoneAt` 기록, 더 보내지 않음 | D-20 |
 | ACKNOWLEDGED이고 `renotifyAfter` 경과 | RENOTIFY 잡(최초와 같은 채널 매칭) | R5-2, 71aa6e2 |
 
@@ -239,19 +239,24 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 ### 8.3 온콜
 | 메서드 경로 | 설명 | 권한 |
 |---|---|---|
-| GET/POST `/teams`, PATCH/DELETE `/teams/{id}` | 멤버 순서 포함 | A |
 | GET/POST `/schedules`, PATCH/DELETE `/schedules/{id}` | 시프트 포함 | A |
 | GET/POST `/schedules/{id}/overrides`, DELETE `.../{oid}` | 대체·교환 요청. 본문 `{ kind: "COVER"\|"SWAP", start, end, fromUserId, toUserId, swapStart?, swapEnd?, reason }`(부분 시간 허용). 생성 시 `status: PENDING` — 수락 전 순서 불변. GET은 `?since=`로 최근 목록(사유 포함). DELETE는 요청자 취소(PENDING만) | O |
 | POST `/schedules/{id}/overrides/{oid}/accept` | 대상자만. PENDING→ACCEPTED, 반영. 이미 처리됨 409 `OVERRIDE_NOT_PENDING` | O(대상자) |
 | POST `/schedules/{id}/overrides/{oid}/decline` | 대상자만. 본문 `{ note? }`. PENDING→DECLINED, 요청자에게 알림. 48시간 또는 시작 시각 경과 시 EXPIRED | O(대상자) |
 | POST `/schedules/{id}/overrides/{oid}/remind` | 요청자만. Slack 재전송(10분 1회 제한) | O |
-| GET `/oncall/now?customerId=&serviceId=` | 지금 순서 + 해석 근거(level, rule, shift/override) — 알림 해석과 같은 함수(1b27f2f) | V |
-| GET `/oncall/paging-path?q=` 또는 `?resourceId=` / `?serviceId=` | "Who gets paged for…". 응답 `{ path: [{level:"RESOURCE"\|"SERVICE"\|"PROJECT"\|"CUSTOMER", id, name}], team: {id,name}, inheritedFrom: {level, id, name}, preset, policyId, policyVersion, steps: [{atMin, target:{kind:"USER"\|"EVERYONE", userId?, name?}, channels}], repeatCount, stopAtMin, sentence, customerNotified: [{contactId, name, scope:{level,id,name}, role}] }`(D-29, 알림만). `q`는 이름 접두 검색, 여러 건이면 `candidates[]` 반환. `/oncall/now`와 같은 해석 함수 | V |
-| GET/POST `/escalation-policies`, GET/PUT/DELETE `/escalation-policies/{id}` | 단계 포함, `repeatCount` 기본 1(D-20), `renotifyAfterAckMin`. **`preset`: `STANDARD`\|`URGENT`\|`QUIET`\|`CUSTOM`** — 프리셋이면 `steps`는 서버가 채움(읽기 전용), 단계 수정 시 `CUSTOM`. 응답에 `version`, `updatedBy`, `updatedAt`, `usedBy: [{customerId, name, preset, override}]`. PUT은 If-Match, 영향 고객 수를 응답 `affectedCustomers`로 반환 | A |
-| PUT `/customers/{id}/escalation` | D-30. `{ teamId, plan: STANDARD\|URGENT\|QUIET, timing?: { steps[], repeatCount } \| null }`. `timing` 있으면 그 고객만의 타이밍(계획 복사본) 저장, `null`이면 팀 계획으로 복귀. 응답 `{ label: "Mirae Pay · Urgent (customized)", customized, steps, sentence }`. 팀 계획 PUT 응답은 `affectedCustomers[]`, `excludedCustomers[]`(자기 타이밍 보유) | A |
-| GET `/teams?q=` | D-31. 팀 목록: `{id, name, memberCount, onCallNow:{contactId,name,until}, customerCount}` | V |
+| GET `/oncall/now?customerId=&contactId=&style=` | 로테이션별 지금 당번 + 고객별 첫 호출 대상·단계 요약 — 알림 해석과 같은 함수(Leave·Override 적용) | V |
+| GET `/oncall/paging-path?q=` 또는 `?resourceId=` / `?serviceId=` | "Who gets paged for…". 응답 `{ path: [{level:"RESOURCE"\|"SERVICE"\|"PROJECT"\|"CUSTOMER", id, name}], customer: {id,name}, inheritedFrom: {level, id, name}, style, plan, edited, pagingConfigId, version, steps: [{atMin, targetType:"PERSON"\|"ROTATION"\|"ALL_RESPONDERS", targetId?, nowIds[], names[], channels}], repeatCount, stopAtMin, sentence, customerNotified: [{contactId, name, scope:{level,id,name}}] }`(Notify only 고객 사람). `q`는 이름 접두 검색, 여러 건이면 `candidates[]` 반환. `/oncall/now`와 같은 해석 함수 | V |
+| GET/PUT `/customers/{id}/paging` | D-30 개정. `{ style: ALL_AT_ONCE\|CUSTOMER_ROTATION\|SHARED_ROTATION\|CUSTOM, plan: STANDARD\|URGENT\|QUIET, sharedRotationId?, steps[{atMin, targetType: PERSON\|ROTATION\|ALL_RESPONDERS, targetId?, channels[]}], repeatCount }` (If-Match). `plan`만 바꾸면 서버가 템플릿으로 단계 재생성(`edited=false`). 응답에 `sentence`(실명 미리보기) | A |
+| PUT/DELETE `/customers/{id}/paging-overrides/{scopeType}/{scopeId}` | PROJECT·SERVICE 덮어쓰기. 해석 service › project › customer | A |
+| GET/POST `/customers/{id}/responders`, PATCH/DELETE `/customers/{id}/responders/{contactId}` | `{contactId, role: PAGEABLE\|NOTIFY_ONLY}` 또는 새 고객 사람 `{name,email,phone,role,extras:[APPROVER,PORTAL_USER],scope, insertStep?:{afterIndex, atMin, channels}}`. 다른 고객 Contact는 422 `CROSS_CUSTOMER` | A |
+| GET/POST `/rotations?scope=&customerId=`, PATCH/DELETE `/rotations/{id}`, GET `/rotations/{id}/shifts?from=&to=`, GET `/rotations/{id}/usage` | Rotation(scope MSP\|CUSTOMER). usage = 참조 고객·단계 | A |
+| POST `/rotations/{id}/overrides`, POST `/overrides/{id}/accept\|decline` | COVER/SWAP, 상대 수락 후 반영(D-28) | O |
+| GET/POST `/responder-templates`, PATCH `/responder-templates/{id}`, POST `/responder-templates/{id}/preview` | 템플릿 변경 시 영향 고객 미리보기, PATCH는 `previewHash` 필수 | A |
+| GET `/staff?q=`, GET `/staff/{id}/coverage` | People: `{customerCount, onShift[], nextShift, customers[{id, via[]}]}` | V |
+| POST `/staff/{id}/leave/preview`, POST `/staff/{id}/leave`, DELETE `/leaves/{id}` | `{from, to, replacementId}` → `{customers[{id,effects[]}], rotations[{id,shifts[]}], totals, previewHash}`. 적용은 같은 본문 + previewHash, 다르면 409 `PREVIEW_STALE`. BulkChange + AuditLog 기록 | A |
+| POST `/staff/{id}/customers/preview`, POST `/staff/{id}/customers` | 직원을 여러 고객 Responders에 추가 `{customerIds[]}` | A |
+| GET `/bulk-changes?contactId=&kind=` | 일괄 변경 감사 | V |
 | GET `/contacts/needs-action?kind=&customerId=&channel=&q=` | 직원·고객 통합 Needs action 목록(한 정의: 확인 안 된 채널이 하나라도 있는 사람). 응답 `{ people[], counts:{people, staff, customer, linkable, notSet} }` | A |
-| PATCH `/teams/{id}` 확장 | `members[]` 순서(N명, 드래그 결과 그대로), `shiftPattern: "DAILY_0900"\|"DAY_NIGHT_0921"`, `layers: 1\|2`(primary/secondary, 기본 1) | A |
 | GET/POST `/routing-rules`, PATCH/DELETE `/{id}` | | A |
 
 ### 8.4 조직·계정·연동
@@ -264,8 +269,8 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 | GET `/accounts/{id}/status` | 역할별 상태·첫/마지막 수신(P4-1) | V |
 | POST `/unmapped-accounts/{awsAccountId}/map` | `{ customerId, serviceId? }` 미매핑 복구(P2-3) | A |
 | GET/POST `/assignments`, DELETE `/assignments/{id}`, PUT `/assignments/order` | | A |
-| GET/POST `/contacts`, PATCH/DELETE `/contacts/{id}` | `kind: INTERNAL\|CUSTOMER`(D-29). GET 쿼리 `kind`, `customerId`, `needsAction=true`(미확인·만료·미설정), `groupBy=team`(INTERNAL), `q`. 응답 항목에 `teams[]`(INTERNAL) 또는 `scopes[]`(CUSTOMER), 채널별 `{status, via, at, expiresAt}`. CUSTOMER를 팀·로테이션에 넣으면 422 `CUSTOMER_CONTACT_NOT_ROSTERABLE` | A, P(contacts, 자기 고객 CUSTOMER만) |
-| GET `/customers/{id}/people?scopeType=&scopeId=&q=` | 선택 노드의 사람: `attached[]`, `inherited[{from:{level,id,name}, people[]}]`, 트리 노드별 `count`, `needsAction` | V, P(contacts) |
+| GET/POST `/contacts`, PATCH/DELETE `/contacts/{id}` | `kind: INTERNAL\|CUSTOMER`(D-29). GET 쿼리 `kind`, `customerId`, `needsAction=true`(미확인·만료·미설정), `q`. 응답 항목에 `customerCount`(INTERNAL) 또는 `responderRole`·`scopes[]`(CUSTOMER), 채널별 `{status, via, at, expiresAt}`. CUSTOMER를 다른 고객이나 MSP 로테이션에 넣으면 422 `CROSS_CUSTOMER`, NOTIFY_ONLY를 단계·로테이션에 넣으면 422 `NOT_PAGEABLE` | A, P(contacts, 자기 고객 CUSTOMER만) |
+| (삭제) `/customers/{id}/people` | Responders & paging 탭으로 통합(`/customers/{id}/responders`, ContactScope는 아래) | |
 | POST `/contacts/{id}/scopes`, DELETE `/contacts/{id}/scopes/{sid}` | `{ scopeType: CUSTOMER\|PROJECT\|SERVICE, scopeId, role: NOTIFY\|APPROVER\|PORTAL_USER }`. 중복 409 | A, P(contacts) |
 | POST `/contacts/verify-bulk` | `{ contactIds[] }` 또는 `{ kind?, customerId?, filter: "needsAction" }` → `{ sent, notSet[] }`. 미설정(NOT_SET) 채널은 링크 대상 아님 → `notSet`으로 반환해 "Ask to add" | A |
 | POST `/contacts/{id}/verify` | `{ channel, method: "link"|"manual", note? }` | A, P(contacts) |

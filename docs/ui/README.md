@@ -31,8 +31,12 @@
 | Incident 상세(RCA 자리, 자동 조치 패널) | `screens/incident-detail.md` | 있음 | 하은 |
 | Monitoring(알람·리소스·빈틈·Needs review) | `screens/monitoring.md` | 있음 | 민재 |
 | Resource 상세(임계치 출처·드리프트·이력) | `screens/resource-detail.md` | 있음 | 민재 |
-| 온콜 팀(순서·당번·교환·프리셋, D-28) | `screens/oncall-team.md` | 있음 | 하은, 준호 |
-| Contacts(MSP 직원, D-29) | `screens/contacts.md` | 있음 | 준호 |
+| On-call › Now (D-30·D-31) | `screens/oncall-now.md` | 있음 | 하은, 준호 |
+| On-call › Rotations | `screens/oncall-rotations.md` | 있음 | 하은, 준호 |
+| On-call › People (직원별 담당, 휴가 대체) | `screens/oncall-people.md` | 있음 | 준호 |
+| On-call › Templates | `screens/oncall-templates.md` | 있음 | 준호 |
+| Customer › Responders & paging | `screens/customer-responders.md` | 있음 | 준호 |
+| Contacts·채널 확인 정의 | `screens/contacts.md` | 있음 | 준호 |
 | 점검 창 | `screens/maintenance-windows.md` | 있음 | 준호, 민재 |
 | Integrations | `screens/integrations.md` | 있음 | 준호, 민재 |
 | 고객 온보딩 마법사 | `screens/customer-onboarding.md` | 있음(3단계) | 준호 |

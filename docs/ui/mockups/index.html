@@ -298,7 +298,7 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
 .big-q{font-size:22px;font-weight:600;letter-spacing:-.02em;line-height:1.3}
 
 
-/* on-call team (D-28) */
+/* on-call (D-30, D-31) */
 .oc-chain{display:flex;align-items:center;gap:12px;padding:16px;flex-wrap:wrap}
 .oc-p{display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid var(--rule);background:var(--surface);min-width:0;flex:1}
 .oc-p.first{border-color:var(--ink);box-shadow:inset 3px 0 0 var(--ink)}
@@ -320,6 +320,12 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
 .oc-presets>div span{font-size:12px;color:var(--mut)}
 .oc-presets>div.on{border-color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink);background:var(--soft)}
 .oc-presets>div.add{border-style:dashed}
+.oc-presets.ob-4{grid-template-columns:repeat(4,minmax(0,1fr))}
+@media (max-width:1100px){.oc-presets.ob-4{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.ed-r select{min-width:0}
+select.inp{max-width:100%}
+#s-customer-resp .g-main{grid-template-columns:minmax(0,1.25fr) minmax(0,1fr)}
+@media (max-width:1100px){#s-customer-resp .g-main{grid-template-columns:minmax(0,1fr)}}
 .oc-sent{font-size:15px;line-height:1.55;padding:12px 14px;border-left:3px solid var(--ink);background:var(--soft)}
 #oc-form{scroll-margin-top:48px}
 .oc-ord{padding:12px 16px;display:flex;flex-direction:column;gap:6px}
@@ -478,8 +484,10 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
   <button data-s="incident">Incident detail</button>
   <button data-s="monitoring">Monitoring</button>
   <button data-s="resource">Resource detail</button>
-  <button data-s="oncall">On-call team</button>
-  <button data-s="contacts">Contacts (staff)</button>
+  <button data-s="oncall">On-call · Now</button>
+  <button data-s="rotations">Rotations</button>
+  <button data-s="people">People</button>
+  <button data-s="templates">Templates</button>
   <button data-s="needs-action">Needs action</button>
   <button data-s="maintenance">Maintenance</button>
   <button data-s="integrations">Integrations</button>
@@ -487,7 +495,7 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
   <button data-s="onboard-oncall">Onboarding · on-call</button>
   <button data-s="customers">Customers</button>
   <button data-s="customer">Customer detail</button>
-  <button data-s="customer-people">Customer › People</button>
+  <button data-s="customer-resp">Customer › Responders</button>
   <button data-s="settings">Settings</button>
   <button data-s="portal">Customer portal</button>
   <button class="tt" id="tt">THEME: AUTO</button>
@@ -528,7 +536,7 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
 
   <div class="tiles">
     <div class="tile on"><div class="row"><span class="st trig"><span class="mk dot"></span></span><span class="ov">Triggered</span></div><div class="v red">3</div><div class="d">1 SEV-1 · oldest 11m</div></div>
-    <div class="tile"><div class="row"><span class="st esc"><span class="mk tri"></span></span><span class="ov">Escalated</span></div><div class="v orange">1</div><div class="d">step 2 of 4 · next 03:19</div></div>
+    <div class="tile"><div class="row"><span class="st esc"><span class="mk tri"></span></span><span class="ov">Escalated</span></div><div class="v orange">1</div><div class="d">step 3 of 4 · next 03:17</div></div>
     <div class="tile"><div class="row"><span class="st ack"><span class="mk ring"></span></span><span class="ov">Acknowledged</span></div><div class="v">2</div><div class="d">median ack 2m 40s</div></div>
     <div class="tile"><div class="row"><span class="st res"><span class="mk chk"></span></span><span class="ov">Resolved · 24h</span></div><div class="v">17</div><div class="d">9 auto · 8 manual</div></div>
     <div class="tile"><div class="row"><span class="st mute"><span class="mk dash"></span></span><span class="ov">Muted</span></div><div class="v">5</div><div class="d">2 maintenance windows</div></div>
@@ -554,16 +562,16 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
         <tbody>
           <tr class="hot"><td class="cbc"><span class="cb on"></span></td><td><span class="sev s1 hot"><span class="mk dot"></span>SEV-1</span></td><td><span class="st trig"><span class="mk dot"></span>Triggered</span></td>
             <td><a class="ttl" href="#incident" style="color:var(--ink)">payments-db-1 FreeStorageSpace below 10 GB</a><div class="org">Mirae Pay<span class="chain">›</span>Core<span class="chain">›</span>Payments API · RDS · <span class="mono">prd</span></div></td>
-            <td class="r mono b">3</td><td><span class="who"><span class="av on">HK</span>Haeun Kim</span><div class="org" id="il-pay-next"></div></td>
+            <td class="r mono b">3</td><td><span class="who" id="il-pay-who"></span><div class="org" id="il-pay-next"></div></td>
             <td class="hide-m" id="il-pay-esc"></td><td class="r mono sm">4m</td></tr>
           <tr class="esc"><td class="cbc"><span class="cb on"></span></td><td><span class="sev s2"><span class="mk tri"></span>SEV-2</span></td><td><span class="st esc"><span class="mk tri"></span>Escalated</span></td>
             <td><a class="ttl" href="#incident" style="color:var(--ink)">api-alb 5XX rate above 2%</a><div class="org">Hanbit Logistics<span class="chain">›</span>Tracking<span class="chain">›</span>Public API · ALB · <span class="mono">prd</span></div></td>
-            <td class="r mono b">2</td><td><span class="who"><span class="av">JP</span>Junho Park</span><div class="org">called 03:12 · Haeun didn't ack</div></td>
+            <td class="r mono b">2</td><td><span class="who"><span class="av">JP</span>Junho Park</span><div class="org">on shift in Hanbit on-call · called 03:12</div></td>
             <td class="hide-m"><span class="mono sm">3/4</span> <span class="sm mut">· everyone in 1m</span></td><td class="r mono sm">11m</td></tr>
           <tr class="hot"><td class="cbc"><span class="cb"></span></td><td><span class="sev s2"><span class="mk tri"></span>SEV-2</span></td><td><span class="st trig"><span class="mk dot"></span>Triggered</span></td>
             <td><span class="ttl">node-exporter: KubeNodeNotReady on ip-10-2-14-77</span><div class="org">Daon Retail<span class="chain">›</span>Commerce<span class="chain">›</span>EKS prod · Prometheus</div></td>
-            <td class="r mono b">1</td><td><span class="who"><span class="av on">HK</span>Haeun Kim</span><div class="org">next: Slack everyone at 15 min</div></td>
-            <td class="hide-m"><span class="mono sm">1/2</span> <span class="sm mut">· Slack sent</span></td><td class="r mono sm">2m</td></tr>
+            <td class="r mono b">1</td><td><span class="who"><span class="av">JP</span>Junho, Minjae, Soyeon</span><div class="org">all at once · next: call all 3 at 7 min</div></td>
+            <td class="hide-m"><span class="mono sm">2/3</span> <span class="sm mut">· Slack + SMS sent</span></td><td class="r mono sm">2m</td></tr>
           <tr class="hot"><td class="cbc"><span class="cb"></span></td><td><span class="sev s3"><span class="mk dia"></span>SEV-3</span></td><td><span class="st trig"><span class="mk dot"></span>Triggered</span></td>
             <td><span class="ttl">3 alarms from unmapped account</span><div class="org"><span class="st warn" style="font-size:10px"><span class="mk tri"></span>Unmapped</span> · <span class="mono">481220935017</span> · CloudWatch</div></td>
             <td class="r mono b">3</td><td><span class="mut sm">No owner</span></td>
@@ -584,9 +592,9 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
 
     <aside class="stack">
       <div class="card">
-        <div class="card-h"><span class="ov">On call now · by schedule</span><span class="sp"></span><a class="sm" href="#schedule">Schedule</a></div>
+        <div class="card-h"><span class="ov">On shift now</span><span class="sp"></span><a class="sm" href="#oncall">All customers</a></div>
         <div class="plist" id="il-oncall"></div>
-        <div class="xs faint" style="padding:8px 16px;border-top:1px solid var(--grid)">Each incident pages the team of its service (set on the service, or else on the customer). Teams are MSP staff groups shared by many customers.</div>
+        <div class="xs faint" style="padding:8px 16px;border-top:1px solid var(--grid)">Each incident follows its customer's paging steps (service › project › customer). Shared MSP rotations serve many customers.</div>
       </div>
       <div class="card lb-orange">
         <div class="card-h"><span class="ov">Escalation pending</span></div>
@@ -594,7 +602,7 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
           <div><div class="row"><span class="sev s1"><span class="mk dot"></span>SEV-1</span><span class="b sm">payments-db-1</span><span class="sp"></span><span class="mono sm" style="color:var(--orange)" id="il-pay-t"></span></div>
             <div class="xs mut" id="il-pay-pend"></div><div class="prog" style="margin-top:6px"><i style="width:62%;background:var(--orange)"></i></div></div>
           <div><div class="row"><span class="sev s2"><span class="mk tri"></span>SEV-2</span><span class="b sm">api-alb</span><span class="sp"></span><span class="mono sm" style="color:var(--orange)">0:48</span></div>
-            <div class="xs mut">Step 4 · Slack + SMS + call everyone on Infra team (6)</div><div class="prog" style="margin-top:6px"><i style="width:38%;background:var(--orange)"></i></div></div>
+            <div class="xs mut" id="il-alb-pend"></div><div class="prog" style="margin-top:6px"><i style="width:38%;background:var(--orange)"></i></div></div>
         </div>
       </div>
     </aside>
@@ -840,47 +848,17 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
 </div>
 </section>
 
-<!-- ============================ 5. ON-CALL TEAM (D-28) ============================ -->
+<!-- ============================ 5. ON-CALL › NOW (D-30, D-31) ============================ -->
 <section class="screen" id="s-oncall" data-menu="oncall">
 <div class="page">
-  <div class="tabs"><a class="on">Teams <span class="n">2</span></a><a href="#contacts">Contacts <span class="n hot js-staff-na"></span></a><a href="#maintenance">Maintenance</a></div>
-
-  <div class="card" style="margin-bottom:16px">
-    <div class="card-h" style="height:auto;min-height:40px;flex-wrap:wrap;padding:8px 16px;gap:8px"><span class="ov">Teams</span><span class="xs mut">Teams are your MSP staff groups (e.g. Infra, Data, Night desk). Many customers share one team; customers never get their own team.</span><span class="sp"></span><input class="inp" id="tl-q" style="width:200px;height:28px" placeholder="Search teams" aria-label="Search teams"><button class="btn sm">New team</button></div>
-    <div class="tw" style="border:0"><table class="t ccards" id="tl-t"><thead><tr><th>Team</th><th>Members</th><th>On call now</th><th>Customers</th></tr></thead><tbody></tbody></table></div>
-  </div>
-
+  <div class="tabs js-octabs" data-on="now"></div>
   <div class="ph">
-    <div><div class="crumb">On-call<span class="chain">›</span><span class="js-tm-name"></span></div><h1 class="sub js-tm-name"></h1><div class="desc" id="tm-desc"></div></div>
-    <div class="sp"></div><span class="seg" id="tm-sw"></span><a class="btn pri oc-cta" href="#oc-form" id="oc-cta">Cover or swap a shift</a>
+    <div><h1 class="sub">On shift now</h1><div class="desc" id="now-desc"></div></div>
+    <div class="sp"></div><a class="btn" href="#rotations">Rotations</a><a class="btn pri" href="#people?p=hk">My shifts</a>
   </div>
+  <div class="g3" id="now-rots" style="margin-bottom:16px"></div>
 
-  <div id="tm-pending"></div>
-
-  <aside class="card oc-sheet" id="oc-form" hidden style="margin-bottom:16px">
-    <div class="card-h"><span class="ov">Cover or swap a shift</span><span class="sp"></span><a class="sm" id="oc-close">Close</a></div>
-    <div class="card-b stack">
-      <div><label class="lab">What</label><div class="seg full"><span class="on">Someone covers me</span><span>Swap days</span></div></div>
-      <div><label class="lab">When</label><div class="sel" style="width:100%">Sat 14 · 09:00 – Sun 09:00<span class="sp"></span><span class="car">▼</span></div>
-        <div class="row" style="gap:8px;margin-top:6px"><span class="chip on">Whole shift</span><span class="chip">Part of it…</span><span class="xs mut">e.g. 18:00 – 23:00</span></div></div>
-      <div><label class="lab">Who</label><input class="inp" list="oc-ppl" value="Minjae Lee" style="width:100%" aria-label="Who covers"><datalist id="oc-ppl"></datalist><div class="hint">Search by name.</div></div>
-      <div><label class="lab">Reason <span class="faint">(shown to the team)</span></label><input class="inp" style="width:100%" value="Dentist appointment"></div>
-      <div class="note"><span>Minjae gets a Slack message to accept or decline. Nothing changes until Minjae accepts.</span></div>
-      <button class="btn pri" style="width:100%;justify-content:center">Send request</button>
-    </div>
-  </aside>
-
-  <div class="card oc-now">
-    <div class="card-h"><span class="ov">If something breaks now · <span class="js-now"></span></span><span class="sp"></span><a class="sm" href="#oc-drag" id="tm-chg">Change order</a></div>
-    <div class="oc-ord" id="tm-order"></div>
-    <div class="xs mut" id="tm-order-note" style="padding:10px 16px;border-top:1px solid var(--grid)"></div>
-    <details class="oc-adv" style="padding:0 16px 12px" id="tm-drag-d"><summary>Change order (drag)</summary>
-      <ol class="oc-drag" id="oc-drag"></ol>
-      <div class="row" style="gap:8px"><button class="btn sm">+ Add person</button><span class="sp"></span><button class="btn sm pri">Save order</button></div>
-    </details>
-  </div>
-
-  <div class="card oc-look" id="who-paged" style="margin-top:16px">
+  <div class="card oc-look" id="who-paged" style="margin-bottom:16px">
     <div class="card-h"><span class="ov">Who gets paged for…</span><span class="sp"></span><span class="xs faint">service or resource</span></div>
     <div class="card-b stack">
       <input class="inp" id="oc-q" list="oc-ql" value="payments-db-1" placeholder="Type a service or resource, e.g. payments-db" style="width:100%;min-height:40px" aria-label="Service or resource">
@@ -889,82 +867,98 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
     </div>
   </div>
 
-  <div class="g-main" style="margin:16px 0">
-    <div class="card">
-      <div class="card-h"><span class="ov">Shifts</span><span class="sp"></span><span class="xs mut" id="tm-mynext"></span></div>
-      <div class="row" style="padding:8px 16px;gap:8px;border-top:1px solid var(--grid)"><span class="xs mut">Shift length</span><span class="seg" id="oc-len"><span class="on" data-v="1">1 per day (09–09)</span><span data-v="2">Day 09–21 / Night 21–09</span></span></div>
-      <div class="oc-wk">This week · Nov 9 – 15 · each row = 09:00 that day → 09:00 next day</div>
-      <div class="oc-days" id="oc-d1"></div>
-      <div class="oc-days" id="oc-d2" hidden></div>
-      <div class="oc-wk">Next week · Nov 16 – 22</div>
-      <div class="oc-strip" id="tm-strip"></div>
-      <div class="xs mut" id="tm-rot" style="padding:10px 16px;border-top:1px solid var(--grid)"></div>
-    </div>
-
-    <div class="card">
-      <div class="card-h"><span class="ov">Recent changes to shifts</span><span class="sp"></span><span class="xs faint">last 30 days</span></div>
-      <div class="plist" id="tm-changes"></div>
-    </div>
-  </div>
-
-  <div class="card" style="margin-bottom:16px">
-    <div class="card-h"><span class="ov">Alert plans</span><span class="sp"></span><span class="xs mut" id="tm-ver"></span></div>
-    <div class="card-b stack">
-      <div class="oc-presets" id="oc-presets"></div>
-      <div class="oc-sent" id="oc-sent"></div>
-      <div class="xs mut" id="oc-used"></div>
-      <div class="xs mut">Stops as soon as anyone acknowledges. Names are who is on call right now (<span class="js-now"></span>). During maintenance, SEV-2 and below stay quiet; <b>SEV-1 always alerts.</b></div>
-      <div class="row" style="gap:8px"><button class="btn sm" id="tm-edit-plan">Edit timing of this plan…</button><span class="xs mut">Changes every customer on this plan that has no timing of its own.</span></div>
-    </div>
-  </div>
-
-  <div id="tm-editor"></div>
-
   <div class="card">
-    <div class="card-h" style="height:auto;min-height:40px;flex-wrap:wrap;padding:8px 16px;gap:8px"><span class="ov">Customers using this team</span><span class="mono xs faint" id="tm-cn"></span><span class="sp"></span>
-      <input class="inp" id="tm-cq" style="width:200px;height:28px" placeholder="Filter customers" aria-label="Filter customers"><span class="chips" id="tm-cf"></span></div>
-    <div class="tw" style="border:0">
-      <table class="t ccards" id="tm-ct">
-        <thead><tr><th>Customer</th><th>Services on this team</th><th>Alert plan</th><th>What happens</th><th class="r">Timing</th></tr></thead>
-        <tbody></tbody>
-      </table>
-    </div>
-    <div class="xs mut" style="padding:10px 16px;border-top:1px solid var(--grid)">People and order always come from the team. Each customer picks an alert plan; to change timing for one customer only, use <b>Customize for … only</b>. It copies the plan's steps for that customer.</div>
+    <div class="card-h" style="height:auto;min-height:40px;flex-wrap:wrap;padding:8px 16px;gap:8px"><span class="ov">If something breaks now, per customer</span><span class="mono xs faint" id="now-n"></span><span class="sp"></span>
+      <input class="inp" id="now-q" style="width:180px;height:28px" placeholder="Filter customers" aria-label="Filter customers">
+      <select class="inp" id="now-p" style="width:auto;height:28px" aria-label="Person"><option value="">Anyone</option></select>
+      <span class="chips" id="now-f"></span></div>
+    <div class="tw" style="border:0"><table class="t ccards" id="now-t"><thead><tr><th>Customer</th><th>Ordering</th><th>Paged first</th><th>Then</th><th class="r">Responders</th></tr></thead><tbody></tbody></table></div>
+    <div class="xs mut" style="padding:10px 16px;border-top:1px solid var(--grid)">Each customer has its own Responders and paging steps. A step targets a person, whoever is on shift in a rotation (the customer's own or a shared MSP rotation), or everyone in Responders at once.</div>
   </div>
 </div>
 </section>
 
-<!-- ============================ 7. CONTACTS (MSP staff, D-29) ============================ -->
-<section class="screen" id="s-contacts" data-menu="oncall">
+<!-- ============================ 5b. ON-CALL › ROTATIONS ============================ -->
+<section class="screen" id="s-rotations" data-menu="oncall">
 <div class="page">
-  <div class="tabs"><a href="#oncall">Teams <span class="n">2</span></a><a class="on">Contacts <span class="n hot js-staff-na"></span></a><a href="#maintenance">Maintenance</a></div>
+  <div class="tabs js-octabs" data-on="rotations"></div>
   <div class="ph">
-    <div><h1 class="sub">Contacts</h1><div class="desc">MSP staff who can be paged. Customer contacts are under each customer › <a href="#customer-people">People</a> (notified only, never paged).</div></div>
-    <div class="sp"></div><button class="btn pri">Add staff</button>
+    <div><h1 class="sub">Rotations</h1><div class="desc">Shared MSP rotations live here and are referenced by many customers' paging steps. Customer-specific rotations live under each customer.</div></div>
+    <div class="sp"></div><a class="btn pri oc-cta" href="#oc-form" id="oc-cta">Cover or swap a shift</a>
   </div>
-  <div class="banner accent ct-xc" id="ct-banner"></div>
-  <div class="row ct-bar" style="margin-bottom:12px">
-    <div class="chips" id="ct-f"></div>
-    <select class="inp" id="ct-team" style="width:auto" aria-label="Team"><option value="">All teams</option></select>
-    <select class="inp" id="ct-chan" style="width:auto" aria-label="Channel"><option value="">Any channel</option><option>Slack</option><option>Email</option><option>SMS</option><option>Voice</option></select>
-    <input class="inp ct-q" id="ct-q" placeholder="Search staff" aria-label="Search staff">
+  <div id="rt-pending"></div>
+  <aside class="card oc-sheet" id="oc-form" hidden style="margin-bottom:16px">
+    <div class="card-h"><span class="ov">Cover or swap a shift</span><span class="sp"></span><a class="sm" id="oc-close">Close</a></div>
+    <div class="card-b stack">
+      <div><label class="lab">What</label><div class="seg full"><span class="on">Someone covers me</span><span>Swap days</span></div></div>
+      <div><label class="lab">When</label><div class="sel" style="width:100%">MSP night desk · Fri 13 · 09:00 – Sat 09:00<span class="sp"></span><span class="car">▼</span></div>
+        <div class="row" style="gap:8px;margin-top:6px"><span class="chip on">Whole shift</span><span class="chip">Part of it…</span><span class="xs mut">e.g. 18:00 – 23:00</span></div></div>
+      <div><label class="lab">Who</label><input class="inp" list="oc-ppl" value="Minjae Lee" style="width:100%" aria-label="Who covers"><datalist id="oc-ppl"></datalist><div class="hint">Anyone in this rotation.</div></div>
+      <div><label class="lab">Reason <span class="faint">(shown to the rotation)</span></label><input class="inp" style="width:100%" value="Dentist appointment"></div>
+      <div class="note"><span>Minjae gets a Slack message to accept or decline. Nothing changes until Minjae accepts. Several days or all customers at once: use <a href="#people?p=hk&amp;b=leave">People › Leave &amp; replace</a>.</span></div>
+      <button class="btn pri" style="width:100%;justify-content:center">Send request</button>
+    </div>
+  </aside>
+  <div class="row" style="margin-bottom:12px"><span class="seg" id="rt-sw"></span><span class="sp"></span><button class="btn sm">New shared rotation</button></div>
+  <div class="g-main" style="margin-bottom:16px">
+    <div class="card">
+      <div class="card-h"><span class="ov" id="rt-name"></span><span class="sp"></span><span class="xs mut" id="rt-meta"></span></div>
+      <div class="oc-ord" id="rt-order"></div>
+      <div class="oc-wk" id="rt-wk1"></div>
+      <div class="oc-days" id="rt-days"></div>
+      <div class="xs mut" id="rt-note" style="padding:10px 16px;border-top:1px solid var(--grid)"></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><span class="ov">Used by</span><span class="sp"></span><span class="mono xs faint" id="rt-un"></span></div>
+      <div class="plist" id="rt-used"></div>
+      <div class="xs mut" style="padding:10px 16px;border-top:1px solid var(--grid)">Changing members or order here changes "on shift" for every customer listed.</div>
+    </div>
   </div>
-  <div class="card" id="ct-list"></div>
+  <div class="card">
+    <div class="card-h"><span class="ov">Customer rotations</span><span class="sp"></span><span class="xs faint">edited in each customer › Responders &amp; paging</span></div>
+    <div class="tw" style="border:0"><table class="t ccards" id="rt-ct"><thead><tr><th>Rotation</th><th>Customer</th><th>Members</th><th>On shift now</th></tr></thead><tbody></tbody></table></div>
+  </div>
+</div>
+</section>
 
-  <div class="g2" style="margin-top:16px">
-    <div class="note"><span class="st ack"><span class="mk ring"></span></span><span><b>Unverified channels still receive pages.</b> Verification shows the address is correct; it doesn't block delivery. Someone on two teams shows both team names.</span></div>
-    <div class="drawer"><div class="card-h"><span class="ov">Mark SMS verified · Sora Yoon</span></div><div class="card-b stack">
-      <div><label class="lab">How was it confirmed? <span class="faint">(required)</span></label><input class="inp focus" value="Called on Nov 9 and read back the number"></div>
-      <div class="row"><span class="xs mut">Recorded as Haeun Kim</span><span class="sp"></span><button class="btn sm">Cancel</button><button class="btn sm pri">Mark verified</button></div>
-    </div></div>
+<!-- ============================ 5c. ON-CALL › PEOPLE (MSP staff) ============================ -->
+<section class="screen" id="s-people" data-menu="oncall">
+<div class="page">
+  <div class="tabs js-octabs" data-on="people"></div>
+  <div class="ph">
+    <div><h1 class="sub">People</h1><div class="desc" id="pe-desc"></div></div>
+    <div class="sp"></div><a class="btn" href="#needs-action?w=all">Channels needing action <span class="tc warn js-staff-na"></span></a><button class="btn pri">Add staff</button>
   </div>
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-h" style="height:auto;min-height:40px;flex-wrap:wrap;padding:8px 16px;gap:8px"><span class="ov">MSP staff</span><span class="sp"></span><input class="inp" id="pe-q" style="width:200px;height:28px" placeholder="Search staff" aria-label="Search staff"></div>
+    <div class="tw" style="border:0"><table class="t ccards" id="pe-t"><thead><tr><th>Person</th><th class="r">Customers</th><th>On shift now</th><th>Next shift</th><th>Channels</th></tr></thead><tbody></tbody></table></div>
+  </div>
+  <div id="pe-detail"></div>
+  <div id="pe-bulk"></div>
+  <div class="card" style="margin-top:16px">
+    <div class="card-h"><span class="ov">Bulk changes · audit</span><span class="sp"></span><span class="xs faint">who changed which customers</span></div>
+    <div class="plist" id="pe-audit"></div>
+  </div>
+</div>
+</section>
+
+<!-- ============================ 5d. ON-CALL › TEMPLATES ============================ -->
+<section class="screen" id="s-templates" data-menu="oncall">
+<div class="page">
+  <div class="tabs js-octabs" data-on="templates"></div>
+  <div class="ph">
+    <div><h1 class="sub">Responder templates</h1><div class="desc">Saved groups of MSP staff. Applying a template adds those people to a customer's Responders; customer people are always added per customer.</div></div>
+    <div class="sp"></div><button class="btn pri">New template</button>
+  </div>
+  <div class="tw" style="margin-bottom:16px"><table class="t ccards" id="tp-t"><thead><tr><th>Template</th><th>MSP staff</th><th class="r">Customers</th><th>Last edited</th></tr></thead><tbody></tbody></table></div>
+  <div id="tp-detail"></div>
 </div>
 </section>
 
 <!-- ============================ 7b. NEEDS ACTION (staff + customer contacts) ============================ -->
 <section class="screen" id="s-needs-action" data-menu="oncall">
 <div class="page">
-  <div class="crumb"><a href="#contacts">On-call › Contacts</a><span class="chain">›</span>Needs action</div>
+  <div class="crumb"><a href="#people">On-call › People</a><span class="chain">›</span>Needs action</div>
   <div class="ph">
     <div><h1 class="sub">Contacts that need action</h1><div class="desc" id="na-desc"></div></div>
   </div>
@@ -982,7 +976,7 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
 <!-- ============================ 8. MAINTENANCE ============================ -->
 <section class="screen" id="s-maintenance" data-menu="oncall">
 <div class="page">
-  <div class="tabs"><a href="#oncall">Teams <span class="n">2</span></a><a>Contacts</a><a class="on">Maintenance</a></div>
+  <div class="tabs js-octabs" data-on="maint"></div>
   <div class="ph">
     <div><h1 class="sub">Maintenance windows</h1><div class="desc">Mute notifications and escalation while planned work happens. Alerts are still recorded.</div></div>
     <div class="sp"></div><button class="btn pri">New window</button>
@@ -1031,7 +1025,7 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
 <div class="page">
   <div class="crumb"><a href="#customers">Customers</a><span class="chain">›</span>Daon Retail</div>
   <div class="ph"><div><h1 class="sub">Daon Retail</h1></div><div class="sp"></div><button class="btn">Add AWS account</button><button class="btn pri">Add webhook source</button></div>
-  <div class="tabs"><a>Overview</a><a>Org &amp; owners</a><a href="#customer-people">People <span class="n hot">3</span></a><a>AWS accounts <span class="n">2</span></a><a class="on">Integrations <span class="n">4</span></a><a>Monitoring</a><a>Remediation</a><a>Portal access</a></div>
+  <div class="tabs"><a>Overview</a><a>Org &amp; owners</a><a href="#customer-resp?c=daon">Responders &amp; paging <span class="n hot">3</span></a><a>AWS accounts <span class="n">2</span></a><a class="on">Integrations <span class="n">4</span></a><a>Monitoring</a><a>Remediation</a><a>Portal access</a></div>
 
   <div class="g3" style="margin-bottom:20px">
     <div class="card lb-green"><div class="card-b">
@@ -1154,7 +1148,7 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
 <section class="screen" id="s-onboard-oncall" data-menu="customers">
 <div class="page">
   <div class="crumb"><a href="#customers">Customers</a><span class="chain">›</span>New customer</div>
-  <div class="ph"><div><h1 class="sub">Onboard Seoul Bio Labs</h1><div class="desc">Two questions. You can change both later on the On-call page or under the customer.</div></div></div>
+  <div class="ph"><div><h1 class="sub">Onboard Seoul Bio Labs</h1><div class="desc">Who answers for Seoul Bio Labs and in what order. Everything here can be changed later under the customer's Responders &amp; paging tab.</div></div></div>
   <div class="steps">
     <div class="done"><span class="ord">✓</span><div><div class="t1">Customer</div><div class="t2">seoulbio.co.kr</div></div></div>
     <div class="done"><span class="ord">✓</span><div><div class="t1">Organization</div><div class="t2">2 projects · 3 services</div></div></div>
@@ -1162,33 +1156,44 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
     <div class="cur"><span class="ord">4</span><div><div class="t1">On-call</div><div class="t2">in progress</div></div></div>
     <div><span class="ord">5</span><div><div class="t1">Review</div><div class="t2">—</div></div></div>
   </div>
-  <div style="max-width:760px" class="stack">
+  <div style="max-width:820px" class="stack">
     <div class="card"><div class="card-b stack">
-      <div class="b">1. Which team answers alerts for Seoul Bio Labs?</div>
-      <div class="note"><span>Pick an existing team. Teams are your staff groups, not per customer: Seoul Bio Labs joins a team that other customers already use.</span></div>
-      <div class="oc-presets" id="ob-teams"></div>
-      <div class="xs mut" id="ob-team-note"></div>
+      <div class="b">1. MSP staff · start from a template <span class="faint">(optional)</span></div>
+      <div class="oc-presets" id="ob-tpl"></div>
+      <div class="xs mut" id="ob-tpl-note"></div>
     </div></div>
     <div class="card"><div class="card-b stack">
-      <div class="b">2. How should we alert them?</div>
+      <div class="b">2. Seoul Bio Labs people</div>
+      <div class="xs mut">Customer people can be paged (call, SMS) or only notified. You can also add them later under the customer's Responders &amp; paging tab.</div>
+      <div id="ob-ppl"></div>
+      <div class="row" style="gap:8px"><input class="inp" id="ob-new" placeholder="Name, email or phone" style="flex:1;min-width:0" aria-label="New customer person"><button class="btn sm" id="ob-add">Add person</button></div>
+    </div></div>
+    <div class="card"><div class="card-b stack">
+      <div class="b">3. Who is paged first?</div>
+      <div class="oc-presets ob-4" id="ob-style"></div>
+      <div id="ob-style-x"></div>
+    </div></div>
+    <div class="card"><div class="card-b stack">
+      <div class="b">4. Timing</div>
       <div class="oc-presets" id="ob-plans"></div>
+      <div class="ov">If something breaks at Seoul Bio Labs now</div>
       <div class="oc-sent" id="ob-sent"></div>
       <div class="xs mut" id="ob-plan-note"></div>
     </div></div>
-    <div class="note"><span class="st info"><span class="mk ring"></span></span><span><b>Customer contacts</b> (status emails, portal sign-in, auto-fix approval) are not on the team. Add them after setup under <a href="#customer-people?c=seoul">Customers › Seoul Bio Labs › People</a>, at the customer, project or service they should hear about.</span></div>
     <div class="row"><button class="btn">Back</button><span class="sp"></span><button class="btn pri">Continue to review</button></div>
   </div>
+
 </div>
 </section>
 
 <!-- ============================ 11. CUSTOMERS LIST ============================ -->
 <section class="screen" id="s-customers" data-menu="customers">
 <div class="page">
-  <div class="ph"><div><h1>Customers</h1><div class="desc">4 customers · 9 AWS accounts · 3 webhook sources</div></div><div class="sp"></div><input class="inp" id="cu-q" style="width:220px" placeholder="Search customers" aria-label="Search customers"><button class="btn pri">New customer</button></div>
+  <div class="ph"><div><h1>Customers</h1><div class="desc" id="cu-desc"></div></div><div class="sp"></div><input class="inp" id="cu-q" style="width:220px" placeholder="Search customers" aria-label="Search customers"><button class="btn pri">New customer</button></div>
   <div class="card lb-accent" id="cu-na" style="margin-bottom:16px"></div>
   <div class="tw">
   <table class="t ccards" id="cu-t">
-    <thead><tr><th>Customer</th><th>Open incidents</th><th>Sources</th><th>Connection</th><th>Coverage</th><th>Setup</th><th>On-call team</th><th>People</th></tr></thead>
+    <thead><tr><th>Customer</th><th>Open incidents</th><th>Sources</th><th>Connection</th><th>Coverage</th><th>Paging</th><th>Responders</th></tr></thead>
     <tbody></tbody>
   </table>
   </div>
@@ -1200,7 +1205,7 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
 <div class="page">
   <div class="crumb"><a href="#customers">Customers</a><span class="chain">›</span><span class="js-cd-name"></span></div>
   <div class="ph"><div><h1 class="sub js-cd-name"></h1><div class="desc" id="cd-desc"></div></div><div class="sp"></div><select class="inp js-cpick" style="width:auto" aria-label="Example customer"></select><button class="btn">Edit</button></div>
-  <div class="tabs"><a>Overview</a><a>Org &amp; owners</a><a class="js-pp-tab">People</a><a>AWS accounts <span class="n">2</span></a><a>Integrations <span class="n">4</span></a><a class="on">Monitoring</a><a>Auto-fix</a><a>Portal access</a></div>
+  <div class="tabs js-ctabs" data-on="mon" data-c="daon"></div>
 
   <div id="cd-editor"></div>
 
@@ -1236,7 +1241,7 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
           <div><span class="st res"><span class="mk chk"></span></span><span class="sm">AWS prod connected</span></div>
           <div><span class="st esc"><span class="mk tri"></span></span><span class="sm">AWS stg: EventForwarder denied</span></div>
           <div><span class="st res"><span class="mk chk"></span></span><span class="sm">Prometheus and Grafana receiving</span></div>
-          <div><span class="st res"><span class="mk chk"></span></span><span class="sm">On-call team and alert plan chosen</span></div>
+          <div><span class="st res"><span class="mk chk"></span></span><span class="sm">Responders and paging steps set</span></div>
           <div><span class="st res"><span class="mk chk"></span></span><span class="sm">Portal: 1 user, can manage contacts and silences</span></div>
         </div></div>
       <div class="card"><div class="card-h"><span class="ov">Auto-fix</span></div><div class="card-b row"><span class="tog"></span><span class="sm">Off · auto-fix permission not deployed in AWS</span></div></div>
@@ -1245,35 +1250,22 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
 </div>
 </section>
 
-<!-- ============================ 12b. CUSTOMER DETAIL › PEOPLE (D-29) ============================ -->
-<section class="screen" id="s-customer-people" data-menu="customers" data-cust="Mirae Pay">
+<!-- ============================ 12b. CUSTOMER DETAIL › RESPONDERS & PAGING (D-30, D-31) ============================ -->
+<section class="screen" id="s-customer-resp" data-menu="customers" data-cust="Mirae Pay">
 <div class="page">
-  <div class="crumb"><a href="#customers">Customers</a><span class="chain">›</span><span class="js-cp-name"></span></div>
-  <div class="ph"><div><h1 class="sub js-cp-name"></h1><div class="desc" id="cp-desc"></div></div><div class="sp"></div><select class="inp js-cpick" style="width:auto" aria-label="Example customer"></select><button class="btn">Edit</button></div>
-  <div class="tabs"><a>Overview</a><a>Org &amp; owners</a><a class="on js-pp-tab">People</a><a>AWS accounts</a><a>Integrations</a><a href="#customer">Monitoring</a><a>Auto-fix</a><a>Portal access</a></div>
+  <div class="crumb"><a href="#customers">Customers</a><span class="chain">›</span><span class="js-cr-name"></span></div>
+  <div class="ph"><div><h1 class="sub js-cr-name"></h1><div class="desc" id="cr-desc"></div></div><div class="sp"></div><select class="inp js-cpick" style="width:auto" aria-label="Example customer"></select><button class="btn">Edit</button></div>
+  <div class="tabs js-ctabs" data-on="resp"></div>
 
-  <div class="note" style="margin-bottom:14px"><span class="st info"><span class="mk ring"></span></span><span>Customer people are <b>notified only</b>. They are never on an on-call rotation; paging is done by MSP teams under <a href="#oncall">On-call</a>.</span></div>
-
-  <div class="pp">
-    <div class="card pp-tree">
-      <div class="card-h"><span class="ov">Where they're notified</span></div>
-      <div class="card-b" style="padding:10px"><input class="inp" id="cp-tq" placeholder="Filter projects and services" aria-label="Filter scope"></div>
-      <ul class="tr" id="cp-tree"></ul>
-      <div class="xs mut" style="padding:10px 14px;border-top:1px solid var(--grid)">Number = people added at that level. <span class="tc warn">1</span> = needs action.</div>
-    </div>
-
+  <div class="g-main">
     <div class="stack">
-      <div class="card">
-        <div class="card-h" style="height:auto;min-height:40px;flex-wrap:wrap;padding:8px 16px;gap:8px"><span class="mono sm" id="cp-path"></span><span class="sp"></span><button class="btn sm pri" id="cp-add">Add person here</button></div>
-        <div class="row" style="padding:8px 16px;gap:8px;border-bottom:1px solid var(--grid)">
-          <span class="chips" id="cp-f"></span>
-          <input class="inp" id="cp-q" style="width:180px;height:28px" placeholder="Search people" aria-label="Search people">
-        </div>
-        <div class="xs mut" id="cp-sum" style="padding:8px 16px;background:var(--soft);border-bottom:1px solid var(--grid)"></div>
-        <div id="cp-list"></div>
-      </div>
-
-      <div class="drawer" id="cp-drawer"></div>
+      <div class="card" id="cr-paging"></div>
+      <div class="card" id="cr-rot"></div>
+      <div class="card" id="cr-ov"></div>
+    </div>
+    <div class="stack">
+      <div class="card" id="cr-list"></div>
+      <div class="drawer" id="cr-drawer"></div>
     </div>
   </div>
 </div>
@@ -1381,85 +1373,181 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
 </section>
 
 <script>
-/* ===== Single source of sample truth. Every on-call, contact and people view renders from D. ===== */
+/* ===== Single source of sample truth. Every on-call, responder, people and paging view renders from D. =====
+   Model (D-30, D-31): each customer has its own Responders (MSP staff + that customer's people).
+   Paging steps target a PERSON, whoever is on shift in a ROTATION (customer or shared MSP), or ALL responders. */
 var D={
-  now:{label:'Mon 9, 03:16',sec:3*3600+16*60+16},
+  now:{label:'Mon 9, 03:16',sec:3*3600+16*60+16,day:9,h:3.27},
   me:'hk',
   staff:{
-    hk:{n:'Haeun Kim',i:'HK',title:'Cloud engineer',teams:['infra'],ch:{Slack:'ok',Email:'ok',SMS:'ok',Voice:'ok'}},
-    jp:{n:'Junho Park',i:'JP',title:'Ops lead',teams:['infra'],ch:{Slack:'ok',Email:'ok',SMS:'exp',Voice:'exp'}},
-    ml:{n:'Minjae Lee',i:'ML',title:'Cloud engineer',teams:['infra'],ch:{Slack:'ok',Email:'ok',SMS:'ok',Voice:'ok'}},
-    jh:{n:'Jiwoo Han',i:'JH',title:'Cloud engineer',teams:['infra'],ch:{Slack:'ok',Email:'ok',SMS:'ok',Voice:'ok'}},
-    sy:{n:'Sora Yoon',i:'SY',title:'Cloud engineer',teams:['infra'],ch:{Slack:'ok',Email:'ok',SMS:'unv',Voice:'unv'}},
-    dk:{n:'Dohyun Kang',i:'DK',title:'Joined Nov 3',teams:['infra'],ch:{Slack:'ok',Email:'unv',SMS:'sent',Voice:'sent'}},
-    tj:{n:'Taemin Jung',i:'TJ',title:'Data engineer',teams:['data'],ch:{Slack:'ok',Email:'ok',SMS:'ok',Voice:'ok'}},
-    ek:{n:'Eunji Kwon',i:'EK',title:'Data engineer',teams:['data'],ch:{Slack:'none',Email:'ok',SMS:'ok',Voice:'ok'}}
+    hk:{n:'Haeun Kim',i:'HK',title:'Cloud engineer',ch:{Slack:'ok',Email:'ok',SMS:'ok',Voice:'ok'}},
+    jp:{n:'Junho Park',i:'JP',title:'Ops lead',ch:{Slack:'ok',Email:'ok',SMS:'exp',Voice:'exp'}},
+    ml:{n:'Minjae Lee',i:'ML',title:'Cloud engineer',ch:{Slack:'ok',Email:'ok',SMS:'ok',Voice:'ok'}},
+    jh:{n:'Jiwoo Han',i:'JH',title:'Cloud engineer',ch:{Slack:'ok',Email:'ok',SMS:'ok',Voice:'ok'}},
+    sy:{n:'Sora Yoon',i:'SY',title:'Cloud engineer',ch:{Slack:'ok',Email:'ok',SMS:'unv',Voice:'unv'}},
+    dk:{n:'Dohyun Kang',i:'DK',title:'Joined Nov 3',ch:{Slack:'ok',Email:'unv',SMS:'sent',Voice:'sent'}},
+    tj:{n:'Taemin Jung',i:'TJ',title:'Data engineer',ch:{Slack:'ok',Email:'ok',SMS:'ok',Voice:'ok'}},
+    ek:{n:'Eunji Kwon',i:'EK',title:'Data engineer',ch:{Slack:'none',Email:'ok',SMS:'ok',Voice:'ok'}}
   },
-  teams:{
-    infra:{n:'Infra team',order:['hk','jp','ml','jh','sy','dk'],version:7,editedBy:'Junho Park',editedOn:'Nov 6',
-      plans:{
-        standard:{n:'Standard',d:'Slack, SMS, then call',repeat:1,steps:[{at:0,who:'shift',how:['Slack']},{at:2,who:'shift',how:['SMS']},{at:7,who:'next',how:['Call']},{at:12,who:'all',how:['Slack','SMS','Call']}]},
-        urgent:{n:'Urgent',d:'Call right away',repeat:1,steps:[{at:0,who:'shift',how:['Call']},{at:5,who:'next',how:['Call']},{at:10,who:'all',how:['Call']}]},
-        quiet:{n:'Quiet',d:'Slack only',repeat:1,steps:[{at:0,who:'shift',how:['Slack']},{at:15,who:'all',how:['Slack']}]}
-      },
-      covers:[{day:5,part:'18:00–23:00',by:'jp',st:'Accepted'}],
-      pending:{day:6,by:'ml',from:'hk'},
-      changes:[['Sat 14 · Haeun → Minjae','Cover · "Dentist appointment" · asked Nov 9 02:50','Pending'],['Fri 13 18:00–23:00 · Dohyun → Junho','Cover · "Family dinner" · accepted by Junho Nov 8','Accepted'],['Tue 3 · Junho ⇄ Haeun (Thu 5)','Swap · "Sick leave" · accepted by Haeun Nov 2','Accepted'],['Sat 31 · Haeun → Junho','Cover · "Travel" · declined by Junho Oct 29','Declined']]},
-    data:{n:'Data team',order:['tj','ek'],version:3,editedBy:'Taemin Jung',editedOn:'Oct 28',
-      plans:{
-        standard:{n:'Standard',d:'Slack, SMS, then call',repeat:1,steps:[{at:0,who:'shift',how:['Slack']},{at:2,who:'shift',how:['SMS']},{at:7,who:'next',how:['Call']},{at:12,who:'all',how:['Slack','SMS','Call']}]},
-        urgent:{n:'Urgent',d:'Call right away',repeat:1,steps:[{at:0,who:'shift',how:['Call']},{at:5,who:'next',how:['Call']},{at:10,who:'all',how:['Call']}]},
-        quiet:{n:'Quiet',d:'Slack only',repeat:1,steps:[{at:0,who:'shift',how:['Slack']},{at:15,who:'all',how:['Slack']}]}
-      },covers:[],pending:null,changes:[]}
+  // saved MSP staff groups; applying one adds its members to a customer's Responders
+  templates:{
+    core:{n:'Infra core',members:['hk','jp','ml'],by:'Junho Park',on:'Nov 6'},
+    data:{n:'Data desk',members:['tj','ek'],by:'Taemin Jung',on:'Oct 28'},
+    night:{n:'Night backup',members:['jh','sy'],by:'Junho Park',on:'Oct 30'}
   },
-  // tree: project > service; a service may use another team (and its own plan)
+  // scope MSP = shared, referenced by many customers; CUSTOMER = lives in that customer
+  rotations:{
+    night:{scope:'MSP',n:'MSP night desk',members:['hk','jp','ml','jh','sy'],len:'daily',anchor:8,hh:9,hhl:'09:00'},
+    data:{scope:'MSP',n:'Data desk',members:['tj','ek'],len:'weekly',anchor:2,hh:9,hhl:'09:00'},
+    hanbit:{scope:'CUSTOMER',c:'hanbit',n:'Hanbit on-call',members:['jp','p:ha','p:es'],len:'weekly',anchor:2,hh:10,hhl:'10:00'},
+    seoul:{scope:'CUSTOMER',c:'seoul',n:'Seoul Bio on-call',members:['jp','p:mr'],len:'weekly',anchor:9,hh:10,hhl:'10:00'}
+  },
+  covers:[{rot:'night',s:13,by:'jp',part:'18:00–23:00',st:'Accepted'}],
+  pending:{rot:'night',s:13,by:'ml',from:'hk'},
+  leaves:[],
+  // starting templates for timing. 'P' = the customer's first target (rotation or everyone); 'ALL' = everyone in Responders
+  plans:{
+    standard:{n:'Standard',d:'Slack, SMS, then call',repeat:1,steps:[{at:0,t:'P',how:['Slack']},{at:2,t:'P',how:['SMS']},{at:7,t:'P',how:['Call']},{at:12,t:'ALL',how:['Call']}]},
+    urgent:{n:'Urgent',d:'Call right away',repeat:1,steps:[{at:0,t:'P',how:['Call']},{at:5,t:'ALL',how:['Call']}]},
+    quiet:{n:'Quiet',d:'Slack only',repeat:0,steps:[{at:0,t:'P',how:['Slack']},{at:15,t:'ALL',how:['Slack']}]}
+  },
   customers:[
-    {id:'mirae',n:'Mirae Pay',dom:'miraepay.com',ind:'Payments',team:'infra',plan:'urgent',
-      override:{repeat:1,by:'Minjae Lee',on:'Nov 7',steps:[{at:0,who:'shift',how:['Slack']},{at:2,who:'shift',how:['Call']},{at:7,who:'next',how:['Call']},{at:12,who:'all',how:['Call']}]},
-      tree:[{n:'Core',s:[{n:'Payments API',r:['payments-db-1','payments-api-1']},{n:'Settlement'},{n:'Checkout',team:'data',plan:'urgent',r:['checkout-web-1']}]},{n:'Merchant',s:[{n:'Merchant portal'}]},{n:'Data platform',s:[{n:'Ledger',r:['ledger-aurora-r1']}]}],
-      inc:'1 SEV-1',src:'CloudWatch · 3 accounts',conn:'ok',cov:'128 / 131',covn:'1 needs review',setup:'Done',owner:'HK'},
-    {id:'hanbit',n:'Hanbit Logistics',dom:'hanbit-lg.co.kr',ind:'Logistics',team:'infra',plan:'standard',override:null,
-      tree:[{n:'Tracking',s:[{n:'Public API',r:['api-alb']}]},{n:'Ops',s:[{n:'Batch',r:['batch-worker-3']}]},{n:'Fulfilment',s:[{n:'Orders API',r:['orders-api-1']}]}],
-      inc:'1 SEV-2 · 1 SEV-3',src:'CloudWatch · 3 accounts',conn:'ok',cov:'171 / 180',covn:'2 need review',setup:'Done',owner:'JP'},
-    {id:'daon',n:'Daon Retail',dom:'daon.kr',ind:'Retail',team:'infra',plan:'quiet',override:null,
+    {id:'mirae',n:'Mirae Pay',dom:'miraepay.com',ind:'Payments',template:'core',staff:['tj'],style:'custom',plan:'urgent',edited:{by:'Minjae Lee',on:'Nov 7'},repeat:1,
+      steps:[{at:0,to:{type:'ROTATION',id:'night'},how:['Slack','Call']},{at:10,to:{type:'PERSON',id:'p:ys'},how:['Call']},{at:15,to:{type:'ALL'},how:['Call']}],
+      tree:[{n:'Core',s:[{n:'Payments API',r:['payments-db-1','payments-api-1']},{n:'Settlement'},{n:'Checkout',r:['checkout-web-1']}]},{n:'Merchant',s:[{n:'Merchant portal'}]},
+        {n:'Data platform',ov:{repeat:0,by:'Taemin Jung',on:'Nov 2',steps:[{at:0,to:{type:'ROTATION',id:'data'},how:['Slack']},{at:15,to:{type:'ALL'},how:['Slack']}]},s:[{n:'Ledger',r:['ledger-aurora-r1']}]}],
+      inc:'1 SEV-1',src:'CloudWatch · 3 accounts',conn:'ok',cov:'128 / 131',covn:'1 needs review',setup:'Done'},
+    {id:'daon',n:'Daon Retail',dom:'daon.kr',ind:'Retail',template:null,staff:['jp','ml'],style:'all',plan:'standard',edited:null,repeat:1,
       tree:[{n:'Commerce',s:[{n:'Checkout',r:['checkout-redis']},{n:'Search'}]},{n:'Platform',s:[{n:'EKS prod',r:['ip-10-2-14-77']}]}],
-      inc:'1 SEV-2 · 1 SEV-4',src:'CloudWatch · 2 · Prometheus · Grafana',conn:'1 role denied',cov:'96 / 112',covn:'14 gaps · 1 needs review',setup:'5 / 6',owner:'ML'},
-    {id:'seoul',n:'Seoul Bio Labs',dom:'seoulbio.co.kr',ind:'Biotech',team:'infra',plan:'standard',override:null,onboarding:true,
-      tree:[{n:'Research',s:[{n:'LIMS'},{n:'Sequencer API'}]},{n:'Web',s:[{n:'Portal'}]}],
-      inc:'—',src:'CloudWatch · 1 account',conn:'checking',cov:'Waiting for first sync',covn:'',setup:'2 / 6',owner:'JP'}
+      inc:'1 SEV-2 · 1 SEV-4',src:'CloudWatch · 2 · Prometheus · Grafana',conn:'1 role denied',cov:'96 / 112',covn:'14 gaps · 1 needs review',setup:'5 / 6'},
+    {id:'hanbit',n:'Hanbit Logistics',dom:'hanbit-lg.co.kr',ind:'Logistics',template:null,staff:['jp','ml'],style:'rotation',rot:'hanbit',plan:'standard',edited:null,repeat:1,
+      tree:[{n:'Tracking',s:[{n:'Public API',r:['api-alb']}]},{n:'Ops',s:[{n:'Batch',r:['batch-worker-3']}]},{n:'Fulfilment',s:[{n:'Orders API',r:['orders-api-1']}]}],
+      inc:'1 SEV-2 · 1 SEV-3',src:'CloudWatch · 3 accounts',conn:'ok',cov:'171 / 180',covn:'2 need review',setup:'Done'},
+    {id:'ara',n:'Ara Games',dom:'aragames.io',ind:'Games',template:'core',staff:[],style:'shared',shared:'night',plan:'standard',edited:null,repeat:1,
+      tree:[{n:'Live ops',s:[{n:'Game API',r:['game-api-asg']},{n:'Matchmaking'}]},{n:'Web',s:[{n:'Store'}]}],
+      inc:'—',src:'CloudWatch · 2 accounts',conn:'ok',cov:'64 / 64',covn:'',setup:'Done'}
   ],
-  // customer contacts: scope = path inside the customer ([] = whole customer)
-  contacts:[
-    {c:'mirae',n:'Yuna Seo',i:'YS',title:'Platform lead',sc:['Core','Payments API'],roles:['Approver'],ch:{Slack:'ok',Email:'ok',SMS:'unv'}},
-    {c:'mirae',n:'Seojun Bae',i:'SB',title:'Core backend manager',sc:['Core'],roles:['Notify only'],ch:{Email:'ok',SMS:'ok'}},
-    {c:'mirae',n:'Hana Noh',i:'HN',title:'SRE',sc:['Core'],roles:['Notify only'],ch:{Slack:'ok',Email:'ok'}},
-    {c:'mirae',n:'Hyejin Lim',i:'HL',title:'IT manager',sc:[],roles:['Portal user','Notify only'],ch:{Email:'ok',SMS:'ok'}},
-    {c:'mirae',n:'Dami Ko',i:'DM',title:'Checkout PM',sc:['Core','Checkout'],roles:['Notify only'],ch:{Email:'sent'}},
-    {c:'mirae',n:'Mina Cho',i:'MC',title:'Merchant ops',sc:['Merchant'],roles:['Notify only'],ch:{Email:'ok',SMS:'ok'}},
-    {c:'mirae',n:'Kyungho Baek',i:'KB',title:'Merchant lead',sc:['Merchant'],roles:['Notify only'],ch:{Email:'ok'}},
-    {c:'daon',n:'Soyeon Choi',i:'SC',title:'Head of commerce',sc:['Commerce'],roles:['Approver','Portal user'],ch:{Email:'sent',SMS:'unv'}},
-    {c:'daon',n:'Taehee Oh',i:'TO',title:'Checkout engineer',sc:['Commerce','Checkout'],roles:['Notify only'],ch:{Email:'ok',SMS:'unv'}},
-    {c:'daon',n:'Jaewon Shin',i:'JS',title:'CTO',sc:[],roles:['Notify only'],ch:{Slack:'none',Email:'ok'}},
-    {c:'daon',n:'Bora Jang',i:'BJ',title:'Platform engineer',sc:['Platform'],roles:['Notify only'],ch:{Email:'ok',SMS:'ok'}},
-    {c:'daon',n:'Woojin Nam',i:'WN',title:'IT manager',sc:[],roles:['Notify only'],ch:{Email:'ok'}},
-    {c:'hanbit',n:'Sungmin Yoon',i:'SM',title:'IT director',sc:[],roles:['Notify only'],ch:{Email:'unv',SMS:'unv'}},
-    {c:'hanbit',n:'Eunbi Song',i:'ES',title:'Tracking lead',sc:['Tracking'],roles:['Notify only'],ch:{Email:'ok',SMS:'sent'}},
-    {c:'hanbit',n:'Hyunwoo Ahn',i:'HA',title:'Ops manager',sc:['Ops'],roles:['Approver'],ch:{Slack:'ok',Email:'ok'}},
-    {c:'hanbit',n:'Seri Moon',i:'SR',title:'Service desk',sc:[],roles:['Portal user'],ch:{Email:'ok'}},
-    {c:'seoul',n:'Minseo Ryu',i:'MR',title:'Infra manager',sc:[],roles:['Notify only'],ch:{Email:'ok'}}
+  // customer people: role pageable (can be called/SMS) or notify (notified only), plus approver / portal. sc = where they are notified ([] = whole customer)
+  people:[
+    {id:'p:ys',c:'mirae',n:'Yuna Seo',i:'YS',title:'Platform lead',sc:['Core','Payments API'],roles:['pageable','approver'],ch:{Slack:'ok',Email:'ok',SMS:'unv',Voice:'ok'}},
+    {id:'p:sb',c:'mirae',n:'Seojun Bae',i:'SB',title:'Core backend manager',sc:['Core'],roles:['notify'],ch:{Email:'ok',SMS:'ok'}},
+    {id:'p:hn',c:'mirae',n:'Hana Noh',i:'HN',title:'SRE',sc:['Core'],roles:['notify'],ch:{Slack:'ok',Email:'ok'}},
+    {id:'p:hl',c:'mirae',n:'Hyejin Lim',i:'HL',title:'IT manager',sc:[],roles:['notify','portal'],ch:{Email:'ok',SMS:'ok'}},
+    {id:'p:dm',c:'mirae',n:'Dami Ko',i:'DM',title:'Checkout PM',sc:['Core','Checkout'],roles:['notify'],ch:{Email:'sent'}},
+    {id:'p:sc',c:'daon',n:'Soyeon Choi',i:'SC',title:'Head of commerce',sc:[],roles:['pageable','approver','portal'],ch:{Email:'sent',SMS:'unv',Voice:'unv'}},
+    {id:'p:to',c:'daon',n:'Taehee Oh',i:'TO',title:'Checkout engineer',sc:['Commerce','Checkout'],roles:['notify'],ch:{Email:'ok',SMS:'unv'}},
+    {id:'p:js',c:'daon',n:'Jaewon Shin',i:'JS',title:'CTO',sc:[],roles:['notify'],ch:{Slack:'none',Email:'ok'}},
+    {id:'p:ha',c:'hanbit',n:'Hyunwoo Ahn',i:'HA',title:'Ops manager',sc:[],roles:['pageable','approver'],ch:{Slack:'ok',Email:'ok',SMS:'ok',Voice:'ok'}},
+    {id:'p:es',c:'hanbit',n:'Eunbi Song',i:'ES',title:'Tracking lead',sc:[],roles:['pageable'],ch:{Email:'ok',SMS:'sent',Voice:'sent'}},
+    {id:'p:sm',c:'hanbit',n:'Sungmin Yoon',i:'SM',title:'IT director',sc:[],roles:['notify'],ch:{Email:'unv',SMS:'unv'}},
+    {id:'p:sr',c:'hanbit',n:'Seri Moon',i:'SR',title:'Service desk',sc:[],roles:['portal'],ch:{Email:'ok'}},
+    {id:'p:gk',c:'ara',n:'Gyuri Kim',i:'GK',title:'Live ops lead',sc:[],roles:['notify','portal'],ch:{Email:'ok',Slack:'ok'}},
+    {id:'p:mr',c:'seoul',n:'Minseo Ryu',i:'MR',title:'Infra manager',sc:[],roles:['pageable'],ch:{Email:'ok',SMS:'unv'}},
+    {id:'p:jy',c:'seoul',n:'Jisu Yang',i:'JY',title:'Lab IT',sc:[],roles:['notify'],ch:{Email:'ok'}}
   ],
+  audit:[{when:'Nov 2 18:40',by:'Junho Park',what:'Sora Yoon on leave Nov 3–4 → Jiwoo Han in 6 customers (1 rotation: 1 shift, 6 everyone steps)'}],
   incident:{id:'INC-20261109-0312-7F3A',res:'payments-db-1',opened:3*3600+12*60+4,sev:'SEV-1'}
 };
+// customer being onboarded (not yet in the list)
+D.draft={id:'seoul',n:'Seoul Bio Labs',dom:'seoulbio.co.kr',ind:'Biotech',template:'core',staff:[],style:'shared',shared:'night',rot:'seoul',plan:'standard',edited:null,repeat:1,
+  tree:[{n:'Research',s:[{n:'LIMS'},{n:'Sequencer API'}]},{n:'Web',s:[{n:'Portal'}]}]};
+// 8 more customers (lighter sample rows) so Junho covers 12 and bulk actions show scale
+[['bora','Bora Foods','core',[],'shared'],['cheong','Cheong Media','core',[],'all'],['dasol','Dasol Health','core',[],'shared'],['eden','Eden Mobility',null,['jp','jh'],'all'],
+ ['gaon','Gaon Energy','core',[],'shared'],['haneul','Haneul Air',null,['jp','sy'],'shared'],['iruda','Iruda Edu',null,['jp','dk'],'custom'],['jeil','Jeil Insure','core',[],'all']].forEach(function(x){
+  var c={id:x[0],n:x[1],dom:x[0]+'.co.kr',ind:'—',template:x[2],staff:x[3],style:x[4],shared:'night',plan:'standard',edited:null,repeat:1,lite:true,
+    tree:[{n:'Main',s:[{n:'Web'}]}],inc:'—',src:'CloudWatch · 1 account',conn:'ok',cov:'—',covn:'',setup:'Done'};
+  if(x[4]==='custom'){c.plan='urgent';c.edited={by:'Junho Park',on:'Oct 20'};c.steps=[{at:0,to:{type:'PERSON',id:'jp'},how:['Call']},{at:5,to:{type:'PERSON',id:'dk'},how:['Call']},{at:10,to:{type:'ALL'},how:['Call']}];}
+  D.customers.push(c);
+});
 
 /* ===== helpers ===== */
 function $(s,r){return (r||document).querySelector(s);}
 function $$(s,r){return Array.prototype.slice.call((r||document).querySelectorAll(s));}
 function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
-function first(id){return D.staff[id].n.split(' ')[0];}
-function cust(id){return D.customers.filter(function(c){return c.id===id;})[0];}
 function hm(sec){var h=Math.floor(sec/3600)%24,m=Math.floor(sec/60)%60;return (h<10?'0':'')+h+':'+(m<10?'0':'')+m;}
 function hms(sec){var s=sec%60;return hm(sec)+':'+(s<10?'0':'')+s;}
 function clone(o){return JSON.parse(JSON.stringify(o));}
+function uniq(a){var o=[];a.forEach(function(x){if(o.indexOf(x)<0)o.push(x);});return o;}
+function mod(a,n){return ((a%n)+n)%n;}
+function isP(id){return String(id).indexOf('p:')===0;}
+var TMPP=null;
+function per(id){if(TMPP&&id===TMPP.id)return TMPP;return isP(id)?D.people.filter(function(p){return p.id===id;})[0]:D.staff[id];}
+function nm(id){return per(id).n;}
+function fn(id){return nm(id).split(' ')[0];}
+function first(id){return fn(id);}
+function cust(id){return D.customers.concat([D.draft]).filter(function(c){return c.id===id;})[0];}
+var WD=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+function wd(d){return WD[mod(d-9,7)];}
+function dl(d){return wd(d)+' '+d;}
+var ROLE={pageable:'Pageable',notify:'Notify only',approver:'Auto-fix approver',portal:'Portal'};
+var STYLE={all:'All at once',rotation:'Customer rotation',shared:'Shared MSP rotation',custom:'Custom steps'};
+var STYLED={all:'Page every responder together',rotation:'This customer\'s own rotation first',shared:'A shared MSP rotation first',custom:'Your own steps, any mix'};
+
+/* ===== rotations ===== */
+function R(id){return D.rotations[id];}
+function slot(r,day,h){if(r.len==='daily')return h<r.hh?day-1:day;var s=day-mod(day-r.anchor,7);if(s===day&&h<r.hh)s-=7;return s;}
+function slotNow(r){return slot(r,D.now.day,D.now.h);}
+function slotLen(r){return r.len==='daily'?1:7;}
+function baseWho(r,s){var i=r.len==='daily'?s-r.anchor:(s-r.anchor)/7;return r.members[mod(i,r.members.length)];}
+function leaveFor(id,s,len){return D.leaves.filter(function(l){return l.who===id&&s<=l.to&&s+len-1>=l.from;})[0];}
+function who(r,s){var b=baseWho(r,s),l=leaveFor(b,s,slotLen(r));if(l&&r.len==='daily')return l.by;return b;}
+function coverNote(r,s){var b=baseWho(r,s),l=leaveFor(b,s,slotLen(r));if(!l)return '';var a=Math.max(s,l.from),z=Math.min(s+slotLen(r)-1,l.to);return fn(l.by)+' covers '+(r.len==='daily'?'(leave)':'Nov '+a+(z>a?'–'+z:'')+' (leave)');}
+function nowOn(rid){var r=R(rid);return who(r,slotNow(r));}
+function untilTxt(r,s){return 'until '+dl(s+slotLen(r))+' '+r.hhl;}
+function slotTxt(r,s){return r.len==='daily'?dl(s)+' '+r.hhl+' → '+wd(s+1)+' '+r.hhl:'Week of Nov '+s+' · '+wd(s)+' '+r.hhl;}
+function rotUsers(rid){return D.customers.filter(function(c){return allSteps(c).some(function(s){return s.to.type==='ROTATION'&&s.to.id===rid;});});}
+
+/* ===== responders & paging ===== */
+function staffOf(c){var m=[],seen={};
+  (c.template?D.templates[c.template].members:[]).forEach(function(id){m.push({id:id,src:'tpl'});seen[id]=1;});
+  (c.staff||[]).forEach(function(id){if(!seen[id]){m.push({id:id,src:'added'});seen[id]=1;}});
+  return m;}
+function custPeople(cid){return D.people.filter(function(p){return p.c===cid;});}
+function pageable(p){return p.roles.indexOf('pageable')>=0;}
+function responders(c){return staffOf(c).map(function(x){return x.id;}).concat(custPeople(c.id).filter(pageable).map(function(p){return p.id;}));}
+function primaryTo(c){return c.style==='rotation'?{type:'ROTATION',id:c.rot}:c.style==='shared'?{type:'ROTATION',id:c.shared||'night'}:c.style==='all'?{type:'ALL'}:(c.steps&&c.steps[0]?c.steps[0].to:{type:'ALL'});}
+function buildSteps(c){var p=D.plans[c.plan],pt=primaryTo(c);
+  var st=p.steps.map(function(s){return {at:s.at,how:s.how.slice(),to:s.t==='P'?clone(pt):{type:'ALL'}};});
+  if(pt.type==='ALL'&&st.length>1)st.pop();
+  c.steps=st;c.repeat=p.repeat;c.edited=null;}
+D.customers.forEach(function(c){if(!c.steps)buildSteps(c);});buildSteps(D.draft);
+function allSteps(c){var a=c.steps.slice();c.tree.forEach(function(p){if(p.ov)a=a.concat(p.ov.steps);p.s.forEach(function(s){if(s.ov)a=a.concat(s.ov.steps);});});return a;}
+// inheritance: service › project › customer
+function pagingFor(c,path){
+  var pr=path&&path[0]?c.tree.filter(function(p){return p.n===path[0];})[0]:null,sv=pr&&path[1]?pr.s.filter(function(s){return s.n===path[1];})[0]:null;
+  if(sv&&sv.ov)return {steps:sv.ov.steps,repeat:sv.ov.repeat,from:sv.n+' service',lvl:'service',ov:sv.ov};
+  if(pr&&pr.ov)return {steps:pr.ov.steps,repeat:pr.ov.repeat,from:pr.n+' project',lvl:'project',ov:pr.ov};
+  return {steps:c.steps,repeat:c.repeat,from:c.n,lvl:'customer'};}
+function planBadge(c){return '<span class="pill'+(c.edited?' cz':'')+'">'+STYLE[c.style]+' · '+D.plans[c.plan].n+(c.edited?' (edited)':'')+'</span>';}
+function idsNow(c,to){if(to.type==='PERSON')return [to.id];if(to.type==='ROTATION')return [nowOn(to.id)];return responders(c);}
+function names(ids,max){max=max||4;var a=ids.map(fn);return a.length>max?a.slice(0,max).join(', ')+' +'+(a.length-max):a.join(', ');}
+function tgtTxt(c,to,short){
+  if(to.type==='PERSON')return '<b>'+esc(short?fn(to.id):nm(to.id))+'</b>'+(isP(to.id)&&!short?' <span class="faint">('+esc(c.n)+')</span>':'');
+  if(to.type==='ROTATION'){var r=R(to.id);return 'on shift in '+esc(r.n)+' (<b>'+esc(fn(nowOn(to.id)))+'</b> now)';}
+  var rs=responders(c);return 'everyone in Responders (<b>'+rs.length+'</b>'+(short?'':': '+esc(names(rs,5)))+')';}
+function howTxt(h){return h.map(function(x){return x==='Call'?'call':x;}).join(' + ');}
+function stopAt(steps,rep){return steps[steps.length-1].at*(rep+1);}
+function sentence(c,steps,rep,short){
+  var a=steps.map(function(s){return howTxt(s.how)+' '+tgtTxt(c,s.to,short)+' '+(s.at===0?'now':'at <b>'+s.at+' min</b>');});
+  a.push(rep?'repeat '+(rep===1?'once':rep+' times'):'no repeat');a.push('stop at <b>'+stopAt(steps,rep)+' min</b>');
+  var s=a.join(' → ');return s.charAt(0).toUpperCase()+s.slice(1)+'.';}
+function resIndex(){var m={};D.customers.forEach(function(c){c.tree.forEach(function(p){p.s.forEach(function(s){m[(c.lite?c.id+'-':'')+s.n.toLowerCase().replace(/ /g,'-')]={c:c.id,path:[p.n,s.n],kind:'service',name:s.n};(s.r||[]).forEach(function(r){m[r]={c:c.id,path:[p.n,s.n],kind:'resource',name:r};});});});});return m;}
+function covers(sc,path){return sc.every(function(x,i){return path[i]===x;});}
+function notifiedFor(cid,path){return custPeople(cid).filter(function(p){return p.roles.indexOf('notify')>=0&&covers(p.sc,path);});}
+function approversFor(cid,path){return custPeople(cid).filter(function(p){return p.roles.indexOf('approver')>=0&&covers(p.sc,path);});}
+// where a staff member shows up (customers covered)
+function coverage(sid){return D.customers.map(function(c){var via=[];
+    staffOf(c).forEach(function(x){if(x.id===sid)via.push(x.src==='tpl'?D.templates[c.template].n+' template':'added directly');});
+    uniq(allSteps(c).filter(function(s){return s.to.type==='ROTATION'&&R(s.to.id).members.indexOf(sid)>=0;}).map(function(s){return s.to.id;})).forEach(function(rid){via.push('in '+R(rid).n);});
+    var named=c.steps.map(function(s,i){return s.to.type==='PERSON'&&s.to.id===sid?i+1:0;}).filter(Boolean);
+    if(named.length)via.push('named in step '+named.join(', '));
+    return {c:c,via:via};}).filter(function(x){return x.via.length;});}
+function shiftsOf(sid,from,to){var out=[];Object.keys(D.rotations).forEach(function(rid){var r=R(rid);if(r.c==='seoul'||r.members.indexOf(sid)<0)return;
+    var s=slot(r,from,12);for(;s<=to;s+=slotLen(r)){if(baseWho(r,s)===sid)out.push({rid:rid,r:r,s:s,by:who(r,s)!==sid?who(r,s):null,note:coverNote(r,s)});}});
+  return out.sort(function(a,b){return a.s-b.s;});}
+function onShiftNow(sid){return Object.keys(D.rotations).filter(function(rid){return R(rid).c!=='seoul'&&nowOn(rid)===sid;});}
+
+/* ===== shared people list (Needs action) ===== */
 var CHS=['Slack','Email','SMS','Voice'];
 var CHL={ok:'',unv:'not verified',exp:'link expired',sent:'link sent',none:'not set'};
 var CHC={ok:'ok',unv:'unv',exp:'exp',sent:'sent',none:'none'};
@@ -1474,45 +1562,12 @@ function actions(p){
   if(l.length){var re=l.every(function(k){return p.ch[k]==='exp'||p.ch[k]==='sent';});b+='<button class="btn sm">'+(re?'Resend link':'Send link')+'</button>';}
   if(u.length)b+='<button class="btn sm">Ask to add '+u.join(', ')+'</button>';
   if(!b)b='<button class="btn sm ghost">Test</button>';
-  return b;
-}
-// every person as one row model (staff + customer)
-function staffRows(){return Object.keys(D.staff).map(function(id){var p=D.staff[id];return {id:id,kind:'staff',n:p.n,i:p.i,title:p.title,ch:p.ch,ctx:p.teams.map(function(t){return D.teams[t].n;}).join(', '),teams:p.teams};});}
-function custRows(cid){return D.contacts.filter(function(p){return !cid||p.c===cid;}).map(function(p){var c=cust(p.c);return {id:p.c+':'+p.n,kind:'customer',n:p.n,i:p.i,title:p.title,ch:p.ch,c:p.c,ctx:[c.n].concat(p.sc).join(' › ')+(p.sc.length<2?(p.sc.length?' (all services)':' (all projects)'):''),roles:p.roles,src:p};});}
+  return b;}
+function scTxt(c,sc){return [c.n].concat(sc).join(' › ')+(sc.length<2?(sc.length?' (all services)':' (all projects)'):'');}
+function staffRows(){return Object.keys(D.staff).map(function(id){var p=D.staff[id];return {id:id,kind:'staff',n:p.n,i:p.i,title:p.title,ch:p.ch,ctx:coverage(id).length+' customers'};});}
+function custRows(cid){return D.people.filter(function(p){return p.c!=='seoul'&&(!cid||p.c===cid);}).map(function(p){var c=cust(p.c);return {id:p.id,kind:'customer',n:p.n,i:p.i,title:p.title,ch:p.ch,c:p.c,ctx:scTxt(c,p.sc),roles:p.roles.map(function(r){return ROLE[r];}),src:p};});}
 function count(rows){var ppl=rows.filter(needs);return {people:ppl.length,links:ppl.reduce(function(a,p){return a+linkCh(p).length;},0),unset:ppl.reduce(function(a,p){return a+unsetCh(p).length;},0)};}
 var NA_DEF='A person needs action when at least one of their channels is not verified yet (not verified, link sent but not opened, link expired, or not set).';
-
-/* ===== escalation model (D-30) ===== */
-function findSvc(c,path){if(!path||path.length<2)return null;var pr=c.tree.filter(function(p){return p.n===path[0];})[0];return pr&&pr.s.filter(function(s){return s.n===path[1];})[0]||null;}
-// resolves team + plan + timing for a customer/service. Customer timing override applies only where the customer's own team & plan apply.
-function resolve(cid,path){
-  var c=cust(cid),svc=findSvc(c,path||[]);
-  var own=svc&&svc.team;
-  var tk=own?svc.team:c.team, pk=own?(svc.plan||c.plan):c.plan, t=D.teams[tk], p=t.plans[pk];
-  var ov=!own&&c.override;
-  return {c:c,svc:svc,tk:tk,t:t,pk:pk,p:p,steps:ov?c.override.steps:p.steps,repeat:ov?c.override.repeat:p.repeat,custom:!!ov,
-    label:(own?svc.n+' · ':c.n+' · ')+p.n+(ov?' (customized)':''),from:own?svc.n:c.n};
-}
-function badge(r){return '<span class="pill'+(r.custom?' cz':'')+'">'+esc(r.label)+'</span>';}
-function whoName(t,w){return w==='all'?'everyone':first(t.order[w==='shift'?0:1]);}
-function howTxt(h){return h.map(function(x){return x==='Call'?'call':x;}).join(' + ');}
-function stopAt(steps,rep){return steps[steps.length-1].at*(rep+1);}
-function sentence(t,steps,rep){
-  var a=steps.map(function(s){return howTxt(s.how)+' <b>'+whoName(t,s.who)+'</b> '+(s.at===0?'now':'at <b>'+s.at+' min</b>');});
-  a.push(rep?'repeat '+(rep===1?'once':rep+' times'):'no repeat');a.push('stop at <b>'+stopAt(steps,rep)+' min</b>');
-  var s=a.join(' → ');return s.charAt(0).toUpperCase()+s.slice(1)+'.';
-}
-function usersOf(tk,pk){return D.customers.filter(function(c){return c.team===tk&&c.plan===pk;});}
-function resIndex(){var m={};D.customers.forEach(function(c){c.tree.forEach(function(p){p.s.forEach(function(s){m[s.n.toLowerCase().replace(/ /g,'-')]={c:c.id,path:[p.n,s.n],kind:'service',name:s.n};(s.r||[]).forEach(function(r){m[r]={c:c.id,path:[p.n,s.n],kind:'resource',name:r};});});});});return m;}
-function notified(cid,path){ // customer contacts whose scope covers path, grouped by level
-  var lv=[[],[path[0]],path.slice(0,2)],c=cust(cid);
-  return lv.map(function(sc,i){
-    var ppl=D.contacts.filter(function(p){return p.c===cid&&p.sc.join('/')===sc.join('/');});
-    return {from:i===0?c.n:sc[sc.length-1],level:i,ppl:ppl};
-  }).filter(function(g){return g.ppl.length;}).reverse();
-}
-
-/* ===== shared people list (Contacts, Needs action, Customer › People) ===== */
 var SEL={};
 function avatar(p){return '<span class="av">'+p.i+'</span>';}
 function listHTML(name,rows,opt){
@@ -1526,375 +1581,446 @@ function listHTML(name,rows,opt){
     (picked.length?'<button class="btn sm pri js-bulk"'+(pc.links?'':' disabled')+'>Send '+pc.links+' link'+(pc.links===1?'':'s')+' to selected</button>'+(pc.unset?'<button class="btn sm js-bulk">Ask to add '+pc.unset+' missing</button>':''):'')+
     '<span class="xs mut js-bulk-msg"></span></div>';
   if(!rows.length)h+='<div class="sm mut" style="padding:16px">'+(opt.empty||'Nobody matches these filters.')+'</div>';
-  var grp=null;
   rows.forEach(function(r){
-    if(opt.group&&r.grp!==grp){grp=r.grp;h+='<div class="pp-sec">'+esc(grp)+'</div>';}
-    var ctx=r.kind==='staff'?'<span class="pill">Staff</span><span class="sm">'+esc(r.ctx)+'</span>':
-      '<span class="pill cu">Customer</span><a class="sm" href="#customer-people?c='+r.c+'&n='+encodeURIComponent(r.src.sc.join('/'))+'">'+esc(r.ctx)+'</a>';
-    if(opt.scope)ctx='<span class="xs faint">Notified for</span><span class="sm">'+esc(r.ctx)+'</span>';
-    var roles=r.roles?'<span class="pp-rl">'+r.roles.map(function(x){return '<span class="pill'+(x==='Approver'?' prd':'')+'">'+x+'</span>';}).join('')+(r.roles.indexOf('Approver')>=0?'<span class="xs faint">auto-fix approval</span>':'')+'</span>':'';
+    var ctx=r.kind==='staff'?'<span class="pill">Staff</span><a class="sm" href="#people?p='+r.id+'">'+esc(r.ctx)+'</a>':
+      '<span class="pill cu">Customer</span><a class="sm" href="#customer-resp?c='+r.c+'">'+esc(r.ctx)+'</a>';
+    var roles=r.roles?'<span class="pp-rl">'+r.roles.map(function(x){return '<span class="pill'+(x==='Auto-fix approver'||x==='Pageable'?' prd':'')+'">'+x+'</span>';}).join('')+'</span>':'';
     var chs=CHS.filter(function(k){return r.ch[k];}).filter(function(k){return !opt.badOnly||r.ch[k]!=='ok';});
-    var act=r.away?'<a class="sm js-goto" data-n="'+esc(r.src.sc.join('/'))+'">Open in '+esc(r.grp.replace(/^From /,''))+'</a>':actions(r);
-    h+='<div class="pl-row'+(r.away?' inh':'')+'"><label class="pl-cb"><input type="checkbox" data-k="'+esc(r.id)+'"'+(sel[r.id]?' checked':'')+' aria-label="Select '+esc(r.n)+'"></label>'+
+    h+='<div class="pl-row"><label class="pl-cb"><input type="checkbox" data-k="'+esc(r.id)+'"'+(sel[r.id]?' checked':'')+' aria-label="Select '+esc(r.n)+'"></label>'+
       '<span class="who">'+avatar(r)+'<div><div class="b">'+esc(r.n)+'</div><div class="xs faint">'+esc(r.title)+'</div></div></span>'+
       '<span class="pl-ctx">'+ctx+roles+'</span>'+
       '<span class="ct-ch">'+chs.map(function(k){return chip(k,r.ch[k]);}).join('')+'</span>'+
-      '<span class="ct-a">'+act+'</span></div>';
+      '<span class="ct-a">'+actions(r)+'</span></div>';
   });
-  return h;
-}
+  return h;}
 function bindList(el,name,rerender){
   el.onchange=function(e){var t=e.target;if(t.classList.contains('js-all')){$$('input[data-k]',el).forEach(function(c){if(t.checked)SEL[name][c.dataset.k]=1;else delete SEL[name][c.dataset.k];});rerender();}
     else if(t.dataset.k){if(t.checked)SEL[name][t.dataset.k]=1;else delete SEL[name][t.dataset.k];rerender();}};
-  el.onclick=function(e){var b=e.target.closest('.js-bulk');if(b){var m=$('.js-bulk-msg',el);m.textContent=b.textContent.indexOf('Ask')===0?'Asked them to add the missing channels.':'Links sent. Chips change to "link sent" until each person opens theirs.';}};
-}
+  el.onclick=function(e){var b=e.target.closest('.js-bulk');if(b){var m=$('.js-bulk-msg',el);m.textContent=b.textContent.indexOf('Ask')===0?'Asked them to add the missing channels.':'Links sent. Chips change to "link sent" until each person opens theirs.';}};}
 
-/* ===== badges everywhere ===== */
-function renderBadges(){
-  var s=count(staffRows()).people;
-  $$('.js-staff-na').forEach(function(e){e.textContent=s;});
-  $$('.js-now').forEach(function(e){e.textContent=D.now.label;});
-}
+/* ===== tabs ===== */
+function renderTabs(){
+  var na=count(staffRows()).people;
+  $$('.js-octabs').forEach(function(t){var on=t.dataset.on;t.innerHTML=[['now','Now','#oncall'],['rotations','Rotations','#rotations'],['people','People','#people'],['templates','Templates','#templates'],['maint','Maintenance','#maintenance']].map(function(x){
+    return '<a href="'+x[2]+'"'+(x[0]===on?' class="on"':'')+'>'+x[1]+(x[0]==='people'&&na?' <span class="n hot">'+na+'</span>':x[0]==='rotations'?' <span class="n">'+Object.keys(D.rotations).filter(function(k){return R(k).scope==='MSP';}).length+'</span>':x[0]==='templates'?' <span class="n">'+Object.keys(D.templates).length+'</span>':'')+'</a>';}).join('');});
+  $$('.js-ctabs').forEach(function(t){var cid=t.dataset.c||CR.c,on=t.dataset.on,n=custRows(cid).filter(needs).length;
+    t.innerHTML='<a>Overview</a><a>Org &amp; owners</a><a href="#customer-resp?c='+cid+'"'+(on==='resp'?' class="on"':'')+'>Responders &amp; paging'+(n?' <span class="n hot">'+n+'</span>':'')+'</a><a>AWS accounts</a><a>Integrations</a><a href="#customer?c='+cid+'"'+(on==='mon'?' class="on"':'')+'>Monitoring</a><a>Auto-fix</a><a>Portal access</a>';});
+  $$('.js-staff-na').forEach(function(e){e.textContent=na;});
+  $$('.js-now').forEach(function(e){e.textContent=D.now.label;});}
 
-/* ===== On-call team page ===== */
-var TM={tk:'infra',pk:'standard',cq:'',cf:''};
-var DAYS=['Sun 8','Mon 9','Tue 10','Wed 11','Thu 12','Fri 13','Sat 14','Sun 15'],NEXT=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
-function teamCustomers(tk){
-  return D.customers.map(function(c){
-    var other=[],mine=[];c.tree.forEach(function(p){p.s.forEach(function(s){((s.team||c.team)===tk?mine:other).push(s);});});
-    return {c:c,mine:mine,other:other};
-  }).filter(function(x){return x.mine.length;});
-}
-function namedCount(p){var w={};p.steps.forEach(function(s){if(s.who!=='all')w[s.who]=1;});return Object.keys(w).length;}
-function renderTeam(){
-  var tk=TM.tk,t=D.teams[tk],N=t.order.length,meIn=t.order.indexOf(D.me)>=0,tc=teamCustomers(tk);
-  $$('.js-tm-name').forEach(function(e){e.textContent=t.n;});
-  $('#tm-desc').innerHTML=N+' people · Asia/Seoul · <b>shifts hand over daily at 09:00 KST</b> · used by '+tc.length+' customers';
-  $('#tm-sw').innerHTML=Object.keys(D.teams).map(function(k){return '<span data-t="'+k+'" class="'+(k===tk?'on':'')+'">'+D.teams[k].n+'</span>';}).join('');
-  $('#oc-cta').style.display=meIn?'':'none';
-  var pd=t.pending;
-  $('#tm-pending').innerHTML=pd&&pd.from===D.me?'<div class="banner accent oc-pending"><span class="st info"><span class="mk q"></span>Pending</span><span style="flex:1;min-width:0"><b>You asked '+first(pd.by)+' to cover your '+DAYS[pd.day]+' shift</b> ('+DAYS[pd.day].split(' ')[0]+' 09:00 – '+DAYS[pd.day+1].split(' ')[0]+' 09:00). Waiting for '+first(pd.by)+' to accept. You stay on call for that shift until '+first(pd.by)+' accepts.</span><span class="row" style="gap:6px"><button class="btn sm">Remind '+first(pd.by)+'</button><button class="btn sm ghost">Cancel my request</button></span></div>':'';
-  $('#oc-ppl').innerHTML=t.order.filter(function(x){return x!==D.me;}).map(function(x){return '<option value="'+D.staff[x].n+'">';}).join('');
-  // order: always numbered 1..N
-  function li(id,i){var p=D.staff[id];return '<div class="oc-li"><span class="ord'+(i===0?' first':'')+'">'+(i+1)+'</span><span class="av'+(i===0?' on':'')+'">'+p.i+'</span><span class="b">'+p.n+'</span>'+(i===0?'<span class="xs mut">on shift Sun 8 09:00 → Mon 9 09:00</span>':i===1?'<span class="xs mut">takes over at 09:00</span>':'')+'</div>';}
-  var h=li(t.order[0],0).replace('oc-li','oc-li oc-first')+(N>1?li(t.order[1],1):'')+(N>2?li(t.order[2],2):'');
-  if(N>3)h+='<details class="oc-more"><summary>+'+(N-3)+' more: '+t.order.slice(3).map(function(x,i){return (i+4)+' '+first(x);}).join(' · ')+'</summary>'+t.order.slice(3).map(function(x,i){return li(x,i+3);}).join('')+'</details>';
-  $('#tm-order').innerHTML=h;
-  var pl=t.plans,named=Object.keys(pl).map(function(k){return pl[k].n+' names '+namedCount(pl[k]);}).join(', ');
-  $('#tm-order-note').innerHTML='This is the only order: 1 is on shift now, then the rotation. <b>At the 09:00 handover the order moves up by one</b>: '+first(t.order[1])+' becomes 1 and '+first(t.order[0])+' becomes '+N+'. Covers and swaps change who works a shift, not this order. Alert plans reach people by number, then everyone ('+named+').';
-  $('#oc-drag').innerHTML=t.order.map(function(x){return '<li draggable="true">'+D.staff[x].n+'</li>';}).join('');
-  // shifts from rotation
-  function nm(i){return t.order[i%N];}
-  var d='';DAYS.forEach(function(day,i){
-    var id=nm(i),p=D.staff[id],cv=t.covers.filter(function(x){return x.day===i;})[0],pend=pd&&pd.day===i;
-    d+='<div class="'+(i===0?'now':pend?'pend':'')+'"><span class="d">'+day+'</span><span class="av'+(id===D.me?' on':'')+'">'+p.i+'</span><span class="nm">'+p.n+(i===0?' <span class="xs faint">until Mon 09:00</span>':'')+(i===1?' <span class="xs faint">from 09:00</span>':'')+(cv?' <span class="faint">'+cv.part+' '+first(cv.by)+'</span>':'')+(pend?' <span class="faint">→ '+first(pd.by)+'?</span>':'')+'</span>'+
-      (i===0?'<span class="pill prd">Now</span>':pend?'<span class="pill">Pending</span>':'<a class="sm oc-sw" href="#oc-form">Swap</a>')+'</div>';});
-  $('#oc-d1').innerHTML=d;
-  var d2='',lab=['Sun 8 N','Mon 9 D','Mon 9 N','Tue 10 D','Tue 10 N'];lab.forEach(function(l,i){var p=D.staff[nm(i)];d2+='<div class="'+(i===0?'now':'')+'"><span class="d">'+l+'</span><span class="av">'+p.i+'</span><span class="nm">'+p.n+' <span class="xs faint">'+(l.slice(-1)==='N'?'night 21–09':'day 09–21')+'</span></span>'+(i===0?'<span class="pill prd">Now</span>':'<a class="sm oc-sw" href="#oc-form">Swap</a>')+'</div>';});
-  $('#oc-d2').innerHTML=d2+'<div><span class="d">…</span><span class="nm xs mut">Same rotation, two shifts a day</span></div>';
-  $('#tm-strip').innerHTML=NEXT.map(function(x,i){var id=nm(i+8);return '<span'+(id===D.me?' class="me"':'')+'><i>'+x+'</i>'+first(id)+'</span>';}).join('');
-  $('#tm-rot').innerHTML='Each shift is 24 h, handover 09:00 KST. Rotation: '+t.order.map(function(x,i){return (i+1)+' '+first(x);}).join(' → ')+', one shift each.';
-  var nx=-1;if(meIn)for(var i=1;i<15;i++)if(nm(i)===D.me){nx=i;break;}
-  $('#tm-mynext').innerHTML=nx>0&&nx<DAYS.length?'Your next shift: <b class="mono">'+DAYS[nx]+', 09:00</b>':'';
-  $('#tm-changes').innerHTML=t.changes.length?t.changes.map(function(c){return '<div><div style="flex:1"><div class="b">'+c[0]+'</div><div class="xs faint">'+c[1]+'</div></div><span class="pill">'+c[2]+'</span></div>';}).join(''):'<div class="sm mut">No covers or swaps in the last 30 days.</div>';
-  // alert plans
-  $('#tm-ver').textContent='version '+t.version+', edited by '+t.editedBy+' on '+t.editedOn;
-  $('#oc-presets').innerHTML=Object.keys(pl).map(function(k){return '<div data-p="'+k+'" class="'+(k===TM.pk?'on':'')+'"><b>'+pl[k].n+'</b><span>'+pl[k].d+'</span></div>';}).join('');
-  var p=pl[TM.pk];$('#oc-sent').innerHTML=sentence(t,p.steps,p.repeat);
-  var u=usersOf(tk,TM.pk),plain=u.filter(function(c){return !c.override;}),own=u.filter(function(c){return c.override;});
-  $('#oc-used').innerHTML='Used by '+(plain.length?plain.map(function(c){return c.n+(c.onboarding?' (setting up)':'');}).join(', '):'no customer as-is')+'.'+(own.length?' '+own.map(function(c){return c.n;}).join(', ')+' picked '+p.n+' but '+(own.length>1?'have':'has')+' '+(own.length>1?'their':'its')+' own timing.':'');
-  // customers table
-  $('#tm-cn').textContent=tc.length+' customers';
-  var cf=['','standard','urgent','quiet','custom'];
-  $('#tm-cf').innerHTML=cf.map(function(k){return '<span class="chip'+(TM.cf===k?' on':'')+'" data-f="'+k+'">'+(k?(k==='custom'?'Customized':pl[k].n):'All')+'</span>';}).join('');
-  var rows=tc.filter(function(x){
-    if(TM.cq&&x.c.n.toLowerCase().indexOf(TM.cq)<0)return false;
-    var r=resolve(x.c.id,x.c.team===tk?null:[x.c.tree[0].n,x.mine[0].n]);
-    if(TM.cf==='custom')return r.custom; if(TM.cf)return r.pk===TM.cf; return true;});
-  $('#tm-ct tbody').innerHTML=rows.map(function(x){
-    var c=x.c,viaSvc=c.team!==tk,path=viaSvc?[findProj(c,x.mine[0].n),x.mine[0].n]:null,r=resolve(c.id,path);
-    var svc=viaSvc?x.mine.map(function(s){return s.n;}).join(', ')+' only':(x.other.length?x.mine.map(function(s){return s.n;}).join(', ')+' · <span class="faint">'+x.other.map(function(s){return s.n+' uses '+D.teams[s.team].n;}).join(', ')+'</span>':'All '+x.mine.length+' services');
-    var act=viaSvc?'<span class="xs mut">Set on the '+x.mine[0].n+' service</span>':r.custom?'<button class="btn sm js-cz" data-c="'+c.id+'">Edit '+c.n+'\'s timing</button>':'<button class="btn sm js-cz" data-c="'+c.id+'">Customize for '+c.n+' only</button>';
-    return '<tr><td data-l="Customer"><a class="ttl" href="#customer?c='+c.id+'">'+c.n+'</a>'+(c.onboarding?'<div class="org">setting up</div>':'')+'</td><td data-l="Services" class="sm">'+svc+'</td><td data-l="Alert plan">'+badge(r)+'</td><td data-l="What happens" class="xs">'+sentence(r.t,r.steps,r.repeat)+'</td><td data-l="" class="r">'+act+'</td></tr>';
-  }).join('')||'<tr><td colspan="5" class="sm mut">No customers match.</td></tr>';
-}
-function findProj(c,svcName){var n=null;c.tree.forEach(function(p){p.s.forEach(function(s){if(s.n===svcName)n=p.n;});});return n;}
-
-/* ===== timing editor (team plan or one customer) ===== */
-function openEditor(host,ctx){
-  var t=D.teams[ctx.tk],p=t.plans[ctx.pk],c=ctx.cid?cust(ctx.cid):null;
-  var src=c&&c.override?c.override:p,w={steps:clone(src.steps),repeat:src.repeat};
-  function names(a){return a.map(function(x){return x.n;}).join(', ');}
-  function scope(){
-    if(c)return '<b>Changes '+c.n+' only.</b> '+t.n+'\'s '+p.n+' plan and every other customer stay as they are.'+(c.override?' Edited by '+c.override.by+' on '+c.override.on+'.':' Starts as a copy of '+p.n+'.');
-    var u=usersOf(ctx.tk,ctx.pk),plain=u.filter(function(x){return !x.override;}),own=u.filter(function(x){return x.override;});
-    return '<b>Applies to '+plain.length+' customer'+(plain.length===1?'':'s')+' using '+p.n+'</b>'+(plain.length?' ('+names(plain)+')':'')+'.'+(own.length?' Except '+names(own)+', which '+(own.length>1?'have':'has')+' '+(own.length>1?'their':'its')+' own timing and won\'t change.':'')+' To change one customer only, use Customize on that customer instead.';
-  }
-  function draw(){
-    var h='<div class="card lb-accent" style="margin-bottom:16px"><div class="card-h"><span class="ov">'+(c?'Timing for '+c.n+' only · based on '+t.n+' · '+p.n:'Edit '+p.n+' plan · '+t.n)+'</span><span class="sp"></span><a class="sm js-x">Close</a></div><div class="card-b stack">'+
-      '<div class="banner accent" style="margin:0"><span>'+scope()+'</span></div>'+
-      '<div class="ed"><div class="ed-h"><span>Step</span><span>At</span><span>Who</span><span>How</span><span></span></div>';
-    w.steps.forEach(function(s,i){
-      h+='<div class="ed-r" data-i="'+i+'"><span class="ord'+(i===0?' first':'')+'">'+(i+1)+'</span>'+
-        '<span>'+(i===0?'<span class="mono b">0 min</span>':'<input class="inp num js-at" style="width:56px" value="'+s.at+'" aria-label="Minutes"><span class="xs mut"> min</span>')+'</span>'+
-        '<span><select class="inp js-who" aria-label="Who">'+[['shift','1 · on shift ('+first(t.order[0])+')'],['next','2 · next ('+first(t.order[1])+')'],['all','Everyone']].map(function(o){return '<option value="'+o[0]+'"'+(o[0]===s.who?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select></span>'+
-        '<span class="row" style="gap:4px">'+['Slack','SMS','Call'].map(function(k){return '<span class="ch js-how'+(s.how.indexOf(k)>=0?' on':'')+'" data-h="'+k+'" role="button">'+k+'</span>';}).join('')+'</span>'+
-        '<span>'+(i>0?'<a class="sm js-rm" aria-label="Remove step">✕</a>':'')+'</span></div>';
-    });
-    h+='</div><div class="row" style="gap:12px"><button class="btn sm js-add">+ Add step</button><span class="xs mut">"At" is minutes from when the alert opened.</span><span class="sp"></span><label class="lab" style="margin:0">Repeat whole chain</label><input class="inp num js-rep" style="width:52px" value="'+w.repeat+'"><span class="xs mut">time(s)</span></div>'+
-      '<div class="ov">Preview</div><div class="oc-sent">'+sentence(t,w.steps,w.repeat)+'</div>'+
-      '<div class="row" style="gap:8px">'+(c&&c.override?'<button class="btn sm ghost js-reset">Go back to team\'s '+p.n+' timing</button>':'')+'<span class="sp"></span><button class="btn sm js-x">Cancel</button><button class="btn sm pri js-save">'+(c?'Save for '+c.n+' only':'Save '+p.n+' for '+usersOf(ctx.tk,ctx.pk).filter(function(x){return !x.override;}).length+' customer(s)')+'</button></div>'+
-      '<div class="xs mut js-msg"></div></div></div>';
-    host.innerHTML=h;
-  }
-  host.oninput=function(e){var r=e.target.closest('.ed-r');
-    if(e.target.classList.contains('js-at')){w.steps[r.dataset.i].at=Math.max(1,parseInt(e.target.value,10)||1);$('.oc-sent',host).innerHTML=sentence(t,w.steps,w.repeat);}
-    if(e.target.classList.contains('js-rep')){w.repeat=Math.max(0,parseInt(e.target.value,10)||0);$('.oc-sent',host).innerHTML=sentence(t,w.steps,w.repeat);}};
-  host.onchange=function(e){if(e.target.classList.contains('js-who')){w.steps[e.target.closest('.ed-r').dataset.i].who=e.target.value;draw();}};
-  host.onclick=function(e){var el=e.target,r=el.closest('.ed-r');
-    if(el.classList.contains('js-how')){var s=w.steps[r.dataset.i],k=el.dataset.h,ix=s.how.indexOf(k);if(ix>=0){if(s.how.length>1)s.how.splice(ix,1);}else s.how.push(k);draw();}
-    else if(el.classList.contains('js-rm')){w.steps.splice(r.dataset.i,1);draw();}
-    else if(el.classList.contains('js-add')){var l=w.steps[w.steps.length-1];w.steps.push({at:l.at+5,who:'all',how:['Call']});draw();}
-    else if(el.classList.contains('js-x')){host.innerHTML='';}
-    else if(el.classList.contains('js-reset')){c.override=null;host.innerHTML='';renderAll();}
-    else if(el.classList.contains('js-save')){w.steps.sort(function(a,b){return a.at-b.at;});w.steps[0].at=0;
-      if(c)c.override={steps:w.steps,repeat:w.repeat,by:'Haeun Kim',on:'Nov 9'};
-      else{p.steps=w.steps;p.repeat=w.repeat;t.version++;t.editedBy='Haeun Kim';t.editedOn='Nov 9';}
-      host.innerHTML='<div class="banner accent"><span><b>Saved.</b> '+(c?c.n+' now shows “'+resolve(c.id).label+'”. Other customers didn\'t change.':p.n+' updated (version '+t.version+').')+'</span></div>';renderAll();}
-  };
-  draw();host.scrollIntoView({block:'nearest'});
-}
+/* ===== On-call › Now ===== */
+var NW={q:'',p:'',f:''};
+function rotCard(rid){var r=R(rid),s=slotNow(r),w=who(r,s),u=r.scope==='MSP'?rotUsers(rid):[cust(r.c)];
+  return '<div class="card"><div class="card-b"><div class="row"><span class="pill'+(r.scope==='MSP'?'':' cu')+'">'+(r.scope==='MSP'?'Shared MSP':'Customer')+'</span><a class="b sm" href="'+(r.scope==='MSP'?'#rotations?r='+rid:'#customer-resp?c='+r.c)+'">'+esc(r.n)+'</a></div>'+
+    '<div class="row" style="margin-top:10px"><span class="av on">'+per(w).i+'</span><div><div class="b">'+esc(nm(w))+(isP(w)?' <span class="pill cu">'+esc(cust(per(w).c).n)+'</span>':'')+'</div><div class="xs faint">'+untilTxt(r,s)+' · next '+esc(fn(who(r,s+slotLen(r))))+'</div></div></div>'+
+    '<div class="xs mut" style="margin-top:8px">'+(r.scope==='MSP'?'Used by '+u.length+' customers':'Only '+esc(u[0].n))+'</div></div></div>';}
+function renderNow(){
+  var rots=Object.keys(D.rotations).filter(function(k){return R(k).c!=='seoul';});
+  $('#now-rots').innerHTML=rots.map(rotCard).join('');
+  var allAt=D.customers.filter(function(c){return c.steps[0].to.type==='ALL';});
+  $('#now-desc').innerHTML=D.now.label+' KST · '+D.customers.length+' customers · '+rots.length+' rotations on shift · '+allAt.length+' customers page everyone at once';
+  var ps=$('#now-p');if(ps.options.length<2)Object.keys(D.staff).forEach(function(k){ps.add(new Option(D.staff[k].n,k));});
+  $('#now-f').innerHTML=[['','All']].concat(Object.keys(STYLE).map(function(k){return [k,STYLE[k]];})).map(function(o){var n=o[0]?D.customers.filter(function(c){return c.style===o[0];}).length:D.customers.length;return '<span class="chip'+(NW.f===o[0]?' on':'')+'" data-f="'+o[0]+'">'+o[1]+'<span class="n">'+n+'</span></span>';}).join('');
+  var rows=D.customers.filter(function(c){
+    if(NW.q&&c.n.toLowerCase().indexOf(NW.q)<0)return false;if(NW.f&&c.style!==NW.f)return false;
+    if(NW.p&&responders(c).indexOf(NW.p)<0&&!c.steps.some(function(s){return idsNow(c,s.to).indexOf(NW.p)>=0;}))return false;return true;});
+  $('#now-n').textContent=rows.length+' of '+D.customers.length;
+  $('#now-t tbody').innerHTML=rows.map(function(c){var s0=c.steps[0],ids=idsNow(c,s0.to),rs=responders(c),cp=custPeople(c.id).filter(pageable).length;
+    var then=c.steps.slice(1).map(function(s){return howTxt(s.how)+' '+tgtTxt(c,s.to,true)+' at '+s.at+' min';}).join(' → ')||'—';
+    return '<tr><td data-l="Customer"><a class="ttl" href="#customer-resp?c='+c.id+'">'+esc(c.n)+'</a></td><td data-l="Ordering">'+planBadge(c)+'</td>'+
+      '<td data-l="Paged first"><div class="row" style="gap:6px">'+ids.slice(0,4).map(function(id){return '<span class="av'+(id===NW.p?' on':'')+'" title="'+esc(nm(id))+'">'+per(id).i+'</span>';}).join('')+'<span class="sm">'+esc(names(ids,3))+'</span></div><div class="xs faint">'+howTxt(s0.how)+' · '+(s0.to.type==='ROTATION'?'on shift in '+esc(R(s0.to.id).n):s0.to.type==='ALL'?'all at once':'named person')+'</div></td>'+
+      '<td data-l="Then" class="xs">'+then+'</td><td data-l="Responders" class="r sm"><span class="mono">'+rs.length+'</span>'+(cp?' <span class="xs faint">incl. '+cp+' customer</span>':'')+'</td></tr>';}).join('')||'<tr><td colspan="5" class="sm mut">No customers match.</td></tr>';}
 
 /* ===== paging lookup ===== */
 function renderLookup(){
   var idx=resIndex(),q=$('#oc-q'),out=$('#oc-res');
   $('#oc-ql').innerHTML=Object.keys(idx).map(function(k){return '<option value="'+k+'">';}).join('');
   var v=q.value.trim().toLowerCase(),k=null;Object.keys(idx).forEach(function(x){if(!k&&v&&x.indexOf(v)===0)k=x;});
-  if(!k){out.innerHTML='<div class="xs mut">No service or resource matches “'+esc(q.value)+'”. Try payments-db, checkout or orders-api.</div>';return;}
-  out.innerHTML=pagingBlock(idx[k]);
-}
-function pagingBlock(x,compact){
-  var c=cust(x.c),r=resolve(x.c,x.path),path=[c.n].concat(x.path);if(x.kind==='resource')path.push(x.name);
-  var ng=notified(x.c,x.path);
+  if(!k){out.innerHTML='<div class="xs mut">No service or resource matches “'+esc(q.value)+'”. Try payments-db, orders-api or game-api.</div>';return;}
+  out.innerHTML=pagingBlock(idx[k]);}
+function pagingBlock(x){
+  var c=cust(x.c),pg=pagingFor(c,x.path),path=[c.n].concat(x.path);if(x.kind==='resource')path.push(x.name);
+  var ng=notifiedFor(x.c,x.path);
   return '<div class="oc-path mono">'+path.map(esc).join(' <span class="chain">›</span> ')+'</div>'+
-    '<div class="row" style="gap:8px;margin:8px 0;flex-wrap:wrap"><a class="b" href="#oncall">'+r.t.n+'</a><span class="xs mut">from '+r.from+'</span>'+badge(r)+(c.team===r.tk&&!r.svc?'':'')+'</div>'+
-    '<div class="oc-sent">'+sentence(r.t,r.steps,r.repeat)+'</div>'+
-    (ng.length?'<div class="oc-cn"><span class="ov">Customer notified</span><span class="xs faint">not paged · notified only</span>'+ng.map(function(g){return '<div class="sm">'+g.ppl.map(function(p){return p.n+(p.roles.indexOf('Approver')>=0?' (Approver)':'');}).join(', ')+' <span class="faint">· from '+g.from+'</span></div>';}).join('')+'<a class="xs" href="#customer-people?c='+x.c+'&n='+encodeURIComponent(x.path.join('/'))+'">Open in '+c.n+' › People</a></div>':'');
-}
+    '<div class="row" style="gap:8px;margin:8px 0;flex-wrap:wrap"><a class="b" href="#customer-resp?c='+c.id+'">'+esc(c.n)+' · Responders &amp; paging</a>'+(pg.lvl==='customer'?planBadge(c):'<span class="pill cz">Own steps on '+esc(pg.from)+'</span>')+'<span class="xs mut">steps from '+esc(pg.from)+'</span></div>'+
+    '<div class="oc-sent">'+sentence(c,pg.steps,pg.repeat)+'</div>'+
+    (ng.length?'<div class="oc-cn"><span class="ov">Customer notified</span><span class="xs faint">notify only · not paged</span><div class="sm">'+ng.map(function(p){return esc(p.n);}).join(', ')+'</div><a class="xs" href="#customer-resp?c='+x.c+'">Open '+esc(c.n)+' › Responders &amp; paging</a></div>':'');}
+
+/* ===== Rotations ===== */
+var RT={r:'night'};
+function renderRotations(){
+  var shared=Object.keys(D.rotations).filter(function(k){return R(k).scope==='MSP';}),r=R(RT.r),N=r.members.length,s0=slotNow(r),pd=D.pending;
+  $('#rt-sw').innerHTML=shared.map(function(k){return '<span data-r="'+k+'" class="'+(k===RT.r?'on':'')+'" role="button">'+esc(R(k).n)+'</span>';}).join('');
+  $('#rt-name').textContent=r.n;
+  $('#rt-meta').textContent=N+' people · '+(r.len==='daily'?'24 h shifts, handover '+r.hhl:'weekly, handover '+wd(r.anchor)+' '+r.hhl)+' KST';
+  $('#rt-pending').innerHTML=pd&&pd.rot===RT.r&&pd.from===D.me?'<div class="banner accent oc-pending"><span class="st info"><span class="mk q"></span>Pending</span><span style="flex:1;min-width:0"><b>You asked '+fn(pd.by)+' to cover your '+dl(pd.s)+' shift</b> in '+esc(r.n)+'. You stay on shift until '+fn(pd.by)+' accepts.</span><span class="row" style="gap:6px"><button class="btn sm">Remind '+fn(pd.by)+'</button><button class="btn sm ghost">Cancel my request</button></span></div>':'';
+  $('#oc-cta').style.display=r.members.indexOf(D.me)>=0?'':'none';
+  $('#oc-ppl').innerHTML=r.members.filter(function(x){return x!==D.me;}).map(function(x){return '<option value="'+esc(nm(x))+'">';}).join('');
+  var cur=who(r,s0),ci=r.members.indexOf(baseWho(r,s0));
+  $('#rt-order').innerHTML=r.members.map(function(id,i){var k=mod(i-ci,N);return {id:id,k:k};}).sort(function(a,b){return a.k-b.k;}).map(function(x){
+    return '<div class="oc-li'+(x.k===0?' oc-first':'')+'"><span class="ord'+(x.k===0?' first':'')+'">'+(x.k+1)+'</span><span class="av'+(x.k===0?' on':'')+'">'+per(x.id).i+'</span><span class="b">'+esc(nm(x.id))+'</span><span class="xs mut">'+(x.k===0?'on shift · '+untilTxt(r,s0):x.k===1?'takes over '+wd(s0+slotLen(r))+' '+r.hhl:'')+'</span></div>';}).join('');
+  $('#rt-wk1').textContent=r.len==='daily'?'Next shifts · each row = '+r.hhl+' that day → '+r.hhl+' next day':'Next weeks';
+  var rows='',n=r.len==='daily'?8:4;
+  for(var i=0;i<n;i++){var s=s0+i*slotLen(r),b=baseWho(r,s),w=who(r,s),cv=D.covers.filter(function(x){return x.rot===RT.r&&x.s===s;})[0],pend=pd&&pd.rot===RT.r&&pd.s===s,note=coverNote(r,s);
+    rows+='<div class="'+(i===0?'now':pend?'pend':'')+'"><span class="d">'+(r.len==='daily'?dl(s):'Nov '+s)+'</span><span class="av'+(w===D.me?' on':'')+'">'+per(w).i+'</span><span class="nm">'+esc(nm(w))+(w!==b?' <span class="xs faint">for '+esc(fn(b))+' (leave)</span>':'')+(note&&w===b?' <span class="xs faint">'+esc(note)+'</span>':'')+(cv?' <span class="faint">'+cv.part+' '+fn(cv.by)+'</span>':'')+(pend?' <span class="faint">→ '+fn(pd.by)+'?</span>':'')+'</span>'+
+      (i===0?'<span class="pill prd">Now</span>':pend?'<span class="pill">Pending</span>':'<a class="sm oc-sw" href="#oc-form">Swap</a>')+'</div>';}
+  $('#rt-days').innerHTML=rows;
+  $('#rt-note').innerHTML='Customers reference this rotation as “on shift in '+esc(r.n)+'”. Covers and swaps change who works a shift; the order stays. Leave set under People replaces the person in every rotation at once.';
+  var u=rotUsers(RT.r);$('#rt-un').textContent=u.length+' customers';
+  $('#rt-used').innerHTML=u.map(function(c){var st=c.steps.map(function(s,i){return s.to.type==='ROTATION'&&s.to.id===RT.r?i+1:0;}).filter(Boolean);var ov=!st.length;
+    return '<div><div style="flex:1;min-width:0"><a class="b" href="#customer-resp?c='+c.id+'">'+esc(c.n)+'</a><div class="xs faint">'+(ov?'project or service override':'step '+st.join(', '))+' · '+STYLE[c.style]+'</div></div></div>';}).join('')||'<div class="sm mut">No customer uses this rotation yet.</div>';
+  $('#rt-ct tbody').innerHTML=Object.keys(D.rotations).filter(function(k){return R(k).scope==='CUSTOMER'&&R(k).c!=='seoul';}).map(function(k){var x=R(k),c=cust(x.c),w=nowOn(k);
+    return '<tr><td data-l="Rotation"><a class="ttl" href="#customer-resp?c='+c.id+'">'+esc(x.n)+'</a></td><td data-l="Customer" class="sm">'+esc(c.n)+'</td><td data-l="Members" class="sm">'+x.members.map(function(m){return esc(fn(m))+(isP(m)?' <span class="pill cu">customer</span>':'');}).join(' → ')+'</td><td data-l="On shift now" class="sm"><b>'+esc(nm(w))+'</b> <span class="xs faint">'+untilTxt(x,slotNow(x))+'</span></td></tr>';}).join('');}
+
+/* ===== People (MSP staff) ===== */
+var PE={p:'jp',q:'',b:'',who:'jp',by:'ml',from:20,to:24,add:'dk',sel:{}};
+function nextShift(sid){var sh=shiftsOf(sid,D.now.day,D.now.day+21).filter(function(x){return !(x.s<=D.now.day&&onShiftNow(sid).indexOf(x.rid)>=0)&&x.s>=D.now.day-0;});return sh[0];}
+function renderPeople(){
+  var ids=Object.keys(D.staff).filter(function(id){return !PE.q||nm(id).toLowerCase().indexOf(PE.q)>=0;});
+  $('#pe-desc').innerHTML=Object.keys(D.staff).length+' MSP staff across '+D.customers.length+' customers. Pick a person to see where they are on shift, what they cover, and to replace them during leave in every customer at once.';
+  $('#pe-t tbody').innerHTML=ids.map(function(id){var p=D.staff[id],cv=coverage(id),on=onShiftNow(id),nx=nextShift(id),lv=D.leaves.filter(function(l){return l.who===id;})[0];
+    return '<tr class="'+(id===PE.p?'cur':'')+'"><td data-l="Person"><a class="ttl js-pe" data-p="'+id+'"><span class="who"><span class="av'+(on.length?' on':'')+'">'+p.i+'</span>'+esc(p.n)+'</span></a><div class="org">'+esc(p.title)+(lv?' · <b>leave Nov '+lv.from+'–'+lv.to+'</b>':'')+'</div></td>'+
+      '<td data-l="Customers" class="r mono b">'+cv.length+'</td>'+
+      '<td data-l="On shift now" class="sm">'+(on.length?on.map(function(r){return esc(R(r).n);}).join(', '):'<span class="mut">—</span>')+'</td>'+
+      '<td data-l="Next shift" class="sm">'+(nx?esc(R(nx.rid).n)+' · <span class="mono">'+(nx.r.len==='daily'?dl(nx.s):'week of Nov '+nx.s)+'</span>':'<span class="mut">none in 3 weeks</span>')+'</td>'+
+      '<td data-l="Channels"><span class="ct-ch">'+badCh(p).map(function(k){return chip(k,p.ch[k]);}).join('')+(needs(p)?'':'<span class="xs faint">all verified</span>')+'</span></td></tr>';}).join('');
+  renderPersonDetail();renderBulk();
+  $('#pe-audit').innerHTML=D.audit.map(function(a){return '<div><div style="flex:1;min-width:0"><div class="sm">'+esc(a.what)+'</div><div class="xs faint">'+esc(a.by)+' · '+esc(a.when)+'</div></div></div>';}).join('');}
+function renderPersonDetail(){
+  var id=PE.p,p=D.staff[id],cv=coverage(id),on=onShiftNow(id),sh=shiftsOf(id,D.now.day,D.now.day+21),lv=D.leaves.filter(function(l){return l.who===id;});
+  $('#pe-detail').innerHTML='<div class="card lb-accent" style="margin-bottom:16px"><div class="card-h" style="height:auto;min-height:40px;flex-wrap:wrap;padding:8px 16px;gap:8px"><span class="who"><span class="av on">'+p.i+'</span><span class="b">'+esc(p.n)+'</span></span><span class="xs mut">covers '+cv.length+' customers</span><span class="sp"></span>'+
+    '<button class="btn sm pri js-b" data-b="leave">Leave &amp; replace…</button><button class="btn sm js-b" data-b="add">Add to customers…</button></div>'+
+    (lv.length?'<div class="banner accent" style="margin:0;border-width:0 0 1px 3px"><span><b>On leave Nov '+lv[0].from+'–'+lv[0].to+'</b> · '+esc(fn(lv[0].by))+' covers in every customer and rotation. <a class="js-undo" data-p="'+id+'">Undo</a></span></div>':'')+
+    '<div class="g2" style="gap:0">'+
+    '<div style="border-right:1px solid var(--grid)"><div class="oc-wk">On shift now</div><div class="plist">'+(on.length?on.map(function(r){var x=R(r);return '<div><span class="pill prd">Now</span><div style="flex:1;min-width:0"><b>'+esc(x.n)+'</b><div class="xs faint">'+untilTxt(x,slotNow(x))+' · paged first for '+(x.scope==='MSP'?rotUsers(r).length+' customers':esc(cust(x.c).n))+'</div></div></div>';}).join(''):'<div class="sm mut">Not on shift. Still paged where a step names them or pages everyone.</div>')+'</div>'+
+    '<div class="oc-wk">Upcoming shifts · 3 weeks</div><div class="plist">'+(sh.filter(function(x){return on.indexOf(x.rid)<0||x.s>slotNow(x.r);}).map(function(x){return '<div><span class="mono sm" style="width:92px;flex:none">'+(x.r.len==='daily'?dl(x.s):'wk Nov '+x.s)+'</span><div style="flex:1;min-width:0"><span class="sm">'+esc(x.r.n)+'</span>'+(x.r.scope==='CUSTOMER'?' <span class="pill cu">customer</span>':'')+(x.by?' <span class="xs faint">· '+esc(fn(x.by))+' covers</span>':x.note?' <span class="xs faint">· '+esc(x.note)+'</span>':'')+'</div></div>';}).join('')||'<div class="sm mut">No shifts.</div>')+'</div></div>'+
+    '<div><div class="oc-wk">Customers covered · how</div><div class="plist" style="max-height:420px;overflow:auto">'+cv.map(function(x){return '<div><div style="flex:1;min-width:0"><a class="b sm" href="#customer-resp?c='+x.c.id+'">'+esc(x.c.n)+'</a><div class="xs faint">'+esc(x.via.join(' · '))+'</div></div>'+planBadge(x.c)+'</div>';}).join('')+'</div></div>'+
+    '</div></div>';}
+function leavePreview(w,by,from,to){
+  var res=[],tot={c:0,person:0,all:0,shifts:0,skip:0};
+  coverage(w).forEach(function(x){var c=x.c,eff=[],rs=responders(c);
+    function scan(steps,where){steps.forEach(function(s,i){var lab=(where?where+' · ':'')+'step '+(i+1)+' ('+s.at+' min)';
+      if(s.to.type==='PERSON'&&s.to.id===w){eff.push(lab+': '+howTxt(s.how)+' '+fn(w)+' → <b>'+fn(by)+'</b>');tot.person++;}
+      if(s.to.type==='ALL'&&rs.indexOf(w)>=0){if(rs.indexOf(by)>=0){eff.push(lab+': everyone — '+fn(w)+' left out, '+fn(by)+' already a responder');tot.skip++;}else eff.push(lab+': everyone — <b>'+fn(by)+'</b> instead of '+fn(w));tot.all++;}
+      if(s.to.type==='ROTATION'&&R(s.to.id).members.indexOf(w)>=0){var r=R(s.to.id),sh=shiftsOf(w,from,to).filter(function(z){return z.rid===s.to.id;});
+        if(sh.length)eff.push(lab+': on shift in '+esc(r.n)+' — '+sh.map(function(z){return r.len==='daily'?dl(z.s):'Nov '+Math.max(z.s,from)+'–'+Math.min(z.s+6,to);}).join(', ')+' → <b>'+fn(by)+'</b>');}});}
+    scan(c.steps,'');c.tree.forEach(function(p){if(p.ov)scan(p.ov.steps,p.n);});
+    if(!eff.length)eff.push('No step reaches '+fn(w)+' on these dates');
+    res.push({c:c,eff:eff});tot.c++;});
+  var rots=Object.keys(D.rotations).filter(function(k){return R(k).c!=='seoul'&&R(k).members.indexOf(w)>=0;}).map(function(k){var sh=shiftsOf(w,from,to).filter(function(z){return z.rid===k;});tot.shifts+=sh.length;return {r:R(k),sh:sh};}).filter(function(x){return x.sh.length;});
+  return {res:res,tot:tot,rots:rots};}
+function renderBulk(){
+  var el=$('#pe-bulk');if(!PE.b){el.innerHTML='';return;}
+  var so=function(v){return Object.keys(D.staff).map(function(k){return '<option value="'+k+'"'+(k===v?' selected':'')+'>'+esc(nm(k))+'</option>';}).join('');};
+  if(PE.b==='leave'){
+    var pv=leavePreview(PE.who,PE.by,PE.from,PE.to),t=pv.tot;
+    el.innerHTML='<div class="card" style="margin-bottom:16px"><div class="card-h"><span class="ov">Leave &amp; replace · all customers at once</span><span class="sp"></span><a class="sm js-bx">Close</a></div><div class="card-b stack">'+
+      '<div class="row" style="gap:10px;flex-wrap:wrap"><div><label class="lab">Who is away</label><select class="inp js-lw">'+so(PE.who)+'</select></div><div><label class="lab">From</label><select class="inp js-lf">'+[16,17,18,19,20,21,22,23].map(function(d){return '<option'+(d===PE.from?' selected':'')+' value="'+d+'">Nov '+d+'</option>';}).join('')+'</select></div>'+
+      '<div><label class="lab">To</label><select class="inp js-lt">'+[20,21,22,23,24,25,26,27].map(function(d){return '<option'+(d===PE.to?' selected':'')+' value="'+d+'">Nov '+d+'</option>';}).join('')+'</select></div><div><label class="lab">Replaced by</label><select class="inp js-lb">'+so(PE.by)+'</select></div></div>'+
+      '<div class="banner accent" style="margin:0"><span><b>'+fn(PE.who)+' → '+fn(PE.by)+', Nov '+PE.from+'–'+PE.to+'</b>: '+t.c+' customers · '+t.person+' step'+(t.person===1?'':'s')+' naming '+fn(PE.who)+' · '+t.all+' “everyone” steps · '+pv.rots.length+' rotation'+(pv.rots.length===1?'':'s')+' ('+t.shifts+' shift'+(t.shifts===1?'':'s')+'). Nothing else changes; after Nov '+PE.to+' everything goes back.</span></div>'+
+      (pv.rots.length?'<div><div class="ov" style="margin-bottom:6px">Rotations</div>'+pv.rots.map(function(x){return '<div class="sm">'+esc(x.r.n)+(x.r.scope==='CUSTOMER'?' <span class="pill cu">customer</span>':'')+': '+x.sh.map(function(z){return x.r.len==='daily'?dl(z.s):'Nov '+Math.max(z.s,PE.from)+'–'+Math.min(z.s+6,PE.to)+' (week of '+z.s+')';}).join(', ')+' → '+esc(fn(PE.by))+'</div>';}).join('')+'</div>':'')+
+      '<div class="tw"><table class="t ccards"><thead><tr><th>Customer</th><th>What changes</th></tr></thead><tbody>'+pv.res.map(function(x){return '<tr><td data-l="Customer"><a class="ttl" href="#customer-resp?c='+x.c.id+'">'+esc(x.c.n)+'</a></td><td data-l="Changes" class="xs">'+x.eff.join('<br>')+'</td></tr>';}).join('')+'</tbody></table></div>'+
+      '<div class="row"><span class="xs mut">Recorded in the audit log. '+fn(PE.by)+' gets a Slack message with this list.</span><span class="sp"></span><button class="btn sm js-bx">Cancel</button><button class="btn sm pri js-lapply"'+(PE.who===PE.by?' disabled':'')+'>Apply to '+t.c+' customers</button></div><div class="xs mut js-bmsg"></div></div></div>';
+  }else{
+    var w=PE.add,cs=D.customers,pick=cs.filter(function(c){return PE.sel[c.id];}),already=function(c){return responders(c).indexOf(w)>=0;};
+    el.innerHTML='<div class="card" style="margin-bottom:16px"><div class="card-h"><span class="ov">Add staff to customers</span><span class="sp"></span><a class="sm js-bx">Close</a></div><div class="card-b stack">'+
+      '<div class="row" style="gap:10px;flex-wrap:wrap"><div><label class="lab">Person</label><select class="inp js-aw">'+so(w)+'</select></div><span class="sp"></span><button class="btn sm js-asel" data-s="core">Select customers using Infra core</button><button class="btn sm js-asel" data-s="">Clear</button></div>'+
+      '<div class="tw"><table class="t ccards"><thead><tr><th></th><th>Customer</th><th>Effect</th></tr></thead><tbody>'+cs.map(function(c){var a=already(c),all=c.steps.filter(function(s){return s.to.type==='ALL';});
+        return '<tr><td data-l=""><input type="checkbox" class="js-ac" data-c="'+c.id+'"'+(a?' disabled checked':PE.sel[c.id]?' checked':'')+' aria-label="'+esc(c.n)+'"></td><td data-l="Customer" class="sm b">'+esc(c.n)+'</td><td data-l="Effect" class="xs">'+(a?'<span class="mut">already a responder</span>':PE.sel[c.id]?'Joins Responders'+(all.length?' → paged in “everyone” at '+all.map(function(s){return s.at+' min';}).join(', '):' → not in any step yet (named steps only)'):'<span class="faint">—</span>')+'</td></tr>';}).join('')+'</tbody></table></div>'+
+      '<div class="row"><span class="xs mut">Adds '+fn(w)+' as a responder only; rotations and named steps don\'t change.</span><span class="sp"></span><button class="btn sm pri js-aapply"'+(pick.length?'':' disabled')+'>Add '+fn(w)+' to '+pick.length+' customer'+(pick.length===1?'':'s')+'</button></div><div class="xs mut js-bmsg"></div></div></div>';}}
+
+/* ===== Templates ===== */
+var TP={k:'core',add:[],rm:[]};
+function renderTemplates(){
+  $('#tp-t tbody').innerHTML=Object.keys(D.templates).map(function(k){var t=D.templates[k],u=D.customers.filter(function(c){return c.template===k;});
+    return '<tr class="'+(k===TP.k?'cur':'')+'"><td data-l="Template"><a class="ttl js-tp" data-k="'+k+'">'+esc(t.n)+'</a></td><td data-l="MSP staff" class="sm">'+t.members.map(nm).join(', ')+'</td><td data-l="Customers" class="r mono">'+u.length+'</td><td data-l="Last edited" class="sm">'+esc(t.by)+' · '+t.on+'</td></tr>';}).join('');
+  var t=D.templates[TP.k],u=D.customers.filter(function(c){return c.template===TP.k;}),next=t.members.filter(function(m){return TP.rm.indexOf(m)<0;}).concat(TP.add);
+  var opts=Object.keys(D.staff).filter(function(k){return next.indexOf(k)<0;});
+  var changed=TP.add.length||TP.rm.length;
+  var eff=u.map(function(c){var e=[];TP.add.forEach(function(a){if(responders(c).indexOf(a)<0)e.push('+ '+fn(a)+' joins Responders');else e.push(fn(a)+' already added directly');});
+    TP.rm.forEach(function(r){if((c.staff||[]).indexOf(r)>=0)e.push(fn(r)+' stays (added directly)');else{e.push('− '+fn(r)+' leaves Responders');c.steps.forEach(function(s,i){if(s.to.type==='PERSON'&&s.to.id===r)e.push('<b>step '+(i+1)+' still names '+fn(r)+'</b> — fix in the customer');});}});
+    return {c:c,e:e};});
+  $('#tp-detail').innerHTML='<div class="card lb-accent"><div class="card-h"><span class="ov">'+esc(t.n)+'</span><span class="sp"></span><span class="xs mut">used by '+u.length+' customers</span></div><div class="card-b stack">'+
+    '<div class="row" style="gap:6px;flex-wrap:wrap">'+next.map(function(m){return '<span class="chip'+(TP.add.indexOf(m)>=0?' on':'')+'"><span class="av">'+per(m).i+'</span>'+esc(nm(m))+' <a class="js-tprm" data-m="'+m+'" aria-label="Remove '+esc(nm(m))+'">✕</a></span>';}).join('')+
+    (TP.rm.length?TP.rm.map(function(m){return '<span class="chip" style="text-decoration:line-through;opacity:.6">'+esc(nm(m))+'</span>';}).join(''):'')+
+    '<select class="inp js-tpadd" style="width:auto;height:28px" aria-label="Add staff"><option value="">+ Add staff…</option>'+opts.map(function(k){return '<option value="'+k+'">'+esc(nm(k))+'</option>';}).join('')+'</select></div>'+
+    (changed?'<div class="banner accent" style="margin:0"><span><b>This change affects '+u.length+' customers</b> using '+esc(t.n)+'. Customer people and each customer\'s steps stay as they are.</span></div>'+
+      '<div class="tw"><table class="t ccards"><thead><tr><th>Customer</th><th>What changes</th></tr></thead><tbody>'+eff.map(function(x){return '<tr><td data-l="Customer" class="sm b">'+esc(x.c.n)+'</td><td data-l="Changes" class="xs">'+x.e.join('<br>')+'</td></tr>';}).join('')+'</tbody></table></div>'+
+      '<div class="row"><span class="sp"></span><button class="btn sm js-tpx">Discard</button><button class="btn sm pri js-tpsave">Save template for '+u.length+' customers</button></div>':
+      '<div class="xs mut">Used by: '+u.map(function(c){return '<a href="#customer-resp?c='+c.id+'">'+esc(c.n)+'</a>';}).join(', ')+'. Add or remove someone to see which customers change before you save.</div>')+
+    '<div class="xs mut js-tpmsg"></div></div></div>';}
+
+/* ===== step editor (customer paging + onboarding custom) ===== */
+function targetOpts(c,to){
+  var o=[],v=to.type==='ALL'?'ALL':to.type+':'+to.id;
+  var rots=Object.keys(D.rotations).filter(function(k){var r=R(k);return r.scope==='MSP'||r.c===c.id;});
+  o.push('<optgroup label="Rotation">'+rots.map(function(k){return '<option value="ROTATION:'+k+'"'+(v==='ROTATION:'+k?' selected':'')+'>On shift in '+esc(R(k).n)+' ('+esc(fn(nowOn(k)))+' now)</option>';}).join('')+'</optgroup>');
+  o.push('<option value="ALL"'+(v==='ALL'?' selected':'')+'>Everyone in Responders ('+responders(c).length+')</option>');
+  o.push('<optgroup label="Person">'+responders(c).map(function(id){return '<option value="PERSON:'+id+'"'+(v==='PERSON:'+id?' selected':'')+'>'+esc(nm(id))+(isP(id)?' (customer)':'')+'</option>';}).join('')+'</optgroup>');
+  return o.join('');}
+function parseT(v){if(v==='ALL')return {type:'ALL'};var a=v.split(':');return {type:a[0],id:a.slice(1).join(':')};}
+function stepsHTML(c,steps){
+  return '<div class="ed"><div class="ed-h"><span>Step</span><span>At</span><span>Who</span><span>How</span><span></span></div>'+steps.map(function(s,i){
+    return '<div class="ed-r" data-i="'+i+'"><span class="ord'+(i===0?' first':'')+'">'+(i+1)+'</span>'+
+      '<span>'+(i===0?'<span class="mono b">0 min</span>':'<input class="inp num js-at" style="width:56px" value="'+s.at+'" aria-label="Minutes"><span class="xs mut"> min</span>')+'</span>'+
+      '<span><select class="inp js-who" aria-label="Who" style="width:100%">'+targetOpts(c,s.to)+'</select></span>'+
+      '<span class="row" style="gap:4px">'+['Slack','SMS','Call'].map(function(k){return '<span class="ch js-how'+(s.how.indexOf(k)>=0?' on':'')+'" data-h="'+k+'" role="button">'+k+'</span>';}).join('')+'</span>'+
+      '<span>'+(i>0?'<a class="sm js-rm" aria-label="Remove step">✕</a>':'')+'</span></div>';}).join('')+'</div>';}
+function bindSteps(host,c,after){
+  host.oninput=function(e){var r=e.target.closest('.ed-r');if(e.target.classList.contains('js-at')){c.steps[r.dataset.i].at=Math.max(1,parseInt(e.target.value,10)||1);c.edited={by:'Haeun Kim',on:'Nov 9'};after(true);}
+    if(e.target.classList.contains('js-rep')){c.repeat=Math.max(0,parseInt(e.target.value,10)||0);c.edited={by:'Haeun Kim',on:'Nov 9'};after(true);}};
+  host.onchange=function(e){if(e.target.classList.contains('js-who')){c.steps[e.target.closest('.ed-r').dataset.i].to=parseT(e.target.value);c.style='custom';c.edited={by:'Haeun Kim',on:'Nov 9'};after();}};
+  host.addEventListener('click',function(e){var el=e.target,r=el.closest('.ed-r');
+    if(el.classList.contains('js-how')){var s=c.steps[r.dataset.i],k=el.dataset.h,ix=s.how.indexOf(k);if(ix>=0){if(s.how.length>1)s.how.splice(ix,1);}else s.how.push(k);c.edited={by:'Haeun Kim',on:'Nov 9'};after();}
+    else if(el.classList.contains('js-rm')){c.steps.splice(r.dataset.i,1);c.style='custom';c.edited={by:'Haeun Kim',on:'Nov 9'};after();}
+    else if(el.classList.contains('js-addstep')){var l=c.steps[c.steps.length-1];c.steps.push({at:l.at+5,to:{type:'ALL'},how:['Call']});c.style='custom';c.edited={by:'Haeun Kim',on:'Nov 9'};after();}});}
+
+/* ===== Customer › Responders & paging ===== */
+var CR={c:'mirae',drawer:true,step:'1',at:5,role:'pageable',nn:'Jaehyun Kwak'};
+function renderCustResp(){
+  var c=cust(CR.c),sh=staffOf(c),cp=custPeople(c.id),rs=responders(c);
+  $('#s-customer-resp').dataset.cust=c.n;$$('#s-customer-resp .cust-label').forEach(function(e){e.textContent=c.n;});
+  $$('.js-cr-name').forEach(function(e){e.textContent=c.n;});$$('#s-customer-resp .js-cpick').forEach(function(s){s.value=CR.c;});
+  $('#s-customer-resp .js-ctabs').dataset.c=CR.c;
+  $('#cr-desc').innerHTML=esc(c.ind)+' · <span class="mono">'+esc(c.dom)+'</span> · '+rs.length+' responders · '+planBadge(c);
+  var ovs=[];c.tree.forEach(function(p){if(p.ov)ovs.push({n:p.n,lvl:'project',ov:p.ov,path:[p.n]});p.s.forEach(function(s){if(s.ov)ovs.push({n:p.n+' › '+s.n,lvl:'service',ov:s.ov});});});
+  // paging
+  var h='<div class="card-h"><span class="ov">Paging steps · '+esc(c.n)+'</span><span class="sp"></span>'+planBadge(c)+'</div><div class="card-b stack">'+
+    '<div><label class="lab">Who is paged first</label><div class="oc-presets ob-4 js-style">'+Object.keys(STYLE).map(function(k){return '<div data-st="'+k+'" class="'+(c.style===k?'on':'')+'"><b>'+STYLE[k]+'</b><span>'+STYLED[k]+'</span></div>';}).join('')+'</div></div>'+
+    (c.style==='shared'?'<div><label class="lab">Shared rotation</label><select class="inp js-shared" style="width:auto">'+Object.keys(D.rotations).filter(function(k){return R(k).scope==='MSP';}).map(function(k){return '<option value="'+k+'"'+(c.shared===k?' selected':'')+'>'+esc(R(k).n)+' · '+esc(fn(nowOn(k)))+' now</option>';}).join('')+'</select></div>':'')+
+    '<div><label class="lab">Timing · start from a plan</label><div class="seg full js-plan">'+Object.keys(D.plans).map(function(k){return '<span data-p="'+k+'" class="'+(c.plan===k?'on':'')+'" role="button">'+D.plans[k].n+'</span>';}).join('')+'</div><div class="hint">Picking a plan rewrites the steps below from that template'+(c.edited?' and drops edits made by '+esc(c.edited.by)+' on '+c.edited.on:'')+'.</div></div>'+
+    '<div class="js-steps">'+stepsHTML(c,c.steps)+'</div>'+
+    '<div class="row" style="gap:12px"><button class="btn sm js-addstep">+ Add step</button><span class="xs mut">“At” is minutes from when the alert opened.</span><span class="sp"></span><label class="lab" style="margin:0">Repeat</label><input class="inp num js-rep" style="width:52px" value="'+c.repeat+'"><span class="xs mut">time(s)</span></div>'+
+    '<div class="ov">If something breaks now</div><div class="oc-sent js-sent">'+sentence(c,c.steps,c.repeat)+'</div>'+
+    '<div class="xs mut">Applies to every project and service of '+esc(c.n)+(ovs.length?' except '+ovs.map(function(o){return esc(o.n);}).join(', ')+' (own steps, below)':'')+'. Stops as soon as anyone acknowledges. SEV-1 pages through maintenance.</div></div>';
+  var pg=$('#cr-paging');pg.innerHTML=h;
+  bindSteps(pg,c,function(soft){if(soft){$('.js-sent',pg).innerHTML=sentence(c,c.steps,c.repeat);}else renderAll();});
+  pg.onclick=function(e){var st=e.target.closest('[data-st]'),pl=e.target.closest('[data-p]');
+    if(st){c.style=st.dataset.st;if(c.style==='rotation'&&!c.rot){c.rot=c.id+'-rot';D.rotations[c.rot]={scope:'CUSTOMER',c:c.id,n:c.n.split(' ')[0]+' on-call',members:responders(c).slice(0,3),len:'weekly',anchor:2,hh:10,hhl:'10:00'};}
+      if(c.style!=='custom')buildSteps(c);renderAll();}
+    else if(pl){c.plan=pl.dataset.p;buildSteps(c);renderAll();}};
+  var shs=$('.js-shared',pg);if(shs)shs.onchange=function(){c.shared=this.value;buildSteps(c);renderAll();};
+  // rotation
+  var rt=$('#cr-rot');
+  if(c.style==='rotation'&&c.rot){var r=R(c.rot),s0=slotNow(r);
+    rt.innerHTML='<div class="card-h"><span class="ov">'+esc(r.n)+' · customer rotation</span><span class="sp"></span><span class="xs mut">weekly · handover '+wd(r.anchor)+' '+r.hhl+'</span></div>'+
+      '<div class="oc-ord">'+r.members.map(function(m,i){var on=m===who(r,s0);return '<div class="oc-li'+(on?' oc-first':'')+'"><span class="ord'+(on?' first':'')+'">'+(i+1)+'</span><span class="av'+(on?' on':'')+'">'+per(m).i+'</span><span class="b">'+esc(nm(m))+'</span>'+(isP(m)?'<span class="pill cu">'+esc(c.n)+'</span>':'<span class="pill">MSP</span>')+(on?'<span class="xs mut">on shift · '+untilTxt(r,s0)+'</span>':'')+'</div>';}).join('')+'</div>'+
+      '<div class="oc-strip" style="grid-template-columns:repeat(4,1fr)">'+[0,1,2,3].map(function(i){var s=s0+7*i,w=who(r,s),nt=coverNote(r,s);return '<span'+(i===0?' class="me"':'')+'><i>wk Nov '+s+'</i>'+esc(fn(w))+(nt?'<i>'+esc(nt)+'</i>':'')+'</span>';}).join('')+'</div>'+
+      '<div class="xs mut" style="padding:10px 16px;border-top:1px solid var(--grid)">Members can be MSP staff or '+esc(c.n)+' people with the Pageable role. Only '+esc(c.n)+' uses this rotation.</div>';}
+  else if(c.style==='shared'||c.steps.some(function(s){return s.to.type==='ROTATION';})){var ids=uniq(c.steps.filter(function(s){return s.to.type==='ROTATION';}).map(function(s){return s.to.id;}));
+    rt.innerHTML='<div class="card-h"><span class="ov">Rotation</span></div><div class="plist">'+ids.map(function(k){var r=R(k);return '<div><span class="av on">'+per(nowOn(k)).i+'</span><div style="flex:1;min-width:0"><a class="b" href="#rotations?r='+k+'">'+esc(r.n)+'</a> <span class="pill">Shared MSP</span><div class="xs faint">'+esc(nm(nowOn(k)))+' on shift · '+untilTxt(r,slotNow(r))+' · also used by '+(rotUsers(k).length-1)+' other customers</div></div></div>';}).join('')+'</div>';}
+  else rt.innerHTML='<div class="card-h"><span class="ov">Rotation</span></div><div class="card-b sm mut">No rotation: '+(c.style==='all'?'every responder is paged together at each step.':'steps name people directly.')+'</div>';
+  // overrides
+  $('#cr-ov').innerHTML='<div class="card-h"><span class="ov">Project &amp; service overrides</span><span class="sp"></span><button class="btn sm">Add override</button></div>'+
+    (ovs.length?'<div class="plist">'+ovs.map(function(o){return '<div style="align-items:flex-start"><div style="flex:1;min-width:0"><div class="b sm">'+esc(o.n)+' <span class="pill">'+o.lvl+'</span></div><div class="xs" style="margin-top:4px">'+sentence(c,o.ov.steps,o.ov.repeat)+'</div><div class="xs faint">edited by '+esc(o.ov.by)+' · '+o.ov.on+'</div></div><button class="btn sm ghost">Use customer steps</button></div>';}).join('')+'</div>':'<div class="card-b sm mut">None. All projects and services use the steps above.</div>')+
+    '<div class="xs mut" style="padding:10px 16px;border-top:1px solid var(--grid)">Lookup order: service › project › customer. The first level with its own steps wins.</div>';
+  // responders list
+  var inStep=function(id){return c.steps.map(function(s,i){return s.to.type==='PERSON'&&s.to.id===id?i+1:0;}).filter(Boolean);};
+  var l='<div class="card-h"><span class="ov">Responders</span><span class="mono xs faint">'+rs.length+' paged as “everyone”</span><span class="sp"></span><button class="btn sm pri js-cradd">Add customer person</button></div>'+
+    '<div class="pp-sec">MSP staff · '+sh.length+'</div><div class="row xs mut" style="padding:4px 16px 8px">Template: '+(c.template?'<a href="#templates">'+esc(D.templates[c.template].n)+'</a> ('+D.templates[c.template].members.map(fn).join(', ')+')':'none')+' · <a>Change</a> · <a>+ Add staff</a></div>'+
+    '<div class="plist">'+sh.map(function(x){var p=D.staff[x.id],st=inStep(x.id);return '<div><span class="av">'+p.i+'</span><div style="flex:1;min-width:0"><a class="b sm" href="#people?p='+x.id+'">'+esc(p.n)+'</a><div class="xs faint">'+(x.src==='tpl'?'from '+esc(D.templates[c.template].n):'added directly')+(st.length?' · named in step '+st.join(', '):'')+'</div>'+(needs(p)?'<div class="row" style="gap:4px;margin-top:4px">'+badCh(p).map(function(k){return chip(k,p.ch[k]);}).join('')+'</div>':'')+'</div></div>';}).join('')+'</div>'+
+    '<div class="pp-sec">'+esc(c.n)+' people · '+cp.length+'</div><div class="plist">'+(cp.map(function(p){var st=inStep(p.id),rot=c.rot&&R(c.rot).members.indexOf(p.id)>=0;
+      return '<div style="align-items:flex-start"><span class="av">'+p.i+'</span><div style="flex:1;min-width:0"><div class="b sm">'+esc(p.n)+' <span class="xs faint">'+esc(p.title)+'</span></div>'+
+        '<div class="row" style="gap:4px;margin-top:4px">'+p.roles.map(function(r){return '<span class="pill'+(r==='pageable'||r==='approver'?' prd':'')+'">'+ROLE[r]+'</span>';}).join('')+(st.length?'<span class="pill cz">step '+st.join(', ')+'</span>':'')+(rot?'<span class="pill cz">in rotation</span>':'')+'</div>'+
+        '<div class="xs faint" style="margin-top:3px">'+(pageable(p)?'Can be called / SMS · ':'')+'Notified for '+esc(scTxt(c,p.sc))+'</div>'+
+        '<div class="row" style="gap:4px;margin-top:4px">'+badCh(p).map(function(k){return chip(k,p.ch[k]);}).join('')+'</div></div>'+
+        '<select class="inp js-role" data-id="'+p.id+'" style="width:auto;height:28px" aria-label="Role of '+esc(p.n)+'"><option value="pageable"'+(pageable(p)?' selected':'')+'>Pageable</option><option value="notify"'+(pageable(p)?'':' selected')+'>Notify only</option></select></div>';}).join('')||'<div class="sm mut">No '+esc(c.n)+' people yet.</div>')+'</div>'+
+    '<div class="xs mut" style="padding:10px 16px;border-top:1px solid var(--grid)"><b>Pageable</b>: can be called and texted, can be named in a step or a rotation, and is part of “everyone”. <b>Notify only</b>: status emails only. <b>Auto-fix approver</b> and <b>Portal</b> can be added to either.</div>';
+  var ll=$('#cr-list');ll.innerHTML=l;
+  ll.onchange=function(e){var s=e.target.closest('.js-role');if(s){var p=per(s.dataset.id);p.roles=p.roles.filter(function(r){return r!=='pageable'&&r!=='notify';});p.roles.unshift(s.value);renderAll();}};
+  ll.onclick=function(e){if(e.target.closest('.js-cradd')){CR.drawer=true;renderCustResp();$('#cr-drawer').scrollIntoView({behavior:'smooth',block:'nearest'});var i=$('#cr-drawer input');if(i)i.focus();}};
+  renderDrawer(c);}
+function renderDrawer(c){
+  var dr=$('#cr-drawer');if(!CR.drawer){dr.innerHTML='';dr.style.display='none';return;}dr.style.display='';
+  var n=c.steps.length,pos=parseInt(CR.step,10)||0,prevAt=pos?c.steps[pos-1].at:0,nextAt=c.steps[pos]?c.steps[pos].at:null;
+  if(pos&&(CR.at<=prevAt||(nextAt!==null&&CR.at>=nextAt)))CR.at=nextAt!==null?Math.max(prevAt+1,Math.floor((prevAt+nextAt)/2)):prevAt+5;
+  function prev(){TMPP={id:'p:new',n:CR.nn||'New person',c:c.id};var tmp=clone(c.steps);tmp.splice(pos,0,{at:CR.at,to:{type:'PERSON',id:'p:new'},how:['Call']});tmp.sort(function(a,b){return a.at-b.at;});var s=sentence(c,tmp,c.repeat);TMPP=null;return s;}
+  var preview=CR.role==='pageable'&&pos?prev():'';
+  var stepOpts='<option value="0"'+(pos===0?' selected':'')+'>Not in a named step</option>'+c.steps.map(function(s,i){return '<option value="'+(i+1)+'"'+(pos===i+1?' selected':'')+'>New step '+(i+2)+', after step '+(i+1)+' ('+s.at+' min)</option>';}).join('');
+  dr.innerHTML='<div class="card-h"><span class="ov">Add '+esc(c.n)+' person</span><span class="sp"></span><a class="sm js-drx">Close</a></div><div class="card-b stack">'+
+    '<div class="g2" style="gap:10px"><div><label class="lab">Name</label><input class="inp js-dn" value="'+esc(CR.nn)+'" aria-label="Name"></div><div><label class="lab">Email · phone</label><input class="inp mono" value="jh.kwak@'+esc(c.dom)+' · 010-4821-…" aria-label="Email and phone"></div></div>'+
+    '<div><label class="lab">Role</label><div class="seg full js-drole"><span data-r="pageable" class="'+(CR.role==='pageable'?'on':'')+'" role="button">Pageable (calls, SMS)</span><span data-r="notify" class="'+(CR.role==='notify'?'on':'')+'" role="button">Notify only</span></div>'+
+    '<div class="row" style="gap:12px;margin-top:6px"><label class="sm"><input type="checkbox"> Auto-fix approver</label><label class="sm"><input type="checkbox"> Portal sign-in</label></div></div>'+
+    '<div><label class="lab">Notified for</label><select class="inp" style="width:100%" aria-label="Notified for"><option>All of '+esc(c.n)+'</option>'+c.tree.map(function(p){return '<option>'+esc(p.n)+' (all services)</option>';}).join('')+'</select></div>'+
+    (CR.role==='pageable'?'<div><label class="lab">Call them at</label><div class="row" style="gap:8px;flex-wrap:wrap"><select class="inp js-dstep" style="width:auto" aria-label="Step">'+stepOpts+'</select>'+(pos?'<input class="inp num js-dat" style="width:56px" value="'+CR.at+'" aria-label="Minutes"><span class="xs mut">min'+(nextAt!==null?' (between '+prevAt+' and '+nextAt+')':'')+'</span>':'')+'</div>'+
+      '<div class="hint">'+(pos?'Inserts a call step. Later steps move down.':'They are still paged in “everyone” steps.')+'</div></div>':'')+
+    (preview?'<div class="ov">Preview</div><div class="oc-sent js-dprev" style="font-size:13px">'+preview+'</div>':'')+
+    '<div class="row"><span class="xs mut">A verification link is sent after saving.</span><span class="sp"></span><button class="btn sm js-drx">Cancel</button><button class="btn sm pri js-dsave">Add &amp; send link</button></div><div class="xs mut js-dmsg"></div></div>';
+  dr.oninput=function(e){if(e.target.classList.contains('js-dat')){CR.at=Math.max(1,parseInt(e.target.value,10)||1);var pv=$('.js-dprev',dr);if(pv)pv.innerHTML=prev();}
+    if(e.target.classList.contains('js-dn')){CR.nn=e.target.value;var pv2=$('.js-dprev',dr);if(pv2)pv2.innerHTML=prev();}};
+  dr.onchange=function(e){if(e.target.classList.contains('js-dstep')){CR.step=e.target.value;var p=parseInt(CR.step,10);if(p){var a=c.steps[p-1].at,b=c.steps[p]?c.steps[p].at:a+10;CR.at=Math.max(a+1,Math.round((a+b)/2));}renderDrawer(c);}};
+  dr.onclick=function(e){var r=e.target.closest('[data-r]');if(r){CR.role=r.dataset.r;renderDrawer(c);}
+    if(e.target.closest('.js-drx')){CR.drawer=false;renderDrawer(c);}
+    if(e.target.closest('.js-dsave')){var id='p:n'+(D.people.length+1),nmv=CR.nn||'New person',ii=nmv.split(' ').map(function(w){return w.charAt(0);}).join('').slice(0,2).toUpperCase();
+      D.people.push({id:id,c:c.id,n:nmv,i:ii,title:'Added Nov 9',sc:[],roles:[CR.role],ch:{Email:'sent',SMS:'sent',Voice:'sent'}});
+      if(CR.role==='pageable'&&pos){c.steps.splice(pos,0,{at:CR.at,to:{type:'PERSON',id:id},how:['Call']});c.steps.sort(function(a,b){return a.at-b.at;});c.style='custom';c.edited={by:'Haeun Kim',on:'Nov 9'};}
+      CR.drawer=false;CR.nn='';renderAll();
+      $('#cr-paging').insertAdjacentHTML('afterbegin','<div class="banner accent" style="margin:0;border-width:0 0 1px 3px"><span><b>Added '+esc(nmv)+'.</b> '+(pos&&CR.role==='pageable'?'Called at step '+(pos+1)+' ('+CR.at+' min). ':'')+'Verification link sent.</span></div>');}};}
 
 /* ===== incident detail + list ===== */
 function renderIncident(){
-  var I=D.incident,x=resIndex()[I.res],r=resolve(x.c,x.path),t=r.t,c=r.c,el=D.now.sec-I.opened;
-  var done=r.steps.filter(function(s){return s.at*60<=el;}).length,N=t.order.length;
-  function full(w){return w==='all'?'everyone on '+t.n+' ('+N+')':D.staff[t.order[w==='shift'?0:1]].n;}
+  var I=D.incident,x=resIndex()[I.res],c=cust(x.c),pg=pagingFor(c,x.path),st=pg.steps,el=D.now.sec-I.opened;
+  var done=st.filter(function(s){return s.at*60<=el;}).length;
+  function full(to){return to.type==='PERSON'?nm(to.id)+(isP(to.id)?' ('+c.n+')':''):to.type==='ROTATION'?nm(nowOn(to.id))+' (on shift in '+R(to.id).n+')':'everyone in Responders ('+responders(c).length+')';}
+  function avi(to){return to.type==='ALL'?'All':per(idsNow(c,to)[0]).i;}
   function when(s){return hm(I.opened+s.at*60);}
-  $('#inc-paged').innerHTML='<span class="ov">Paged</span><a href="#oncall">'+r.steps.map(function(s,i){return howTxt(s.how)+' <b>'+whoName(t,s.who)+'</b> '+when(s)+(i<done?' ✓':'');}).join(' → ')+'</a> '+badge(r)+'<span class="xs mut">'+t.n+'</span>';
-  var ng=notified(x.c,x.path),cn=[];ng.forEach(function(g){g.ppl.forEach(function(p){cn.push(p.n);});});
+  $('#inc-paged').innerHTML='<span class="ov">Paged</span><a href="#customer-resp?c='+c.id+'">'+st.map(function(s,i){return howTxt(s.how)+' <b>'+esc(fn(idsNow(c,s.to)[0]))+(s.to.type==='ALL'?' + all':'')+'</b> '+when(s)+(i<done?' ✓':'');}).join(' → ')+'</a> '+planBadge(c);
+  var ng=notifiedFor(x.c,x.path),cn=ng.map(function(p){return p.n;});
   var ev=[];
-  r.steps.forEach(function(s,i){if(i>=done)return;var tm=I.opened+s.at*60+(i===0?2:0);
-    if(i===0)ev.push([tm,'res','chk',howTxt(s.how).replace(/^./,function(a){return a.toUpperCase();})+' to <b>#mirae-ops</b> and '+full(s.who),'Step 1 of '+r.steps.length]);
-    else ev.push([tm,'esc','tri','<b>Step '+(i+1)+'</b> — '+howTxt(s.how)+' '+full(s.who)+(s.how.indexOf('Call')>=0&&i===done-1?' · no answer yet':''),'No acknowledgement '+s.at+' min after the alert opened · alert plan '+r.label]);});
-  ev.push([I.opened+3,'info','ring','Email to customer contacts (notified only): '+cn.join(', '),'From '+ng.map(function(g){return g.from;}).join(', ')]);
+  st.forEach(function(s,i){if(i>=done)return;var tm=I.opened+s.at*60+(i===0?2:0);
+    if(i===0)ev.push([tm,'res','chk',howTxt(s.how).replace(/^./,function(a){return a.toUpperCase();})+' to <b>#mirae-ops</b> and '+esc(full(s.to)),'Step 1 of '+st.length+' · '+STYLE[c.style]]);
+    else ev.push([tm,'esc','tri','<b>Step '+(i+1)+'</b> — '+howTxt(s.how)+' '+esc(full(s.to)),'No acknowledgement '+s.at+' min after the alert opened']);});
+  ev.push([I.opened+3,'info','ring','Email to '+esc(c.n)+' people (notify only): '+esc(cn.join(', ')),'Notified for Core or all of '+esc(c.n)]);
   ev.push([I.opened+1,'mute','dash','1 alert suppressed as duplicate','payments-db-1 FreeStorageSpace repeated within 5m dedup window']);
-  ev.push([I.opened,'trig','dot','<b>Triggered</b> — group of 3 alerts ('+c.n+' · SEV-1) closed after 30s','Paging order at open ('+t.n+'): '+t.order.slice(0,2).map(function(x,i){return (i+1)+' '+D.staff[x].n;}).join(' → ')+' → everyone']);
+  ev.push([I.opened,'trig','dot','<b>Triggered</b> — group of 3 alerts ('+esc(c.n)+' · SEV-1) closed after 30s','Paging steps at open: '+st.map(function(s){return fn(idsNow(c,s.to)[0])+(s.to.type==='ALL'?' + all':'');}).join(' → ')]);
   ev.sort(function(a,b){return b[0]-a[0];});
   $('#inc-tl').innerHTML=ev.map(function(e){return '<div class="ev"><span class="m"><span class="st '+e[1]+'"><span class="mk '+e[2]+'"></span></span></span><span class="tm">'+hms(e[0])+'</span><span class="tx">'+e[3]+'<span class="s">'+e[4]+'</span></span></div>';}).join('');
-  var nn=r.steps.slice(0,done).reduce(function(a,s){return a+s.how.length*(s.who==='all'?N:1);},0)+1+cn.length;
+  var nn=st.slice(0,done).reduce(function(a,s){return a+s.how.length*idsNow(c,s.to).length;},0)+1+cn.length;
   $('#inc-ntab').textContent=nn;
-  $('#inc-esc-h').textContent='step '+done+'/'+r.steps.length+' · repeat 0/'+r.repeat;
-  $('#inc-esc').innerHTML=r.steps.map(function(s,i){var at=I.opened+s.at*60,left=at-D.now.sec;
-    return '<div><span class="ord'+(i===0?' first':'')+'">'+(i+1)+'</span><span class="av'+(i<done?' on':'')+'">'+(s.who==='all'?'All':D.staff[t.order[s.who==='shift'?0:1]].i)+'</span><div><div class="b">'+full(s.who)+'</div><div class="xs faint">'+howTxt(s.how)+' '+(i<done?'✓ '+hm(at):'at '+hm(at)+(i===done?' · in '+Math.floor(left/60)+'m '+(left%60)+'s if no ack':''))+'</div></div></div>';}).join('');
-  $('#inc-esc-f').innerHTML='Then repeats '+(r.repeat===1?'once':r.repeat+' times')+', stops '+hm(I.opened+stopAt(r.steps,r.repeat)*60)+'. '+badge(r)+' <a href="#customer?c='+c.id+'&edit=1">Edit '+c.n+'\'s timing</a><br>SEV-1 · pages through maintenance windows';
-  var ap=[];ng.forEach(function(g){g.ppl.forEach(function(p){if(p.roles.indexOf('Approver')>=0)ap.push(p.n+' ('+c.n+')');});});
-  $('#inc-rem').innerHTML='Approve in <b>Slack</b> (#mirae-ops) or with the <b>email link</b>. Only people with the <b>Approver</b> role for '+x.path[1]+' can approve: '+ap.join(', ')+'. Runs with the customer\'s auto-fix permission in AWS.';
-  // incidents list cells for the same incident
-  var nx=r.steps[done],left=nx?I.opened+nx.at*60-D.now.sec:0;
-  $('#il-pay-next').textContent=nx?'next: '+howTxt(nx.how)+' '+whoName(t,nx.who)+' at '+hm(I.opened+nx.at*60):'';
-  $('#il-pay-esc').innerHTML='<span class="mono sm">'+done+'/'+r.steps.length+'</span> <span class="sm mut">· '+(nx?howTxt(nx.how)+' '+whoName(t,nx.who)+' in '+Math.floor(left/60)+'m '+(left%60)+'s':'done')+'</span>';
-  $('#il-pay-pend').textContent=nx?'Step '+(done+1)+' · '+howTxt(nx.how)+' '+full(nx.who):'';
+  $('#inc-esc-h').textContent='step '+done+'/'+st.length+' · repeat 0/'+pg.repeat;
+  $('#inc-esc').innerHTML=st.map(function(s,i){var at=I.opened+s.at*60,left=at-D.now.sec;
+    return '<div><span class="ord'+(i===0?' first':'')+'">'+(i+1)+'</span><span class="av'+(i<done?' on':'')+'">'+avi(s.to)+'</span><div><div class="b">'+esc(full(s.to))+'</div><div class="xs faint">'+howTxt(s.how)+' '+(i<done?'✓ '+hm(at):'at '+hm(at)+(i===done?' · in '+Math.floor(left/60)+'m '+(left%60)+'s if no ack':''))+'</div></div></div>';}).join('');
+  $('#inc-esc-f').innerHTML='Then repeats '+(pg.repeat===1?'once':pg.repeat+' times')+', stops '+hm(I.opened+stopAt(st,pg.repeat)*60)+'. '+planBadge(c)+' <a href="#customer-resp?c='+c.id+'">Edit '+esc(c.n)+'\'s paging</a><br>SEV-1 · pages through maintenance windows';
+  var ap=approversFor(x.c,x.path).map(function(p){return p.n+' ('+c.n+')';});
+  $('#inc-rem').innerHTML='Approve in <b>Slack</b> (#mirae-ops) or with the <b>email link</b>. Only people with the <b>Auto-fix approver</b> role for '+esc(x.path[1])+' can approve: '+esc(ap.join(', '))+'. Runs with the customer\'s auto-fix permission in AWS.';
+  var nx=st[done],left=nx?I.opened+nx.at*60-D.now.sec:0;
+  $('#il-pay-who').innerHTML='<span class="av on">'+per(idsNow(c,st[0].to)[0]).i+'</span>'+esc(nm(idsNow(c,st[0].to)[0]));
+  $('#il-pay-next').textContent=nx?'next: '+howTxt(nx.how)+' '+fn(idsNow(c,nx.to)[0])+(nx.to.type==='ALL'?' + all':'')+' at '+hm(I.opened+nx.at*60):'';
+  $('#il-pay-esc').innerHTML='<span class="mono sm">'+done+'/'+st.length+'</span> <span class="sm mut">· '+(nx?howTxt(nx.how)+' '+esc(fn(idsNow(c,nx.to)[0]))+' in '+Math.floor(left/60)+'m '+(left%60)+'s':'done')+'</span>';
+  $('#il-pay-pend').textContent=nx?'Step '+(done+1)+' · '+howTxt(nx.how)+' '+full(nx.to):'';
   $('#il-pay-t').textContent=Math.floor(left/60)+':'+('0'+left%60).slice(-2);
-  $('#il-oncall').innerHTML=Object.keys(D.teams).map(function(k){var tm=D.teams[k],p=D.staff[tm.order[0]],cs=teamCustomers(k).map(function(x){return x.c.team===k?x.c.n:x.c.n+' › '+x.mine.map(function(s){return s.n;}).join(', ');});
-    return '<div><span class="av on">'+p.i+'</span><div><div class="b">'+p.n+' <span class="xs faint">'+tm.n+'</span></div><div class="xs faint">'+cs.join(' · ')+' · until 09:00</div></div></div>';}).join('')+
-    '<div><span class="av">—</span><div><div class="b">No owner</div><div class="xs faint">Unmapped account 481220935017</div></div><span class="sp"></span><span class="mono xs mut">1 open</span></div>';
-}
+  var hb=cust('hanbit');$('#il-alb-pend').textContent='Step 4 · '+howTxt(hb.steps[3].how)+' everyone in '+hb.n+' Responders ('+responders(hb).length+')';
+  $('#il-oncall').innerHTML=Object.keys(D.rotations).filter(function(k){return R(k).c!=='seoul';}).map(function(k){var r=R(k),w=nowOn(k),u=r.scope==='MSP'?rotUsers(k):[cust(r.c)];
+    return '<div><span class="av on">'+per(w).i+'</span><div><div class="b">'+esc(nm(w))+' <span class="xs faint">'+esc(r.n)+'</span></div><div class="xs faint">'+(u.length>2?u.length+' customers':u.map(function(z){return esc(z.n);}).join(' · '))+' · '+untilTxt(r,slotNow(r))+'</div></div></div>';}).join('')+
+    '<div><span class="av">All</span><div><div class="b">All at once</div><div class="xs faint">'+D.customers.filter(function(c){return c.style==='all';}).map(function(c){return esc(c.n);}).join(' · ')+'</div></div></div>'+
+    '<div><span class="av">—</span><div><div class="b">No owner</div><div class="xs faint">Unmapped account 481220935017</div></div><span class="sp"></span><span class="mono xs mut">1 open</span></div>';}
 
 /* ===== resource detail ===== */
 var RS='payments-db-1';
-var RINFO={'payments-db-1':{line:'RDS · db.r6g.large · account <span class="mono">8273 1104 6650</span> · ap-northeast-2 · <span class="pill prd">Production</span>',tag:'tag set by customer · seen 02:00'},
-  'orders-api-1':{line:'EC2 · <span class="mono">i-0f19a3d7b2e6c8410</span> · account <span class="mono">3301 8812 4407</span> · ap-northeast-2 · <span class="pill prd">Production</span>',tag:'tag set by customer · seen 02:00'}};
+var RINFO={'payments-db-1':{line:'RDS · db.r6g.large · account <span class="mono">8273 1104 6650</span> · ap-northeast-2 · <span class="pill prd">Production</span>'},
+  'orders-api-1':{line:'EC2 · <span class="mono">i-0f19a3d7b2e6c8410</span> · account <span class="mono">3301 8812 4407</span> · ap-northeast-2 · <span class="pill prd">Production</span>'}};
 function renderResource(){
-  var x=resIndex()[RS],c=cust(x.c);
+  var x=resIndex()[RS],c=cust(x.c),pg=pagingFor(c,x.path);
   $('#rs-sw').innerHTML=Object.keys(RINFO).map(function(k){return '<span data-r="'+k+'" class="'+(k===RS?'on':'')+'">'+k+'</span>';}).join('');
   $('#rs-crumb').textContent=RS;$('#rs-name').textContent=RS;
-  $('#rs-desc').innerHTML=c.n+'<span class="chain">›</span>'+x.path.join('<span class="chain">›</span>')+' · '+RINFO[RS].line;
-  var r=resolve(x.c,x.path);
-  $('#rs-paged').innerHTML='<span class="ov">Paged</span><a href="#oncall">'+r.steps.map(function(s){return howTxt(s.how)+' <b>'+whoName(r.t,s.who)+'</b>'+(s.at?' at '+s.at+' min':'');}).join(' → ')+'</a> '+badge(r)+'<span class="xs mut">'+r.t.n+'</span>';
+  $('#rs-desc').innerHTML=esc(c.n)+'<span class="chain">›</span>'+x.path.map(esc).join('<span class="chain">›</span>')+' · '+RINFO[RS].line;
+  $('#rs-paged').innerHTML='<span class="ov">Paged</span><a href="#customer-resp?c='+c.id+'">'+pg.steps.map(function(s){return howTxt(s.how)+' <b>'+esc(fn(idsNow(c,s.to)[0]))+(s.to.type==='ALL'?' + all':'')+'</b>'+(s.at?' at '+s.at+' min':'');}).join(' → ')+'</a> '+planBadge(c);
   $('#rs-oncall').innerHTML=pagingBlock(x);
-  $$('#s-resource [data-rb]').forEach(function(b){b.hidden=b.dataset.rb!==RS;});
-}
+  $$('#s-resource [data-rb]').forEach(function(b){b.hidden=b.dataset.rb!==RS;});}
 
-/* ===== contacts (staff) ===== */
-var CT={f:'act',team:'',chan:'',q:''};
-function renderContacts(){
-  var all=staffRows(),na=all.filter(needs),cr=custRows(),cc=count(cr),byC={};
-  cr.filter(needs).forEach(function(p){var n=cust(p.c).n;byC[n]=(byC[n]||0)+1;});
-  $('#ct-banner').innerHTML='<span class="st info"><span class="mk ring"></span></span><span style="flex:1;min-width:0"><b>'+(na.length+cc.people)+' people need action</b>: '+na.length+' staff (below) and '+cc.people+' customer contacts ('+Object.keys(byC).map(function(k){return k+' '+byC[k];}).join(' · ')+'). <span class="mut">'+NA_DEF+'</span></span><a class="btn sm" href="#needs-action?w=all">Open the full list</a>';
-  $('#ct-f').innerHTML='<span class="chip'+(CT.f==='act'?' on':'')+'" data-f="act"><span class="st ack"><span class="mk ring"></span></span>Needs action<span class="n">'+na.length+'</span></span><span class="chip'+(CT.f==='all'?' on':'')+'" data-f="all">All staff<span class="n">'+all.length+'</span></span>';
-  var ts=$('#ct-team');if(ts.options.length<2)Object.keys(D.teams).forEach(function(k){ts.add(new Option(D.teams[k].n,k));});
-  var rows=all.filter(function(r){return (CT.f==='all'||needs(r))&&(!CT.team||r.teams.indexOf(CT.team)>=0)&&(!CT.chan||(r.ch[CT.chan]&&(CT.f==='all'||r.ch[CT.chan]!=='ok')))&&(!CT.q||r.n.toLowerCase().indexOf(CT.q)>=0);});
-  var el=$('#ct-list');el.innerHTML=listHTML('ct',rows,{empty:CT.f==='act'?'All channels verified for this filter.':''});bindList(el,'ct',renderContacts);
-}
 /* ===== needs action (cross-scope) ===== */
 var NA={w:'all',chan:'',c:'',q:''};
 function renderNA(){
   var all=staffRows().concat(custRows()).filter(needs),s=all.filter(function(r){return r.kind==='staff';}),cu=all.filter(function(r){return r.kind==='customer';}),k=count(all);
-  $('#na-desc').innerHTML='<b>'+all.length+' people</b> ('+s.length+' staff · '+cu.length+' customer contacts) · '+k.links+' channels can be fixed by link · '+k.unset+' not set. '+NA_DEF;
+  $('#na-desc').innerHTML='<b>'+all.length+' people</b> ('+s.length+' staff · '+cu.length+' customer people) · '+k.links+' channels can be fixed by link · '+k.unset+' not set. '+NA_DEF;
   $('#na-f').innerHTML=[['all','All',all.length],['staff','Staff',s.length],['customer','Customer',cu.length]].map(function(o){return '<span class="chip'+(NA.w===o[0]?' on':'')+'" data-w="'+o[0]+'">'+o[1]+'<span class="n">'+o[2]+'</span></span>';}).join('');
-  var cs=$('#na-cust');if(cs.options.length<2)D.customers.forEach(function(c){cs.add(new Option(c.n,c.id));});cs.value=NA.c;$('#na-chan').value=NA.chan;
+  var cs=$('#na-cust');if(cs.options.length<2)D.customers.filter(function(c){return !c.lite;}).forEach(function(c){cs.add(new Option(c.n,c.id));});cs.value=NA.c;$('#na-chan').value=NA.chan;
   var rows=all.filter(function(r){return (NA.w==='all'||r.kind===NA.w)&&(!NA.c||r.c===NA.c)&&(!NA.chan||(r.ch[NA.chan]&&r.ch[NA.chan]!=='ok'))&&(!NA.q||r.n.toLowerCase().indexOf(NA.q)>=0);});
-  var el=$('#na-list');el.innerHTML=listHTML('na',rows,{badOnly:true,empty:'Nothing needs action for this filter.'});bindList(el,'na',renderNA);
-}
+  var el=$('#na-list');el.innerHTML=listHTML('na',rows,{badOnly:true,empty:'Nothing needs action for this filter.'});bindList(el,'na',renderNA);}
 
 /* ===== customers list ===== */
 function renderCustomers(){
   var q=($('#cu-q').value||'').toLowerCase(),cr=custRows(),na=cr.filter(needs),byC={};na.forEach(function(p){byC[p.c]=(byC[p.c]||0)+1;});
-  $('#cu-na').innerHTML='<div class="card-h"><span class="ov">Customer contacts needing action</span><span class="tc warn">'+na.length+'</span><span class="sp"></span><a class="btn sm" href="#needs-action?w=customer">Open list · send links</a></div>'+
-    '<div class="plist">'+na.slice(0,3).map(function(p){return '<div><div style="flex:1;min-width:0"><div class="b">'+p.n+' <span class="xs faint">'+esc(p.ctx)+' · '+p.roles.join(', ')+'</span></div><div class="row" style="margin-top:4px">'+badCh(p).map(function(k){return chip(k,p.ch[k]);}).join('')+'</div></div></div>';}).join('')+
-    '<div><div style="flex:1" class="xs mut">'+(na.length-3>0?'+'+(na.length-3)+' more · ':'')+Object.keys(byC).map(function(k){return cust(k).n+' '+byC[k];}).join(' · ')+'. '+NA_DEF+'</div></div></div>';
+  $('#cu-desc').textContent=D.customers.length+' customers · 22 AWS accounts · 3 webhook sources';
+  $('#cu-na').innerHTML='<div class="card-h"><span class="ov">Customer people needing action</span><span class="tc warn">'+na.length+'</span><span class="sp"></span><a class="btn sm" href="#needs-action?w=customer">Open list · send links</a></div>'+
+    '<div class="plist">'+na.slice(0,3).map(function(p){return '<div><div style="flex:1;min-width:0"><div class="b">'+esc(p.n)+' <span class="xs faint">'+esc(cust(p.c).n)+' · '+esc(p.roles.join(', '))+'</span></div><div class="row" style="margin-top:4px">'+badCh(p).map(function(k){return chip(k,p.ch[k]);}).join('')+'</div></div></div>';}).join('')+
+    '<div><div style="flex:1" class="xs mut">'+(na.length-3>0?'+'+(na.length-3)+' more · ':'')+Object.keys(byC).map(function(k){return esc(cust(k).n)+' '+byC[k];}).join(' · ')+'. '+NA_DEF+'</div></div></div>';
   $('#cu-t tbody').innerHTML=D.customers.filter(function(c){return !q||c.n.toLowerCase().indexOf(q)>=0;}).map(function(c){
-    var r=resolve(c.id),ppl=cr.filter(function(p){return p.c===c.id;}),n=byC[c.id]||0;
-    return '<tr class="'+(c.inc.indexOf('SEV-1')>=0?'hot':c.inc.indexOf('SEV-2')>=0?'esc':'')+'"><td data-l="Customer"><a class="ttl" href="#customer?c='+c.id+'">'+c.n+'</a><div class="org mono">'+c.dom+'</div></td>'+
+    var n=byC[c.id]||0,rs=responders(c),ids=idsNow(c,c.steps[0].to);
+    return '<tr class="'+(c.inc.indexOf('SEV-1')>=0?'hot':c.inc.indexOf('SEV-2')>=0?'esc':'')+'"><td data-l="Customer"><a class="ttl" href="#customer-resp?c='+c.id+'">'+esc(c.n)+'</a><div class="org mono">'+esc(c.dom)+'</div></td>'+
       '<td data-l="Open incidents" class="sm">'+c.inc+'</td><td data-l="Sources" class="sm">'+c.src+'</td>'+
-      '<td data-l="Connection">'+(c.conn==='ok'?'<span class="st res"><span class="mk chk"></span>All roles OK</span>':c.conn==='checking'?'<span class="st info"><span class="mk q"></span>Checking</span>':'<span class="st esc"><span class="mk tri"></span>'+c.conn+'</span>')+'</td>'+
-      '<td data-l="Coverage"><div class="mono sm">'+c.cov+'</div><div class="org">'+c.covn+'</div></td><td data-l="Setup" class="sm">'+c.setup+'</td>'+
-      '<td data-l="On-call team"><div class="sm">'+r.t.n+'</div>'+badge(r)+'</td>'+
-      '<td data-l="People"><a href="#customer-people?c='+c.id+'"><span class="mono sm">'+ppl.length+'</span>'+(n?' <span class="tc warn">'+n+'</span> <span class="xs">need action</span>':'')+'</a></td></tr>';}).join('');
-}
+      '<td data-l="Connection">'+(c.conn==='ok'?'<span class="st res"><span class="mk chk"></span>All roles OK</span>':'<span class="st esc"><span class="mk tri"></span>'+c.conn+'</span>')+'</td>'+
+      '<td data-l="Coverage"><div class="mono sm">'+c.cov+'</div><div class="org">'+c.covn+'</div></td>'+
+      '<td data-l="Paging">'+planBadge(c)+'<div class="org">first: '+esc(names(ids,3))+'</div></td>'+
+      '<td data-l="Responders"><a href="#customer-resp?c='+c.id+'"><span class="mono sm">'+rs.length+'</span>'+(n?' <span class="tc warn">'+n+'</span> <span class="xs">need action</span>':'')+'</a></td></tr>';}).join('');}
 
-/* ===== customer detail (on-call card) ===== */
+/* ===== customer detail (monitoring tab card) ===== */
 var CD='daon';
-function cpick(sel,val,fn){$$(sel).forEach(function(s){if(!s.options.length)D.customers.forEach(function(c){s.add(new Option('Example: '+c.n,c.id));});s.value=val;s.onchange=function(){fn(s.value);};});}
+function cpick(sel,val,fn){$$(sel).forEach(function(s){if(!s.options.length)D.customers.filter(function(c){return !c.lite;}).forEach(function(c){s.add(new Option('Example: '+c.n,c.id));});s.value=val;s.onchange=function(){fn(s.value);};});}
 function renderCustDetail(){
-  var c=cust(CD),r=resolve(CD),t=r.t,others=[];c.tree.forEach(function(p){p.s.forEach(function(s){if(s.team)others.push(s);});});
+  var c=cust(CD);
   $('#s-customer').dataset.cust=c.n;$$('#s-customer .cust-label').forEach(function(e){e.textContent=c.n;});
-  $$('.js-cd-name').forEach(function(e){e.textContent=c.n;});
-  $('#cd-desc').innerHTML=c.ind+' · <span class="mono">'+c.dom+'</span> · on-call by '+t.n+' · '+badge(r);
-  var na=custRows(CD).filter(needs).length;$('#s-customer .js-pp-tab').outerHTML='<a class="js-pp-tab" href="#customer-people?c='+CD+'">People'+(na?' <span class="n hot">'+na+'</span>':'')+'</a>';
-  $('#cd-oncall').innerHTML='<div class="card-h"><span class="ov">On-call</span><span class="sp"></span><a class="sm" href="#oncall">'+t.n+' →</a></div><div class="card-b stack">'+
-    '<div><label class="lab">Alert plan for '+c.n+'</label><div class="seg full js-cdp">'+Object.keys(t.plans).map(function(k){return '<span data-p="'+k+'" class="'+(k===c.plan?'on':'')+'" role="button">'+t.plans[k].n+'</span>';}).join('')+'</div></div>'+
-    '<div>'+badge(r)+'</div><div class="oc-sent" style="font-size:13px">'+sentence(t,r.steps,r.repeat)+'</div>'+
-    (r.custom?'<div class="xs mut">Own timing for '+c.n+' (copy of '+t.plans[c.plan].n+', edited by '+c.override.by+' on '+c.override.on+'). Team changes to '+t.plans[c.plan].n+' don\'t affect it.</div><div class="row" style="gap:6px"><button class="btn sm pri js-cdz">Edit '+c.n+'\'s timing</button><button class="btn sm ghost js-cdr">Use team timing</button></div>':
-      '<div class="xs mut">Uses '+t.n+'\'s '+t.plans[c.plan].n+' timing, shared with '+(usersOf(c.team,c.plan).length-1)+' other customer(s).</div><button class="btn sm js-cdz">Customize for '+c.n+' only</button>')+
-    (others.length?'<div class="xs mut">'+others.map(function(s){return s.n+' service: '+D.teams[s.team].n+' · '+D.teams[s.team].plans[s.plan||c.plan].n;}).join('<br>')+'</div>':'')+'</div>';
-  var cd=$('#cd-oncall');
-  cd.onclick=function(e){var el=e.target;
-    if(el.dataset.p){c.plan=el.dataset.p;c.override=null;renderAll();}
-    else if(el.classList.contains('js-cdz'))openEditor($('#cd-editor'),{tk:c.team,pk:c.plan,cid:c.id});
-    else if(el.classList.contains('js-cdr')){c.override=null;renderAll();}};
-}
-
-/* ===== customer › people ===== */
-var CP={c:'mirae',node:['Core','Payments API'],f:'scope',q:''};
-function renderPeople(){
-  var c=cust(CP.c),node=CP.node;
-  $('#s-customer-people').dataset.cust=c.n;$$('#s-customer-people .cust-label').forEach(function(e){e.textContent=c.n;});
-  $$('.js-cp-name').forEach(function(e){e.textContent=c.n;});
-  var r=resolve(c.id),others=[];c.tree.forEach(function(p){p.s.forEach(function(s){if(s.team)others.push(s.n+': '+D.teams[s.team].n);});});
-  $('#cp-desc').innerHTML=c.ind+' · <span class="mono">'+c.dom+'</span> · on-call by '+r.t.n+(others.length?' ('+others.join(', ')+')':'')+' · '+badge(r);
-  var mine=custRows(c.id),naAll=mine.filter(needs).length;
-  $('#s-customer-people .js-pp-tab').innerHTML='People'+(naAll?' <span class="n hot">'+naAll+'</span>':'');
-  function at(sc){return mine.filter(function(p){return p.src.sc.join('/')===sc.join('/');});}
-  function tn(sc,label,depth,open){var a=at(sc),w=a.filter(needs).length,on=sc.join('/')===node.join('/');
-    return '<a class="tn'+(on?' on':'')+'" data-n="'+esc(sc.join('/'))+'"><span class="car">'+(depth<2?(open?'▼':'▶'):'')+'</span>'+(depth===0?'<b>'+label+'</b>':label)+'<span class="sp"></span><span class="tc">'+a.length+'</span>'+(w?'<span class="tc warn">'+w+'</span>':'')+'</a>';}
-  var tq=($('#cp-tq').value||'').toLowerCase();
-  $('#cp-tree').innerHTML='<li>'+tn([],c.n,0,true)+'<ul>'+c.tree.filter(function(p){return !tq||p.n.toLowerCase().indexOf(tq)>=0||p.s.some(function(s){return s.n.toLowerCase().indexOf(tq)>=0;});}).map(function(p){var open=node[0]===p.n||!!tq||c.tree.length<=4;
-    return '<li>'+tn([p.n],p.n,1,open)+(open?'<ul>'+p.s.map(function(s){return '<li>'+tn([p.n,s.n],s.n+(s.team?' <span class="xs faint">· '+D.teams[s.team].n+'</span>':''),2)+'</li>';}).join('')+'</ul>':'')+'</li>';}).join('')+'</ul></li>';
-  var label=node.length?node[node.length-1]:c.n;
-  $('#cp-path').innerHTML=[c.n].concat(node).map(function(x,i,a){return i===a.length-1?'<b style="color:var(--ink)">'+esc(x)+'</b>':esc(x);}).join(' <span class="chain">›</span> ');
-  // scope rows: added here, then from each ancestor
-  var lv=[];for(var i=node.length;i>=0;i--)lv.push(node.slice(0,i));
-  var scoped=[];lv.forEach(function(sc,i){at(sc).forEach(function(p){var q=clone(p);q.src=p.src;q.grp=i===0?'Added here':'From '+(sc.length?sc[sc.length-1]:c.n);q.away=i>0;scoped.push(q);});});
-  var appr=mine.filter(function(p){return p.roles.indexOf('Approver')>=0;});
-  $('#cp-f').innerHTML=[['scope','Notified for '+label,scoped.length],['all','Everyone at '+c.n,mine.length],['act','Needs action',naAll],['appr','Approvers',appr.length]].map(function(o){return '<span class="chip'+(CP.f===o[0]?' on':'')+'" data-f="'+o[0]+'">'+o[1]+'<span class="n">'+o[2]+'</span></span>';}).join('');
-  var rows=CP.f==='scope'?scoped:(CP.f==='all'?mine:CP.f==='act'?mine.filter(needs):appr).map(function(p){var q=clone(p);q.src=p.src;return q;});
-  if(CP.q)rows=rows.filter(function(p){return p.n.toLowerCase().indexOf(CP.q)>=0;});
-  var here=scoped.filter(function(p){return !p.away;}).length;
-  $('#cp-sum').textContent=CP.f==='scope'?scoped.length+' people are notified for incidents on '+label+': '+here+' added here, '+(scoped.length-here)+' from higher levels.':rows.length+' shown.';
-  var el=$('#cp-list');el.innerHTML=listHTML('cp',rows,{group:CP.f==='scope',scope:true});bindList(el,'cp',renderPeople);
-  el.addEventListener('click',function(e){var g=e.target.closest('.js-goto');if(g){CP.node=g.dataset.n?g.dataset.n.split('/'):[];renderPeople();}});
-  var pr=node.length===2?node[0]:null;
-  var scopes=node.length===2?['This service only','All of '+node[0],'All of '+c.n]:node.length===1?['All of '+node[0],'All of '+c.n]:['All of '+c.n];
-  $('#cp-drawer').innerHTML='<div class="card-h"><span class="ov">Add person to '+esc(label)+'</span></div><div class="card-b stack">'+
-    '<div class="g2" style="gap:10px"><div><label class="lab">Person</label><input class="inp" list="pp-ex" placeholder="Name" aria-label="Person"><datalist id="pp-ex">'+mine.map(function(p){return '<option value="'+p.n+'">';}).join('')+'</datalist><div class="hint">Existing '+c.n+' person, or a new name.</div></div>'+
-    '<div><label class="lab">Email · phone</label><input class="inp mono" placeholder="name@'+c.dom+'"></div></div>'+
-    '<div><label class="lab">Role</label><div class="seg full"><span class="on">Notify only</span><span>Approver</span><span>Portal user</span></div>'+
-    '<div class="hint"><b>Approver</b>: auto-fix approval — can approve auto-fixes for this scope in Slack or with an email link. <b>Portal user</b>: can also sign in to the portal.</div></div>'+
-    '<div><label class="lab">Notified for</label><div class="seg full">'+scopes.map(function(s,i){return '<span class="'+(i===0?'on':'')+'">'+s+'</span>';}).join('')+'</div></div>'+
-    '<div class="row"><span class="xs mut">A verification link is sent after saving.</span><span class="sp"></span><button class="btn sm">Cancel</button><button class="btn sm pri">Add &amp; send link</button></div></div>';
-}
+  $$('.js-cd-name').forEach(function(e){e.textContent=c.n;});$$('#s-customer .js-cpick').forEach(function(s){s.value=CD;});
+  $('#s-customer .js-ctabs').dataset.c=CD;
+  $('#cd-desc').innerHTML=esc(c.ind)+' · <span class="mono">'+esc(c.dom)+'</span> · '+responders(c).length+' responders · '+planBadge(c);
+  $('#cd-oncall').innerHTML='<div class="card-h"><span class="ov">Responders &amp; paging</span><span class="sp"></span><a class="sm" href="#customer-resp?c='+c.id+'">Open →</a></div><div class="card-b stack">'+
+    '<div>'+planBadge(c)+'</div><div class="oc-sent" style="font-size:13px">'+sentence(c,c.steps,c.repeat,true)+'</div>'+
+    '<div class="xs mut">'+staffOf(c).length+' MSP staff · '+custPeople(c.id).filter(pageable).length+' pageable and '+custPeople(c.id).filter(function(p){return !pageable(p);}).length+' notify-only '+esc(c.n)+' people.</div></div>';}
 
 /* ===== onboarding · on-call ===== */
-var OB={tk:'infra',pk:'standard'};
 function renderOnboard(){
-  $('#ob-teams').innerHTML=Object.keys(D.teams).map(function(k){var t=D.teams[k];return '<div data-t="'+k+'" class="'+(k===OB.tk?'on':'')+'"><b>'+t.n+'</b><span>'+t.order.length+' people: '+t.order.map(function(x,i){return (i+1)+' '+first(x);}).join(', ')+'</span></div>';}).join('')+'<div class="add"><b>+ New team</b><span>Name and people</span></div>';
-  var t=D.teams[OB.tk];
-  $('#ob-team-note').innerHTML='Same people and order as <a href="#oncall">On-call › '+t.n+'</a>. '+first(t.order[0])+' is on shift now.';
-  $('#ob-plans').innerHTML=Object.keys(t.plans).map(function(k){return '<div data-p="'+k+'" class="'+(k===OB.pk?'on':'')+'"><b>'+t.plans[k].n+'</b><span>'+t.plans[k].d+'</span></div>';}).join('');
-  var p=t.plans[OB.pk];$('#ob-sent').innerHTML='If something breaks now: '+sentence(t,p.steps,p.repeat);
-  var u=usersOf(OB.tk,OB.pk).filter(function(c){return c.id!=='seoul';});
-  $('#ob-plan-note').innerHTML=(u.length?'Same '+p.n+' timing as '+u.map(function(c){return c.n+(c.override?' (customized)':'');}).join(', ')+'. ':'')+'To change timing for Seoul Bio Labs only, use <b>Customize for Seoul Bio Labs only</b> on its customer page later. SEV-1 alerts even during maintenance.';
-}
+  var c=D.draft,ppl=custPeople('seoul');
+  $('#ob-tpl').innerHTML='<div data-t="" class="'+(!c.template?'on':'')+'"><b>No template</b><span>Pick staff one by one</span></div>'+Object.keys(D.templates).map(function(k){var t=D.templates[k];return '<div data-t="'+k+'" class="'+(c.template===k?'on':'')+'"><b>'+esc(t.n)+'</b><span>'+t.members.map(fn).join(', ')+'</span></div>';}).join('');
+  $('#ob-tpl-note').innerHTML=c.template?'Adds '+D.templates[c.template].members.map(nm).join(', ')+' as responders. If <a href="#templates">'+esc(D.templates[c.template].n)+'</a> changes later, Seoul Bio Labs changes with the other '+D.customers.filter(function(x){return x.template===c.template;}).length+' customers using it.':'No MSP staff yet. Add staff under Responders after setup.';
+  $('#ob-ppl').innerHTML='<div class="plist" style="border:1px solid var(--rule)">'+ppl.map(function(p){return '<div><span class="av">'+p.i+'</span><div style="flex:1;min-width:0"><div class="b sm">'+esc(p.n)+'</div><div class="xs faint">'+esc(p.title)+'</div></div><select class="inp js-obrole" data-id="'+p.id+'" style="width:auto;height:28px" aria-label="Role of '+esc(p.n)+'"><option value="pageable"'+(pageable(p)?' selected':'')+'>Pageable (calls, SMS)</option><option value="notify"'+(pageable(p)?'':' selected')+'>Notify only</option></select></div>';}).join('')+'</div>';
+  $('#ob-style').innerHTML=Object.keys(STYLE).map(function(k){return '<div data-st="'+k+'" class="'+(c.style===k?'on':'')+'"><b>'+STYLE[k]+'</b><span>'+STYLED[k]+'</span></div>';}).join('');
+  var x='';
+  if(c.style==='shared')x='<label class="lab">Shared rotation</label><select class="inp js-obsh" style="width:auto">'+Object.keys(D.rotations).filter(function(k){return R(k).scope==='MSP';}).map(function(k){return '<option value="'+k+'"'+(c.shared===k?' selected':'')+'>'+esc(R(k).n)+' · '+esc(R(k).members.map(fn).join(', '))+'</option>';}).join('')+'</select><div class="hint">Already used by '+rotUsers(c.shared).length+' customers. '+esc(fn(nowOn(c.shared)))+' is on shift now.</div>';
+  else if(c.style==='rotation'){var r=R('seoul');r.members=responders(c).filter(function(id){return r.members.indexOf(id)>=0;}).concat(responders(c).filter(function(id){return r.members.indexOf(id)<0;})).slice(0,Math.max(2,r.members.length));
+    x='<label class="lab">Seoul Bio on-call · weekly, handover Mon 10:00</label><div class="oc-ord" style="padding:0">'+r.members.map(function(m,i){return '<div class="oc-li"><span class="ord'+(i===0?' first':'')+'">'+(i+1)+'</span><span class="b">'+esc(nm(m))+'</span>'+(isP(m)?'<span class="pill cu">Seoul Bio Labs</span>':'<span class="pill">MSP</span>')+'</div>';}).join('')+'</div><div class="hint">Any responder can be in it, MSP staff or pageable Seoul Bio Labs people.</div>';}
+  else if(c.style==='custom')x='<div class="js-obsteps">'+stepsHTML(c,c.steps)+'</div><div class="row" style="margin-top:8px"><button class="btn sm js-addstep">+ Add step</button></div>';
+  else x='<div class="xs mut">Every responder ('+names(responders(c),6)+') gets each step at the same time.</div>';
+  var sx=$('#ob-style-x');sx.innerHTML=x;bindSteps(sx,c,function(soft){if(soft)$('#ob-sent').innerHTML=sentence(c,c.steps,c.repeat);else renderOnboard();});
+  var sel=$('.js-obsh',sx);if(sel)sel.onchange=function(){c.shared=this.value;buildSteps(c);renderOnboard();};
+  $('#ob-plans').innerHTML=Object.keys(D.plans).map(function(k){return '<div data-p="'+k+'" class="'+(k===c.plan?'on':'')+'"><b>'+D.plans[k].n+'</b><span>'+D.plans[k].d+'</span></div>';}).join('');
+  $('#ob-sent').innerHTML=sentence(c,c.steps,c.repeat);
+  $('#ob-plan-note').innerHTML='Plans are starting templates: after setup you can change any step under Customers › Seoul Bio Labs › Responders &amp; paging, and give a project or service its own steps. SEV-1 pages even during maintenance.';}
 
-var TLQ='';
-function renderTeamList(){
-  $('#tl-t tbody').innerHTML=Object.keys(D.teams).filter(function(k){return !TLQ||D.teams[k].n.toLowerCase().indexOf(TLQ)>=0;}).map(function(k){var t=D.teams[k],p=D.staff[t.order[0]];
-    return '<tr class="'+(k===TM.tk?'cur':'')+'"><td data-l="Team"><a class="ttl js-tl" data-t="'+k+'">'+t.n+'</a></td><td data-l="Members" class="sm">'+t.order.length+' people</td><td data-l="On call now" class="sm">1 '+p.n+' · until 09:00</td><td data-l="Customers" class="sm">'+teamCustomers(k).length+'</td></tr>';}).join('')||'<tr><td colspan="4" class="sm mut">No team matches.</td></tr>';
-}
-function renderAll(){renderBadges();renderTeamList();renderTeam();renderLookup();renderIncident();renderResource();renderContacts();renderNA();renderCustomers();renderCustDetail();renderPeople();renderOnboard();}
+function renderAll(){renderNow();renderLookup();renderRotations();renderPeople();renderTemplates();renderIncident();renderResource();renderNA();renderCustomers();renderCustDetail();renderCustResp();renderOnboard();renderTabs();}
 
 function applyParams(id,Q){
-  if(id==='customer'&&Q.c){CD=Q.c;}
-  if(id==='customer-people'&&Q.c){if(CP.c!==Q.c){CP.c=Q.c;CP.node=[];}if(Q.n!==undefined)CP.node=Q.n?Q.n.split('/'):[];}
+  if(id==='customer'&&Q.c)CD=Q.c;
+  if(id==='customer-resp'&&Q.c){if(CR.c!==Q.c){CR.c=Q.c;CR.step='1';}}
   if(id==='needs-action'&&Q.w)NA.w=Q.w;
-  renderAll();
-  if(id==='customer'&&Q.edit){var c=cust(CD);openEditor($('#cd-editor'),{tk:c.team,pk:c.plan,cid:c.id});}
-}
+  if(id==='rotations'&&Q.r)RT.r=Q.r;
+  if(id==='people'){if(Q.p)PE.p=Q.p;if(Q.b){PE.b=Q.b;PE.who=PE.p;PE.by=PE.p==='ml'?'jh':'ml';}}
+  renderAll();}
 
 function bindStatic(){
-  $('#tl-q').oninput=function(){TLQ=this.value.trim().toLowerCase();renderTeamList();};
-  $('#tl-t').onclick=function(e){var a=e.target.closest('.js-tl');if(a){TM.tk=a.dataset.t;$('#tm-editor').innerHTML='';renderTeamList();renderTeam();}};
-  $('#tm-sw').onclick=function(e){var s=e.target.closest('[data-t]');if(s){TM.tk=s.dataset.t;$('#tm-editor').innerHTML='';renderTeamList();renderTeam();}};
-  $('#oc-presets').onclick=function(e){var d=e.target.closest('[data-p]');if(d){TM.pk=d.dataset.p;renderTeam();}};
-  $('#tm-edit-plan').onclick=function(){openEditor($('#tm-editor'),{tk:TM.tk,pk:TM.pk});};
-  $('#tm-cq').oninput=function(){TM.cq=this.value.trim().toLowerCase();renderTeam();};
-  $('#tm-cf').onclick=function(e){var d=e.target.closest('[data-f]');if(d){TM.cf=d.dataset.f;renderTeam();}};
-  $('#tm-ct').onclick=function(e){var b=e.target.closest('.js-cz');if(b){var c=cust(b.dataset.c);openEditor($('#tm-editor'),{tk:c.team,pk:c.plan,cid:c.id});}};
-  $('#tm-chg').onclick=function(){$('#tm-drag-d').open=true;};
   $('#oc-q').addEventListener('input',renderLookup);
-  var f=$('#oc-form');function openF(e){if(e&&e.target.closest('.oc-sw,#oc-cta')){e.preventDefault();f.hidden=false;f.scrollIntoView({behavior:'smooth',block:'start'});}}
-  $('#s-oncall').addEventListener('click',openF);
+  $('#now-q').oninput=function(){NW.q=this.value.trim().toLowerCase();renderNow();};
+  $('#now-p').onchange=function(){NW.p=this.value;renderNow();};
+  $('#now-f').onclick=function(e){var d=e.target.closest('[data-f]');if(d){NW.f=d.dataset.f;renderNow();}};
+  $('#rt-sw').onclick=function(e){var s=e.target.closest('[data-r]');if(s){RT.r=s.dataset.r;renderRotations();}};
+  var f=$('#oc-form');$('#s-rotations').addEventListener('click',function(e){if(e.target.closest('.oc-sw,#oc-cta')){e.preventDefault();f.hidden=false;f.scrollIntoView({behavior:'smooth',block:'start'});}});
   $('#oc-close').onclick=function(){f.hidden=true;};
-  var dl=$('#oc-drag'),dg=null;dl.addEventListener('dragstart',function(e){dg=e.target;});dl.addEventListener('dragover',function(e){e.preventDefault();var t=e.target.closest('li');if(t&&t!==dg)dl.insertBefore(dg,t);});
-  $$('#oc-len span').forEach(function(s){s.addEventListener('click',function(){$$('#oc-len span').forEach(function(x){x.classList.toggle('on',x===s);});$('#oc-d1').hidden=s.dataset.v==='2';$('#oc-d2').hidden=s.dataset.v!=='2';});});
-  $('#ct-f').onclick=function(e){var d=e.target.closest('[data-f]');if(d){CT.f=d.dataset.f;renderContacts();}};
-  $('#ct-team').onchange=function(){CT.team=this.value;renderContacts();};
-  $('#ct-chan').onchange=function(){CT.chan=this.value;renderContacts();};
-  $('#ct-q').oninput=function(){CT.q=this.value.trim().toLowerCase();if(CT.q)CT.f='all';renderContacts();};
+  $('#pe-q').oninput=function(){PE.q=this.value.trim().toLowerCase();renderPeople();};
+  $('#s-people').addEventListener('click',function(e){var t=e.target;
+    var a=t.closest('.js-pe');if(a){PE.p=a.dataset.p;renderPeople();return;}
+    var b=t.closest('.js-b');if(b){PE.b=b.dataset.b;PE.who=PE.p;if(PE.by===PE.p)PE.by=PE.p==='ml'?'jh':'ml';PE.sel={};renderBulk();$('#pe-bulk').scrollIntoView({behavior:'smooth',block:'start'});return;}
+    if(t.closest('.js-bx')){PE.b='';renderBulk();return;}
+    if(t.closest('.js-undo')){D.leaves=D.leaves.filter(function(l){return l.who!==t.closest('.js-undo').dataset.p;});renderAll();return;}
+    if(t.closest('.js-lapply')){var pv=leavePreview(PE.who,PE.by,PE.from,PE.to),tt=pv.tot;D.leaves=D.leaves.filter(function(l){return l.who!==PE.who;});D.leaves.push({who:PE.who,by:PE.by,from:PE.from,to:PE.to});
+      D.audit.unshift({when:'Nov 9 03:18',by:'Haeun Kim',what:nm(PE.who)+' on leave Nov '+PE.from+'–'+PE.to+' → '+nm(PE.by)+' in '+tt.c+' customers ('+tt.person+' named steps, '+tt.all+' everyone steps, '+pv.rots.length+' rotations: '+tt.shifts+' shifts)'});
+      PE.p=PE.who;PE.b='';renderAll();return;}
+    var as=t.closest('.js-asel');if(as){PE.sel={};if(as.dataset.s)D.customers.forEach(function(c){if(c.template===as.dataset.s)PE.sel[c.id]=1;});renderBulk();return;}
+    if(t.closest('.js-aapply')){var n=0;D.customers.forEach(function(c){if(PE.sel[c.id]&&responders(c).indexOf(PE.add)<0){c.staff=(c.staff||[]).concat([PE.add]);n++;}});
+      D.audit.unshift({when:'Nov 9 03:18',by:'Haeun Kim',what:'Added '+nm(PE.add)+' as responder to '+n+' customers'});PE.p=PE.add;PE.b='';PE.sel={};renderAll();return;}});
+  $('#s-people').addEventListener('change',function(e){var t=e.target;
+    if(t.classList.contains('js-lw')){PE.who=t.value;renderBulk();}if(t.classList.contains('js-lb')){PE.by=t.value;renderBulk();}
+    if(t.classList.contains('js-lf')){PE.from=+t.value;if(PE.to<PE.from)PE.to=PE.from;renderBulk();}if(t.classList.contains('js-lt')){PE.to=+t.value;renderBulk();}
+    if(t.classList.contains('js-aw')){PE.add=t.value;renderBulk();}
+    if(t.classList.contains('js-ac')){if(t.checked)PE.sel[t.dataset.c]=1;else delete PE.sel[t.dataset.c];renderBulk();}});
+  $('#s-templates').addEventListener('click',function(e){var t=e.target;
+    var a=t.closest('.js-tp');if(a){TP={k:a.dataset.k,add:[],rm:[]};renderTemplates();return;}
+    var r=t.closest('.js-tprm');if(r){var m=r.dataset.m;if(TP.add.indexOf(m)>=0)TP.add.splice(TP.add.indexOf(m),1);else TP.rm.push(m);renderTemplates();return;}
+    if(t.closest('.js-tpx')){TP.add=[];TP.rm=[];renderTemplates();return;}
+    if(t.closest('.js-tpsave')){var tp=D.templates[TP.k],u=D.customers.filter(function(c){return c.template===TP.k;}).length;tp.members=tp.members.filter(function(m){return TP.rm.indexOf(m)<0;}).concat(TP.add);tp.by='Haeun Kim';tp.on='Nov 9';
+      D.audit.unshift({when:'Nov 9 03:18',by:'Haeun Kim',what:tp.n+' template: '+TP.add.map(function(m){return '+'+fn(m);}).concat(TP.rm.map(function(m){return '−'+fn(m);})).join(' ')+' → '+u+' customers'});TP.add=[];TP.rm=[];renderAll();$('.js-tpmsg').textContent='Saved. '+u+' customers updated; see the audit log under People.';}});
+  $('#s-templates').addEventListener('change',function(e){if(e.target.classList.contains('js-tpadd')&&e.target.value){var m=e.target.value;if(TP.rm.indexOf(m)>=0)TP.rm.splice(TP.rm.indexOf(m),1);else TP.add.push(m);renderTemplates();}});
   $('#na-f').onclick=function(e){var d=e.target.closest('[data-w]');if(d){NA.w=d.dataset.w;renderNA();}};
   $('#na-chan').onchange=function(){NA.chan=this.value;renderNA();};
   $('#na-cust').onchange=function(){NA.c=this.value;if(NA.c)NA.w='customer';renderNA();};
   $('#na-q').oninput=function(){NA.q=this.value.trim().toLowerCase();renderNA();};
   $('#cu-q').oninput=renderCustomers;
   $('#rs-sw').onclick=function(e){var s=e.target.closest('[data-r]');if(s){RS=s.dataset.r;renderResource();}};
-  $('#cp-tree').onclick=function(e){var a=e.target.closest('[data-n]');if(a){CP.node=a.dataset.n?a.dataset.n.split('/'):[];CP.f='scope';renderPeople();}};
-  $('#cp-tq').oninput=renderPeople;
-  $('#cp-f').onclick=function(e){var d=e.target.closest('[data-f]');if(d){CP.f=d.dataset.f;renderPeople();}};
-  $('#cp-q').oninput=function(){CP.q=this.value.trim().toLowerCase();renderPeople();};
-  $('#cp-add').onclick=function(){$('#cp-drawer').scrollIntoView({behavior:'smooth',block:'nearest'});$('#cp-drawer input').focus();};
-  $('#ob-teams').onclick=function(e){var d=e.target.closest('[data-t]');if(d){OB.tk=d.dataset.t;renderOnboard();}};
-  $('#ob-plans').onclick=function(e){var d=e.target.closest('[data-p]');if(d){OB.pk=d.dataset.p;renderOnboard();}};
+  $('#ob-tpl').onclick=function(e){var d=e.target.closest('[data-t]');if(d){D.draft.template=d.dataset.t||null;renderOnboard();}};
+  $('#ob-style').onclick=function(e){var d=e.target.closest('[data-st]');if(d){D.draft.style=d.dataset.st;if(d.dataset.st!=='custom')buildSteps(D.draft);renderOnboard();}};
+  $('#ob-plans').onclick=function(e){var d=e.target.closest('[data-p]');if(d){D.draft.plan=d.dataset.p;buildSteps(D.draft);renderOnboard();}};
+  $('#ob-ppl').onchange=function(e){var s=e.target.closest('.js-obrole');if(s){var p=per(s.dataset.id);p.roles=[s.value];renderOnboard();}};
+  $('#ob-add').onclick=function(){var v=$('#ob-new').value.trim();if(!v)return;D.people.push({id:'p:o'+D.people.length,c:'seoul',n:v,i:v.split(' ').map(function(w){return w.charAt(0);}).join('').slice(0,2).toUpperCase(),title:'New',sc:[],roles:['pageable'],ch:{Email:'sent'}});$('#ob-new').value='';renderOnboard();};
   cpick('#s-customer .js-cpick',CD,function(v){location.hash='customer?c='+v;});
-  cpick('#s-customer-people .js-cpick',CP.c,function(v){location.hash='customer-people?c='+v;});
+  cpick('#s-customer-resp .js-cpick',CR.c,function(v){location.hash='customer-resp?c='+v;});
 }
 
 (function(){

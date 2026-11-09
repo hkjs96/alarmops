@@ -44,7 +44,9 @@
 - 기본값은 등급 정책. 잠긴 정의(SEV-1, 주기 ≥ 60분)는 M/N 편집 불가. 1분 주기는 상세 모니터링이 켜진 리소스만 고를 수 있다.
 - 태그 `Threshold_{키}_Eval=M/N`이 있으면 M/N은 태그 값이 이기고 잠김 표시. 주기·통계 태그 키는 미결(Q-UI-EVAL-01).
 
-## On-call 표시 (v3 재점검, D-30)
-- 목업 샘플은 On-call과 같은 데이터 객체에서 렌더링: payments-db-1 (Mirae Pay › Core › Payments API), Infra team, 배지 "Mirae Pay · Urgent (customized)".
-- Paged 줄: "Slack Haeun 03:12 ✓ → call Haeun 03:14 ✓ → call Junho 03:19 → call everyone 03:24" (Incident) / 분 단위 문장(Resource).
-- 목업은 payments-db-1 / orders-api-1 전환. "Who gets paged and notified" 카드 = On-call의 Who gets paged for… 와 같은 블록.
+## On-call 표시 (D-30·D-31 개정)
+- 목업 샘플은 같은 데이터 객체 `D`에서 렌더링: payments-db-1 (Mirae Pay › Core › Payments API), Mirae Pay 단계 = Custom steps · Urgent (edited): Slack + call on shift in MSP night desk (Haeun) → 10분 call Yuna Seo (Mirae Pay, Pageable) → 15분 call everyone in Responders (5).
+- Paged 줄: "Slack + call Haeun 03:12 ✓ → call Yuna 03:22 → call Haeun + all 03:27" (Incident) / 분 단위 문장(Resource). 링크는 Customer › Responders & paging.
+- Escalation 패널: 단계마다 대상(사람 / 로테이션 당번 / 전원)·채널·시각, 다음 단계 남은 시간, **Edit Mirae Pay's paging** 링크.
+- 타임라인: "Paging steps at open: Haeun → Yuna → Haeun + all". Notify only 고객 사람 메일 이벤트 포함(Seojun Bae, Hana Noh, Hyejin Lim).
+- Auto-fix 카드: "Only people with the Auto-fix approver role for Payments API can approve: Yuna Seo (Mirae Pay)."
