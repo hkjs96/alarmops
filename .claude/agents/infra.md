@@ -20,3 +20,7 @@ maxTurns: 60
 - 그 밖의 고객 리소스 쓰기 권한은 만들지 않는다.
 
 검증: `sam validate`, `cfn-lint` 결과와 역할별 권한 목록을 PR에 첨부한다.
+
+TagWriter 검증 과제 (고객 연결 스택 작업 시작 전)
+- 29개 리소스 유형마다 AWS 문서 "서비스별 작업·리소스·조건 키" 표로 태그 쓰기 API가 `aws:TagKeys` 조건을 지원하는지, 태그 목록 전체를 덮어쓰는 API인지 확인해 `docs/specs/alarm-rules.md`에 표로 기록한다.
+- 지원하지 않는 유형은 TagWriter에서 제외한다(현재 S3 확정, Route53은 확인 필요). 결과가 D-07과 다르면 사용자에게 묻는다.
