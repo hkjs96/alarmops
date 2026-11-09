@@ -321,6 +321,24 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
 .oc-presets>div.on{border-color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink);background:var(--soft)}
 .oc-presets>div.add{border-style:dashed}
 .oc-sent{font-size:15px;line-height:1.55;padding:12px 14px;border-left:3px solid var(--ink);background:var(--soft)}
+#oc-form{scroll-margin-top:48px}
+.oc-ord{padding:12px 16px;display:flex;flex-direction:column;gap:6px}
+.oc-li{display:flex;align-items:center;gap:10px;padding:6px 14px;border:1px solid var(--grid);font-size:13px;flex-wrap:wrap}
+.oc-more summary{cursor:pointer;font-size:13px;color:var(--ink2);padding:6px 14px}
+.oc-more .oc-li{margin-top:6px}
+.oc-drag{list-style:none;counter-reset:o;padding:0;margin:8px 0}
+.oc-drag li{counter-increment:o;padding:8px 12px;border:1px solid var(--rule);margin-bottom:4px;background:var(--surface);cursor:grab;min-height:40px}
+.oc-drag li:before{content:"⋮⋮ " counter(o) ". ";color:var(--faint);font-family:var(--mono)}
+@media (max-width:760px){.oc-strip{grid-template-columns:repeat(4,1fr)}.oc-strip span:nth-child(5){border-left:0}.oc-strip span:nth-child(n+5){border-top:1px solid var(--grid)}}
+.oc-tl{display:flex;flex-wrap:wrap;gap:0;border:1px solid var(--rule);margin-top:6px}
+.oc-tl span{padding:6px 8px;border-left:1px solid var(--grid);color:var(--ink2)}
+.oc-tl span:first-child{border-left:0}
+.oc-tl span.stop{background:var(--soft);color:var(--ink);font-weight:700}
+.oc-cs{font-size:13px;line-height:1.5;margin-top:6px;padding:6px 10px;border-left:3px solid var(--rule);background:var(--soft)}
+.oc-cust>div{align-items:flex-start}
+.oc-path{font-size:13px;color:var(--ink2)}
+.oc-paged{display:inline-flex;align-items:center;gap:6px;font-size:13px;margin-top:8px}
+.top .nav,.top .logo,.top-r{flex:none}
 .oc-adv summary{cursor:pointer;font-weight:600;font-size:13px;color:var(--ink2);padding:6px 0}
 .oc-pending{flex-wrap:wrap}
 @media (max-width:760px){
@@ -520,6 +538,7 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
         <div style="flex:1;min-width:280px">
           <h1 style="font-size:26px;font-weight:600;letter-spacing:-.025em;margin:0 0 6px;line-height:1.2">payments-db-1 FreeStorageSpace below 10 GB</h1>
           <div class="sm mut">Mirae Pay<span class="chain">›</span>Core<span class="chain">›</span>Payments API<span class="chain">›</span><span class="mono">8273 1104 6650</span> · ap-northeast-2 · <span class="pill prd">prd</span></div>
+          <div class="oc-paged"><span class="ov">Paged</span><a href="#oncall"><b>Haeun</b> (called 03:12) → <b>Junho</b> at 03:17 · Urgent · Infra team</a></div>
         </div>
         <div class="row">
           <button class="btn">Mute 1h</button>
@@ -673,7 +692,7 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
 <div class="page">
   <div class="crumb"><a href="#monitoring">Monitoring</a><span class="chain">›</span>Resources<span class="chain">›</span>orders-api-1</div>
   <div class="ph">
-    <div><h1 class="sub">orders-api-1</h1><div class="desc">EC2 · <span class="mono">i-0f19a3d7b2e6c8410</span> · Hanbit Logistics<span class="chain">›</span><span class="mono">3301 8812 4407</span> · ap-northeast-2 · <span class="pill prd">prd</span></div></div>
+    <div><h1 class="sub">orders-api-1</h1><div class="desc">EC2 · <span class="mono">i-0f19a3d7b2e6c8410</span> · Hanbit Logistics<span class="chain">›</span><span class="mono">3301 8812 4407</span> · ap-northeast-2 · <span class="pill prd">prd</span></div><div class="oc-paged"><span class="ov">Paged</span><a href="#oncall"><b>Haeun</b> → <b>everyone</b> at 15 min · Quiet · Infra team</a></div></div>
     <div class="sp"></div><span class="st res"><span class="mk chk"></span>Monitored</span><span class="xs faint mono">tag set by customer · seen 02:00</span><button class="btn">Sync resource</button>
   </div>
   <div class="tabs"><a class="on">Thresholds</a><a>Alarms <span class="n">6</span></a><a>Tags <span class="n">14</span></a><a>History <span class="n">9</span></a></div>
@@ -747,75 +766,115 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
 <section class="screen" id="s-oncall" data-menu="oncall">
 <div class="page">
   <div class="tabs"><a class="on">Teams <span class="n">2</span></a><a>Contacts</a><a>Maintenance</a></div>
-  <div class="ph">
-    <div><div class="crumb">On-call<span class="chain">›</span>Infra team</div><h1 class="sub">Infra team</h1><div class="desc">3 people · Asia/Seoul · shifts hand over at 09:00 · used by 3 customers</div></div>
-    <div class="sp"></div><span class="seg hide-m"><span class="on">Infra team</span><span>Data team</span></span><button class="btn pri oc-cta">Cover or swap a shift</button>
+
+  <div class="card oc-look" id="who-paged">
+    <div class="card-h"><span class="ov">Who gets paged for…</span><span class="sp"></span><span class="xs faint">service or resource</span></div>
+    <div class="card-b stack">
+      <input class="inp" id="oc-q" list="oc-ql" value="payments-db-1" placeholder="Type a service or resource, e.g. payments-db" style="width:100%;min-height:40px" aria-label="Service or resource">
+      <datalist id="oc-ql"><option value="payments-db-1"><option value="payments-api"><option value="checkout-web-1"><option value="orders-api-1"></datalist>
+      <div id="oc-res"></div>
+    </div>
+  </div>
+
+  <div class="ph" style="margin-top:20px">
+    <div><div class="crumb">On-call<span class="chain">›</span>Infra team</div><h1 class="sub">Infra team</h1><div class="desc">6 people · Asia/Seoul · <b>shifts hand over daily at 09:00 KST</b> · used by 3 customers</div></div>
+    <div class="sp"></div><span class="seg hide-m"><span class="on">Infra team</span><span>Data team</span></span><a class="btn pri oc-cta" href="#oc-form" id="oc-cta">Cover or swap a shift</a>
   </div>
 
   <div class="banner accent oc-pending">
     <span class="st info"><span class="mk q"></span>Pending</span>
-    <span style="flex:1;min-width:0"><b>Minjae covers your Thu 12 shift</b> (09:00 – Fri 09:00). Waiting for Minjae to accept. You stay on call until then.</span>
-    <span class="row" style="gap:6px"><button class="btn sm">Remind</button><button class="btn sm ghost">Cancel</button></span>
+    <span style="flex:1;min-width:0"><b>You asked Minjae to cover your Sat 14 shift</b> (Sat 09:00 – Sun 09:00). Waiting for Minjae to accept. You stay on call for that shift until Minjae accepts.</span>
+    <span class="row" style="gap:6px"><button class="btn sm">Remind Minjae</button><button class="btn sm ghost">Cancel my request</button></span>
   </div>
 
-  <div class="card oc-now">
-    <div class="card-h"><span class="ov">If something breaks now · Mon 9, 03:16</span><span class="sp"></span><a class="sm">Change order</a></div>
-    <div class="oc-chain">
-      <div class="oc-p first"><span class="ord first">1</span><span class="av on">HK</span><div><div class="b">Haeun Kim</div><div class="xs mut">On shift until 09:00</div></div></div>
-      <span class="oc-arr">→</span>
-      <div class="oc-p"><span class="ord">2</span><span class="av">JP</span><div><div class="b">Junho Park</div><div class="xs mut">Next in rotation</div></div></div>
-      <span class="oc-arr">→</span>
-      <div class="oc-p"><span class="ord">3</span><span class="av">ML</span><div><div class="b">Minjae Lee</div><div class="xs mut">Then Minjae</div></div></div>
+  <aside class="card oc-sheet" id="oc-form" hidden style="margin-bottom:16px">
+    <div class="card-h"><span class="ov">Cover or swap a shift</span><span class="sp"></span><a class="sm" id="oc-close">Close</a></div>
+    <div class="card-b stack">
+      <div><label class="lab">What</label><div class="seg full"><span class="on">Someone covers me</span><span>Swap days</span></div></div>
+      <div><label class="lab">When</label><div class="sel" style="width:100%">Sat 14 · 09:00 – Sun 09:00<span class="sp"></span><span class="car">▼</span></div>
+        <div class="row" style="gap:8px;margin-top:6px"><span class="chip on">Whole shift</span><span class="chip">Part of it…</span><span class="xs mut">e.g. 18:00 – 23:00</span></div></div>
+      <div><label class="lab">Who</label><input class="inp" list="oc-ppl" value="Minjae Lee" style="width:100%" aria-label="Who covers"><datalist id="oc-ppl"><option value="Junho Park"><option value="Minjae Lee"><option value="Jiwoo Han"><option value="Sora Yoon"><option value="Dohyun Kang"></datalist><div class="hint">Search by name. Buttons are used only for teams of 4 or fewer.</div></div>
+      <div><label class="lab">Reason <span class="faint">(shown to the team)</span></label><input class="inp" style="width:100%" value="Dentist appointment"></div>
+      <div class="note"><span>Minjae gets a Slack message to accept or decline. Nothing changes until Minjae accepts.</span></div>
+      <button class="btn pri" style="width:100%;justify-content:center">Send request</button>
     </div>
-    <div class="xs mut" style="padding:10px 16px;border-top:1px solid var(--grid)">This is the only order. Whoever is on shift goes first, then the rest of the rotation in order.</div>
+  </aside>
+
+  <div class="card oc-now">
+    <div class="card-h"><span class="ov">If something breaks now · Mon 9, 03:16</span><span class="sp"></span><a class="sm" href="#oc-drag" onclick="document.querySelector('#oc-drag').closest('details').open=true">Change order</a></div>
+    <div class="oc-ord">
+      <div class="oc-p first"><span class="ord first">1</span><span class="av on">HK</span><div><div class="b" style="font-size:16px">Haeun Kim</div><div class="xs mut">On shift Sun 8 09:00 → Mon 9 09:00</div></div></div>
+      <div class="oc-li"><span class="ord">2</span><span class="av">JP</span><span class="b">Junho Park</span><span class="xs mut">next · takes over Mon 09:00</span></div>
+      <div class="oc-li"><span class="ord">3</span><span class="av">ML</span><span class="b">Minjae Lee</span></div>
+      <details class="oc-more"><summary>+3 more (Jiwoo, Sora, Dohyun)</summary>
+        <div class="oc-li"><span class="ord">4</span><span class="av">JH</span><span>Jiwoo Han</span></div>
+        <div class="oc-li"><span class="ord">5</span><span class="av">SY</span><span>Sora Yoon</span></div>
+        <div class="oc-li"><span class="ord">6</span><span class="av">DK</span><span>Dohyun Kang</span></div>
+      </details>
+    </div>
+    <div class="xs mut" style="padding:10px 16px;border-top:1px solid var(--grid)">This is the only order: whoever is on shift first, then the rotation. Alerts reach only as many people as the preset has steps — <b>Standard and Urgent contact 2 people by name, then everyone</b>; Quiet contacts 1, then everyone. At 09:00 Junho moves to the front.</div>
+    <details class="oc-adv" style="padding:0 16px 12px"><summary>Change order (drag)</summary>
+      <ol class="oc-drag" id="oc-drag"><li draggable="true">Haeun Kim</li><li draggable="true">Junho Park</li><li draggable="true">Minjae Lee</li><li draggable="true">Jiwoo Han</li><li draggable="true">Sora Yoon</li><li draggable="true">Dohyun Kang</li></ol>
+      <div class="row" style="gap:8px"><button class="btn sm">+ Add person</button><span class="sp"></span><button class="btn sm pri">Save order</button></div>
+    </details>
   </div>
 
   <div class="g-main" style="margin:16px 0">
     <div class="card">
-      <div class="card-h"><span class="ov">Shifts</span><span class="sp"></span><span class="xs mut">Your next shift: <b class="mono">Thu 12, 09:00</b></span></div>
-      <div class="oc-wk">This week · Nov 9 – 15</div>
-      <div class="oc-days">
-        <div class="now"><span class="d">Mon 9</span><span class="av on">HK</span><span class="nm">Haeun Kim</span><span class="pill prd">Now</span></div>
-        <div><span class="d">Tue 10</span><span class="av">JP</span><span class="nm">Junho Park</span><a class="sm">Swap</a></div>
-        <div><span class="d">Wed 11</span><span class="av">ML</span><span class="nm">Minjae Lee</span><a class="sm">Swap</a></div>
-        <div class="pend"><span class="d">Thu 12</span><span class="av on">HK</span><span class="nm">Haeun Kim <span class="faint">→ Minjae</span></span><span class="pill">Pending</span></div>
-        <div><span class="d">Fri 13</span><span class="av">JP</span><span class="nm">Junho Park</span><a class="sm">Swap</a></div>
-        <div><span class="d">Sat 14</span><span class="av">ML</span><span class="nm">Minjae Lee</span><a class="sm">Swap</a></div>
-        <div><span class="d">Sun 15</span><span class="av on">HK</span><span class="nm">Haeun Kim</span><a class="sm">Swap</a></div>
+      <div class="card-h"><span class="ov">Shifts</span><span class="sp"></span><span class="xs mut">Your next shift: <b class="mono">Sat 14, 09:00</b></span></div>
+      <div class="row" style="padding:8px 16px;gap:8px;border-top:1px solid var(--grid)"><span class="xs mut">Shift length</span><span class="seg" id="oc-len"><span class="on" data-v="1">1 per day (09–09)</span><span data-v="2">Day 09–21 / Night 21–09</span></span></div>
+      <div class="oc-wk">This week · Nov 9 – 15 · each row = 09:00 that day → 09:00 next day</div>
+      <div class="oc-days" id="oc-d1">
+        <div class="now"><span class="d">Sun 8</span><span class="av on">HK</span><span class="nm">Haeun Kim <span class="xs faint">until Mon 09:00</span></span><span class="pill prd">Now</span></div>
+        <div><span class="d">Mon 9</span><span class="av">JP</span><span class="nm">Junho Park <span class="xs faint">from 09:00</span></span><a class="sm oc-sw" href="#oc-form">Swap</a></div>
+        <div><span class="d">Tue 10</span><span class="av">ML</span><span class="nm">Minjae Lee</span><a class="sm oc-sw" href="#oc-form">Swap</a></div>
+        <div><span class="d">Wed 11</span><span class="av">JH</span><span class="nm">Jiwoo Han</span><a class="sm oc-sw" href="#oc-form">Swap</a></div>
+        <div><span class="d">Thu 12</span><span class="av">SY</span><span class="nm">Sora Yoon</span><a class="sm oc-sw" href="#oc-form">Swap</a></div>
+        <div><span class="d">Fri 13</span><span class="av">DK</span><span class="nm">Dohyun Kang <span class="faint">18:00–23:00 Junho</span></span><a class="sm oc-sw" href="#oc-form">Swap</a></div>
+        <div class="pend"><span class="d">Sat 14</span><span class="av on">HK</span><span class="nm">Haeun Kim <span class="faint">→ Minjae?</span></span><span class="pill">Pending</span></div>
+        <div><span class="d">Sun 15</span><span class="av">JP</span><span class="nm">Junho Park</span><a class="sm oc-sw" href="#oc-form">Swap</a></div>
+      </div>
+      <div class="oc-days" id="oc-d2" hidden>
+        <div class="now"><span class="d">Sun 8 N</span><span class="av on">HK</span><span class="nm">Haeun Kim <span class="xs faint">night 21–09</span></span><span class="pill prd">Now</span></div>
+        <div><span class="d">Mon 9 D</span><span class="av">JP</span><span class="nm">Junho Park <span class="xs faint">day 09–21</span></span><a class="sm oc-sw" href="#oc-form">Swap</a></div>
+        <div><span class="d">Mon 9 N</span><span class="av">ML</span><span class="nm">Minjae Lee <span class="xs faint">night 21–09</span></span><a class="sm oc-sw" href="#oc-form">Swap</a></div>
+        <div><span class="d">Tue 10 D</span><span class="av">JH</span><span class="nm">Jiwoo Han</span><a class="sm oc-sw" href="#oc-form">Swap</a></div>
+        <div><span class="d">Tue 10 N</span><span class="av">SY</span><span class="nm">Sora Yoon</span><a class="sm oc-sw" href="#oc-form">Swap</a></div>
+        <div><span class="d">…</span><span class="nm xs mut">Same rotation, two shifts a day</span></div>
       </div>
       <div class="oc-wk">Next week · Nov 16 – 22</div>
       <div class="oc-strip">
-        <span><i>Mon</i>JP</span><span><i>Tue</i>ML</span><span class="me"><i>Wed</i>HK</span><span><i>Thu</i>JP</span><span><i>Fri</i>ML</span><span class="me"><i>Sat</i>HK</span><span><i>Sun</i>JP</span>
+        <span><i>Mon</i>Minjae</span><span><i>Tue</i>Jiwoo</span><span><i>Wed</i>Sora</span><span><i>Thu</i>Dohyun</span><span class="me"><i>Fri</i>Haeun</span><span><i>Sat</i>Junho</span><span><i>Sun</i>Minjae</span>
       </div>
-      <div class="xs mut" style="padding:10px 16px;border-top:1px solid var(--grid)">Each shift is 24 h from 09:00. Rotation: Haeun → Junho → Minjae.</div>
+      <div class="xs mut" style="padding:10px 16px;border-top:1px solid var(--grid)">Each shift is 24 h, handover 09:00 KST. Rotation: Haeun → Junho → Minjae → Jiwoo → Sora → Dohyun, one shift each.</div>
     </div>
 
-    <aside class="card oc-sheet">
-      <div class="card-h"><span class="ov">Cover or swap a shift</span></div>
-      <div class="card-b stack">
-        <div><label class="lab">What</label><div class="seg full"><span class="on">Someone covers me</span><span>Swap days</span></div></div>
-        <div><label class="lab">When</label><div class="sel" style="width:100%">Thu 12 · 09:00 – Fri 09:00<span class="sp"></span><span class="car">▼</span></div><div class="hint">Or pick part of a shift: 18:00 – 23:00</div></div>
-        <div><label class="lab">Who</label><div class="chips"><span class="chip">Junho Park</span><span class="chip on">Minjae Lee</span></div></div>
-        <div class="note"><span>Minjae gets a Slack message to accept. Nothing changes until Minjae accepts.</span></div>
-        <button class="btn pri" style="width:100%;justify-content:center">Send request</button>
+    <div class="card">
+      <div class="card-h"><span class="ov">Recent changes to shifts</span><span class="sp"></span><span class="xs faint">last 30 days</span></div>
+      <div class="plist">
+        <div><div style="flex:1"><div class="b">Sat 14 · Haeun → Minjae</div><div class="xs faint">Cover · "Dentist appointment" · asked Nov 9 02:50</div></div><span class="pill">Pending</span></div>
+        <div><div style="flex:1"><div class="b">Fri 13 18:00–23:00 · Dohyun → Junho</div><div class="xs faint">Cover · "Family dinner" · accepted by Junho Nov 8</div></div><span class="pill">Accepted</span></div>
+        <div><div style="flex:1"><div class="b">Tue 3 · Junho ⇄ Haeun (Thu 5)</div><div class="xs faint">Swap · "Sick leave" · accepted by Haeun Nov 2</div></div><span class="pill">Accepted</span></div>
+        <div><div style="flex:1"><div class="b">Sat 31 · Haeun → Junho</div><div class="xs faint">Cover · "Travel" · declined by Junho Oct 29</div></div><span class="pill">Declined</span></div>
       </div>
-    </aside>
+    </div>
   </div>
 
   <div class="g2">
     <div class="card">
-      <div class="card-h"><span class="ov">How we get alerted</span><span class="sp"></span><span class="xs mut">team default</span></div>
+      <div class="card-h"><span class="ov">How we get alerted</span><span class="sp"></span><span class="xs mut">version 7, edited by Junho Park on Nov 6</span></div>
       <div class="card-b stack">
-        <div class="oc-presets">
-          <div class="on"><b>Standard</b><span>Slack, SMS, then call</span></div>
-          <div><b>Urgent</b><span>Call right away</span></div>
-          <div><b>Quiet</b><span>Slack only</span></div>
+        <div class="oc-presets" id="oc-presets">
+          <div class="on" data-p="STANDARD"><b>Standard</b><span>Slack, SMS, then call</span></div>
+          <div data-p="URGENT"><b>Urgent</b><span>Call right away</span></div>
+          <div data-p="QUIET"><b>Quiet</b><span>Slack only</span></div>
         </div>
-        <div class="oc-sent">Slack <b>Haeun</b> now, SMS Haeun at <b>2 min</b>, call <b>Junho</b> at <b>7 min</b>, then alert <b>everyone</b> at <b>12 min</b>.</div>
-        <div class="xs mut">Stops as soon as anyone acknowledges. If nobody does, it runs once more from the start, then stops.</div>
+        <div class="oc-sent" id="oc-sent"></div>
+        <div class="xs mut">Stops as soon as anyone acknowledges. Names are who is on call right now (Mon 9, 03:16).</div>
         <div class="note"><span class="st info"><span class="mk ring"></span></span><span>During maintenance, SEV-2 and below stay quiet. <b>SEV-1 always alerts.</b></span></div>
         <details class="oc-adv">
-          <summary>Advanced: edit steps</summary>
+          <summary>Advanced: edit timing</summary>
+          <div class="banner accent" style="margin-top:10px"><span><b>Changes apply to 3 customers:</b> Daon Retail, Mirae Pay, Hanbit Logistics. To keep the old timing for one, set an override below.</span></div>
           <div class="lad" style="margin-top:10px;border:1px solid var(--rule)">
             <div class="h">Step</div><div class="h">At</div><div class="h">Who</div><div class="h">How</div><div class="h">If all fail</div><div class="h"></div>
             <div><span class="ord first">1</span></div><div><span class="mono b">0 min</span></div><div class="sm">Person on shift</div><div><span class="ch on">Slack</span></div><div><span class="tog"></span></div><div class="faint">⋮</div>
@@ -823,17 +882,31 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
             <div><span class="ord">3</span></div><div><input class="inp num" style="width:56px" value="7"><span class="xs mut">min</span></div><div class="sm">Next person</div><div><span class="ch on">Call</span></div><div><span class="tog"></span></div><div class="faint">⋮</div>
             <div><span class="ord">4</span></div><div><input class="inp num" style="width:56px" value="12"><span class="xs mut">min</span></div><div class="sm">Everyone</div><div><span class="ch on">Slack</span><span class="ch on">SMS</span><span class="ch on">Call</span></div><div><span class="tog"></span></div><div class="faint">⋮</div>
           </div>
-          <div class="row" style="margin-top:10px;gap:8px"><button class="btn sm">+ Add step</button><span class="sp"></span><span class="xs mut">Editing steps turns this into a Custom preset.</span></div>
+          <div class="xs mut" style="margin-top:6px">"At" is minutes from when the alert opened (not the gap between steps).</div>
+          <div class="ov" style="margin-top:12px">Timeline</div>
+          <div class="oc-tl mono xs"><span>0′ Slack Haeun</span><span>2′ SMS Haeun</span><span>7′ call Junho</span><span>12′ everyone</span><span>12′ repeat</span><span>14′</span><span>19′</span><span>24′ everyone</span><span class="stop">24′ stop</span></div>
+          <div class="row" style="gap:16px;margin-top:12px;flex-wrap:wrap">
+            <div><label class="lab">Repeat whole chain</label><div class="row" style="gap:6px"><input class="inp num" style="width:56px" value="1"><span class="xs mut">time(s), then stop</span></div></div>
+            <div><label class="lab">Re-notify after acknowledge</label><div class="row" style="gap:6px"><input class="inp num" style="width:56px" value="30"><span class="xs mut">min if still open</span></div></div>
+          </div>
+          <div class="row" style="gap:10px;margin-top:12px"><span class="tog"></span><div><div class="sm b">Primary + secondary on call</div><div class="xs mut">For larger teams: two people on shift at once; step 1 pages both. Off by default.</div></div></div>
+          <div class="ov" style="margin-top:12px">Per-customer override</div>
+          <div class="plist" style="border:1px solid var(--rule)">
+            <div><div style="flex:1" class="sm">Daon Retail</div><span class="chip on">Use team timing</span><span class="chip">Keep v7</span></div>
+            <div><div style="flex:1" class="sm">Mirae Pay</div><span class="chip on">Use team timing</span><span class="chip">Keep v7</span></div>
+            <div><div style="flex:1" class="sm">Hanbit Logistics</div><span class="chip on">Use team timing</span><span class="chip">Keep v7</span></div>
+          </div>
+          <div class="row" style="margin-top:10px;gap:8px"><button class="btn sm">+ Add step</button><span class="sp"></span><span class="xs mut">Editing steps turns this into a Custom preset · saves as version 8.</span></div>
         </details>
       </div>
     </div>
 
     <div class="card">
       <div class="card-h"><span class="ov">Who uses this team</span><span class="sp"></span><a class="sm">Add customer</a></div>
-      <div class="plist">
-        <div><div style="flex:1"><div class="b">Daon Retail</div><div class="xs faint">All 3 services</div></div><span class="pill">Standard</span></div>
-        <div><div style="flex:1"><div class="b">Mirae Pay</div><div class="xs faint">payments-api, settlement · checkout uses Data team</div></div><span class="pill prd">Urgent</span></div>
-        <div><div style="flex:1"><div class="b">Hanbit Logistics</div><div class="xs faint">All 2 services</div></div><span class="pill">Standard</span></div>
+      <div class="plist oc-cust">
+        <div><div style="flex:1;min-width:0"><div class="row" style="gap:8px"><span class="b">Daon Retail</span><span class="pill">Standard</span></div><div class="xs faint">All 3 services</div><div class="oc-cs" data-p="STANDARD"></div></div></div>
+        <div><div style="flex:1;min-width:0"><div class="row" style="gap:8px"><span class="b">Mirae Pay</span><span class="pill prd">Urgent</span></div><div class="xs faint">Payments API (incl. payments-db-1), Settlement · Checkout uses Data team</div><div class="oc-cs" data-p="URGENT"></div></div></div>
+        <div><div style="flex:1;min-width:0"><div class="row" style="gap:8px"><span class="b">Hanbit Logistics</span><span class="pill">Quiet</span></div><div class="xs faint">All 2 services</div><div class="oc-cs" data-p="QUIET"></div></div></div>
       </div>
       <div class="xs mut" style="padding:10px 16px;border-top:1px solid var(--grid)">A customer can pick a different preset. People and order always come from this team.</div>
     </div>
@@ -1309,6 +1382,46 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
   var init=location.hash.slice(1);
   if(!init){try{init=localStorage.getItem('ao-tab')||'';}catch(e){}}
   show(init||'incidents');
+  // on-call: presets, per-customer sentences, paging lookup
+  var P={
+    STANDARD:{n:'Standard',s:'Slack <b>Haeun</b> now → SMS <b>Haeun</b> at <b>2 min</b> → call <b>Junho</b> at <b>7 min</b> → alert <b>everyone</b> at <b>12 min</b> → repeat once → stop at <b>24 min</b>'},
+    URGENT:{n:'Urgent',s:'Call <b>Haeun</b> now → call <b>Junho</b> at <b>5 min</b> → call <b>everyone</b> at <b>10 min</b> → repeat once → stop at <b>20 min</b>'},
+    QUIET:{n:'Quiet',s:'Slack <b>Haeun</b> now → Slack <b>everyone</b> at <b>15 min</b> → repeat once → stop at <b>30 min</b>'},
+    D_URGENT:{n:'Urgent',s:'Call <b>Taemin</b> now → call <b>Yuna</b> at <b>5 min</b> → call <b>everyone</b> at <b>10 min</b> → repeat once → stop at <b>20 min</b>'}
+  };
+  var sent=document.getElementById('oc-sent');
+  if(sent){
+    function setP(k){sent.innerHTML=P[k].s+'.';document.querySelectorAll('#oc-presets>div').forEach(function(d){d.classList.toggle('on',d.dataset.p===k);});}
+    document.querySelectorAll('#oc-presets>div').forEach(function(d){d.addEventListener('click',function(){setP(d.dataset.p);});});
+    setP('STANDARD');
+    document.querySelectorAll('.oc-cs').forEach(function(c){c.innerHTML=P[c.dataset.p].s+'.';});
+    var R={
+      'payments-db-1':{path:['payments-db-1','Payments API','Core','Mirae Pay'],team:'Infra team',from:'customer Mirae Pay (service and resource inherit)',p:'URGENT'},
+      'payments-api':{path:['Payments API','Core','Mirae Pay'],team:'Infra team',from:'customer Mirae Pay (service inherits)',p:'URGENT'},
+      'checkout-web-1':{path:['checkout-web-1','Checkout','Core','Mirae Pay'],team:'Data team',from:'service Checkout (overrides customer)',p:'D_URGENT'},
+      'orders-api-1':{path:['orders-api-1','Orders API','Fulfilment','Hanbit Logistics'],team:'Infra team',from:'customer Hanbit Logistics',p:'QUIET'}
+    };
+    var q=document.getElementById('oc-q'),out=document.getElementById('oc-res');
+    function look(){
+      var v=q.value.trim().toLowerCase(),k=null;
+      Object.keys(R).forEach(function(x){if(!k&&v&&x.indexOf(v)===0)k=x;});
+      if(!k){out.innerHTML='<div class="xs mut">No service or resource matches “'+q.value.replace(/</g,'&lt;')+'”. Try payments-db, checkout or orders-api.</div>';return;}
+      var r=R[k];
+      out.innerHTML='<div class="oc-path mono">'+r.path.join(' <span class="chain">›</span> ')+'</div>'+
+        '<div class="row" style="gap:8px;margin:8px 0;flex-wrap:wrap"><span class="b">'+r.team+'</span><span class="xs mut">set on '+r.from+'</span><span class="pill'+(P[r.p].n==='Urgent'?' prd':'')+'">'+P[r.p].n+'</span></div>'+
+        '<div class="oc-sent">'+P[r.p].s+'.</div>';
+    }
+    q.addEventListener('input',look); look();
+    var f=document.getElementById('oc-form');
+    function openF(e){if(e)e.preventDefault();f.hidden=false;f.scrollIntoView({behavior:'smooth',block:'start'});}
+    document.getElementById('oc-cta').addEventListener('click',openF);
+    document.querySelectorAll('.oc-sw').forEach(function(a){a.addEventListener('click',openF);});
+    var dl=document.getElementById('oc-drag'),dg=null;
+    dl.addEventListener('dragstart',function(e){dg=e.target;});
+    dl.addEventListener('dragover',function(e){e.preventDefault();var t=e.target.closest('li');if(t&&t!==dg)dl.insertBefore(dg,t.nextSibling===dg?t:t);});
+    document.querySelectorAll('#oc-len span').forEach(function(s){s.addEventListener('click',function(){document.querySelectorAll('#oc-len span').forEach(function(x){x.classList.toggle('on',x===s);});document.getElementById('oc-d1').hidden=s.dataset.v==='2';document.getElementById('oc-d2').hidden=s.dataset.v!=='2';});});
+    document.getElementById('oc-close').addEventListener('click',function(){f.hidden=true;});
+  }
   // theme
   var modes=['auto','light','dark'],tt=document.getElementById('tt'),cur='auto';
   try{cur=localStorage.getItem('ao-theme')||'auto';}catch(e){}

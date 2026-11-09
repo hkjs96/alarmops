@@ -241,9 +241,15 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 |---|---|---|
 | GET/POST `/teams`, PATCH/DELETE `/teams/{id}` | 멤버 순서 포함 | A |
 | GET/POST `/schedules`, PATCH/DELETE `/schedules/{id}` | 시프트 포함 | A |
-| GET/POST `/schedules/{id}/overrides`, DELETE `.../{oid}` | | O |
+| GET/POST `/schedules/{id}/overrides`, DELETE `.../{oid}` | 대체·교환 요청. 본문 `{ kind: "COVER"\|"SWAP", start, end, fromUserId, toUserId, swapStart?, swapEnd?, reason }`(부분 시간 허용). 생성 시 `status: PENDING` — 수락 전 순서 불변. GET은 `?since=`로 최근 목록(사유 포함). DELETE는 요청자 취소(PENDING만) | O |
+| POST `/schedules/{id}/overrides/{oid}/accept` | 대상자만. PENDING→ACCEPTED, 반영. 이미 처리됨 409 `OVERRIDE_NOT_PENDING` | O(대상자) |
+| POST `/schedules/{id}/overrides/{oid}/decline` | 대상자만. 본문 `{ note? }`. PENDING→DECLINED, 요청자에게 알림. 48시간 또는 시작 시각 경과 시 EXPIRED | O(대상자) |
+| POST `/schedules/{id}/overrides/{oid}/remind` | 요청자만. Slack 재전송(10분 1회 제한) | O |
 | GET `/oncall/now?customerId=&serviceId=` | 지금 순서 + 해석 근거(level, rule, shift/override) — 알림 해석과 같은 함수(1b27f2f) | V |
-| GET/POST `/escalation-policies`, GET/PUT/DELETE `/escalation-policies/{id}` | 단계 포함, `repeatCount` 기본 1(D-20). If-Match | A |
+| GET `/oncall/paging-path?q=` 또는 `?resourceId=` / `?serviceId=` | "Who gets paged for…". 응답 `{ path: [{level:"RESOURCE"\|"SERVICE"\|"PROJECT"\|"CUSTOMER", id, name}], team: {id,name}, inheritedFrom: {level, id, name}, preset, policyId, policyVersion, steps: [{atMin, target:{kind:"USER"\|"EVERYONE", userId?, name?}, channels}], repeatCount, stopAtMin, sentence }`. `q`는 이름 접두 검색, 여러 건이면 `candidates[]` 반환. `/oncall/now`와 같은 해석 함수 | V |
+| GET/POST `/escalation-policies`, GET/PUT/DELETE `/escalation-policies/{id}` | 단계 포함, `repeatCount` 기본 1(D-20), `renotifyAfterAckMin`. **`preset`: `STANDARD`\|`URGENT`\|`QUIET`\|`CUSTOM`** — 프리셋이면 `steps`는 서버가 채움(읽기 전용), 단계 수정 시 `CUSTOM`. 응답에 `version`, `updatedBy`, `updatedAt`, `usedBy: [{customerId, name, preset, override}]`. PUT은 If-Match, 영향 고객 수를 응답 `affectedCustomers`로 반환 | A |
+| PUT `/customers/{id}/escalation` | 고객별 프리셋 선택 또는 타이밍 고정(`{ preset, pinPolicyVersion? }`) — 팀 기본 변경에서 제외 | A |
+| PATCH `/teams/{id}` 확장 | `members[]` 순서(N명, 드래그 결과 그대로), `shiftPattern: "DAILY_0900"\|"DAY_NIGHT_0921"`, `layers: 1\|2`(primary/secondary, 기본 1) | A |
 | GET/POST `/routing-rules`, PATCH/DELETE `/{id}` | | A |
 
 ### 8.4 조직·계정·연동
