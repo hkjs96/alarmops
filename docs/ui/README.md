@@ -32,7 +32,7 @@
 | Monitoring(알람·리소스·빈틈·Needs review) | `screens/monitoring.md` | 있음 | 민재 |
 | Resource 상세(임계치 출처·드리프트·이력) | `screens/resource-detail.md` | 있음 | 민재 |
 | 온콜 팀(순서·당번·교환·프리셋, D-28) | `screens/oncall-team.md` | 있음 | 하은, 준호 |
-| 채널 검증(Contacts) | `screens/channel-verification.md` | 있음 | 준호 |
+| Contacts(MSP 직원, D-29) | `screens/contacts.md` | 있음 | 준호 |
 | 점검 창 | `screens/maintenance-windows.md` | 있음 | 준호, 민재 |
 | Integrations | `screens/integrations.md` | 있음 | 준호, 민재 |
 | 고객 온보딩 마법사 | `screens/customer-onboarding.md` | 있음(3단계) | 준호 |

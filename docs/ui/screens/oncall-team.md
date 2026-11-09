@@ -12,6 +12,7 @@
 - Infra team 6명, 로테이션 Haeun → Junho → Minjae → Jiwoo → Sora → Dohyun, 하루 1교대, **교대 09:00 KST**.
 - 지금 Mon 9 03:16 → 당번은 **Sun 8 09:00 – Mon 9 09:00 시프트의 Haeun**. 09:00에 Junho 인계.
 - 대기 요청: Haeun의 Sat 14 시프트를 Minjae가 대체(PENDING). Fri 13 18–23시 Dohyun→Junho 부분 대체(ACCEPTED).
+- "Who gets paged for…" 결과 아래에 그 리소스로 알림만 받는 고객 담당자를 "Customer notified" 블록으로 표시(D-29, 페이징 아님).
 - 고객: Daon Retail=Standard, Mirae Pay=Urgent(Checkout 서비스만 Data team: Taemin → Yuna), Hanbit Logistics=Quiet.
 
 ## 레이아웃 (위에서 아래, 390px에서도 같은 순서 1열)

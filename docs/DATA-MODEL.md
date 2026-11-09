@@ -49,13 +49,14 @@
 - IX(customerId). 범위 계산: 고객사 담당자 → 자기 고객사, ADMIN·seeAll → 전체, 그 밖 → `Assignment`(직접 + 팀 경유)로 환산한 고객사(R3-1).
 - 세션은 앱 쿠키(서명 JWT 또는 DB 세션 — 미결 Q-DM-03). open 모드(SSO 없음)는 두지 않는다(org-tenant 새 구현 4).
 
-### Contact (페이징 대상 인원)
-로그인 계정과 별개. 온콜·담당은 Contact를 가리킨다.
+### Contact (알림 대상 인원, D-29)
+로그인 계정과 별개. `kind`로 둘로 나뉜다: `INTERNAL`(MSP 직원, 팀·로테이션·페이징 대상) / `CUSTOMER`(고객 담당자, 알림만. `ContactScope`로 범위 지정).
 
 | 필드 | 타입 | 비고 |
 |---|---|---|
 | id | text PK | |
-| customerId | text? FK Customer (Cascade) | null = 내부 인원(org-tenant R1-4, 0979b6f) |
+| kind | enum `INTERNAL, CUSTOMER` | D-29 |
+| customerId | text? FK Customer (Cascade) | `INTERNAL`이면 null, `CUSTOMER`면 필수(CHECK). org-tenant R1-4, 0979b6f |
 | userId | text? FK User UQ | 로그인과 연결(Slack 버튼 권한 판정에 사용, notification R6-2) |
 | name | text | |
 | email, phone, slackUserId | text? | phone은 E.164 |
@@ -64,7 +65,22 @@
 | active | bool default true | false면 담당 해석에서 빠지지만 배정 행은 유지(oncall R1-5) |
 | createdAt, updatedAt | | |
 
-- UQ(slackUserId) where not null, IX(customerId).
+- UQ(slackUserId) where not null, IX(customerId), IX(kind).
+- `CUSTOMER`는 TeamMember·RotationMember·Override·Assignment(contactId)에 들어갈 수 없다(앱 검증 + 트리거, D-29). Phone 칩은 SMS·Voice 두 채널로 표시.
+
+### ContactScope (고객 담당자 범위, D-29)
+| 필드 | 타입 | 비고 |
+|---|---|---|
+| id | PK | |
+| customerId | FK Customer (Cascade) | 비정규화 |
+| contactId | FK Contact (Cascade) | kind = CUSTOMER만 |
+| scopeType | enum `CUSTOMER, PROJECT, SERVICE` | |
+| scopeId | text | |
+| role | enum `NOTIFY, APPROVER, PORTAL_USER` | 한 사람이 여러 행 가능. APPROVER = 자동 조치 승인(D-15) |
+| createdAt | | |
+
+- UQ(contactId, scopeType, scopeId, role), IX(customerId, scopeType, scopeId).
+- 해석: 리소스 → Service → Project → Customer 순으로 **모두 합친다**(Assignment와 달리 가장 구체적인 하나가 아님). 화면의 "Inherited from …"과 알림 대상 계산은 같은 함수.
 
 ### Team / TeamMember
 | Team | 타입 | 비고 |
@@ -687,6 +703,7 @@ erDiagram
     Customer ||--o{ IntegrationSource : has
     Customer ||--o{ User : "portal users"
     Customer ||--o{ Contact : "customer contacts"
+    Contact ||--o{ ContactScope : "notified for"
     User |o--o| Contact : links
     Team ||--o{ TeamMember : has
     Contact ||--o{ TeamMember : in

@@ -353,6 +353,51 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
 .screen{display:none}
 .screen.on{display:block}
 
+/* contacts & people (D-29) */
+.cv{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 7px;font-size:12px;border:1px solid var(--rule);background:var(--surface);white-space:nowrap}
+.cv.ok{color:var(--green)} .cv.exp{color:var(--orange);border-color:var(--orange)} .cv.unv{color:var(--slate);border-color:var(--slate)}
+.cv.sent{color:var(--accent);border-color:var(--accent)} .cv.none{color:var(--gray);border-style:dashed}
+.ct-q{width:220px}
+.ct-grp{margin-bottom:12px}
+.ct-grp>summary{cursor:pointer;list-style:none}
+.ct-grp>summary::-webkit-details-marker{display:none}
+.ct-grp>summary .car,.tn .car{color:var(--faint);font-size:9px;width:10px;display:inline-block}
+.ct-grp:not([open])>summary{border-bottom:0}
+.ct-grp:not([open])>summary .car{transform:rotate(-90deg)}
+.ct-row,.pp-row{display:grid;grid-template-columns:minmax(180px,1fr) 90px minmax(0,2fr) 210px;gap:12px;align-items:center;padding:10px 16px;border-top:1px solid var(--grid)}
+.ct-list .ct-row:first-child{border-top:0}
+.ct-tm,.ct-ch,.ct-a,.pp-rl{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.ct-a{justify-content:flex-end}
+.ct-hid{padding:8px 16px;border-top:1px solid var(--grid);display:none}
+.ct-hid a{cursor:pointer}
+.f-act .ct-row[data-ok]{display:none}
+.f-act .ct-hid{display:block}
+.ct-row.q-miss{display:none !important}
+.tc{font:700 10px var(--mono);color:var(--faint);border:1px solid var(--rule);padding:0 4px;min-width:16px;text-align:center}
+.tc.warn{color:#fff;background:var(--amber);border-color:var(--amber)}
+.pp{display:grid;grid-template-columns:280px minmax(0,1fr);gap:20px;align-items:start}
+.tr,.tr ul{list-style:none;margin:0;padding:0}
+.tr ul{padding-left:16px}
+.tn{display:flex;align-items:center;gap:6px;padding:7px 12px;font-size:13px;color:var(--ink2);text-decoration:none;cursor:pointer;min-height:36px;border-left:2px solid transparent}
+.tn:hover{background:var(--soft)}
+.tn.on{background:var(--accent-t);border-left-color:var(--accent);color:var(--ink);font-weight:600}
+.pp-row{grid-template-columns:minmax(160px,1.1fr) minmax(170px,1.3fr) minmax(120px,.9fr) minmax(0,1.2fr) 130px}
+.pp-row.inh{background:var(--soft)}
+.pp-sc{display:flex;flex-direction:column;min-width:0}
+.pp-sec{font:700 10.5px var(--mono);letter-spacing:.07em;text-transform:uppercase;color:var(--faint);padding:10px 16px 4px;border-top:1px solid var(--grid)}
+.oc-cn{margin-top:10px;padding:8px 12px;border:1px dashed var(--deco);display:flex;flex-direction:column;gap:3px}
+.oc-cn .ov{margin-right:8px}
+@media (max-width:1100px){.pp{grid-template-columns:minmax(0,1fr)}.pp-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.pp-row .ct-a{justify-content:flex-start}}
+@media (max-width:760px){
+  .ct-row,.pp-row{grid-template-columns:minmax(0,1fr) auto;gap:8px}
+  .ct-row .ct-ch,.pp-row .ct-ch,.pp-row .pp-sc{grid-column:1 / -1}
+  .ct-row .ct-a{grid-column:1 / -1;justify-content:flex-start}
+  .ct-row .ct-tm{justify-content:flex-end}
+  .pp-row .ct-a{grid-column:1 / -1}
+  .ct-q{width:100%;order:3}
+  .ct-xc{flex-direction:column;align-items:flex-start}
+  .pp .seg.full{flex-direction:column}.pp .seg.full span+span{border-left:0;border-top:1px solid var(--rule)}
+}
 /* responsive */
 @media (max-width:1100px){
   .g-main,.g-detail{grid-template-columns:minmax(0,1fr)}
@@ -401,13 +446,14 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
   <button data-s="monitoring">Monitoring</button>
   <button data-s="resource">Resource detail</button>
   <button data-s="oncall">On-call team</button>
-  <button data-s="contacts">Channel verification</button>
+  <button data-s="contacts">Contacts (staff)</button>
   <button data-s="maintenance">Maintenance</button>
   <button data-s="integrations">Integrations</button>
   <button data-s="onboarding">Onboarding</button>
   <button data-s="onboard-oncall">Onboarding · on-call</button>
   <button data-s="customers">Customers</button>
   <button data-s="customer">Customer detail</button>
+  <button data-s="customer-people">Customer › People</button>
   <button data-s="settings">Settings</button>
   <button data-s="portal">Customer portal</button>
   <button class="tt" id="tt">THEME: AUTO</button>
@@ -914,52 +960,71 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
 </div>
 </section>
 
-<!-- ============================ 7. CHANNEL VERIFICATION ============================ -->
+<!-- ============================ 7. CONTACTS (MSP staff, D-29) ============================ -->
 <section class="screen" id="s-contacts" data-menu="oncall">
 <div class="page">
-  <div class="tabs"><a href="#oncall">Teams <span class="n">2</span></a><a class="on">Contacts</a><a>Maintenance</a></div>
+  <div class="tabs"><a href="#oncall">Teams <span class="n">2</span></a><a class="on">Contacts <span class="n hot">4</span></a><a>Maintenance</a></div>
   <div class="ph">
-    <div><h1 class="sub">Contacts</h1><div class="desc">People who can be paged, and whether each channel has been verified.</div></div>
-    <div class="sp"></div><button class="btn">Send links to all unverified</button><button class="btn pri">Add contact</button>
+    <div><h1 class="sub">Contacts</h1><div class="desc">MSP staff who can be paged, by team. Customer contacts are under each customer › <a href="#customer-people">People</a>.</div></div>
+    <div class="sp"></div><button class="btn">Send links to all unverified <span class="mono xs">(5)</span></button><button class="btn pri">Add staff</button>
   </div>
-  <div class="row" style="margin-bottom:12px">
-    <div class="chips"><span class="chip on">All<span class="n">8</span></span><span class="chip"><span class="st ack"><span class="mk ring"></span></span>Unverified<span class="n">5</span></span><span class="chip"><span class="st esc"><span class="mk tri"></span></span>Expired<span class="n">1</span></span></div>
-    <span class="sp"></span><span class="sm mut"><b class="mono" style="color:var(--ink)">18</b> of 24 channels verified</span>
-    <div class="prog" style="width:140px"><i style="width:75%"></i></div>
+  <div class="banner accent ct-xc"><span class="st info"><span class="mk ring"></span></span><span style="flex:1;min-width:0"><b>7 customer contacts need action</b> across 3 customers (Daon Retail 3 · Mirae Pay 2 · Hanbit Logistics 2). They are notified only, never paged on a rotation.</span><a class="btn sm" href="#customers">Review customer contacts</a></div>
+  <div class="row ct-bar" style="margin-bottom:12px">
+    <div class="chips" id="ct-f"><span class="chip on" data-f="act"><span class="st ack"><span class="mk ring"></span></span>Needs action<span class="n">4</span></span><span class="chip" data-f="all">All<span class="n">8</span></span></div>
+    <input class="inp ct-q" id="ct-q" placeholder="Search staff, e.g. Sora" aria-label="Search staff">
+    <span class="sp"></span><span class="sm mut"><b class="mono" style="color:var(--ink)">26</b> of 32 channels verified</span>
+    <div class="prog hide-m" style="width:120px"><i style="width:81%"></i></div>
   </div>
-  <div class="tw">
-  <table class="t">
-    <thead><tr><th>Contact</th><th>Customer</th><th>Slack</th><th>Email</th><th>Phone · SMS / voice</th><th class="r"></th></tr></thead>
-    <tbody>
-      <tr><td><span class="who"><span class="av">HK</span><div><div class="ttl">Haeun Kim</div><div class="org">Infra · MSP</div></div></span></td><td class="mut">Internal</td>
-        <td><span class="st res"><span class="mk chk"></span>Verified</span><div class="org">slack-lookup · Oct 2</div></td>
-        <td><span class="st res"><span class="mk chk"></span>Verified</span><div class="org">sso · Oct 2</div></td>
-        <td><span class="st res"><span class="mk chk"></span>Verified</span><div class="org mono">+82 10-****-2291 · link · Oct 3</div></td><td class="r"><button class="btn sm">Test</button></td></tr>
-      <tr><td><span class="who"><span class="av">JP</span><div><div class="ttl">Junho Park</div><div class="org">Ops lead · MSP</div></div></span></td><td class="mut">Internal</td>
-        <td><span class="st res"><span class="mk chk"></span>Verified</span><div class="org">slack-lookup · Oct 2</div></td>
-        <td><span class="st res"><span class="mk chk"></span>Verified</span><div class="org">sso · Oct 2</div></td>
-        <td><span class="st esc"><span class="mk tri"></span>Link expired</span><div class="org">sent Nov 6 · not opened</div></td><td class="r"><button class="btn sm">Resend</button></td></tr>
-      <tr style="background:var(--accent-t)"><td><span class="who"><span class="av">SC</span><div><div class="ttl">Soyeon Choi</div><div class="org">IT manager</div></div></span></td><td>Daon Retail</td>
-        <td><span class="st mute"><span class="mk dash"></span>Not set</span></td>
-        <td><span class="st info"><span class="mk ring"></span>Link sent</span><div class="org">14:02 · expires in 23h</div></td>
-        <td><span class="st ack"><span class="mk ring"></span>Unverified</span><div class="org mono">+82 10-****-7710</div></td>
-        <td class="r"><div class="row" style="justify-content:flex-end"><button class="btn sm">Send link</button><button class="btn sm">Mark verified…</button></div></td></tr>
-      <tr><td><span class="who"><span class="av">DY</span><div><div class="ttl">Dohyun Yoon</div><div class="org">SRE</div></div></span></td><td>Hanbit Logistics</td>
-        <td><span class="st res"><span class="mk chk"></span>Verified</span><div class="org">admin:Junho · Nov 1</div></td>
-        <td><span class="st ack"><span class="mk ring"></span>Unverified</span></td>
-        <td><span class="st ack"><span class="mk ring"></span>Unverified</span><div class="org mono">+82 10-****-0384</div></td>
-        <td class="r"><button class="btn sm">Send link</button></td></tr>
-      <tr><td><span class="who"><span class="av">YS</span><div><div class="ttl">Yuna Seo</div><div class="org">Platform</div></div></span></td><td>Mirae Pay</td>
-        <td><span class="st res"><span class="mk chk"></span>Verified</span><div class="org">link · Oct 28</div></td>
-        <td><span class="st res"><span class="mk chk"></span>Verified</span><div class="org">link · Oct 28</div></td>
-        <td><span class="st ack"><span class="mk ring"></span>Unverified</span><div class="org mono">+82 10-****-5521</div></td>
-        <td class="r"><button class="btn sm">Send link</button></td></tr>
-    </tbody>
-  </table>
-  </div>
+
+  <details class="card ct-grp" open>
+    <summary class="card-h"><span class="car">▼</span><span class="b">Infra team</span><span class="xs mut">6 people</span><span class="sp"></span><span class="st ack ct-gs"><span class="mk ring"></span>3 need action</span></summary>
+    <div class="ct-list">
+      <div class="ct-row" data-ok="1" data-n="haeun kim"><span class="who"><span class="av on">HK</span><div><div class="b">Haeun Kim</div><div class="xs faint">On shift now</div></div></span>
+        <span class="ct-tm"><span class="pill">Infra</span></span>
+        <span class="ct-ch"><span class="cv ok"><span class="mk chk"></span>Slack</span><span class="cv ok"><span class="mk chk"></span>Email</span><span class="cv ok"><span class="mk chk"></span>SMS</span><span class="cv ok"><span class="mk chk"></span>Voice</span></span>
+        <span class="ct-a"><button class="btn sm ghost">Test</button></span></div>
+      <div class="ct-row" data-n="junho park"><span class="who"><span class="av">JP</span><div><div class="b">Junho Park</div><div class="xs faint">Ops lead</div></div></span>
+        <span class="ct-tm"><span class="pill">Infra</span></span>
+        <span class="ct-ch"><span class="cv ok"><span class="mk chk"></span>Slack</span><span class="cv ok"><span class="mk chk"></span>Email</span><span class="cv exp" title="Link sent Nov 6, not opened"><span class="mk tri"></span>SMS expired</span><span class="cv exp"><span class="mk tri"></span>Voice expired</span></span>
+        <span class="ct-a"><button class="btn sm">Resend link</button></span></div>
+      <div class="ct-row" data-ok="1" data-n="minjae lee"><span class="who"><span class="av">ML</span><div><div class="b">Minjae Lee</div><div class="xs faint">Cloud engineer</div></div></span>
+        <span class="ct-tm"><span class="pill">Infra</span></span>
+        <span class="ct-ch"><span class="cv ok"><span class="mk chk"></span>Slack</span><span class="cv ok"><span class="mk chk"></span>Email</span><span class="cv ok"><span class="mk chk"></span>SMS</span><span class="cv ok"><span class="mk chk"></span>Voice</span></span>
+        <span class="ct-a"><button class="btn sm ghost">Test</button></span></div>
+      <div class="ct-row" data-ok="1" data-n="jiwoo han"><span class="who"><span class="av">JH</span><div><div class="b">Jiwoo Han</div><div class="xs faint">Cloud engineer</div></div></span>
+        <span class="ct-tm"><span class="pill">Infra</span></span>
+        <span class="ct-ch"><span class="cv ok"><span class="mk chk"></span>Slack</span><span class="cv ok"><span class="mk chk"></span>Email</span><span class="cv ok"><span class="mk chk"></span>SMS</span><span class="cv ok"><span class="mk chk"></span>Voice</span></span>
+        <span class="ct-a"><button class="btn sm ghost">Test</button></span></div>
+      <div class="ct-row" data-n="sora yoon"><span class="who"><span class="av">SY</span><div><div class="b">Sora Yoon</div><div class="xs faint">Cloud engineer</div></div></span>
+        <span class="ct-tm"><span class="pill">Infra</span></span>
+        <span class="ct-ch"><span class="cv ok"><span class="mk chk"></span>Slack</span><span class="cv ok"><span class="mk chk"></span>Email</span><span class="cv unv"><span class="mk ring"></span>SMS</span><span class="cv unv"><span class="mk ring"></span>Voice</span></span>
+        <span class="ct-a"><button class="btn sm">Send link</button><button class="btn sm ghost">Mark verified…</button></span></div>
+      <div class="ct-row" data-n="dohyun kang"><span class="who"><span class="av">DK</span><div><div class="b">Dohyun Kang</div><div class="xs faint">Joined Nov 3</div></div></span>
+        <span class="ct-tm"><span class="pill">Infra</span></span>
+        <span class="ct-ch"><span class="cv ok"><span class="mk chk"></span>Slack</span><span class="cv unv"><span class="mk ring"></span>Email</span><span class="cv sent" title="Sent 14:02, expires in 23h"><span class="mk ring"></span>SMS link sent</span><span class="cv sent"><span class="mk ring"></span>Voice link sent</span></span>
+        <span class="ct-a"><button class="btn sm">Send link</button></span></div>
+    </div>
+    <div class="ct-hid xs mut">3 fully verified people hidden · <a class="ct-all">Show all</a></div>
+  </details>
+
+  <details class="card ct-grp" open>
+    <summary class="card-h"><span class="car">▼</span><span class="b">Data team</span><span class="xs mut">2 people</span><span class="sp"></span><span class="st ack ct-gs"><span class="mk ring"></span>1 needs action</span></summary>
+    <div class="ct-list">
+      <div class="ct-row" data-ok="1" data-n="taemin jung"><span class="who"><span class="av">TJ</span><div><div class="b">Taemin Jung</div><div class="xs faint">Data engineer</div></div></span>
+        <span class="ct-tm"><span class="pill">Data</span></span>
+        <span class="ct-ch"><span class="cv ok"><span class="mk chk"></span>Slack</span><span class="cv ok"><span class="mk chk"></span>Email</span><span class="cv ok"><span class="mk chk"></span>SMS</span><span class="cv ok"><span class="mk chk"></span>Voice</span></span>
+        <span class="ct-a"><button class="btn sm ghost">Test</button></span></div>
+      <div class="ct-row" data-n="yuna kwon"><span class="who"><span class="av">YK</span><div><div class="b">Yuna Kwon</div><div class="xs faint">Data engineer</div></div></span>
+        <span class="ct-tm"><span class="pill">Data</span></span>
+        <span class="ct-ch"><span class="cv none"><span class="mk dash"></span>Slack not set</span><span class="cv ok"><span class="mk chk"></span>Email</span><span class="cv ok"><span class="mk chk"></span>SMS</span><span class="cv ok"><span class="mk chk"></span>Voice</span></span>
+        <span class="ct-a"><button class="btn sm">Look up in Slack</button></span></div>
+    </div>
+    <div class="ct-hid xs mut">1 fully verified person hidden · <a class="ct-all">Show all</a></div>
+  </details>
+
   <div class="g2" style="margin-top:16px">
-    <div class="note"><span class="st ack"><span class="mk ring"></span></span><span><b>Unverified channels still receive pages.</b> Verification shows that the address is correct; it doesn't block delivery.</span></div>
-    <div class="drawer"><div class="card-h"><span class="ov">Mark SMS verified · Soyeon Choi</span></div><div class="card-b stack">
+    <div class="note"><span class="st ack"><span class="mk ring"></span></span><span><b>Unverified channels still receive pages.</b> Verification shows the address is correct; it doesn't block delivery. Someone on two teams is listed under each.</span></div>
+    <div class="drawer"><div class="card-h"><span class="ov">Mark SMS verified · Sora Yoon</span></div><div class="card-b stack">
       <div><label class="lab">How was it confirmed? <span class="faint">(required)</span></label><input class="inp focus" value="Called on Nov 9 and read back the number"></div>
       <div class="row"><span class="xs mut">Recorded as admin:Haeun Kim</span><span class="sp"></span><button class="btn sm">Cancel</button><button class="btn sm pri">Mark verified</button></div>
     </div></div>
@@ -1019,7 +1084,7 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
 <div class="page">
   <div class="crumb"><a href="#customers">Customers</a><span class="chain">›</span>Daon Retail</div>
   <div class="ph"><div><h1 class="sub">Daon Retail</h1></div><div class="sp"></div><button class="btn">Add AWS account</button><button class="btn pri">Add webhook source</button></div>
-  <div class="tabs"><a>Overview</a><a>Org &amp; owners</a><a>AWS accounts <span class="n">2</span></a><a class="on">Integrations <span class="n">4</span></a><a>Monitoring</a><a>Remediation</a><a>Portal access</a></div>
+  <div class="tabs"><a>Overview</a><a>Org &amp; owners</a><a href="#customer-people">People <span class="n hot">3</span></a><a>AWS accounts <span class="n">2</span></a><a class="on">Integrations <span class="n">4</span></a><a>Monitoring</a><a>Remediation</a><a>Portal access</a></div>
 
   <div class="g3" style="margin-bottom:20px">
     <div class="card lb-green"><div class="card-b">
@@ -1179,26 +1244,35 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
 <section class="screen" id="s-customers" data-menu="customers">
 <div class="page">
   <div class="ph"><div><h1>Customers</h1><div class="desc">4 customers · 9 AWS accounts · 3 webhook sources</div></div><div class="sp"></div><input class="inp hide-m" style="width:220px" placeholder="Search customers"><button class="btn pri">New customer</button></div>
+  <details class="card ct-grp cx" open>
+    <summary class="card-h"><span class="car">▼</span><span class="b">Customer contacts needing action</span><span class="tc warn">7</span><span class="sp"></span><button class="btn sm">Send links to all 7</button></summary>
+    <div class="plist">
+      <div><div style="flex:1"><div class="b">Soyeon Choi <span class="xs faint">Daon Retail › Commerce (all services) · Approver</span></div><div class="row" style="margin-top:4px"><span class="cv sent"><span class="mk ring"></span>Email link sent</span><span class="cv unv"><span class="mk ring"></span>SMS</span></div></div><a class="sm" href="#customer-people">Open</a></div>
+      <div><div style="flex:1"><div class="b">Yuna Seo <span class="xs faint">Mirae Pay › Core › Payments API · Approver</span></div><div class="row" style="margin-top:4px"><span class="cv unv"><span class="mk ring"></span>SMS</span></div></div><a class="sm" href="#customer-people">Open</a></div>
+      <div><div style="flex:1"><div class="b">Dohyun Yoon <span class="xs faint">Hanbit Logistics (all projects) · Notify only</span></div><div class="row" style="margin-top:4px"><span class="cv unv"><span class="mk ring"></span>Email</span><span class="cv unv"><span class="mk ring"></span>SMS</span></div></div><a class="sm" href="#customer-people">Open</a></div>
+      <div><div style="flex:1" class="xs mut">+4 more: Daon Retail 2 · Mirae Pay 1 · Hanbit Logistics 1</div><a class="sm">Show all</a></div>
+    </div>
+  </details>
   <div class="tw">
   <table class="t">
-    <thead><tr><th>Customer</th><th>Open incidents</th><th>Sources</th><th>Connection</th><th>Coverage</th><th>Setup</th><th class="r">Owner</th></tr></thead>
+    <thead><tr><th>Customer</th><th>Open incidents</th><th>Sources</th><th>Connection</th><th>Coverage</th><th>Setup</th><th>People</th><th class="r">Owner</th></tr></thead>
     <tbody>
       <tr class="hot"><td><div class="ttl">Mirae Pay</div><div class="org mono">miraepay.com</div></td>
         <td><span class="row" style="gap:10px"><span class="sev s1"><span class="mk dot"></span>1</span><span class="sev s3"><span class="mk dia"></span>0</span></span></td>
         <td class="sm">CloudWatch · 3 accounts</td><td><span class="st res"><span class="mk chk"></span>All roles OK</span></td>
-        <td><div class="mono sm">128 / 131</div><div class="org">1 needs review</div></td><td><span class="st res"><span class="mk chk"></span>Done</span></td><td class="r"><span class="av">HK</span></td></tr>
+        <td><div class="mono sm">128 / 131</div><div class="org">1 needs review</div></td><td><span class="st res"><span class="mk chk"></span>Done</span></td><td><span class="mono sm">6</span> <span class="tc warn">2</span></td><td class="r"><span class="av">HK</span></td></tr>
       <tr class="esc"><td><div class="ttl">Hanbit Logistics</div><div class="org mono">hanbit-lg.co.kr</div></td>
         <td><span class="row" style="gap:10px"><span class="sev s2"><span class="mk tri"></span>1</span><span class="sev s3"><span class="mk dia"></span>1</span></span></td>
         <td class="sm">CloudWatch · 3 accounts</td><td><span class="st res"><span class="mk chk"></span>All roles OK</span></td>
-        <td><div class="mono sm">171 / 180</div><div class="org" style="color:var(--amber)">▲ 2 needs review</div></td><td><span class="st res"><span class="mk chk"></span>Done</span></td><td class="r"><span class="av">JP</span></td></tr>
+        <td><div class="mono sm">171 / 180</div><div class="org" style="color:var(--amber)">▲ 2 needs review</div></td><td><span class="st res"><span class="mk chk"></span>Done</span></td><td><span class="mono sm">4</span> <span class="tc warn">2</span></td><td class="r"><span class="av">JP</span></td></tr>
       <tr class="hot"><td><div class="ttl">Daon Retail</div><div class="org mono">daon.kr</div></td>
         <td><span class="row" style="gap:10px"><span class="sev s2"><span class="mk tri"></span>1</span><span class="sev s4"><span class="mk ring"></span>1</span></span></td>
         <td class="sm">CloudWatch · 2 · Prometheus · Grafana</td><td><span class="st esc"><span class="mk tri"></span>1 role denied</span></td>
-        <td><div class="mono sm">96 / 112</div><div class="org">14 gaps · 1 needs review</div></td><td><span class="mono sm">5 / 6</span><div class="prog" style="width:70px;margin-top:4px"><i style="width:83%"></i></div></td><td class="r"><span class="av">ML</span></td></tr>
+        <td><div class="mono sm">96 / 112</div><div class="org">14 gaps · 1 needs review</div></td><td><span class="mono sm">5 / 6</span><div class="prog" style="width:70px;margin-top:4px"><i style="width:83%"></i></div></td><td><span class="mono sm">5</span> <span class="tc warn">3</span></td><td class="r"><span class="av">ML</span></td></tr>
       <tr><td><div class="ttl">Seoul Bio Labs</div><div class="org mono">seoulbio.co.kr</div></td>
         <td><span class="mut sm">—</span></td>
         <td class="sm">CloudWatch · 1 account</td><td><span class="st info"><span class="mk q"></span>Checking</span></td>
-        <td><span class="mut sm">Waiting for first sync</span></td><td><span class="mono sm">2 / 6</span><div class="prog" style="width:70px;margin-top:4px"><i style="width:33%"></i></div></td><td class="r"><span class="av">JP</span></td></tr>
+        <td><span class="mut sm">Waiting for first sync</span></td><td><span class="mono sm">2 / 6</span><div class="prog" style="width:70px;margin-top:4px"><i style="width:33%"></i></div></td><td><span class="mono sm">1</span></td><td class="r"><span class="av">JP</span></td></tr>
     </tbody>
   </table>
   </div>
@@ -1210,7 +1284,7 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
 <div class="page">
   <div class="crumb"><a href="#customers">Customers</a><span class="chain">›</span>Daon Retail</div>
   <div class="ph"><div><h1 class="sub">Daon Retail</h1><div class="desc">Retail · <span class="mono">daon.kr</span> · since Oct 14 · escalation “Daon — Standard”</div></div><div class="sp"></div><button class="btn">Edit</button></div>
-  <div class="tabs"><a>Overview</a><a>Org &amp; owners</a><a>AWS accounts <span class="n">2</span></a><a>Integrations <span class="n">4</span></a><a class="on">Monitoring</a><a>Remediation</a><a>Portal access</a></div>
+  <div class="tabs"><a>Overview</a><a>Org &amp; owners</a><a href="#customer-people">People <span class="n hot">3</span></a><a>AWS accounts <span class="n">2</span></a><a>Integrations <span class="n">4</span></a><a class="on">Monitoring</a><a>Remediation</a><a>Portal access</a></div>
 
   <div class="row" style="margin-bottom:14px"><span class="chip on" style="cursor:default">Customer: Daon Retail <span class="ov" style="font-size:9px">Locked</span></span><span class="sm mut">Same view as <a href="#monitoring">Monitoring</a>, filtered to this customer.</span></div>
   <div class="tiles">
@@ -1248,6 +1322,85 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
         </div></div>
       <div class="card"><div class="card-h"><span class="ov">Remediation</span></div><div class="card-b row"><span class="tog"></span><span class="sm">Off · Remediator role not deployed</span></div></div>
     </aside>
+  </div>
+</div>
+</section>
+
+<!-- ============================ 12b. CUSTOMER DETAIL › PEOPLE (D-29) ============================ -->
+<section class="screen" id="s-customer-people" data-menu="customers" data-cust="Mirae Pay">
+<div class="page">
+  <div class="crumb"><a href="#customers">Customers</a><span class="chain">›</span>Mirae Pay</div>
+  <div class="ph"><div><h1 class="sub">Mirae Pay</h1><div class="desc">Payments · <span class="mono">miraepay.com</span> · on-call by Infra team (Checkout: Data team)</div></div><div class="sp"></div><button class="btn">Edit</button></div>
+  <div class="tabs"><a>Overview</a><a>Org &amp; owners</a><a class="on">People <span class="n hot">2</span></a><a>AWS accounts <span class="n">3</span></a><a>Integrations</a><a>Monitoring</a><a>Remediation</a><a>Portal access</a></div>
+
+  <div class="note" style="margin-bottom:14px"><span class="st info"><span class="mk ring"></span></span><span>Customer people are <b>notified only</b>. They are never on an on-call rotation; paging is done by MSP teams under <a href="#contacts">On-call</a>.</span></div>
+
+  <div class="pp">
+    <div class="card pp-tree">
+      <div class="card-h"><span class="ov">Scope</span><span class="sp"></span><span class="xs faint">people attached</span></div>
+      <div class="card-b" style="padding:10px"><input class="inp" placeholder="Filter projects and services" aria-label="Filter scope"></div>
+      <ul class="tr">
+        <li><a class="tn"><span class="car">▼</span><b>Mirae Pay</b><span class="sp"></span><span class="tc">1</span></a>
+          <ul>
+            <li><a class="tn"><span class="car">▼</span>Core<span class="sp"></span><span class="tc">2</span></a>
+              <ul>
+                <li><a class="tn on"><span class="car"></span>Payments API<span class="sp"></span><span class="tc">1</span><span class="tc warn">1</span></a></li>
+                <li><a class="tn"><span class="car"></span>Settlement<span class="sp"></span><span class="tc">0</span></a></li>
+                <li><a class="tn"><span class="car"></span>Checkout<span class="sp"></span><span class="tc">1</span><span class="tc warn">1</span></a></li>
+              </ul></li>
+            <li><a class="tn"><span class="car">▶</span>Merchant<span class="sp"></span><span class="tc">2</span></a></li>
+            <li><a class="tn"><span class="car">▶</span>Data platform<span class="sp"></span><span class="tc">0</span></a></li>
+          </ul></li>
+      </ul>
+      <div class="xs mut" style="padding:10px 14px;border-top:1px solid var(--grid)">Number = people attached at that level. <span class="tc warn">1</span> = needs action.</div>
+    </div>
+
+    <div class="stack">
+      <div class="card">
+        <div class="card-h" style="height:auto;min-height:40px;flex-wrap:wrap;padding:8px 16px"><span class="mono sm">Mirae Pay <span class="chain">›</span> Core <span class="chain">›</span> <b style="color:var(--ink)">Payments API</b></span><span class="sp"></span><input class="inp" style="width:180px;height:28px" placeholder="Search in this scope" aria-label="Search people in scope"><button class="btn sm pri">Add person here</button></div>
+        <div class="xs mut" style="padding:8px 16px;background:var(--soft);border-bottom:1px solid var(--grid)">4 people are notified for incidents on Payments API: 1 attached here, 3 inherited from above.</div>
+        <div class="pp-sec">Attached here</div>
+        <div class="pp-row">
+          <span class="who"><span class="av">YS</span><div><div class="b">Yuna Seo</div><div class="xs faint">Platform lead</div></div></span>
+          <span class="pp-sc"><span class="xs faint">Notified for</span><span class="sm">Mirae Pay › Core › Payments API</span></span>
+          <span class="pp-rl"><span class="pill prd">Approver</span><span class="xs faint">remediation (D-15)</span></span>
+          <span class="ct-ch"><span class="cv ok"><span class="mk chk"></span>Slack</span><span class="cv ok"><span class="mk chk"></span>Email</span><span class="cv unv"><span class="mk ring"></span>SMS</span></span>
+          <span class="ct-a"><button class="btn sm">Send link</button><button class="btn sm ghost">⋮</button></span>
+        </div>
+        <div class="pp-sec">Inherited from Core</div>
+        <div class="pp-row inh">
+          <span class="who"><span class="av">SJ</span><div><div class="b">Seojun Bae</div><div class="xs faint">Core backend manager</div></div></span>
+          <span class="pp-sc"><span class="xs faint">Notified for</span><span class="sm">Mirae Pay › Core (all services)</span></span>
+          <span class="pp-rl"><span class="pill">Notify only</span></span>
+          <span class="ct-ch"><span class="cv ok"><span class="mk chk"></span>Email</span><span class="cv ok"><span class="mk chk"></span>SMS</span></span>
+          <span class="ct-a"><a class="sm">Open in Core</a></span>
+        </div>
+        <div class="pp-row inh">
+          <span class="who"><span class="av">HN</span><div><div class="b">Hana Noh</div><div class="xs faint">SRE</div></div></span>
+          <span class="pp-sc"><span class="xs faint">Notified for</span><span class="sm">Mirae Pay › Core (all services)</span></span>
+          <span class="pp-rl"><span class="pill">Notify only</span></span>
+          <span class="ct-ch"><span class="cv ok"><span class="mk chk"></span>Slack</span><span class="cv ok"><span class="mk chk"></span>Email</span></span>
+          <span class="ct-a"><a class="sm">Open in Core</a></span>
+        </div>
+        <div class="pp-sec">Inherited from Mirae Pay</div>
+        <div class="pp-row inh">
+          <span class="who"><span class="av">HL</span><div><div class="b">Hyejin Lim</div><div class="xs faint">IT manager</div></div></span>
+          <span class="pp-sc"><span class="xs faint">Notified for</span><span class="sm">Mirae Pay (all projects)</span></span>
+          <span class="pp-rl"><span class="pill">Portal user</span><span class="pill">Notify only</span></span>
+          <span class="ct-ch"><span class="cv ok"><span class="mk chk"></span>Email</span><span class="cv ok"><span class="mk chk"></span>SMS</span></span>
+          <span class="ct-a"><a class="sm">Open in Mirae Pay</a></span>
+        </div>
+      </div>
+
+      <div class="drawer"><div class="card-h"><span class="ov">Add person to Payments API</span></div><div class="card-b stack">
+        <div class="g2" style="gap:10px"><div><label class="lab">Person</label><input class="inp focus" list="pp-ex" value="Dami Ko" aria-label="Person"><datalist id="pp-ex"><option value="Seojun Bae"><option value="Hana Noh"></datalist><div class="hint">Existing Mirae Pay person, or a new name.</div></div>
+          <div><label class="lab">Email · phone</label><input class="inp mono" value="dami.ko@miraepay.com"></div></div>
+        <div><label class="lab">Role</label><div class="seg full"><span class="on">Notify only</span><span>Approver (remediation)</span><span>Portal user</span></div>
+          <div class="hint">Approver can approve automatic fixes in Slack or email (D-15). Portal user also signs in to the portal.</div></div>
+        <div><label class="lab">Notified for</label><div class="seg full"><span class="on">This service only</span><span>All of Core</span><span>All of Mirae Pay</span></div></div>
+        <div class="row"><span class="xs mut">A verification link is sent after saving.</span><span class="sp"></span><button class="btn sm">Cancel</button><button class="btn sm pri">Add &amp; send link</button></div>
+      </div></div>
+    </div>
   </div>
 </div>
 </section>
@@ -1396,10 +1549,10 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
     setP('STANDARD');
     document.querySelectorAll('.oc-cs').forEach(function(c){c.innerHTML=P[c.dataset.p].s+'.';});
     var R={
-      'payments-db-1':{path:['payments-db-1','Payments API','Core','Mirae Pay'],team:'Infra team',from:'customer Mirae Pay (service and resource inherit)',p:'URGENT'},
-      'payments-api':{path:['Payments API','Core','Mirae Pay'],team:'Infra team',from:'customer Mirae Pay (service inherits)',p:'URGENT'},
-      'checkout-web-1':{path:['checkout-web-1','Checkout','Core','Mirae Pay'],team:'Data team',from:'service Checkout (overrides customer)',p:'D_URGENT'},
-      'orders-api-1':{path:['orders-api-1','Orders API','Fulfilment','Hanbit Logistics'],team:'Infra team',from:'customer Hanbit Logistics',p:'QUIET'}
+      'payments-db-1':{path:['payments-db-1','Payments API','Core','Mirae Pay'],team:'Infra team',from:'customer Mirae Pay (service and resource inherit)',p:'URGENT',cust:['Yuna Seo (Mirae Pay › Core › Payments API) · approver','Seojun Bae, Hana Noh (Mirae Pay › Core)','Hyejin Lim (Mirae Pay)']},
+      'payments-api':{path:['Payments API','Core','Mirae Pay'],team:'Infra team',from:'customer Mirae Pay (service inherits)',p:'URGENT',cust:['Yuna Seo (Mirae Pay › Core › Payments API) · approver','Seojun Bae, Hana Noh (Mirae Pay › Core)','Hyejin Lim (Mirae Pay)']},
+      'checkout-web-1':{path:['checkout-web-1','Checkout','Core','Mirae Pay'],team:'Data team',from:'service Checkout (overrides customer)',p:'D_URGENT',cust:['Dami Ko (Mirae Pay › Core › Checkout)','Seojun Bae, Hana Noh (Mirae Pay › Core)','Hyejin Lim (Mirae Pay)']},
+      'orders-api-1':{path:['orders-api-1','Orders API','Fulfilment','Hanbit Logistics'],team:'Infra team',from:'customer Hanbit Logistics',p:'QUIET',cust:['Dohyun Yoon (Hanbit Logistics)']}
     };
     var q=document.getElementById('oc-q'),out=document.getElementById('oc-res');
     function look(){
@@ -1409,7 +1562,8 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
       var r=R[k];
       out.innerHTML='<div class="oc-path mono">'+r.path.join(' <span class="chain">›</span> ')+'</div>'+
         '<div class="row" style="gap:8px;margin:8px 0;flex-wrap:wrap"><span class="b">'+r.team+'</span><span class="xs mut">set on '+r.from+'</span><span class="pill'+(P[r.p].n==='Urgent'?' prd':'')+'">'+P[r.p].n+'</span></div>'+
-        '<div class="oc-sent">'+P[r.p].s+'.</div>';
+        '<div class="oc-sent">'+P[r.p].s+'.</div>'+
+        (r.cust?'<div class="oc-cn"><span class="ov">Customer notified</span><span class="xs faint">not paged · notify only</span>'+r.cust.map(function(x){return '<div class="sm">'+x+'</div>';}).join('')+'</div>':'');
     }
     q.addEventListener('input',look); look();
     var f=document.getElementById('oc-form');
@@ -1421,6 +1575,15 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
     dl.addEventListener('dragover',function(e){e.preventDefault();var t=e.target.closest('li');if(t&&t!==dg)dl.insertBefore(dg,t.nextSibling===dg?t:t);});
     document.querySelectorAll('#oc-len span').forEach(function(s){s.addEventListener('click',function(){document.querySelectorAll('#oc-len span').forEach(function(x){x.classList.toggle('on',x===s);});document.getElementById('oc-d1').hidden=s.dataset.v==='2';document.getElementById('oc-d2').hidden=s.dataset.v!=='2';});});
     document.getElementById('oc-close').addEventListener('click',function(){f.hidden=true;});
+  }
+  // contacts filter + search
+  var cf=document.getElementById('s-contacts');
+  if(cf){
+    function setF(f){cf.classList.toggle('f-act',f==='act');cf.querySelectorAll('#ct-f .chip').forEach(function(c){c.classList.toggle('on',c.dataset.f===f);});}
+    cf.querySelectorAll('#ct-f .chip').forEach(function(c){c.addEventListener('click',function(){setF(c.dataset.f);});});
+    cf.querySelectorAll('.ct-all').forEach(function(a){a.addEventListener('click',function(){setF('all');});});
+    setF('act');
+    document.getElementById('ct-q').addEventListener('input',function(){var v=this.value.trim().toLowerCase();cf.querySelectorAll('.ct-row').forEach(function(r){r.classList.toggle('q-miss',!!v&&r.dataset.n.indexOf(v)<0);});if(v)setF('all');});
   }
   // theme
   var modes=['auto','light','dark'],tt=document.getElementById('tt'),cur='auto';

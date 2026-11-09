@@ -14,9 +14,9 @@ AlarmOps   Incidents   Monitoring   On-call   Customers   Settings        [Custo
 | └ Incident 상세 `/incidents/{id}` | Overview · Alerts · Timeline · Notifications | `incident-detail.md` |
 | **Monitoring** | Alarms · Resources · Coverage gaps · Needs review · Sync runs | `monitoring.md` |
 | └ Resource 상세 `/monitoring/resources/{id}` | Thresholds · Alarms · Tags · History | `resource-detail.md` |
-| **On-call** | Teams · Contacts · Maintenance (D-28) | `oncall-team.md`, `channel-verification.md`, `maintenance-windows.md` |
+| **On-call** | Teams · Contacts · Maintenance (D-28) | `oncall-team.md`, `contacts.md`, `maintenance-windows.md` |
 | **Customers** | 목록 | `customers.md` |
-| └ Customer 상세 `/customers/{id}` | Overview · Org & owners · AWS accounts · Integrations · **Monitoring**(같은 화면, 고객 고정 필터) · Remediation · Portal access | `customers.md`, `integrations.md` |
+| └ Customer 상세 `/customers/{id}` | Overview · Org & owners · **People**(D-29) · AWS accounts · Integrations · **Monitoring**(같은 화면, 고객 고정 필터) · Remediation · Portal access | `customers.md`, `integrations.md` |
 | └ New customer `/customers/new` | 5단계 마법사 | `customer-onboarding.md` |
 | **Settings** | MSP defaults · Severity mapping · Suppression · Integrations(전체) · Users · Audit log | `settings.md`, `integrations.md` |
 | 고객 포털 `/portal` (별도 셸) | Status · Incidents · Contacts · Maintenance | `customer-portal.md` |
@@ -35,7 +35,8 @@ AlarmOps   Incidents   Monitoring   On-call   Customers   Settings        [Custo
 | 4 | Resource detail | 지표별 값과 출처 층, 변경 미리보기, 드리프트 복원/수용, 이력 | 민재(P4-3, P4-5) | Monitoring 행, 인시던트 상세 |
 | 5 | On-call team (D-28) | 팀당 한 화면: 로테이션 순서 하나, 이번·다음 주 당번, 대체·교환(상대 수락), 프리셋 에스컬레이션(Standard/Urgent/Quiet, Advanced 접힘), 사용 고객사 | 하은(모바일), 준호(P2-2, P2-4) | On-call › Teams, 고객 상세, 온보딩 4단계 |
 | 6 | (5에 합쳐짐) | — | — | — |
-| 7 | Channel verification | 연락처 채널별 확인 상태, 링크 발송/수동 확인 | 준호 | On-call › Contacts, 온보딩 4단계 |
+| 7 | Contacts (D-29) | MSP 직원만, 팀별 묶음, 기본 Needs action. 채널 확인·일괄 링크 | 준호 | On-call › Contacts, 온보딩 4단계 |
+| 7b | Customer › People (D-29) | 고객 담당자를 Customer › Project › Service 트리에 붙임, 상속 표시, 역할(Notify only/Approver/Portal user). 알림만, 로테이션 없음. 고객 횡단 할 일은 Customers 목록 카드 | 준호 | Customer 상세 탭, Customers 목록 카드 |
 | 8 | Maintenance windows | 점검 창 생성·해제. SEV-1은 통과(D-17) 고정 안내 | 준호, 민재, 소연(grant) | On-call › Maintenance, Slack 1h 뮤트, 포털 |
 | 9 | Integrations | CloudWatch(계정·역할) / Prometheus / Grafana 연동, 토큰 1회 표시·회전 | 준호, 민재(P4-1) | 고객 상세 탭, Settings › Integrations, 온보딩 3단계 |
 | 10 | Customer onboarding wizard | 고객사 → 조직 → AWS 계정 + IAM 역할 → On-call(팀·프리셋 2문항) → 확인 | 준호(P2-1), 민재(P4-1) | Customers › New customer |
