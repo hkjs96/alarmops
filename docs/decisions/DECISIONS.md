@@ -1,6 +1,6 @@
 # 확정된 결정 (AlarmOps PoC)
 
-계획서: AIOps PoC 계획서 v3 (https://claude.ai/artifact/3Kvfvq3tHmGBiDp3WhVxf4). 결정이 바뀌면 이 파일과 계획서를 같이 고친다.
+계획서: AlarmOps PoC 계획서 v3 (https://claude.ai/artifact/3Kvfvq3tHmGBiDp3WhVxf4). 결정이 바뀌면 이 파일과 계획서를 같이 고친다.
 
 | ID | 결정 | 이유 | 확정일 |
 |---|---|---|---|

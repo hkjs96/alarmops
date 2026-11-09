@@ -1,6 +1,6 @@
 ---
 name: infra
-description: AWS IaC(SAM, 서울 리전), 고객 연결 CloudFormation 스택(Reader·EventForwarder·AlarmWriter), GitHub Actions 배포 파이프라인 작업. infra/ 와 .github/ 변경이 필요할 때 사용.
+description: AWS IaC(SAM, 서울 리전), 고객 연결 CloudFormation 스택(Reader·EventForwarder 필수, AlarmWriter·TagWriter·Remediator 선택), GitHub Actions 배포 파이프라인 작업. infra/ 와 .github/ 변경이 필요할 때 사용.
 tools: Read, Edit, Write, Grep, Glob, Bash
 model: sonnet
 isolation: worktree
