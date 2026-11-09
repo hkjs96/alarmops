@@ -29,6 +29,7 @@
 | D-23 | 1분 틱은 PoC에서 Supabase pg_cron(+pg_net)으로 엔드포인트 호출. AWS 이전 때 EventBridge Scheduler로 교체 | PoC 속도 우선, 교체 범위는 호출 1곳 | Q-API-02 |
 | D-24 | Ack는 인시던트 단위만. 한 번 누르면 묶인 알림 전체가 확인되고 에스컬레이션이 멈춤. 알림 단위 Ack는 PoC에서 제공하지 않음 | 담당자는 사건을 보고 대응함, 버튼 하나가 단순 | Q-DM-05 |
 | D-25 | Prometheus/Grafana `critical`은 SEV-2. SEV-1은 고객이 명시적으로 지정한 경우만 | SEV-1은 점검 창도 통과(D-17)하므로 남용 방지 | Q-DM-08 |
+| D-26 | 상단 메뉴는 Incidents / Monitoring / On-call / Customers / Settings. Monitoring은 독립 메뉴(고객사 횡단 알람·임계치·"Needs review" 리소스), 고객사 상세에는 같은 Monitoring 화면을 그 고객사로 필터해 보여 준다 | 알람 운영자(민재)는 고객사를 가로질러 일하고, 고객사 관점은 필터로 충분. 화면 하나만 유지 | 11/9 (사용자 승인) |
 
 ## 이전을 쉽게 만드는 개발 원칙 (D-09에 딸림)
 1. Postgres 표준 기능만. Supabase Auth·Realtime·Storage·Edge Functions, `auth.uid()` 기반 권한 규칙 금지. 로그인은 앱에서 Google SSO.
@@ -39,7 +40,7 @@
 6. DB 접근은 Prisma 한 경로, 스키마 변경은 prisma migrate로만.
 
 ## 아직 정하지 않은 것 (1주차)
-- 메뉴 구성, 콘솔 사용자 권한(역할·범위·토글), 지문 규칙(소스별), Ack 단위(인시던트/알림), 기본 심각도·사일런스 규칙, Claude 계정 종류와 요금제
+- ~~메뉴 구성~~(D-26), 콘솔 사용자 권한(역할·범위·토글), 지문 규칙(소스별), Ack 단위(인시던트/알림), 기본 심각도·사일런스 규칙, Claude 계정 종류와 요금제
 
 ### 명세 추출(11/9)에서 나온 Q-01~Q-07
 모두 결정됨 → D-15~D-20, D-08(Q-03: 알람 이름에서 임계치 제외).
