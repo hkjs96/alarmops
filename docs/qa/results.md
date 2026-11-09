@@ -34,3 +34,50 @@
 - 기존 오버라이드 목록과 사유, 시간 단위 타임라인(부분 시간대 대타가 시각적으로 보임).
 
 판정: v2가 하은(T1)·준호(T3)에는 확실히 개선(쉬운 말, 한 화면, PENDING 상태). 그러나 T2(“지금 이게 터지면 누가?”)는 두 버전 모두 화면만으로 정답 불가이며 v2는 틀린 답을 자신 있게 유도함. 문제 1~3 해결 전 파일럿 불가(P1).
+
+## On-call·Contacts 재점검 (v3)
+
+평가: 독립 UX 평가자, 2026-11-09, `docs/ui/mockups/index.html` (브랜치 docs/ui-specs), 1440·390 스크린샷만 근거로 판단(명세·결정 미열람).
+
+### 과제 결과
+
+| 과제 | 성공 | 클릭 | 망설인 지점 | 그럴듯한 오답 | 확신(1-5) |
+|---|---|---|---|---|---|
+| T1 하은(폰) 토요일 근무 대타·교환 | 예 | 2~3 | 폰에서 "Who gets paged for…" 박스가 맨 위에 있어 Cover 버튼까지 스크롤해야 함. PENDING 배너와 "You stay on call" 문구는 명확 | 요청만 보내면 이미 빠진 줄 앎 → 배너가 막아 줌 | 5 |
+| T2 payments-db-1이 지금 터지면 누가·어떻게·언제·고객 누구에게 | 부분 | 0(On-call) / 탭 3개 비교 | 탭마다 답이 다름(아래 불일치 1). Resource detail은 orders-api-1(Hanbit)만 보여서 교차 확인이 불가 | Incident 타임라인을 보면 "Slack→2분 SMS→7분 Junho 전화(Standard)"가 맞다고 결론냄. On-call은 "즉시 전화→5분 Junho(Urgent)" | 2 |
+| T3 준호 신규 고객 온콜 온보딩 | 부분 | 3~4 | 팀 카드에 Infra "Haeun, Junho, Minjae"(3명)라고 나오는데 On-call은 6명. Data 팀 "Sora, Taeyang"인데 Contacts의 Data 팀은 Yuna Kwon 외 1명이고 Sora는 Infra 소속 | 팀원 구성을 잘못 믿고 엉뚱한 팀을 고름. 고객 담당자는 "Contacts page"에 추가하라고 안내하지만 Contacts는 직원 전용 | 3 |
+| T4 민재 Mirae Pay만 Slack→전화 시점 변경 | 아니오 | ? | "Advanced: edit timing"이 팀 프리셋 수준에 있음. Mirae Pay는 Urgent(즉시 전화, Slack 없음)인데 사건 화면은 "Mirae Pay — Critical" 정책에 Slack 단계가 있음. 고객 단위 편집 진입점을 찾을 수 없음 | 팀의 Urgent 타이밍을 고쳐서 같은 프리셋을 쓰는 다른 고객까지 바꿈 | 1 |
+| T5 준호 미인증 채널 전체 찾아 링크 발송 | 부분 | 직원 1 + 고객 1~2 | 직원과 고객이 두 화면으로 나뉨(Contacts "(5)" / Customers "Send links to all 7"). 숫자가 4·5·7·26/32로 서로 맞춰지지 않음. "Slack not set"은 링크로 해결되지 않음 | 직원 쪽 버튼 하나로 전부 처리했다고 생각함 | 3 |
+| T6 Daon Retail Checkout 전용 고객 담당자 + 승인권 | 부분 | 4~5 | 고객 전환 → 트리에서 서비스 선택 → "Add person here" → Approver + "This service only" 흐름은 좋음. 다만 예시 트리의 Checkout은 Mirae Pay 소속이고 Daon의 서비스명은 화면에 없음 | Mirae Pay › Checkout에 추가해 버림. 승인 채널이 People에서는 "Slack or email", 사건 화면에서는 "Slack only, Operator or higher"로 다름 | 3 |
+| T7 6명 팀에서 지금 4번째 | 부분 | 1(펼치기) | 4번째부터는 "+3 more (Jiwoo, Sora, Dohyun)"로 접혀 있고 번호가 없음. 09:00 전후로 순서가 바뀜 | 접힌 이름의 나열 순서를 4·5·6번으로 볼지 확신할 수 없음. Fri 13 부분 대타가 순번에 영향을 주는지 알 수 없음 | 3 |
+
+### 탭 간 데이터 불일치
+
+| # | 내용 | 위치 |
+|---|---|---|
+| 1 | Mirae Pay 호출 방식: On-call은 Urgent "즉시 Haeun 전화→5분 Junho→10분 전원→20분 종료". Incident 헤더는 "Haeun called 03:12 → Junho at 03:17 · Urgent". 타임라인과 Escalation 패널은 "Slack 03:12 → SMS 03:14 → Junho 전화 03:19 → 전원 03:24"(Standard 타이밍) + 정책명 "Mirae Pay — Critical" | On-call / Incident detail |
+| 2 | Infra 팀 6명 vs 온보딩 카드 3명. Data 팀 2명(Yuna Kwon…) vs 온보딩 "Sora, Taeyang" | On-call / Contacts / Onboarding |
+| 3 | 원격 수정 승인: "Slack or email (D-15)" vs "Slack only (#mirae-ops), Operator or higher" | People / Incident |
+| 4 | 미인증 건수: 사이드 배지 4, 버튼 (5), Needs action 4, 고객 7, Mirae Pay People 배지 2 vs Customers 표 PEOPLE "6 2" | Contacts / Customers / People |
+| 5 | 이름이 비슷해 혼동됨: Yuna Seo(고객) / Yuna Kwon(직원), Dohyun Kang(직원) / Dohyun Yoon(고객) | 전반 |
+| 6 | Resource detail 예시가 payments-db-1이 아니어서 T2 교차 확인 불가 | Resource detail |
+
+### 용어·화면·확장성
+
+| 구분 | 내용 |
+|---|---|
+| 용어 | "(D-15)"처럼 내부 결정 번호가 화면에 노출됨. preset, inherit, PRD, M of N, Owner snapshot, Remediator role 등 |
+| 레이아웃 | 390px에서 가로 스크롤은 없음. 다만 하은에게는 "Who gets paged" 박스가 Cover 버튼보다 위에 있음. Customers 표는 390px에서 열이 잘림. 상단 내비게이션 "On-call"이 잘림 |
+| 확장성 50+명 | 순번이 "+N more"로 접혀 있고 번호가 없음. Contacts는 팀별 카드를 펼치는 방식이라 검색·필터·일괄 선택이 없음 |
+| 확장성 30+고객 | "Who uses this team"을 고객별 카드로 나열하는 구조. 미인증 고객 담당자는 "+4 more" 접힘만 있음. 프리셋 3개를 공유하므로 고객별 예외 타이밍을 넣을 자리가 없음 |
+
+### 우선순위
+
+- P1: 탭 간 호출 방식 불일치(불일치 1). T2에서 틀린 답을 자신 있게 유도함.
+- P1: 고객 한 곳만 타이밍을 바꾸는 경로가 없고, 바꾸면 다른 고객에 번질 위험(T4).
+- P2: 온보딩의 팀 구성 표시 오류, 고객 담당자 추가 위치 안내 오류(Contacts가 아니라 People).
+- P2: 미인증 건수가 화면마다 다르고 직원·고객 일괄 발송이 나뉘어 있음.
+- P2: 승인 채널·권한 문구 불일치, 내부 결정 번호(D-15) 노출.
+- P2: 순번 4번째 이하에 번호 없음. 대규모 팀·고객에 대비한 검색·필터 없음.
+
+판정: 하은(T1)은 파일럿 수준에 도달함. 하지만 "지금 터지면 누가 어떻게"(T2)는 탭끼리 서로 다른 답을 보여 주고, 고객별 타이밍 변경(T4)은 경로가 없음. P1 두 건을 해결하기 전에는 파일럿 불가.
