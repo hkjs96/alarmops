@@ -2,7 +2,7 @@
 
 클라우드 알람을 만들고 관리하는 것부터, 울린 알람을 인시던트로 묶어 온콜 담당자에게 전달하고 대응하는 것까지 하나로 하는 MSP용 제품(PoC). 이름은 PoC용이며 바뀔 수 있다.
 
-alert-hub와 aws-alert-manager를 하나로 재구축하는 AIOps PoC. 목표: 8주 안에 파일럿 고객사 1곳 실운영.
+alert-hub와 aws-alert-manager를 하나로 재구축하는 AlarmOps PoC. 목표: 8주 안에 파일럿 고객사 1곳 실운영.
 
 ## 구조
 | 경로 | 내용 | 담당 에이전트 |

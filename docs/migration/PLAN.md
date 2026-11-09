@@ -11,7 +11,7 @@
 | 알림·인시던트 이력 | 두 저장소 | PoC에서는 옮기지 않음(필요 시 읽기 전용 보관) | – |
 
 ## 고객 계정 전환 (실고객, 회사 PC에서 사람이 SSO·MFA로)
-1. 새 고객 연결 스택 배포(Reader·EventForwarder, 필요 시 AlarmWriter). ExternalId는 고객사별로 새로 발급.
+1. 새 고객 연결 스택 배포(Reader·EventForwarder, 필요 시 AlarmWriter·TagWriter·Remediator). ExternalId는 고객사별로 새로 발급.
 2. 기존 엔진이 만든 알람(`ManagedBy=AlarmManager`)은 이름에 임계치가 들어 있다(D-08과 다름). 목록과 임계치를 기록한 뒤 새 이름(리소스 + 지표)으로 만들고, 새 알람이 정상 동작하는 것을 확인한 다음 옛 알람을 지운다.
 3. 수신을 새 경로로 바꾼 뒤 일정 기간 두 경로를 비교해 누락 0건을 확인한다.
 4. 기존 역할(ExternalId 없음)과 alert-hub SNS 구독을 제거한다.
