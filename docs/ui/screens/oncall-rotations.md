@@ -24,3 +24,7 @@ GET/POST `/rotations?scope=MSP|CUSTOMER&customerId=`, PATCH `/rotations/{id}` (m
 - 내 교대 행(지금 포함)에 "Cover or swap", 남의 행에 "Swap with me". 폼 When이 고른 교대로 바뀜.
 - "Edit members & order": 순서 ↑↓, 제거, 추가, 인계 시각. 저장 전 영향 고객 목록 + 다음 교대 before → after. everyone 단계는 바뀌지 않음을 설명. 감사 로그 기록.
 - Customer rotations 표는 390px에서 카드, 멤버 배지 줄바꿈(Notify only 멤버 표시).
+
+## 순서 변경 규칙 (v5 점검 P2-3)
+- 순서·인원 변경은 다음 교대 시각부터 적용한다. 지금 진행 중인 교대와 대타 요청이 걸린 교대는 바뀌지 않는다.
+- 미리 보기에서 그런 교대는 "유지됨"으로 표시하고, 바꾸려면 따로 대타·교환으로 처리하게 안내한다.
