@@ -25,6 +25,10 @@
 | D-19 | 임계치 기본값 계층은 4단계: 코드 기본값 < MSP 전체 기본값(콘솔) < 고객사 기본값 < 리소스별 값(콘솔 또는 고객 태그, 태그 우선). 환경변수 기본값 계층 없음. 모든 값의 출처를 콘솔에 표시 | 재배포 없이 바꾸고 출처가 보이게 | 11/9 (Q-06) |
 | D-20 | 에스컬레이션 반복 횟수는 정책별 설정, 기본 1회 반복 | 마지막 단계에서 멈추는 문제 | 11/9 (Q-07) |
 | D-21 | 제품 이름은 AlarmOps(PoC용, 바뀔 수 있음) | 기능이 드러나는 이름 | 11/9 |
+| D-22 | SQS 큐는 2개: 들어온 알림(alert-events), 알람 작업(alarm-commands). 각각 DLQ | "SQS만 쓴다"는 기술 한정이지 개수 제한이 아님 | Q-API-01 |
+| D-23 | 1분 틱은 PoC에서 Supabase pg_cron(+pg_net)으로 엔드포인트 호출. AWS 이전 때 EventBridge Scheduler로 교체 | PoC 속도 우선, 교체 범위는 호출 1곳 | Q-API-02 |
+| D-24 | Ack는 인시던트 단위만. 한 번 누르면 묶인 알림 전체가 확인되고 에스컬레이션이 멈춤. 알림 단위 Ack는 PoC에서 제공하지 않음 | 담당자는 사건을 보고 대응함, 버튼 하나가 단순 | Q-DM-05 |
+| D-25 | Prometheus/Grafana `critical`은 SEV-2. SEV-1은 고객이 명시적으로 지정한 경우만 | SEV-1은 점검 창도 통과(D-17)하므로 남용 방지 | Q-DM-08 |
 
 ## 이전을 쉽게 만드는 개발 원칙 (D-09에 딸림)
 1. Postgres 표준 기능만. Supabase Auth·Realtime·Storage·Edge Functions, `auth.uid()` 기반 권한 규칙 금지. 로그인은 앱에서 Google SSO.
