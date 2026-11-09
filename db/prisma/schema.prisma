@@ -1,0 +1,1306 @@
+// AlarmOps PoC schema — implements docs/DATA-MODEL.md (draft, day 4).
+// Postgres standard features only (D-09 principle 1). Schema changes only via `prisma migrate` (D-10).
+// Partial unique indexes, CHECK constraints and NULLS NOT DISTINCT that Prisma cannot express
+// are added as raw SQL at the end of migrations/0001_init/migration.sql.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [citext]
+}
+
+// ───────────────────────────── enums ─────────────────────────────
+
+enum ConsoleRole {
+  VIEWER
+  OPERATOR
+  ADMIN
+}
+
+enum UserStatus {
+  PENDING
+  ACTIVE
+  DISABLED
+}
+
+enum ContactKind {
+  INTERNAL
+  CUSTOMER
+}
+
+enum ScopeType {
+  CUSTOMER
+  PROJECT
+  SERVICE
+}
+
+enum AssignmentScope {
+  CUSTOMER
+  PROJECT
+  SERVICE
+  ACCOUNT
+}
+
+enum ContactScopeRole {
+  NOTIFY
+  APPROVER
+  PORTAL_USER
+}
+
+enum ResponderRole {
+  PAGEABLE
+  NOTIFY_ONLY
+}
+
+enum ResponderSource {
+  TEMPLATE
+  DIRECT
+}
+
+enum Environment {
+  PRD
+  STG
+  DEV
+}
+
+enum RoleStatus {
+  UNKNOWN
+  OK
+  DENIED
+  MISSING
+}
+
+enum SourceKind {
+  CLOUDWATCH
+  PROMETHEUS
+  GRAFANA
+}
+
+enum EventState {
+  FIRING
+  RESOLVED
+  INSUFFICIENT_DATA
+}
+
+enum AlertStatus {
+  FIRING
+  ACKNOWLEDGED
+  RESOLVED
+  INSUFFICIENT_DATA
+}
+
+enum Severity {
+  SEV_1
+  SEV_2
+  SEV_3
+  SEV_4
+  SEV_5
+}
+
+enum Decision {
+  NOTIFY
+  SUPPRESS
+  DEFER
+}
+
+enum GroupStatus {
+  OPEN
+  CLOSED
+  FINALIZED
+  DELIVERED
+}
+
+enum IncidentStatus {
+  TRIGGERED
+  ACKNOWLEDGED
+  RESOLVED
+}
+
+enum ResolvedVia {
+  MANUAL
+  AUTO
+  RECONCILE
+}
+
+enum IncidentEventKind {
+  TRIGGERED
+  MERGED
+  ACKED
+  RESOLVED
+  ESCALATED
+  NOTIFIED
+  RENOTIFIED
+  SUPPRESSED
+  MUTED
+  REMEDIATION
+  NOTE
+}
+
+enum ActorType {
+  USER
+  CONTACT
+  SYSTEM
+  PROVIDER
+}
+
+enum ResolutionVia {
+  MANUAL
+  AUTO
+}
+
+enum ResolutionKind {
+  RESTART
+  CONFIG
+  AUTO
+  OTHER
+}
+
+enum MaintenanceScope {
+  CUSTOMER
+  PROJECT
+  SERVICE
+  ACCOUNT
+  RESOURCE_TYPE
+  ALERT
+}
+
+enum MonitoringTag {
+  ON
+  OFF
+  ABSENT
+}
+
+enum MonitoringState {
+  MONITORED
+  NEEDS_REVIEW
+  NOT_MONITORED
+  DELETED
+}
+
+enum TagSetBy {
+  CUSTOMER
+  CONSOLE
+}
+
+enum DefaultLevel {
+  MSP
+  CUSTOMER
+}
+
+enum Statistic {
+  Average
+  Sum
+  Minimum
+  Maximum
+  SampleCount
+}
+
+enum ValueSource {
+  CODE
+  MSP
+  CUSTOMER
+  CONSOLE
+  TAG
+}
+
+enum AlarmState {
+  OK
+  ALARM
+  INSUFFICIENT_DATA
+}
+
+enum DriftStatus {
+  IN_SYNC
+  DRIFTED
+  MISSING
+  EXTERNAL_CHANGE
+}
+
+enum ChangeTarget {
+  ALARM
+  CUSTOMER_DEFAULT
+  MSP_DEFAULT
+  SEVERITY
+  MONITORING_TAG
+}
+
+enum ChangeField {
+  THRESHOLD
+  EVAL
+  OFF
+  SEVERITY
+  MONITORING
+}
+
+enum ChangeActorType {
+  USER
+  SYSTEM
+  EXTERNAL
+}
+
+enum ApplyStatus {
+  PENDING
+  APPLIED
+  FAILED
+  SKIPPED_TAG_WINS
+}
+
+enum SyncMode {
+  DAILY
+  TAG_RECONCILE
+  ON_DEMAND
+  CLOUDTRAIL
+}
+
+enum SyncStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+  PARTIAL
+}
+
+enum RemediationMode {
+  NOTIFY_ONLY
+  APPROVAL_REQUIRED
+}
+
+enum RemediationAction {
+  EC2_STOP
+  RDS_STOP
+  ELB_DELETE
+}
+
+enum RemediationStatus {
+  NOTIFIED
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  EXPIRED
+  EXECUTING
+  SUCCEEDED
+  FAILED
+}
+
+enum RotationScope {
+  MSP
+  CUSTOMER
+}
+
+enum Cadence {
+  DAILY
+  WEEKLY
+}
+
+enum OverrideKind {
+  COVER
+  SWAP
+}
+
+enum OverrideStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  CANCELLED
+}
+
+enum BulkChangeKind {
+  LEAVE_REPLACE
+  ADD_STAFF
+  TEMPLATE_UPDATE
+}
+
+enum PagingStyle {
+  ALL_AT_ONCE
+  CUSTOMER_ROTATION
+  SHARED_ROTATION
+  CUSTOM
+}
+
+enum PagingPlan {
+  STANDARD
+  URGENT
+  QUIET
+}
+
+enum StepTargetType {
+  PERSON
+  ROTATION
+  ALL_RESPONDERS
+}
+
+enum ChannelKind {
+  SLACK_BOT
+  SLACK_WEBHOOK
+  EMAIL
+}
+
+enum VerifyChannel {
+  EMAIL
+  SMS
+  SLACK
+}
+
+enum NotificationPurpose {
+  INITIAL
+  ESCALATION
+  RENOTIFY
+  RESOLVED
+  DIGEST
+  REMEDIATION_APPROVAL
+}
+
+enum NotificationChannelType {
+  SLACK_BOT
+  SLACK_WEBHOOK
+  SLACK_DM
+  EMAIL
+  SMS
+  VOICE
+}
+
+enum JobStatus {
+  QUEUED
+  SENDING
+  SENT
+  FAILED
+  SKIPPED
+}
+
+enum LogStatus {
+  SENT
+  FAILED
+}
+
+enum SlackMessageKind {
+  INCIDENT
+  DIGEST
+  DM
+  REMEDIATION
+}
+
+enum AuditActorType {
+  USER
+  CONTACT
+  SYSTEM
+  SLACK
+}
+
+enum TickStatus {
+  OK
+  ERROR
+}
+
+// ───────────────────── 1. org · people · access ─────────────────────
+
+model MspOrg {
+  id                    String   @id @default("msp")
+  name                  String
+  defaultSlackChannelId String?
+  createdAt             DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime @updatedAt @db.Timestamptz(3)
+}
+
+model User {
+  id          String      @id @default(cuid())
+  email       String      @unique @db.Citext
+  name        String
+  customerId  String?
+  customer    Customer?   @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  role        ConsoleRole @default(OPERATOR) // Q-DM-02 pending
+  seeAll      Boolean     @default(false)
+  status      UserStatus  @default(PENDING)
+  lastLoginAt DateTime?   @db.Timestamptz(3)
+  createdAt   DateTime    @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime    @updatedAt @db.Timestamptz(3)
+  contact     Contact?
+  bulkChanges BulkChange[]
+
+  @@index([customerId])
+}
+
+model Contact {
+  id               String      @id @default(cuid())
+  kind             ContactKind
+  customerId       String? // CHECK: INTERNAL ⇒ null, CUSTOMER ⇒ not null (raw SQL)
+  customer         Customer?   @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  userId           String?     @unique
+  user             User?       @relation(fields: [userId], references: [id])
+  name             String
+  email            String?
+  phone            String? // E.164
+  slackUserId      String? // partial UQ where not null (raw SQL)
+  emailVerifiedAt  DateTime?   @db.Timestamptz(3)
+  phoneVerifiedAt  DateTime?   @db.Timestamptz(3)
+  slackVerifiedAt  DateTime?   @db.Timestamptz(3)
+  emailVerifiedVia String?
+  phoneVerifiedVia String?
+  slackVerifiedVia String?
+  active           Boolean     @default(true)
+  createdAt        DateTime    @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime    @updatedAt @db.Timestamptz(3)
+
+  scopes          ContactScope[]
+  responders      Responder[]
+  templateMembers ResponderTemplateMember[]
+  rotationMembers RotationMember[]
+  overrides       Override[]
+  leaves          Leave[]                   @relation("LeaveContact")
+  leaveCovers     Leave[]                   @relation("LeaveReplacement")
+  verifications   ChannelVerification[]
+  remediationDecisions RemediationRequest[]
+
+  @@index([customerId])
+  @@index([kind])
+}
+
+model ContactScope {
+  id         String           @id @default(cuid())
+  customerId String
+  customer   Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  contactId  String
+  contact    Contact          @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  scopeType  ScopeType
+  scopeId    String
+  role       ContactScopeRole
+  createdAt  DateTime         @default(now()) @db.Timestamptz(3)
+
+  @@unique([contactId, scopeType, scopeId, role])
+  @@index([customerId, scopeType, scopeId])
+}
+
+model Responder {
+  customerId String
+  customer   Customer           @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  contactId  String
+  contact    Contact            @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  role       ResponderRole      @default(PAGEABLE)
+  source     ResponderSource    @default(DIRECT)
+  templateId String?
+  template   ResponderTemplate? @relation(fields: [templateId], references: [id])
+  createdBy  String?
+  createdAt  DateTime           @default(now()) @db.Timestamptz(3)
+
+  @@id([customerId, contactId])
+  @@index([contactId])
+}
+
+model ResponderTemplate {
+  id         String                    @id @default(cuid())
+  name       String                    @unique
+  updatedBy  String?
+  updatedAt  DateTime                  @updatedAt @db.Timestamptz(3)
+  version    Int                       @default(0)
+  members    ResponderTemplateMember[]
+  responders Responder[]
+  customers  Customer[]
+}
+
+model ResponderTemplateMember {
+  templateId String
+  template   ResponderTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  contactId  String
+  contact    Contact           @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@id([templateId, contactId])
+}
+
+model Customer {
+  id                  String             @id @default(cuid())
+  name                String             @unique
+  isInternal          Boolean            @default(false)
+  loginDomains        String[]           @default([])
+  portalGrants        String[]           @default([])
+  defaultGroupWaitSec Int?
+  responderTemplateId String?
+  responderTemplate   ResponderTemplate? @relation(fields: [responderTemplateId], references: [id], onDelete: SetNull)
+  createdAt           DateTime           @default(now()) @db.Timestamptz(3)
+  updatedAt           DateTime           @updatedAt @db.Timestamptz(3)
+
+  users                User[]
+  contacts             Contact[]
+  contactScopes        ContactScope[]
+  responders           Responder[]
+  projects             Project[]
+  services             Service[]
+  cloudAccounts        CloudAccount[]
+  assignments          Assignment[]
+  routingRules         RoutingRule[]
+  integrationSources   IntegrationSource[]
+  resources            Resource[]
+  thresholdDefaults    ThresholdDefault[]
+  managedAlarms        ManagedAlarm[]
+  thresholdChanges     ThresholdChange[]
+  alarmSyncRuns        AlarmSyncRun[]
+  remediationPolicy    RemediationPolicy?
+  remediationRequests  RemediationRequest[]
+  rotations            Rotation[]
+  pagingConfigs        PagingConfig[]
+  maintenanceWindows   MaintenanceWindow[]
+  notificationChannels NotificationChannel[]
+}
+
+model Project {
+  id         String    @id @default(cuid())
+  customerId String
+  customer   Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  name       String
+  services   Service[]
+
+  @@unique([customerId, name])
+}
+
+model Service {
+  id            String         @id @default(cuid())
+  customerId    String
+  customer      Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  projectId     String
+  project       Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name          String
+  cloudAccounts CloudAccount[]
+
+  @@unique([projectId, name])
+  @@index([customerId])
+}
+
+model CloudAccount {
+  id                    String       @id @default(cuid())
+  customerId            String
+  customer              Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  serviceId             String?
+  service               Service?     @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+  awsAccountId          String       @unique @db.Char(12)
+  alias                 String?
+  environment           Environment?
+  regions               String[]     @default(["ap-northeast-2"])
+  externalId            String       @unique
+  readerRoleArn         String
+  eventForwarderRoleArn String
+  alarmWriterRoleArn    String?
+  tagWriterRoleArn      String?
+  remediatorRoleArn     String?
+  alarmWriterEnabled    Boolean      @default(false)
+  tagWriterEnabled      Boolean      @default(false)
+  remediatorEnabled     Boolean      @default(false)
+  readerStatus          RoleStatus   @default(UNKNOWN)
+  eventForwarderStatus  RoleStatus   @default(UNKNOWN)
+  alarmWriterStatus     RoleStatus   @default(UNKNOWN)
+  tagWriterStatus       RoleStatus   @default(UNKNOWN)
+  remediatorStatus      RoleStatus   @default(UNKNOWN)
+  lastCheckedAt         DateTime?    @db.Timestamptz(3)
+  firstEventAt          DateTime?    @db.Timestamptz(3)
+  lastEventAt           DateTime?    @db.Timestamptz(3)
+  stackVersion          String?
+  createdAt             DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime     @updatedAt @db.Timestamptz(3)
+
+  resources     Resource[]
+  managedAlarms ManagedAlarm[]
+  syncRuns      AlarmSyncRun[]
+
+  @@index([customerId])
+}
+
+model Assignment {
+  id         String          @id @default(cuid())
+  customerId String
+  customer   Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  scopeType  AssignmentScope
+  scopeId    String
+  contactId  String
+  order      Int
+
+  @@unique([scopeType, scopeId, contactId])
+  @@index([customerId])
+}
+
+model RoutingRule {
+  id             String        @id @default(cuid())
+  customerId     String
+  customer       Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  priority       Int
+  namespace      String?
+  metric         String?
+  resource       String?
+  severities     String[]      @default([])
+  serviceId      String?
+  pagingConfigId String?
+  pagingConfig   PagingConfig? @relation(fields: [pagingConfigId], references: [id], onDelete: SetNull)
+  enabled        Boolean       @default(true)
+  createdAt      DateTime      @default(now()) @db.Timestamptz(3)
+
+  @@index([customerId, priority])
+}
+
+// ───────────────────── 2. ingest · alerts · incidents ─────────────────────
+
+model IntegrationSource {
+  id             String     @id @default(cuid())
+  customerId     String
+  customer       Customer   @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  kind           SourceKind
+  name           String
+  tokenHash      String?    @unique
+  tokenPrefix    String?    @db.Char(4)
+  tokenRotatedAt DateTime?  @db.Timestamptz(3)
+  enabled        Boolean    @default(true)
+  /// Security B-2: accept `?token=` only when true. Query strings land in access logs; header is the default.
+  allowQueryToken Boolean   @default(false)
+  lastReceivedAt DateTime?  @db.Timestamptz(3)
+  rawEvents      RawEvent[]
+
+  @@unique([customerId, name])
+}
+
+model IngestRejection {
+  id           String   @id @default(cuid())
+  receivedAt   DateTime @default(now()) @db.Timestamptz(3)
+  customerId   String?
+  sourceId     String?
+  kind         String
+  reason       String
+  awsAccountId String?
+  topicArn     String?
+  title        String?
+
+  @@index([receivedAt])
+}
+
+model RawEvent {
+  id                 String             @id @default(cuid())
+  dedupKey           String             @unique
+  customerId         String?
+  sourceId           String?
+  integrationSource  IntegrationSource? @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  source             SourceKind
+  awsAccountId       String?
+  region             String?
+  fingerprint        String
+  fingerprintVersion Int
+  state              EventState
+  previousState      String?
+  severity           Severity
+  severityRaw        String?
+  occurredAt         DateTime           @db.Timestamptz(3)
+  receivedAt         DateTime           @db.Timestamptz(3)
+  decision           Decision?
+  decisionReason     String?
+  finalAction        Decision?
+  finalReason        String?
+  finalizedAt        DateTime?          @db.Timestamptz(3)
+  groupId            String?
+  group              AlertGroup?        @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  alertId            String
+  alert              Alert              @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  raw                Json
+  parseError         String?
+
+  @@index([customerId, occurredAt(sort: Desc)])
+  @@index([alertId, occurredAt(sort: Desc)])
+  @@index([groupId])
+}
+
+model Alert {
+  id                 String          @id @default(cuid())
+  /// Identity is (customerId, fingerprint): UQ NULLS NOT DISTINCT in raw SQL (security B-4/B-6).
+  fingerprint        String
+  fingerprintVersion Int
+  customerId         String?
+  sourceId           String?
+  source             SourceKind
+  awsAccountId       String?
+  region             String?
+  resourceId         String?
+  resource           Resource?       @relation(fields: [resourceId], references: [id], onDelete: SetNull)
+  resourceType       String?
+  metricKey          String?
+  namespace          String?
+  title              String
+  status             AlertStatus
+  severity           Severity
+  severityRaw        String?
+  value              Decimal?
+  threshold          Decimal?
+  comparison         String?
+  lastNotifiedAt     DateTime?       @db.Timestamptz(3)
+  episodeOpen        Boolean         @default(false)
+  episodeStartedAt   DateTime?       @db.Timestamptz(3)
+  episodeNotified    Boolean         @default(false)
+  recentEpisodes     DateTime[]      @default([]) @db.Timestamptz(3)
+  quarantinedUntil   DateTime?       @db.Timestamptz(3)
+  fireCount          Int             @default(0)
+  firstSeenAt        DateTime        @db.Timestamptz(3)
+  lastEventAt        DateTime        @db.Timestamptz(3)
+  version            Int             @default(0)
+  rawEvents          RawEvent[]
+  incidents          IncidentAlert[]
+
+  @@index([customerId, status])
+  @@index([customerId, lastEventAt(sort: Desc)])
+  @@index([awsAccountId])
+  @@index([fingerprint])
+}
+
+model AlertGroup {
+  id           String      @id // g-{sha1(groupKey)[:16]}-{yyyymmddHHMMSS} (G-4)
+  groupKey     String // partial UQ where status = 'OPEN' (raw SQL)
+  customerId   String?
+  severity     Severity
+  status       GroupStatus @default(OPEN)
+  openedAt     DateTime    @db.Timestamptz(3)
+  groupWaitSec Int
+  closeAt      DateTime    @db.Timestamptz(3)
+  pauseUntil   DateTime?   @db.Timestamptz(3)
+  staleAfter   DateTime    @db.Timestamptz(3)
+  deliveredAt  DateTime?   @db.Timestamptz(3)
+  sweptReason  String?
+  version      Int         @default(0)
+  rawEvents    RawEvent[]
+
+  @@index([status, closeAt])
+}
+
+model Incident {
+  id                 String           @id // inc-{sha1(axis)[:12]}-{14 digits} (I-2)
+  axis               String // partial UQ where isMergeTarget (raw SQL)
+  customerId         String?
+  number             Int              @default(autoincrement())
+  title              String
+  severity           Severity
+  status             IncidentStatus   @default(TRIGGERED)
+  triggeredAt        DateTime         @db.Timestamptz(3)
+  acknowledgedAt     DateTime?        @db.Timestamptz(3)
+  resolvedAt         DateTime?        @db.Timestamptz(3)
+  acknowledgedBy     String?
+  resolvedBy         String?
+  resolvedVia        ResolvedVia?
+  mttaSec            Int?
+  mttrSec            Int?
+  memberCount        Int              @default(0)
+  eventCount         Int              @default(0)
+  accountIds         String[]         @default([])
+  resourceTypes      String[]         @default([])
+  assignmentSnapshot Json?
+  pagingConfigId     String?
+  pagingConfig       PagingConfig?    @relation(fields: [pagingConfigId], references: [id], onDelete: SetNull)
+  escalationStep     Int              @default(0)
+  escalationRepeat   Int              @default(0)
+  escalationBaseAt   DateTime?        @db.Timestamptz(3)
+  escalationDoneAt   DateTime?        @db.Timestamptz(3)
+  renotifiedAt       DateTime?        @db.Timestamptz(3)
+  rcaPlaceholder     Json?
+  version            Int              @default(0)
+  isMergeTarget      Boolean          @default(true)
+
+  alerts           IncidentAlert[]
+  events           IncidentEvent[]
+  resolutions      Resolution[]
+  notificationJobs NotificationJob[]
+  notificationLogs NotificationLog[]
+  slackMessages    SlackMessage[]
+
+  @@unique([number])
+  @@index([customerId, status, triggeredAt(sort: Desc)])
+  @@index([status, escalationBaseAt])
+}
+
+model IncidentAlert {
+  incidentId String
+  incident   Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  alertId    String
+  alert      Alert    @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  customerId String?
+  joinedAt   DateTime @db.Timestamptz(3)
+  eventCount Int      @default(1)
+
+  @@id([incidentId, alertId])
+  @@index([alertId])
+}
+
+model IncidentEvent {
+  id         String            @id @default(cuid())
+  incidentId String
+  incident   Incident          @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  customerId String?
+  at         DateTime          @db.Timestamptz(3)
+  kind       IncidentEventKind
+  actorType  ActorType
+  actorId    String?
+  message    String
+  data       Json?
+
+  @@index([incidentId, at])
+}
+
+model Resolution {
+  id             String          @id @default(cuid())
+  customerId     String?
+  incidentId     String
+  incident       Incident        @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  alertId        String?
+  via            ResolutionVia
+  kind           ResolutionKind?
+  note           String?
+  serviceId      String?
+  metricKey      String?
+  resourceId     String?
+  durationSec    Int
+  escalationStep Int
+  resolvedBy     String?
+  resolvedAt     DateTime        @db.Timestamptz(3)
+  recurredAt     DateTime?       @db.Timestamptz(3)
+
+  @@index([customerId, serviceId, metricKey, resolvedAt(sort: Desc)])
+}
+
+// ───────────────────── 3. noise control ─────────────────────
+
+model SuppressionPolicy {
+  id                    String   @id @default("global")
+  repeatIntervalSec     Int      @default(900)
+  flappingPerDay        Int      @default(3)
+  flappingWindowDays    Decimal  @default(1)
+  flappingQuarantineSec Int      @default(3600)
+  groupWaitSec          Int      @default(30)
+  autoPauseSec          Json     @default("{}")
+  renotifyAfterSec      Int      @default(3600)
+  incidentMergeMaxSec   Int      @default(21600)
+  updatedBy             String?
+  updatedAt             DateTime @updatedAt @db.Timestamptz(3)
+}
+
+model MaintenanceWindow {
+  id           String           @id @default(cuid())
+  customerId   String?
+  customer     Customer?        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  scopeType    MaintenanceScope
+  scopeId      String?
+  resourceType String?
+  startsAt     DateTime         @db.Timestamptz(3)
+  endsAt       DateTime         @db.Timestamptz(3)
+  reason       String           @db.VarChar(200)
+  createdBy    String
+  revokedAt    DateTime?        @db.Timestamptz(3)
+  revokedBy    String?
+  createdAt    DateTime         @default(now()) @db.Timestamptz(3)
+
+  @@index([customerId, endsAt])
+  @@index([scopeType, scopeId])
+}
+
+model SeverityMapping {
+  id         String   @id @default(cuid())
+  matchValue String   @unique
+  severity   Severity
+  updatedBy  String?
+  updatedAt  DateTime @updatedAt @db.Timestamptz(3)
+}
+
+// ───────────────────── 4. resources · alarm engine ─────────────────────
+
+model Resource {
+  id                 String          @id @default(cuid())
+  customerId         String
+  customer           Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  cloudAccountId     String
+  cloudAccount       CloudAccount    @relation(fields: [cloudAccountId], references: [id], onDelete: Cascade)
+  region             String
+  resourceType       String
+  resourceArn        String
+  resourceKey        String
+  name               String?
+  tags               Json            @default("{}")
+  monitoringTag      MonitoringTag   @default(ABSENT)
+  monitoringState    MonitoringState @default(NOT_MONITORED)
+  needsReviewSince   DateTime?       @db.Timestamptz(3)
+  needsReviewReason  String?
+  monitoringTagSetBy TagSetBy?
+  lastSeenAt         DateTime        @db.Timestamptz(3)
+  discoveryRunId     String?
+  createdAt          DateTime        @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime        @updatedAt @db.Timestamptz(3)
+
+  alerts              Alert[]
+  managedAlarms       ManagedAlarm[]
+  remediationRequests RemediationRequest[]
+
+  @@unique([cloudAccountId, region, resourceType, resourceKey])
+  @@unique([id, customerId]) // target of RemediationRequest composite FK (security B-5)
+  @@index([customerId, resourceType, monitoringState])
+}
+
+model ThresholdDefault {
+  id           String       @id @default(cuid())
+  level        DefaultLevel
+  customerId   String?
+  customer     Customer?    @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  resourceType String
+  metricKey    String
+  threshold    Decimal?
+  off          Boolean      @default(false)
+  periodSec    Int?
+  statistic    Statistic?
+  evalM        Int?
+  evalN        Int?
+  updatedBy    String?
+  updatedAt    DateTime     @updatedAt @db.Timestamptz(3)
+  version      Int          @default(0) // If-Match (API-CONTRACT §2)
+
+  // UQ(level, customerId, resourceType, metricKey) NULLS NOT DISTINCT — raw SQL
+}
+
+model ManagedAlarm {
+  id               String       @id @default(cuid())
+  customerId       String
+  customer         Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  resourceId       String
+  resource         Resource     @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  cloudAccountId   String
+  cloudAccount     CloudAccount @relation(fields: [cloudAccountId], references: [id], onDelete: Cascade)
+  region           String
+  metricKey        String
+  alarmName        String
+  alarmArn         String
+  severity         Severity
+  severityManual   Boolean      @default(false)
+  threshold        Decimal
+  thresholdSource  ValueSource
+  consoleThreshold Decimal?
+  evalM            Int
+  evalN            Int
+  evalSource       ValueSource
+  comparison       String
+  statistic        String
+  period           Int
+  treatMissingData String
+  state            AlarmState?
+  driftStatus      DriftStatus  @default(IN_SYNC)
+  driftDetail      Json?
+  lastSyncedAt     DateTime?    @db.Timestamptz(3)
+  version          Int          @default(0)
+  changes          ThresholdChange[]
+
+  @@unique([cloudAccountId, region, alarmName])
+  @@unique([resourceId, metricKey])
+  @@index([customerId, driftStatus])
+}
+
+model ThresholdChange {
+  id             String          @id @default(cuid())
+  at             DateTime        @default(now()) @db.Timestamptz(3)
+  customerId     String
+  customer       Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  target         ChangeTarget
+  managedAlarmId String?
+  managedAlarm   ManagedAlarm?   @relation(fields: [managedAlarmId], references: [id], onDelete: SetNull)
+  resourceId     String?
+  resourceType   String
+  metricKey      String
+  field          ChangeField
+  oldValue       Json?
+  newValue       Json?
+  oldSource      String?
+  newSource      String?
+  actorType      ChangeActorType
+  actorId        String?
+  reason         String?
+  applyStatus    ApplyStatus     @default(PENDING)
+  commandId      String?
+  error          String?
+
+  @@index([customerId, at(sort: Desc)])
+  @@index([managedAlarmId, at(sort: Desc)])
+}
+
+model AlarmSyncRun {
+  id             String       @id @default(cuid())
+  customerId     String
+  customer       Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  cloudAccountId String
+  cloudAccount   CloudAccount @relation(fields: [cloudAccountId], references: [id], onDelete: Cascade)
+  mode           SyncMode
+  status         SyncStatus   @default(RUNNING)
+  startedAt      DateTime     @db.Timestamptz(3)
+  finishedAt     DateTime?    @db.Timestamptz(3)
+  heartbeatAt    DateTime?    @db.Timestamptz(3)
+  counts         Json         @default("{}")
+  error          String?
+
+  @@index([cloudAccountId, startedAt(sort: Desc)])
+  @@index([status, heartbeatAt])
+}
+
+model RemediationPolicy {
+  customerId   String              @id
+  customer     Customer            @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  enabled      Boolean             @default(false)
+  mode         RemediationMode     @default(NOTIFY_ONLY)
+  actions      RemediationAction[] @default([])
+  approverRole ConsoleRole         @default(ADMIN)
+  updatedBy    String?
+  updatedAt    DateTime            @updatedAt @db.Timestamptz(3)
+}
+
+model RemediationRequest {
+  id             String            @id @default(cuid())
+  customerId     String
+  customer       Customer          @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  cloudAccountId String
+  resourceId     String
+  /// Composite FK (resourceId, customerId) → Resource(id, customerId): request customer = resource customer (B-5).
+  resource       Resource          @relation(fields: [resourceId, customerId], references: [id, customerId], onDelete: Cascade)
+  trigger        Json
+  action         RemediationAction
+  status         RemediationStatus
+  requestedAt    DateTime          @db.Timestamptz(3)
+  expiresAt      DateTime?         @db.Timestamptz(3)
+  decidedBy      String?
+  decider        Contact?          @relation(fields: [decidedBy], references: [id], onDelete: SetNull)
+  decidedAt      DateTime?         @db.Timestamptz(3)
+  decisionVia    String?
+  executedAt     DateTime?         @db.Timestamptz(3)
+  result         Json?
+  slackMessageId String?
+  version        Int               @default(0)
+
+  // partial UQ(customerId, resourceId, action) where status in active set — raw SQL
+  // CHECK: status in (APPROVED, EXECUTING, SUCCEEDED, FAILED) ⇒ decidedBy and decidedAt not null — raw SQL (B-5)
+  @@index([customerId, requestedAt(sort: Desc)])
+}
+
+// ───────────────────── 5. on-call · escalation ─────────────────────
+
+model Rotation {
+  id          String           @id @default(cuid())
+  scope       RotationScope
+  customerId  String? // CHECK scope=CUSTOMER ⇒ not null (raw SQL)
+  customer    Customer?        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  name        String
+  cadence     Cadence
+  handoverDow Int              @db.SmallInt
+  handoverMin Int              @db.SmallInt
+  anchorAt    DateTime         @db.Timestamptz(3)
+  timezone    String           @default("Asia/Seoul")
+  members     RotationMember[]
+  overrides   Override[]
+
+  // UQ(customerId, name) NULLS NOT DISTINCT — raw SQL
+}
+
+model RotationMember {
+  rotationId String
+  rotation   Rotation @relation(fields: [rotationId], references: [id], onDelete: Cascade)
+  contactId  String
+  contact    Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  order      Int
+
+  @@id([rotationId, contactId])
+}
+
+model Override {
+  id          String         @id @default(cuid())
+  rotationId  String
+  rotation    Rotation       @relation(fields: [rotationId], references: [id], onDelete: Cascade)
+  contactId   String
+  contact     Contact        @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  startAt     DateTime       @db.Timestamptz(3)
+  endAt       DateTime       @db.Timestamptz(3)
+  reason      String?
+  createdBy   String
+  kind        OverrideKind
+  status      OverrideStatus @default(PENDING)
+  requestedAt DateTime?      @db.Timestamptz(3)
+  respondedAt DateTime?      @db.Timestamptz(3)
+
+  @@index([rotationId, startAt])
+}
+
+model Leave {
+  id            String      @id @default(cuid())
+  contactId     String
+  contact       Contact     @relation("LeaveContact", fields: [contactId], references: [id], onDelete: Cascade)
+  replacementId String
+  replacement   Contact     @relation("LeaveReplacement", fields: [replacementId], references: [id], onDelete: Cascade)
+  startDate     DateTime    @db.Date
+  endDate       DateTime    @db.Date
+  createdBy     String
+  createdAt     DateTime    @default(now()) @db.Timestamptz(3)
+  cancelledAt   DateTime?   @db.Timestamptz(3)
+  bulkChangeId  String?
+  bulkChange    BulkChange? @relation(fields: [bulkChangeId], references: [id], onDelete: SetNull)
+
+  @@index([contactId, startDate])
+}
+
+model BulkChange {
+  id          String         @id @default(cuid())
+  kind        BulkChangeKind
+  actorId     String
+  actor       User           @relation(fields: [actorId], references: [id])
+  params      Json
+  preview     Json
+  previewHash String
+  createdAt   DateTime       @default(now()) @db.Timestamptz(3)
+  leaves      Leave[]
+}
+
+model PagingConfig {
+  id                  String           @id @default(cuid())
+  customerId          String
+  customer            Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  scopeType           ScopeType
+  scopeId             String
+  style               PagingStyle
+  plan                PagingPlan
+  edited              Boolean          @default(false)
+  repeatCount         Int              @default(1)
+  renotifyAfterAckSec Int?
+  version             Int              @default(0)
+  updatedBy           String?
+  updatedAt           DateTime         @updatedAt @db.Timestamptz(3)
+  steps               EscalationStep[]
+  incidents           Incident[]
+  routingRules        RoutingRule[]
+
+  @@unique([scopeType, scopeId])
+  @@index([customerId])
+}
+
+model EscalationStep {
+  id               String         @id @default(cuid())
+  pagingConfigId   String
+  pagingConfig     PagingConfig   @relation(fields: [pagingConfigId], references: [id], onDelete: Cascade)
+  index            Int
+  atMin            Int
+  targetType       StepTargetType
+  targetId         String?
+  channels         String[]       @default([])
+  advanceOnAllFail Boolean        @default(false)
+
+  @@unique([pagingConfigId, index])
+}
+
+// ───────────────────── 6. notifications ─────────────────────
+
+model NotificationChannel {
+  id               String      @id @default(cuid())
+  customerId       String?
+  customer         Customer?   @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  scopeType        ScopeType
+  scopeId          String
+  kind             ChannelKind
+  slackChannelId   String?
+  webhookSecretRef String? // Q-DM-09
+  conditions       Json?
+  verifiedAt       DateTime?   @db.Timestamptz(3)
+  enabled          Boolean     @default(true)
+
+  @@unique([scopeType, scopeId, kind, slackChannelId])
+}
+
+model ChannelVerification {
+  id         String        @id @default(cuid())
+  customerId String?
+  contactId  String
+  contact    Contact       @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  channel    VerifyChannel
+  tokenHash  String        @unique
+  sentAt     DateTime      @db.Timestamptz(3)
+  expiresAt  DateTime      @db.Timestamptz(3)
+  usedAt     DateTime?     @db.Timestamptz(3)
+  via        String
+  note       String?
+}
+
+model NotificationJob {
+  id             String                  @id @default(cuid())
+  idempotencyKey String                  @unique
+  customerId     String?
+  incidentId     String
+  incident       Incident                @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  purpose        NotificationPurpose
+  channel        NotificationChannelType
+  targetRef      String
+  groupKey       String?
+  status         JobStatus               @default(QUEUED)
+  attempts       Int                     @default(0)
+  nextAttemptAt  DateTime                @db.Timestamptz(3)
+  lastError      String?
+  payload        Json
+  logs           NotificationLog[]
+
+  @@index([status, nextAttemptAt])
+}
+
+model NotificationLog {
+  id                String                  @id @default(cuid())
+  at                DateTime                @default(now()) @db.Timestamptz(3)
+  customerId        String?
+  incidentId        String
+  incident          Incident                @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  jobId             String?
+  job               NotificationJob?        @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  channel           NotificationChannelType
+  status            LogStatus
+  targetSummary     String
+  escalationStep    Int?
+  providerMessageId String?
+  error             String?
+
+  @@index([incidentId, at])
+}
+
+model SlackMessage {
+  id            String           @id @default(cuid())
+  customerId    String?
+  incidentId    String
+  incident      Incident         @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  alertId       String?
+  channelId     String
+  ts            String
+  threadTs      String?
+  kind          SlackMessageKind
+  text          String
+  blocks        Json?
+  firingEpochAt DateTime?        @db.Timestamptz(3)
+  createdAt     DateTime         @default(now()) @db.Timestamptz(3)
+
+  @@unique([channelId, ts])
+  @@index([incidentId, createdAt])
+}
+
+// ───────────────────── 7. audit · ops ─────────────────────
+
+model AuditLog {
+  id         String         @id @default(cuid())
+  at         DateTime       @default(now()) @db.Timestamptz(3)
+  customerId String?
+  actorType  AuditActorType
+  actorId    String?
+  action     String
+  targetType String?
+  targetId   String?
+  before     Json?
+  after      Json?
+  requestId  String?
+  ip         String?
+  userAgent  String?
+
+  @@index([customerId, at(sort: Desc)])
+  @@index([targetType, targetId])
+}
+
+model TickHeartbeat {
+  name                String      @id
+  lastStartedAt       DateTime?   @db.Timestamptz(3)
+  lastFinishedAt      DateTime?   @db.Timestamptz(3)
+  lastStatus          TickStatus?
+  lastDurationMs      Int?
+  lastStats           Json?
+  consecutiveFailures Int         @default(0)
+  lastScheduledAt     DateTime?   @db.Timestamptz(3) // per-minute claim (API-CONTRACT §5)
+}
