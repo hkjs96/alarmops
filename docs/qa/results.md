@@ -81,3 +81,40 @@
 - P2: 순번 4번째 이하에 번호 없음. 대규모 팀·고객에 대비한 검색·필터 없음.
 
 판정: 하은(T1)은 파일럿 수준에 도달함. 하지만 "지금 터지면 누가 어떻게"(T2)는 탭끼리 서로 다른 답을 보여 주고, 고객별 타이밍 변경(T4)은 경로가 없음. P1 두 건을 해결하기 전에는 파일럿 불가.
+
+## Responders 모델 점검 (v4)
+
+- 일시: 2026-11-09 · 대상: `docs/ui/mockups/index.html` (브랜치 docs/ui-specs) · 1440px / 390px 스크린샷 기준
+- 방식: 명세·결정 문서를 읽지 않고 화면만 보고 판단한 독립 평가
+
+### 과제별 결과
+
+| 과제 | 페르소나 | 성공 | 클릭 | 망설임 | 그럴듯한 오판 | 확신(1-5) |
+|---|---|---|---|---|---|---|
+| T1 Mirae Pay payments-db-1 누가·어떻게·언제 | 준호/소연 | 성공 | 1~2 | 낮음 | 사건 상세 상단 "call Haeun + all"을 "Haeun과 몇 명"으로 읽음(다른 화면은 "everyone in Responders (5)"). Data platform 오버라이드가 Core에도 적용된다고 오해할 여지 | 4 |
+| T2 준호 휴가 11/20~24 → 민재 일괄 교체 | 준호 | 성공 | 3~4 | 중간 | 날짜 단위 입력인데 교대는 09:00~09:00. Thu 19 교대(→11/20 09:00)는 포함 안 됨, Tue 24 교대는 11/25 09:00까지 넘어감. "Junho left out"으로 everyone 인원이 줄어드는 것을 위험으로 표시하지 않음 | 3 |
+| T3 Daon Retail 고객 담당자 추가, step 2에 전화 | 준호 | 부분 | 3 | 높음 | Daon은 All at once인데 "New step 2"를 고르면 기존 step 2(2분 SMS)가 밀리는지, 방식이 Custom으로 바뀌는지 안 보임. Pageable이면 이미 "everyone"에 포함되어 step 1부터 받는다는 점과 충돌 | 2 |
+| T4 신규 고객 "everyone at once" | 준호 | 성공 | 1~2 | 낮음 | 없음(온보딩 3단계 + 미리보기 문장이 명확) | 5 |
+| T5 준호 담당 고객 전체·현재 근무 | 준호 | 성공 | 2 | 낮음 | 헤더 "covers 12 customers"인데 목록은 11개만 보임(Jeil Insure 누락/잘림) | 3 |
+| T6 하은 폰에서 night desk 교대 맞바꿈 | 하은 | 부분 | 2~3 | 중간 | 자기 행(Sun 8 NOW)에는 Swap 없음. Fri 13 행 "Haeun Kim 18:00–23:00 Junho → Minjae?"가 배너("Minjae에게 대리 요청")와 모순되어 누가 누구와 바꾸는지 혼란 | 2 |
+| T7 night desk 순서 변경 + 영향 고객 | 민재 | 부분 | 2 | 중간 | 영향 고객(USED BY 6)은 잘 보이나 멤버·순서 편집 진입점(Edit/드래그)이 화면에 없음. "everyone"에 같은 사람이 있는 고객(Cheong 등)은 영향 없음이 맞지만 설명 없음 | 3 |
+| T8 30+ 고객 중 호출 가능 담당자 없음/검증된 전화 없음 찾기 | 준호 | 실패 | 3+ | 높음 | Needs action은 사람·채널 단위라 "고객 단위로 호출 불가"를 못 찾음. Customers 표의 "2 need action"은 정렬·필터 불가. 모든 담당자가 SMS/Voice 미검증인 고객을 정상으로 오판 | 1 |
+
+### 불일치·용어·레이아웃·규모
+
+| 구분 | 위치 | 내용 | 등급 |
+|---|---|---|---|
+| 레이아웃 | On-call › Now, 390px 고객별 카드 "THEN" | 문장 조각이 열로 쪼개져 읽을 수 없음(인라인 요소가 세로 칸으로 배치) | P1 |
+| 기능 공백 | Customers / Needs action | 고객 단위 "호출 가능자 0명 / 검증 전화 0명" 필터·경고 없음 | P1 |
+| 불일치 | Rotations Fri 13 | 행 문구와 PENDING 배너 내용 모순 | P1 |
+| 모델 모호 | Responders › Add person "Call them at" | All at once 고객에서 step 지정 시 결과(방식 전환·기존 step 재번호) 미표시 | P2 |
+| 시간 경계 | Leave & replace | 날짜 단위 입력 vs 09:00 교대 경계, everyone 축소 경고 없음 | P2 |
+| 수치 불일치 | People › Junho | 12 customers vs 목록 11 | P2 |
+| 진입점 | Rotations | 멤버·순서 편집 버튼 없음 | P2 |
+| 레이아웃 | Rotations, 390px CUSTOMER ROTATIONS 표 | 가로 넘침(CUSTOMER 배지 잘림) | P2 |
+| 용어 | 전반 | "night desk"인데 24h 교대, "Haeun + all" vs "everyone in Responders", "Used by 1 customers" 복수형 | P2 |
+| 규모 | Now 고객별 표 | 12개도 길다. 30+면 "문제 있는 고객만" 기본 필터 필요 | P2 |
+| 양호 | T1 네 화면 | 순서·시간·채널이 동일 문장으로 일관, 사건 상세는 실제 시각으로 환산 | — |
+
+### 판정
+조건부 통과 아님 — P1 3건(모바일 THEN 깨짐, 고객 단위 호출 불가 탐지 없음, Fri 13 모순) 수정 후 재점검.
