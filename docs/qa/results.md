@@ -158,3 +158,22 @@
 
 ### 판정
 **통과** — P1 없음. P2 4건은 다음 화면 이슈로 추적(구현 전 수정 권장).
+
+## Console 로그인 점검 — 2026-11-10
+
+대상: `apps/console` (feat/console-scaffold, origin/main 병합 후 `next build` → `next start -p 3107`, MOCK_API=1). 페르소나 하은(P1, 새벽 Slack 핑 링크로 진입). Playwright, 390×844·1440×960, light. 캡처: `docs/qa/shots/console/login-{390,1440}.png`, `login-landed-{390,1440}.png` (스크립트 `apps/console/e2e/login-shots.ts`).
+
+| 단계 | 390 | 1440 | 관찰 |
+|---|---|---|---|
+| 세션 없이 인시던트 링크 진입 | `/login?next=%2Fincidents%2Finc-…`로 이동 | 동일 | 원래 가려던 주소가 `next`에 보존됨 |
+| 로그인 화면 | Sign in 카드 1개, 가로 스크롤 없음 | 카드 상단 중앙, 깨짐 없음 | "Continue with Google"은 비활성, 아래에 "Google SSO is not connected in this build. Mock mode: sign in as Haeun Kim (dev) →" |
+| dev sign-in 클릭 | 인시던트 상세로 바로 도착 (약 1.2초) | 동일 (약 0.9초) | 클릭 1번. 목록을 거치지 않고 의도한 페이지 h1 "payments-db-1 FreeStorageSpace below 10 GB" 표시, 우상단 아바타 HK |
+| 도착 화면 | Acknowledge가 첫 화면 안, 전체 폭 버튼 | Acknowledge 우상단 | 로그인 포함 Ack까지 클릭 2번 (성공 기준 3번 이하 충족) |
+
+| 구분 | 위치 | 내용 | 등급 |
+|---|---|---|---|
+| 터치 영역 | /login 390 | 유일하게 동작하는 "sign in as Haeun Kim (dev) →" 링크가 156×14px 본문 크기. 졸린 상태로 폰에서 누르기 작음. mock 전용이지만 44px 높이 권장 | P2 |
+| 위계 | /login | 가장 크게 보이는 버튼(Continue with Google)이 비활성이라 먼저 눌러 보게 됨. 설명 문구가 바로 아래 있어 헤맴은 짧음. SSO 연결 시 해소 | P3 |
+| 콘솔 오류 | 전 화면 | `ERR_TUNNEL_CONNECTION_FAILED` 2건 — 외부 폰트 요청이 점검 환경 프록시에서 막힌 것으로 보임(스모크 테스트도 fonts 도메인은 제외). 앱 오류 없음 | — |
+
+**판정: 통과** — P1 없음. 다크 테마·실제 Google SSO 경로는 이번 점검 범위 밖.

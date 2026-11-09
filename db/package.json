@@ -1,0 +1,23 @@
+{
+  "name": "@alarmops/db",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "validate": "node scripts/check.mjs",
+    "test": "node scripts/check.mjs",
+    "migrate:diff": "node scripts/migrate-diff-offline.mjs prisma/schema.prisma",
+    "seed": "tsx prisma/seed.ts"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "5.22.0"
+  },
+  "devDependencies": {
+    "@prisma/driver-adapter-utils": "7.10.1",
+    "@prisma/schema-engine-wasm": "7.10.0-8.shadow-db-safety-s4-52d3b3c7e4002ee167a8803802fa11ced0e2c163",
+    "prisma": "5.22.0",
+    "tsx": "4.19.2"
+  }
+}

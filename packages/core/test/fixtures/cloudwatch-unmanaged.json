@@ -1,0 +1,16 @@
+{
+  "version": "0",
+  "id": "ffeeddcc-0000-4000-8000-000000000002",
+  "detail-type": "CloudWatch Alarm State Change",
+  "source": "aws.cloudwatch",
+  "account": "123456789012",
+  "time": "2026-11-09T04:00:00Z",
+  "region": "ap-northeast-2",
+  "resources": ["arn:aws:cloudwatch:ap-northeast-2:123456789012:alarm:customer-own-latency"],
+  "detail": {
+    "alarmName": "customer-own-latency",
+    "state": { "value": "ALARM", "reason": "Threshold Crossed", "timestamp": "2026-11-09T04:00:00.000+0000" },
+    "previousState": { "value": "OK" },
+    "configuration": { "description": "Owned by the customer's Terraform", "metrics": [{ "metricStat": { "metric": { "namespace": "Custom/App", "name": "p99" } } }] }
+  }
+}

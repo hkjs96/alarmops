@@ -1,0 +1,37 @@
+{
+  "version": "4",
+  "groupKey": "{}:{alertname=\"DiskFull\"}",
+  "status": "firing",
+  "receiver": "alarmops",
+  "groupLabels": { "alertname": "DiskFull" },
+  "commonLabels": { "alertname": "DiskFull", "severity": "critical" },
+  "commonAnnotations": {},
+  "externalURL": "http://alertmanager:9093",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": { "alertname": "DiskFull", "instance": "db-1:9100", "device": "/dev/sda1", "severity": "critical" },
+      "annotations": { "summary": "Disk almost full on db-1 /dev/sda1" },
+      "startsAt": "2026-11-09T03:00:00Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "generatorURL": "http://prometheus:9090/graph",
+      "fingerprint": "7a1c0e3b9f2d4e11"
+    },
+    {
+      "status": "firing",
+      "labels": { "alertname": "DiskFull", "instance": "db-1:9100", "device": "/dev/sdb1", "severity": "warning" },
+      "annotations": { "summary": "Disk almost full on db-1 /dev/sdb1" },
+      "startsAt": "2026-11-09T03:00:30Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "fingerprint": "8b2d1f4c0a3e5f22"
+    },
+    {
+      "status": "resolved",
+      "labels": { "alertname": "HighLoad", "instance": "web-2:9100", "severity": "sev-1" },
+      "annotations": {},
+      "startsAt": "2026-11-09T02:00:00Z",
+      "endsAt": "2026-11-09T03:05:00Z",
+      "fingerprint": "9c3e2a5d1b4f6a33"
+    }
+  ]
+}

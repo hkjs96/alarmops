@@ -1,0 +1,8 @@
+{
+  "name": "@alarmops/ingest",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": { "test": "vitest run", "typecheck": "tsc --noEmit -p ." },
+  "dependencies": { "@alarmops/core": "0.0.0", "@aws-sdk/client-sqs": "3.693.0" }
+}
