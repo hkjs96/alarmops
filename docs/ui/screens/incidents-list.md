@@ -14,7 +14,7 @@
 | 스탯 타일 | Triggered · Escalated · Acknowledged · Resolved 24h · Muted. 현재 필터 기준(9-5) |
 | 필터 줄 | 상태 칩, Severity, Customer, Assignee(`me`), Source, 검색 |
 | 표 | Sev · Status · Title / org chain · Alerts(n) · Assignee(1순위 + 다음) · Escalation(step n/m, 다음 단계까지 남은 시간) · Age |
-| 우측 패널 | On call now(담당자 클릭 = assignee 필터), Escalation pending |
+| 우측 패널 | On call now · by schedule: 열린 인시던트가 걸린 스케줄(서비스 › 프로젝트 › 고객사 › MSP 기본 상속 결과)마다 현재 당번 1명과 열린 건수. 순번(1·2·3)은 표시하지 않음(스케줄마다 다름). 미매핑은 "No owner". 고객사·서비스를 필터하면 그 범위의 에스컬레이션 체인 전체를 표시. 그리고 Escalation pending |
 
 ## 컴포넌트
 SevMark, StatusBadge, StatTile, FilterChip, IncidentRow(Triggered는 좌측 3px 빨강), AvatarStack, OrgChain(`›`), BulkBar
