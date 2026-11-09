@@ -1,0 +1,99 @@
+/* App shell + screen layout. Only design-system tokens (var(--…)) — no raw colors. */
+@font-face {
+  font-family: "Pretendard"; font-weight: 45 920; font-display: swap;
+  src: url("/fonts/PretendardVariable.woff2") format("woff2");
+}
+body { overflow-x: hidden; }
+.skip { position: absolute; left: -999px; top: 0; background: var(--surface); padding: 8px 12px; z-index: 100; }
+.skip:focus { left: 8px; }
+
+.top { background: var(--surface); border-bottom: 1px solid var(--rule); height: 52px; display: flex; align-items: center; padding: 0 24px; gap: 28px; }
+.logo { display: flex; align-items: center; gap: 9px; font-weight: 700; letter-spacing: -0.02em; font-size: 15px; white-space: nowrap; color: var(--ink); }
+.logo:hover { text-decoration: none; }
+.logo i { width: 14px; height: 14px; background: var(--ink); display: inline-block; position: relative; }
+.logo i::after { content: ""; position: absolute; right: -4px; top: -4px; width: 7px; height: 7px; background: var(--red); border-radius: 50%; border: 2px solid var(--surface); }
+.nav { display: flex; height: 100%; gap: 2px; }
+.nav a, .bnav a { display: flex; align-items: center; padding: 0 12px; color: var(--mut); font-weight: 500; height: 100%; text-decoration: none; white-space: nowrap; }
+.nav a:hover { color: var(--ink); }
+.nav a.on { color: var(--ink); font-weight: 600; box-shadow: inset 0 -2px 0 var(--ink); }
+.cnt { font: 700 11px var(--mono); background: var(--red); color: var(--on-red); padding: 1px 5px; margin-left: 6px; }
+.top-r { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.health { display: inline-flex; align-items: center; gap: 6px; font: 700 11px var(--mono); letter-spacing: 0.06em; color: var(--green); white-space: nowrap; }
+.health::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+.bnav { display: none; }
+
+.page { max-width: 1360px; margin: 0 auto; padding: 24px 24px 64px; }
+.ph { display: flex; align-items: flex-end; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+.ph h1 { font-size: 27px; font-weight: 600; letter-spacing: -0.025em; margin: 0; line-height: 1.15; }
+.ph .desc { color: var(--mut); margin-top: 4px; font-size: 13px; }
+.crumb { font: 400 12px var(--mono); color: var(--faint); margin-bottom: 6px; }
+.crumb a { color: var(--mut); }
+.subnav { margin-bottom: 16px; }
+
+.g-main { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 20px; align-items: start; }
+.g-detail { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 20px; align-items: start; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); }
+.g3 > div + div { border-left: 1px solid var(--rule); }
+
+/* people list */
+.plist > div { display: flex; align-items: center; gap: 10px; padding: 9px 16px; border-top: 1px solid var(--grid); min-height: 44px; }
+.plist > div:first-child { border-top: 0; }
+.plist > div > div { min-width: 0; overflow-wrap: anywhere; }
+
+/* timeline */
+.tl { position: relative; padding-left: 4px; }
+.tl .ev { display: grid; grid-template-columns: 20px 64px 1fr; gap: 10px; padding: 7px 0; position: relative; align-items: start; }
+.tl .ev::before { content: ""; position: absolute; left: 8.5px; top: 24px; bottom: -8px; width: 1px; background: var(--rule); }
+.tl .ev:last-child::before { display: none; }
+.tl .ev .m { display: flex; justify-content: center; padding-top: 5px; }
+.tl .ev .tm { font: 400 12px var(--mono); color: var(--faint); padding-top: 2px; }
+.tl .ev .tx { font-size: 13px; min-width: 0; overflow-wrap: anywhere; }
+.tl .ev .tx .s { display: block; color: var(--mut); font-size: 12px; }
+
+/* remediation stage */
+.stage { display: flex; align-items: center; margin: 6px 0 2px; }
+.stage > span { flex: 1; display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--faint); }
+.stage > span b { height: 3px; background: var(--rule); display: block; }
+.stage > span.done b { background: var(--ink); } .stage > span.done { color: var(--ink2); }
+.stage > span.cur b { background: var(--orange); } .stage > span.cur { color: var(--orange); font-weight: 600; }
+.spark { display: block; width: 100%; height: 56px; }
+.paged { margin-top: 10px; font-size: 13px; display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; }
+
+/* incidents table → phone cards */
+@media (max-width: 1100px) {
+  .g-main, .g-detail { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 760px) {
+  .top { padding: 0 16px; gap: 14px; }
+  .hide-m { display: none !important; }
+  .bnav {
+    display: grid; grid-template-columns: repeat(5, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+    background: var(--surface); border-top: 1px solid var(--rule); height: 56px;
+  }
+  .bnav a { justify-content: center; padding: 0 2px; font-size: 13px; min-height: 44px; }
+  .bnav a.on { color: var(--ink); font-weight: 600; box-shadow: inset 0 2px 0 var(--ink); }
+  .bnav .cnt { margin-left: 3px; }
+  main { padding-bottom: 56px; }
+  .page { padding: 16px 16px 48px; }
+  .ph h1 { font-size: 23px; }
+  .g-main > *, .g-detail > * { min-width: 0; }
+  .g3 { grid-template-columns: minmax(0, 1fr); }
+  .g3 > div + div { border-left: 0; border-top: 1px solid var(--rule); }
+  .t.cards thead { display: none; }
+  .t.cards tbody tr { display: grid; grid-template-columns: auto auto 1fr; gap: 6px 12px; padding: 12px 14px; border-bottom: 1px solid var(--grid); align-items: center; }
+  .t.cards tbody tr:last-child { border-bottom: 0; }
+  .t.cards td { padding: 0; border: 0; background: none !important; box-shadow: none !important; }
+  .t.cards td.c-sel, .t.cards td.c-alerts, .t.cards td.c-esc { display: none; }
+  .t.cards td.c-age { text-align: right; grid-row: 1; grid-column: 3; }
+  .t.cards td.c-sev, .t.cards td.c-status { grid-row: 1; }
+  .t.cards td.c-title, .t.cards td.c-who { grid-column: 1 / -1; }
+  .t.cards td.c-who .org { display: inline; margin-left: 8px; }
+  .t.cards tr.hot { box-shadow: inset 3px 0 0 var(--red); }
+  .t.cards tr.esc { box-shadow: inset 3px 0 0 var(--orange); }
+  .kv { grid-template-columns: 96px minmax(0, 1fr); }
+  .tl .ev { grid-template-columns: 20px 58px minmax(0, 1fr); }
+  .hero-actions { width: 100%; }
+  .hero-actions .btn { flex: 1; }
+}
+.show-m { display: none; }
+@media (max-width: 760px) { .show-m { display: block; } }

@@ -1,0 +1,5 @@
+{
+  "name": "alarmops",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*", "services/*", "db"]
+}

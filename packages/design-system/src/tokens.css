@@ -1,0 +1,55 @@
+/* AlarmOps design tokens — from alert-hub v2 "warm paper console" (docs/design/tokens.md)
+   with the docs/ui persona adjustments (dark mode, faint >= 4.5:1, single accent). */
+:root {
+  --bg: #fbfaf7;
+  --surface: #ffffff;
+  --soft: #faf8f4;
+  --hair: #f4f1ea;
+  --rule: #ded9cf;
+  --deco: #d3cec3;
+  --faint: #76736b;
+  --mut: #6b6862;
+  --ink2: #4a4842;
+  --ink: #1b1a17;
+  --inv: #ffffff;
+  --accent: #1451d6;
+  --accent-h: #0f3fa8;
+  --accent-t: rgba(20, 81, 214, 0.08);
+  --on-accent: #ffffff;
+  --on-red: #ffffff;
+  --red: #b42318;
+  --red-deep: #7a1710;
+  --red-t: #fdf5f4;
+  --orange: #b54708;
+  --orange-t: #fdf6ef;
+  --slate: #4a5568;
+  --green: #067647;
+  --green-t: #f1f8f4;
+  --gray: #8a877f;
+  --amber: #93670a;
+  --amber-t: #fcf7e8;
+  --grid: #efebe3;
+  --pop: 0 18px 44px rgba(27, 26, 23, 0.18);
+  --mono: "Space Mono", "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+  --sans: "Pretendard", "Inter", -apple-system, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12110f; --surface: #1a1916; --soft: #201f1b; --hair: #25231f; --rule: #34312b; --deco: #423e37;
+    --faint: #9a958a; --mut: #aaa59a; --ink2: #cfcabe; --ink: #eeeae1; --inv: #12110f;
+    --accent: #6b9bff; --accent-h: #8db1ff; --accent-t: rgba(107, 155, 255, 0.12); --on-accent: #0b1530; --on-red: #1a0705;
+    --red: #f0645a; --red-deep: #ff8a80; --red-t: #2a1614; --orange: #f0954a; --orange-t: #2a1c10;
+    --slate: #a3afc2; --green: #4cc38a; --green-t: #12241a; --gray: #8f8b81; --amber: #e0b050; --amber-t: #2a2210;
+    --grid: #24221e; --pop: 0 18px 44px rgba(0, 0, 0, 0.5); color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12110f; --surface: #1a1916; --soft: #201f1b; --hair: #25231f; --rule: #34312b; --deco: #423e37;
+  --faint: #9a958a; --mut: #aaa59a; --ink2: #cfcabe; --ink: #eeeae1; --inv: #12110f;
+  --accent: #6b9bff; --accent-h: #8db1ff; --accent-t: rgba(107, 155, 255, 0.12); --on-accent: #0b1530; --on-red: #1a0705;
+  --red: #f0645a; --red-deep: #ff8a80; --red-t: #2a1614; --orange: #f0954a; --orange-t: #2a1c10;
+  --slate: #a3afc2; --green: #4cc38a; --green-t: #12241a; --gray: #8f8b81; --amber: #e0b050; --amber-t: #2a2210;
+  --grid: #24221e; --pop: 0 18px 44px rgba(0, 0, 0, 0.5); color-scheme: dark;
+}
