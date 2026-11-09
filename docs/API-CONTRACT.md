@@ -248,7 +248,9 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 | GET `/oncall/now?customerId=&serviceId=` | 지금 순서 + 해석 근거(level, rule, shift/override) — 알림 해석과 같은 함수(1b27f2f) | V |
 | GET `/oncall/paging-path?q=` 또는 `?resourceId=` / `?serviceId=` | "Who gets paged for…". 응답 `{ path: [{level:"RESOURCE"\|"SERVICE"\|"PROJECT"\|"CUSTOMER", id, name}], team: {id,name}, inheritedFrom: {level, id, name}, preset, policyId, policyVersion, steps: [{atMin, target:{kind:"USER"\|"EVERYONE", userId?, name?}, channels}], repeatCount, stopAtMin, sentence, customerNotified: [{contactId, name, scope:{level,id,name}, role}] }`(D-29, 알림만). `q`는 이름 접두 검색, 여러 건이면 `candidates[]` 반환. `/oncall/now`와 같은 해석 함수 | V |
 | GET/POST `/escalation-policies`, GET/PUT/DELETE `/escalation-policies/{id}` | 단계 포함, `repeatCount` 기본 1(D-20), `renotifyAfterAckMin`. **`preset`: `STANDARD`\|`URGENT`\|`QUIET`\|`CUSTOM`** — 프리셋이면 `steps`는 서버가 채움(읽기 전용), 단계 수정 시 `CUSTOM`. 응답에 `version`, `updatedBy`, `updatedAt`, `usedBy: [{customerId, name, preset, override}]`. PUT은 If-Match, 영향 고객 수를 응답 `affectedCustomers`로 반환 | A |
-| PUT `/customers/{id}/escalation` | 고객별 프리셋 선택 또는 타이밍 고정(`{ preset, pinPolicyVersion? }`) — 팀 기본 변경에서 제외 | A |
+| PUT `/customers/{id}/escalation` | D-30. `{ teamId, plan: STANDARD\|URGENT\|QUIET, timing?: { steps[], repeatCount } \| null }`. `timing` 있으면 그 고객만의 타이밍(계획 복사본) 저장, `null`이면 팀 계획으로 복귀. 응답 `{ label: "Mirae Pay · Urgent (customized)", customized, steps, sentence }`. 팀 계획 PUT 응답은 `affectedCustomers[]`, `excludedCustomers[]`(자기 타이밍 보유) | A |
+| GET `/teams?q=` | D-31. 팀 목록: `{id, name, memberCount, onCallNow:{contactId,name,until}, customerCount}` | V |
+| GET `/contacts/needs-action?kind=&customerId=&channel=&q=` | 직원·고객 통합 Needs action 목록(한 정의: 확인 안 된 채널이 하나라도 있는 사람). 응답 `{ people[], counts:{people, staff, customer, linkable, notSet} }` | A |
 | PATCH `/teams/{id}` 확장 | `members[]` 순서(N명, 드래그 결과 그대로), `shiftPattern: "DAILY_0900"\|"DAY_NIGHT_0921"`, `layers: 1\|2`(primary/secondary, 기본 1) | A |
 | GET/POST `/routing-rules`, PATCH/DELETE `/{id}` | | A |
 
@@ -265,7 +267,7 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 | GET/POST `/contacts`, PATCH/DELETE `/contacts/{id}` | `kind: INTERNAL\|CUSTOMER`(D-29). GET 쿼리 `kind`, `customerId`, `needsAction=true`(미확인·만료·미설정), `groupBy=team`(INTERNAL), `q`. 응답 항목에 `teams[]`(INTERNAL) 또는 `scopes[]`(CUSTOMER), 채널별 `{status, via, at, expiresAt}`. CUSTOMER를 팀·로테이션에 넣으면 422 `CUSTOMER_CONTACT_NOT_ROSTERABLE` | A, P(contacts, 자기 고객 CUSTOMER만) |
 | GET `/customers/{id}/people?scopeType=&scopeId=&q=` | 선택 노드의 사람: `attached[]`, `inherited[{from:{level,id,name}, people[]}]`, 트리 노드별 `count`, `needsAction` | V, P(contacts) |
 | POST `/contacts/{id}/scopes`, DELETE `/contacts/{id}/scopes/{sid}` | `{ scopeType: CUSTOMER\|PROJECT\|SERVICE, scopeId, role: NOTIFY\|APPROVER\|PORTAL_USER }`. 중복 409 | A, P(contacts) |
-| POST `/contacts/verify-bulk` | `{ kind, customerId?, filter: "unverified" }` → `{ sent, skipped }` | A |
+| POST `/contacts/verify-bulk` | `{ contactIds[] }` 또는 `{ kind?, customerId?, filter: "needsAction" }` → `{ sent, notSet[] }`. 미설정(NOT_SET) 채널은 링크 대상 아님 → `notSet`으로 반환해 "Ask to add" | A |
 | POST `/contacts/{id}/verify` | `{ channel, method: "link"|"manual", note? }` | A, P(contacts) |
 | GET `/verify/{token}` | 1회용 확인 링크(세션 불필요, 토큰 해시 대조) | 토큰 |
 | GET/POST `/customers/{id}/integrations`, PATCH/DELETE `/integrations/{id}` | Prometheus/Grafana. 생성 응답에만 평문 토큰 1회 | A |

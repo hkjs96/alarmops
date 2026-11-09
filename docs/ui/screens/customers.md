@@ -17,7 +17,14 @@
 | Setup | 체크리스트 진행(예: 4/6) |
 | People | 고객 담당자 수 + 할 일 배지(미확인·만료) |
 
-목록 위 카드 **"Customer contacts needing action" (n)**: 고객 횡단으로 할 일 있는 고객 담당자(이름, 범위, 역할, 문제 채널), "Send links to all n", 행 → 해당 고객 People 탭. 3명 + "+n more". API: GET `/contacts?kind=CUSTOMER&needsAction=true`.
+| On-call team | 팀 이름 + 알림 계획 배지("Mirae Pay · Urgent (customized)"). 팀은 MSP 직원 그룹이고 고객마다 만들지 않는다(D-31) |
+
+목록 위 카드 **"Customer contacts needing action" (n)**: 3명 미리보기 + 고객별 수 + Needs action 정의, **Open list · send links** → 통합 Needs action 목록(Customer 필터). 일괄 발송은 그 목록 한 곳에서만. API: GET `/contacts/needs-action?kind=CUSTOMER`.
+
+390px: 표가 카드(라벨: 값)로 바뀐다.
+
+### 상세 On-call 카드 (D-30)
+팀 링크, 알림 계획 선택(Standard/Urgent/Quiet), 배지, 문장. 고객 타이밍이 없으면 **Customize for <고객> only**, 있으면 **Edit <고객>'s timing** · **Use team timing**. 편집기는 "Changes <고객> only" 배너. Incident 상세의 "Edit Mirae Pay's timing" 링크가 이 편집기로 바로 연다(`?edit=1`).
 
 ## 상세 탭
 | 탭 | 내용 | API |
@@ -43,6 +50,12 @@
 | 추가 | Person(기존 고객 사람 검색 또는 새 이름), Email·phone, Role, Notified for(This service only / All of project / All of customer). 저장 후 확인 링크 발송 |
 
 규모: 트리 + 범위 안 검색이 기본, 페이지네이션 없음.
+
+추가(v3 재점검):
+- 트리 노드 클릭 → 경로 + 칩 "Notified for <노드>" / "Everyone at <고객>" / "Needs action" / "Approvers", 이름 검색, 일괄 선택(Send links / Ask to add).
+- 섹션 이름 "Added here" / "From <상위 노드>"(inherit라는 말 쓰지 않음). 상위에서 온 행은 "Open in <노드>".
+- 역할 Approver = 자동 조치 승인(auto-fix approval). 승인 채널은 **Slack 또는 이메일 링크** — Incident 상세 Auto-fix 카드와 같은 문구.
+- 고객 선택(목업 전용 Example 선택)으로 Daon Retail › Commerce › Checkout 등 다른 고객 트리 확인.
 
 ## 상태
 | 상태 | 표시 |

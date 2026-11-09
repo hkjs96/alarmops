@@ -43,3 +43,8 @@
 - 편집 패널 필드: 임계치, 통계(Average·Maximum·Minimum·Sum·p95), 주기(1·5·15·60분), M of N. 아래에 "최근 N개 주기 중 M개 초과면 알람(총 몇 분)"을 문장으로 보여 준다.
 - 기본값은 등급 정책. 잠긴 정의(SEV-1, 주기 ≥ 60분)는 M/N 편집 불가. 1분 주기는 상세 모니터링이 켜진 리소스만 고를 수 있다.
 - 태그 `Threshold_{키}_Eval=M/N`이 있으면 M/N은 태그 값이 이기고 잠김 표시. 주기·통계 태그 키는 미결(Q-UI-EVAL-01).
+
+## On-call 표시 (v3 재점검, D-30)
+- 목업 샘플은 On-call과 같은 데이터 객체에서 렌더링: payments-db-1 (Mirae Pay › Core › Payments API), Infra team, 배지 "Mirae Pay · Urgent (customized)".
+- Paged 줄: "Slack Haeun 03:12 ✓ → call Haeun 03:14 ✓ → call Junho 03:19 → call everyone 03:24" (Incident) / 분 단위 문장(Resource).
+- 목업은 payments-db-1 / orders-api-1 전환. "Who gets paged and notified" 카드 = On-call의 Who gets paged for… 와 같은 블록.

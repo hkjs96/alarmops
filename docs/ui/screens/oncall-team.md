@@ -1,71 +1,64 @@
-# On-call team page (D-28)
-
-이전 `oncall-schedule.md` + `escalation-policy.md`를 합친 화면. 3~5명 MSP 팀 기준으로 단순화.
+# On-call › Teams (D-28, D-30, D-31)
 
 | 항목 | 내용 |
 |---|---|
-| 경로 | `/oncall/teams/{id}` (On-call › Teams) |
-| 목적 | "지금 터지면 누가", "내 당번은 언제", "이 날 바꿔줘", "어떻게 울리나"를 한 화면에서 |
-| 페르소나 | 하은(당번, 모바일), 준호(설정) |
+| 경로 | `/oncall/teams` (목록) · `/oncall/teams/{id}` (팀 화면) |
+| 목적 | "지금 터지면 누가", "내 당번은 언제", "이 날 바꿔줘", "어떻게 울리나", "이 고객만 타이밍 바꾸기" |
+| 페르소나 | 하은(당번, 모바일), 준호(설정), 민재(고객별 타이밍) |
 
-## 샘플 데이터 (목업과 일치)
-- Infra team 6명, 로테이션 Haeun → Junho → Minjae → Jiwoo → Sora → Dohyun, 하루 1교대, **교대 09:00 KST**.
-- 지금 Mon 9 03:16 → 당번은 **Sun 8 09:00 – Mon 9 09:00 시프트의 Haeun**. 09:00에 Junho 인계.
-- 대기 요청: Haeun의 Sat 14 시프트를 Minjae가 대체(PENDING). Fri 13 18–23시 Dohyun→Junho 부분 대체(ACCEPTED).
-- "Who gets paged for…" 결과 아래에 그 리소스로 알림만 받는 고객 담당자를 "Customer notified" 블록으로 표시(D-29, 페이징 아님).
-- 고객: Daon Retail=Standard, Mirae Pay=Urgent(Checkout 서비스만 Data team: Taemin → Yuna), Hanbit Logistics=Quiet.
+## 팀이란 (D-31)
+- Team = **MSP 직원 당번 그룹**(Infra, Data, Night desk 등 몇 개). 고객마다 팀을 만들지 않는다. 고객 여럿이 한 팀을 쓴다.
+- 고객 담당자는 팀이 아니라 연락처(Customer › People, D-29). 팀·로테이션에 넣을 수 없다.
+- 화면 문구: "Teams are your MSP staff groups (e.g. Infra, Data, Night desk). Many customers share one team; customers never get their own team."
 
-## 레이아웃 (위에서 아래, 390px에서도 같은 순서 1열)
+## 샘플 데이터 (목업 스크립트 맨 위 `D` 객체 하나에서 모든 탭이 렌더링)
+- Infra team 6명, 순서 1 Haeun → 2 Junho → 3 Minjae → 4 Jiwoo → 5 Sora → 6 Dohyun, 하루 1교대, 교대 09:00 KST. 지금 Mon 9 03:16 → 1번 Haeun.
+- Data team 2명: 1 Taemin Jung → 2 Eunji Kwon.
+- 고객: Mirae Pay = Infra · **Urgent (customized)** (Checkout 서비스만 Data team · Urgent), Hanbit Logistics = Infra · Standard, Daon Retail = Infra · Quiet, Seoul Bio Labs = Infra · Standard(설정 중).
+- 기준 사건 payments-db-1 (Mirae Pay › Core › Payments API), 03:12:04 발생: Slack Haeun 03:12 → call Haeun 03:14 → call Junho 03:19 → call everyone 03:24, 반복 1회, 03:36 정지. On-call 조회·Incident 헤더/타임라인/Escalation 패널·Incidents 목록·Resource detail이 모두 같은 값.
+
+## 레이아웃 (390px에서도 같은 순서 1열)
 | 영역 | 내용 |
 |---|---|
-| Who gets paged for… | 맨 위 검색. 서비스·리소스 입력(예 payments-db) → 경로(resource › service › project › customer), 해석된 팀과 **어느 레벨에서 상속됐는지**, 프리셋, 전체 문장 |
-| 헤더 | 팀 이름, 인원·시간대·**교대 시각(매일 09:00 KST)**, 팀 전환, **Cover or swap a shift**(주 버튼, 모바일 전체 폭) — 누르면 폼을 열고 폼으로 스크롤(`#oc-form`) |
-| 대기 배너 | "You asked Minjae to cover your Sat 14 shift… Waiting for Minjae to accept." Remind Minjae / Cancel my request |
-| Cover or swap 폼 | 헤더 바로 아래 인라인(기본 닫힘). What · When(전체/일부 시간) · Who · Reason → Send request. **Who는 4명 이하면 버튼, 5명 이상이면 검색 드롭다운** |
-| If something breaks now | 세로 순서 목록: 1번(당번) 크게, 다음 2명, 나머지는 "+3 more (Jiwoo, Sora, Dohyun)" 접힘. 각주: 알림은 프리셋 단계 수만큼만 이름으로 닿는다(Standard·Urgent 2명 후 전원, Quiet 1명 후 전원). **Change order** = N명 드래그 목록 |
-| Shifts | 교대 방식 토글: 하루 1교대(09–09) / 주간 09–21·야간 21–09. 이번 주 행 목록(2교대면 두 줄씩), Now/Pending, Swap(폼으로 이동). 다음 주 7칸 띠는 **이름**, 390px에서 4+3 줄바꿈 |
-| Recent changes to shifts | 최근 30일 대체·교환 목록: 날짜, 누가→누가, 종류, **사유**, 상태(Pending/Accepted/Declined) |
-| How we get alerted | 프리셋 선택 → 문장이 실명·분으로 바뀜(반복 1회, 정지 시각 포함). "version 7, edited by Junho Park on Nov 6". **Advanced: edit timing** 안에: 영향 경고 "Changes apply to 3 customers: …", 단계 표(At=시작 기준 누적 분), 누적 타임라인(0′·2′·7′·12′ … 24′ stop), 반복 횟수, ack 후 재알림(분), 고객별 override(Use team timing / Keep v7), **Primary + secondary on call** 토글(기본 꺼짐) |
-| Who uses this team | 고객별 프리셋 배지 + **그 고객 프리셋의 전체 문장** |
+| Teams 표 | 이름 · 인원 · 지금 당번 · 고객 수, 검색(팀 10개 이상 MSP 대비), New team. 행 선택 → 아래 팀 화면 |
+| 헤더 | 팀 이름, 인원·시간대·교대 09:00·고객 수, 팀 전환, **Cover or swap a shift**(본인이 팀원일 때, 모바일 전체 폭) |
+| 대기 배너 | "You asked Minjae to cover your Sat 14 shift… You stay on call until Minjae accepts." |
+| If something breaks now | **모든 사람에 번호 1–N**. 1~3번은 펼침, 나머지는 "+3 more: 4 Jiwoo · 5 Sora · 6 Dohyun"(펼치면 번호 그대로). 각주: "09:00 교대 때 순서가 한 칸 당겨진다(Junho가 1, Haeun이 6). 대체·교환은 그 시프트의 근무자만 바꾸고 순서는 바꾸지 않는다." |
+| Who gets paged for… | 당번 작업(Cover) 아래. 경로, 팀, "from <노드>", 알림 계획 배지, 문장, Customer notified(알림만, Customer › People 링크) |
+| Shifts / Recent changes | 로테이션에서 계산. 다음 주 띠, "Rotation: 1 Haeun → … → 6 Dohyun" |
+| Alert plans | 팀 계획 Standard/Urgent/Quiet, 문장, "Used by …"와 "X picked Urgent but has its own timing". **Edit timing of this plan…** |
+| Customers using this team | **압축 표**(카드 아님): 고객 · 이 팀이 맡는 서비스 · 알림 계획 배지 · 문장 · 동작. 필터 입력 + 칩(All/Standard/Urgent/Quiet/Customized). 동작: **Customize for <고객> only** 또는 **Edit <고객>'s timing**. 390px에서는 카드 |
 
-연결 화면: Incident detail·Resource detail 헤더에 한 줄 "Paged: Haeun → Junho · Urgent · Infra team" → 이 화면 링크.
+## 타이밍 모델 (D-30)
+- 알림 계획(Alert plan, 내부명 preset)은 **팀** 소유: Standard / Urgent / Quiet.
+- 고객은 계획 하나를 고르고, 필요하면 **고객 단위 타이밍**(계획 단계의 복사본을 고친 것)을 가진다. 배지 "Mirae Pay · Urgent (customized)".
+- 고객 맥락(팀 화면 고객 표의 Customize 버튼, Customer 상세 On-call 카드)에서 편집 → **그 고객만** 바뀜. 배너 "Changes Mirae Pay only. Infra team's Urgent plan and every other customer stay as they are."
+- 팀 계획 편집 → 배너 "Applies to N customers using <계획> (…). Except X, which has its own timing and won't change."
+- "Go back to team's <계획> timing"으로 고객 타이밍 삭제.
+- 서비스가 다른 팀을 쓰면(Checkout → Data team) 그 서비스는 그 팀의 계획을 쓰고 고객 타이밍은 적용되지 않는다.
 
-## 프리셋 (문장은 지금 당번 기준으로 계산)
-| 키 | 단계 | 문장 |
+## 계획 기본 단계
+| 계획 | 단계(At = 발생 후 누적 분) | 문장 |
 |---|---|---|
-| STANDARD | 0분 당번 Slack → 2분 당번 SMS → 7분 다음 사람 전화 → 12분 전원, 반복 1회, 24분 정지 | Slack Haeun now → SMS Haeun at 2 min → call Junho at 7 min → alert everyone at 12 min → repeat once → stop at 24 min |
-| URGENT | 0분 당번 전화 → 5분 다음 사람 전화 → 10분 전원 전화, 반복 1회, 20분 정지 | Call Haeun now → call Junho at 5 min → call everyone at 10 min → repeat once → stop at 20 min |
-| QUIET | 0분 당번 Slack → 15분 전원 Slack, 반복 1회, 30분 정지 | Slack Haeun now → Slack everyone at 15 min → repeat once → stop at 30 min |
-| CUSTOM | Advanced에서 편집한 경우 | 단계로 계산 |
+| Standard | 0 Slack 1번 → 2 SMS 1번 → 7 call 2번 → 12 Slack+SMS+call 전원, 반복 1, 24분 정지 | Slack Haeun now → SMS Haeun at 2 min → call Junho at 7 min → Slack + SMS + call everyone at 12 min → repeat once → stop at 24 min |
+| Urgent | 0 call 1번 → 5 call 2번 → 10 call 전원, 반복 1, 20분 | Call Haeun now → call Junho at 5 min → call everyone at 10 min → … |
+| Quiet | 0 Slack 1번 → 15 Slack 전원, 반복 1, 30분 | Slack Haeun now → Slack everyone at 15 min → … |
+| Mirae Pay 고객 타이밍 | 0 Slack 1번 → 2 call 1번 → 7 call 2번 → 12 call 전원, 반복 1 | Slack Haeun now → call Haeun at 2 min → call Junho at 7 min → call everyone at 12 min → repeat once → stop at 24 min |
 
-ack되면 즉시 멈춤. 점검 창: SEV-2 이하 조용, SEV-1 항상 알림(D-17).
-
-## 큰 팀 (7~8명)
-- 순서 목록은 3명 + 접힘, 드래그 편집은 N명.
-- 2교대(주간/야간) 선택 가능. Primary/secondary 레이어는 Advanced 옵션(기본 꺼짐) — 켜면 1단계가 두 사람에게 동시에.
+ack되면 즉시 멈춤. 점검 창: SEV-2 이하 조용, SEV-1 항상(D-17).
 
 ## 쓰지 않는 말
-owner snapshot, Team default order, IF ALL FAIL(Advanced 안에만).
-
-## 상태
-| 상태 | 표시 |
-|---|---|
-| 요청 대기 | 배너 + 해당 날 Pending, 수락 전 순서 불변 |
-| 거절/만료 | 배너 "Minjae declined" + 다시 요청 |
-| 저장 충돌 | 409 VERSION_CONFLICT → Reload |
+preset(화면은 "Alert plan"), inherit(화면은 "from <노드>"), owner snapshot, Team default order, 내부 결정 번호(D-xx).
 
 ## 동작 → API
 | 동작 | API |
 |---|---|
-| 팀·순서·교대 방식·레이어 | GET/PATCH `/teams/{id}` (`members[]`, `shiftPattern`, `layers`) |
-| 시프트 | GET `/schedules/{id}` |
-| 대체·교환 요청 | POST `/schedules/{id}/overrides` (PENDING) → `.../{oid}/accept` · `.../decline` · `.../remind`, 취소 DELETE |
-| 최근 변경 목록 | GET `/schedules/{id}/overrides?since=` |
-| 프리셋/단계 | GET/PUT `/escalation-policies/{id}` (`preset`, If-Match, `affectedCustomers`) |
-| 고객별 프리셋·고정 | PUT `/customers/{id}/escalation` |
-| 지금 순서 | GET `/oncall/now?customerId=&serviceId=` |
+| 팀 목록 | GET `/teams?q=` (`memberCount`, `onCallNow`, `customerCount`) |
+| 팀·순서·교대 방식 | GET/PATCH `/teams/{id}` |
+| 시프트 / 대체·교환 | GET `/schedules/{id}`, POST `/schedules/{id}/overrides` → accept/decline/remind |
+| 팀 계획 | GET/PUT `/escalation-policies/{id}` (If-Match, 응답 `affectedCustomers`, `excludedCustomers`) |
+| 고객 계획 선택·고객 타이밍 | PUT `/customers/{id}/escalation` `{ teamId, plan, timing?: {steps, repeatCount} \| null }` |
 | Who gets paged for… | GET `/oncall/paging-path?q=` |
 
 ## 미결
-- Q-DM-14 주 단위 교대: 이 화면은 하루 1교대/2교대만 다룸
-- Q-DM-15 뮤트 종료 직후 밀린 단계
+- Q-DM-14 주 단위 교대, Q-DM-15 뮤트 종료 직후 밀린 단계

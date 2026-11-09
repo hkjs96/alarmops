@@ -590,6 +590,19 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 - 프리셋(D-28): STANDARD 0분 Slack → 2분 SMS → 7분 다음 사람 전화 → 12분 전원 / URGENT 0분 전화 → 5분 다음 사람 전화 / QUIET 0분 Slack.
 - 뮤트 종료 직후 밀린 단계 처리(R4-6)는 미결(Q-DM-15).
 
+### CustomerEscalation (고객의 팀·계획 선택, D-30·D-31)
+| 필드 | 타입 | 비고 |
+|---|---|---|
+| customerId | PK FK Customer | 고객당 1행 |
+| teamId | FK Team | MSP 직원 팀(고객 전용 팀 없음, D-31) |
+| planPolicyId | FK EscalationPolicy | 팀의 계획(Standard/Urgent/Quiet) |
+| timingPolicyId | text? FK EscalationPolicy | 고객 단위 타이밍. 계획 단계 복사본(`customerId` 설정, `preset=CUSTOM`, `basedOnPolicyId`). null = 팀 계획 그대로 |
+| updatedBy, updatedAt | | |
+
+- 해석: 서비스에 팀 지정이 있으면 그 팀·계획(고객 타이밍 미적용) → 없으면 CustomerEscalation(timingPolicyId ?? planPolicyId).
+- 팀 계획 PUT 시 영향 고객 = planPolicyId가 같고 timingPolicyId가 null인 고객. timingPolicyId가 있는 고객은 `excludedCustomers`로 응답.
+- EscalationPolicy에 `basedOnPolicyId text? FK` 추가(고객 타이밍이 어느 계획에서 복사됐는지 표시).
+
 ## 6. 통지
 
 ### NotificationChannel (발송 목적지)

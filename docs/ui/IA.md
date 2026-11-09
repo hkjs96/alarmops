@@ -14,7 +14,7 @@ AlarmOps   Incidents   Monitoring   On-call   Customers   Settings        [Custo
 | └ Incident 상세 `/incidents/{id}` | Overview · Alerts · Timeline · Notifications | `incident-detail.md` |
 | **Monitoring** | Alarms · Resources · Coverage gaps · Needs review · Sync runs | `monitoring.md` |
 | └ Resource 상세 `/monitoring/resources/{id}` | Thresholds · Alarms · Tags · History | `resource-detail.md` |
-| **On-call** | Teams · Contacts · Maintenance (D-28) | `oncall-team.md`, `contacts.md`, `maintenance-windows.md` |
+| **On-call** | Teams(직원 당번 그룹 목록, 고객별 팀 없음 D-31) · Contacts · Needs action(직원+고객 통합) · Maintenance (D-28) | `oncall-team.md`, `contacts.md`, `maintenance-windows.md` |
 | **Customers** | 목록 | `customers.md` |
 | └ Customer 상세 `/customers/{id}` | Overview · Org & owners · **People**(D-29) · AWS accounts · Integrations · **Monitoring**(같은 화면, 고객 고정 필터) · Remediation · Portal access | `customers.md`, `integrations.md` |
 | └ New customer `/customers/new` | 5단계 마법사 | `customer-onboarding.md` |
@@ -33,7 +33,7 @@ AlarmOps   Incidents   Monitoring   On-call   Customers   Settings        [Custo
 | 2 | Incident detail | 무엇이 왜 터졌나 → Ack → Resolve. RCA 자리(D-14), 자동 조치 승인 상태(D-15) | 하은(P1-2, P1-4, P1-5), 소연(P3-2 읽기) | Slack `ao_open`, 확인 링크, 목록 행 |
 | 3 | Monitoring | 고객사 횡단 알람·리소스·빈틈·확인 필요(D-16)·임계치 출처(D-19) | 민재(P4-2, P4-3) | 메뉴, 고객 상세 Monitoring 탭, 인시던트 상세 "Open resource" |
 | 4 | Resource detail | 지표별 값과 출처 층, 변경 미리보기, 드리프트 복원/수용, 이력 | 민재(P4-3, P4-5) | Monitoring 행, 인시던트 상세 |
-| 5 | On-call team (D-28) | 팀당 한 화면: 로테이션 순서 하나, 이번·다음 주 당번, 대체·교환(상대 수락), 프리셋 에스컬레이션(Standard/Urgent/Quiet, Advanced 접힘), 사용 고객사 | 하은(모바일), 준호(P2-2, P2-4) | On-call › Teams, 고객 상세, 온보딩 4단계 |
+| 5 | On-call team (D-28) | 팀당 한 화면: 로테이션 순서 하나, 이번·다음 주 당번, 대체·교환(상대 수락), 팀 알림 계획(Standard/Urgent/Quiet) + 고객 단위 타이밍(D-30), 사용 고객 압축 표. 팀은 고객마다 만들지 않음(D-31) | 하은(모바일), 준호(P2-2, P2-4) | On-call › Teams, 고객 상세, 온보딩 4단계 |
 | 6 | (5에 합쳐짐) | — | — | — |
 | 7 | Contacts (D-29) | MSP 직원만, 팀별 묶음, 기본 Needs action. 채널 확인·일괄 링크 | 준호 | On-call › Contacts, 온보딩 4단계 |
 | 7b | Customer › People (D-29) | 고객 담당자를 Customer › Project › Service 트리에 붙임, 상속 표시, 역할(Notify only/Approver/Portal user). 알림만, 로테이션 없음. 고객 횡단 할 일은 Customers 목록 카드 | 준호 | Customer 상세 탭, Customers 목록 카드 |

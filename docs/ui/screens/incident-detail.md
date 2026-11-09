@@ -39,3 +39,10 @@
 - RemediationRequest를 인시던트에 직접 연결하는 FK가 없음(DATA-MODEL). 리소스 + 시간으로 찾을지, `incidentId` 컬럼 추가할지
 - Resolve 시 분류(kind) 필수 여부
 - 승인 요청 만료 시간(Q-DM-13) 표시 문구
+
+## On-call 표시 (v3 재점검, D-30)
+- 목업 샘플은 On-call과 같은 데이터 객체에서 렌더링: payments-db-1 (Mirae Pay › Core › Payments API), Infra team, 배지 "Mirae Pay · Urgent (customized)".
+- Paged 줄: "Slack Haeun 03:12 ✓ → call Haeun 03:14 ✓ → call Junho 03:19 → call everyone 03:24" (Incident) / 분 단위 문장(Resource).
+- Escalation 패널: 단계마다 사람·채널·시각, 다음 단계 남은 시간, "Then repeats once, stops 03:36", **Edit Mirae Pay's timing** 링크(고객 편집기로).
+- 타임라인 문구에서 "Owner snapshot" 대신 "Paging order at open (Infra team): 1 Haeun Kim → 2 Junho Park → everyone". 고객 알림(알림만) 이벤트 포함.
+- Auto-fix 카드: "Approve in Slack (#mirae-ops) or with the email link. Only people with the Approver role for Payments API can approve: Yuna Seo." (People과 같은 문구, 내부 결정 번호 노출 금지)
