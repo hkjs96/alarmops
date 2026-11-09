@@ -42,7 +42,7 @@
 
 ## On-call 표시 (D-30·D-31 개정)
 - 목업 샘플은 같은 데이터 객체 `D`에서 렌더링: payments-db-1 (Mirae Pay › Core › Payments API), Mirae Pay 단계 = Custom steps · Urgent (edited): Slack + call on shift in MSP night desk (Haeun) → 10분 call Yuna Seo (Mirae Pay, Pageable) → 15분 call everyone in Responders (5).
-- Paged 줄: "Slack + call Haeun 03:12 ✓ → call Yuna 03:22 → call Haeun + all 03:27" (Incident) / 분 단위 문장(Resource). 링크는 Customer › Responders & paging.
+- Paged 줄: "Slack + call Haeun 03:12 ✓ → call Yuna 03:22 → call everyone in Responders (5) 03:27" (Incident) / 분 단위 문장(Resource). 링크는 Customer › Responders & paging.
 - Escalation 패널: 단계마다 대상(사람 / 로테이션 당번 / 전원)·채널·시각, 다음 단계 남은 시간, **Edit Mirae Pay's paging** 링크.
-- 타임라인: "Paging steps at open: Haeun → Yuna → Haeun + all". Notify only 고객 사람 메일 이벤트 포함(Seojun Bae, Hana Noh, Hyejin Lim).
+- 타임라인: "Paging steps at open: Haeun → Yuna → everyone in Responders (5)". Notify only 고객 사람 메일 이벤트 포함(Seojun Bae, Hana Noh, Hyejin Lim).
 - Auto-fix 카드: "Only people with the Auto-fix approver role for Payments API can approve: Yuna Seo (Mirae Pay)."

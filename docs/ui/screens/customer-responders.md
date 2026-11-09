@@ -22,3 +22,8 @@ GET `/customers/{id}/responders` → `{ staff[{contactId,source:TEMPLATE|DIRECT,
 
 ## 390px
 단계 행은 번호 + (분 / 대상 / 수단) 세로. Responders 카드는 단계 카드 아래.
+
+## v4 점검 반영 (2026-11-09)
+- 상단 빨간 배너: 호출 건강도 문제와 설명.
+- 사람 추가 "Call them at": 'Only as part of everyone' 또는 'Own call, inserted after step N · old step N+1 becomes N+2'. All at once 등 Custom이 아닌 고객이면 Custom steps 전환 경고 + Before/After 문장. Pageable이면 everyone에 이미 포함됨을 안내.
+- 용어: "everyone in Responders (N)"로 통일.

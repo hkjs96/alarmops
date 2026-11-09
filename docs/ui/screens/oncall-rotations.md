@@ -18,3 +18,9 @@
 
 ## API
 GET/POST `/rotations?scope=MSP|CUSTOMER&customerId=`, PATCH `/rotations/{id}` (members[] 순서, cadence, handover), GET `/rotations/{id}/shifts?from=&to=`, GET `/rotations/{id}/usage` → 참조 고객·단계, POST `/rotations/{id}/overrides` (COVER/SWAP, PENDING→ACCEPTED).
+
+## v4 점검 반영 (2026-11-09)
+- 샘플: 수락된 부분 대리는 Wed 11(Jiwoo 교대, Junho 18:00–23:00), Haeun의 대기 요청은 Fri 13 전체 교대(Minjae). 행 문구와 PENDING 배너가 같은 내용.
+- 내 교대 행(지금 포함)에 "Cover or swap", 남의 행에 "Swap with me". 폼 When이 고른 교대로 바뀜.
+- "Edit members & order": 순서 ↑↓, 제거, 추가, 인계 시각. 저장 전 영향 고객 목록 + 다음 교대 before → after. everyone 단계는 바뀌지 않음을 설명. 감사 로그 기록.
+- Customer rotations 표는 390px에서 카드, 멤버 배지 줄바꿈(Notify only 멤버 표시).

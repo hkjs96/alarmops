@@ -21,3 +21,9 @@ GET `/oncall/now?customerId=&contactId=&style=` → `{ rotations[{id,scope,name,
 ## 상태
 - 빈: "No customers match."
 - 390px: 카드 3개 세로, 표는 라벨:값 카드.
+
+## v4 점검 반영 (2026-11-09)
+- 고객별 표 "Then"은 단계마다 한 줄(`N min` + 문장)로 세로 배치. 390px 카드에서 읽힘.
+- 고객 단위 호출 건강도(D에서 계산, 서버는 `/oncall/now`·`/customers` 응답의 `pagingHealth[]`): No pageable responder / No verified phone on any step / Step targets unverified only / Rotation gap(다음 2주 당번이 Notify only 고객 사람). 고객 행에 빨간 배지.
+- 필터 "Only customers with problems (N)": 고객 10곳 초과면 기본 켜짐.
+- 로테이션 카드에 교대 시간 명시("24 h shifts, 09:00 → 09:00 next day"), 복수형 정리.

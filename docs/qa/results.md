@@ -118,3 +118,8 @@
 
 ### 판정
 조건부 통과 아님 — P1 3건(모바일 THEN 깨짐, 고객 단위 호출 불가 탐지 없음, Fri 13 모순) 수정 후 재점검.
+
+### v4 수정 반영 (2026-11-09, 재점검 대기)
+- P1 모바일 THEN: 단계별 한 줄 세로 배치. P1 고객 단위 탐지: pagingHealth 4종(D에서 계산) → Customers 열·필터, Now 기본 필터(10곳 초과), Customer 배너. 샘플 Kumho Clinic·Lumen Bank 추가. P1 Fri 13: 수락 대리(Wed 11)와 대기 요청(Fri 13 전체) 분리.
+- P2: Custom 전환 경고+Before/After, Leave 교대 경계(Thu 19 09:00 → Wed 25 09:00)·축소/유일 호출자 경고, Junho 12 전부 표시, Rotations 편집 진입점+영향 미리보기, 390 카드, 용어·복수형·교대 시각.
+- 화면 워크스루(작성자): T1–T8 화면에서 답 확인. T8: Customers › Paging problems → Kumho Clinic, Lumen Bank 외 계산상 문제 고객(Hanbit·Haneul·Iruda: 미검증 채널)도 표시됨.

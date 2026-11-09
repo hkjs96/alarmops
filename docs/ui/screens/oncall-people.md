@@ -20,3 +20,8 @@ GET `/staff?q=` → `{id,name,customerCount,onShift[],nextShift,channels}`; GET 
 
 ## 상태
 - 대체자 = 본인이면 Apply 비활성. 영향 0이면 "No step reaches Junho on these dates".
+
+## v4 점검 반영 (2026-11-09)
+- Leave & replace: 입력은 첫/마지막 휴가일, 대체는 교대 경계(09:00 인계)로 계산. 예: Fri 20–Tue 24 → Thu 19 09:00 → Wed 25 09:00. 넘겨받는 교대를 정확한 시각으로 나열, 주간 로테이션은 부분 구간과 복귀 시각 표시.
+- 경고: everyone 인원 축소(N → N-1, 대체자가 이미 Responder), 단계가 유일한 호출 가능자를 잃음(대체자에게 해당 채널 미검증 또는 everyone에 검증 채널 0).
+- 직원 상세의 Customers covered 목록은 스크롤 없이 전부 표시("12 listed"), 헤더 수와 일치.

@@ -50,3 +50,7 @@
 - 고객 담당자 수신 채널별 시간대(야간 SMS 제외 등)
 - 고객사 삭제 vs 보관(soft delete)
 - 목록 집계(coverage, setup) 엔드포인트 없음 — `/customers` 응답에 요약 필드 추가 필요
+
+## v4 점검 반영 (2026-11-09)
+- "Paging health" 열 + 필터 칩 "Paging problems (N)" (`#customers?f=prob`). 정의는 oncall-now.md와 동일.
+- 샘플 문제 고객: Kumho Clinic(호출 가능자 0), Lumen Bank(로테이션 멤버 미검증·Notify only).
