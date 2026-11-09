@@ -1,0 +1,19 @@
+{
+  "version": "0",
+  "id": "a1b2c3d4-0000-4000-8000-000000000001",
+  "detail-type": "CloudWatch Alarm State Change",
+  "source": "aws.cloudwatch",
+  "account": "123456789012",
+  "time": "2026-11-09T03:12:00Z",
+  "region": "ap-northeast-2",
+  "resources": ["arn:aws:cloudwatch:ap-northeast-2:123456789012:alarm:[EC2] web-1 CPU (TagName: i-0abc)"],
+  "detail": {
+    "alarmName": "[EC2] web-1 CPU (TagName: i-0abc)",
+    "state": { "value": "ALARM", "reason": "Threshold Crossed: 1 datapoint [91.2] was greater than the threshold (80.0).", "timestamp": "2026-11-09T03:12:00.000+0000" },
+    "previousState": { "value": "OK" },
+    "configuration": {
+      "description": "{\"managedBy\":\"alarmops\",\"resourceId\":\"i-0abc\",\"resourceType\":\"EC2\",\"metricKey\":\"CPUUtilization\",\"severity\":\"SEV-3\",\"resourceName\":\"web-1\"}",
+      "metrics": [{ "metricStat": { "metric": { "namespace": "AWS/EC2", "name": "CPUUtilization", "dimensions": { "InstanceId": "i-0abc" } } } }]
+    }
+  }
+}
