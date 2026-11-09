@@ -14,7 +14,7 @@ AlarmOps   Incidents   Monitoring   On-call   Customers   Settings        [Custo
 | └ Incident 상세 `/incidents/{id}` | Overview · Alerts · Timeline · Notifications | `incident-detail.md` |
 | **Monitoring** | Alarms · Resources · Coverage gaps · Needs review · Sync runs | `monitoring.md` |
 | └ Resource 상세 `/monitoring/resources/{id}` | Thresholds · Alarms · Tags · History | `resource-detail.md` |
-| **On-call** | Now · Schedules · Escalation policies · Contacts · Maintenance | `oncall-schedule.md`, `escalation-policy.md`, `channel-verification.md`, `maintenance-windows.md` |
+| **On-call** | Teams · Contacts · Maintenance (D-28) | `oncall-team.md`, `channel-verification.md`, `maintenance-windows.md` |
 | **Customers** | 목록 | `customers.md` |
 | └ Customer 상세 `/customers/{id}` | Overview · Org & owners · AWS accounts · Integrations · **Monitoring**(같은 화면, 고객 고정 필터) · Remediation · Portal access | `customers.md`, `integrations.md` |
 | └ New customer `/customers/new` | 5단계 마법사 | `customer-onboarding.md` |
@@ -33,12 +33,12 @@ AlarmOps   Incidents   Monitoring   On-call   Customers   Settings        [Custo
 | 2 | Incident detail | 무엇이 왜 터졌나 → Ack → Resolve. RCA 자리(D-14), 자동 조치 승인 상태(D-15) | 하은(P1-2, P1-4, P1-5), 소연(P3-2 읽기) | Slack `ao_open`, 확인 링크, 목록 행 |
 | 3 | Monitoring | 고객사 횡단 알람·리소스·빈틈·확인 필요(D-16)·임계치 출처(D-19) | 민재(P4-2, P4-3) | 메뉴, 고객 상세 Monitoring 탭, 인시던트 상세 "Open resource" |
 | 4 | Resource detail | 지표별 값과 출처 층, 변경 미리보기, 드리프트 복원/수용, 이력 | 민재(P4-3, P4-5) | Monitoring 행, 인시던트 상세 |
-| 5 | On-call schedule editor | 팀·시프트·대체 근무, "지금 누가" 해석 근거 | 준호(P2-2, P2-4) | On-call › Schedules |
-| 6 | Escalation policy editor | 단계·대기·채널·반복 횟수(D-20) | 준호 | On-call › Escalation policies, 고객 상세 |
+| 5 | On-call team (D-28) | 팀당 한 화면: 로테이션 순서 하나, 이번·다음 주 당번, 대체·교환(상대 수락), 프리셋 에스컬레이션(Standard/Urgent/Quiet, Advanced 접힘), 사용 고객사 | 하은(모바일), 준호(P2-2, P2-4) | On-call › Teams, 고객 상세, 온보딩 4단계 |
+| 6 | (5에 합쳐짐) | — | — | — |
 | 7 | Channel verification | 연락처 채널별 확인 상태, 링크 발송/수동 확인 | 준호 | On-call › Contacts, 온보딩 4단계 |
 | 8 | Maintenance windows | 점검 창 생성·해제. SEV-1은 통과(D-17) 고정 안내 | 준호, 민재, 소연(grant) | On-call › Maintenance, Slack 1h 뮤트, 포털 |
 | 9 | Integrations | CloudWatch(계정·역할) / Prometheus / Grafana 연동, 토큰 1회 표시·회전 | 준호, 민재(P4-1) | 고객 상세 탭, Settings › Integrations, 온보딩 3단계 |
-| 10 | Customer onboarding wizard | 고객사 → 조직 → AWS 계정 + IAM 역할 → 연락처·순서 → 확인 | 준호(P2-1), 민재(P4-1) | Customers › New customer |
+| 10 | Customer onboarding wizard | 고객사 → 조직 → AWS 계정 + IAM 역할 → On-call(팀·프리셋 2문항) → 확인 | 준호(P2-1), 민재(P4-1) | Customers › New customer |
 | 11 | Customers list / detail | 고객사 상태 한눈에, 조직·담당·계정·포털 권한 | 준호(P2-1, P2-3) | 메뉴 |
 | 12 | Settings | MSP 임계치 기본값(D-19), 심각도 매핑표(D-18), 억제 정책 | 준호(ADMIN), 민재 | 메뉴 |
 | 13 | Customer portal | 고객사 하나의 상태를 쉬운 말로. 다른 고객 흔적 없음 | 소연(P3-1~3) | 고객 SSO 로그인, 통지 메일 링크 |

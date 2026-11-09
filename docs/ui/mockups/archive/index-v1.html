@@ -1,0 +1,1298 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AlarmOps Console Mockups</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap">
+<style>
+@font-face{font-family:"Pretendard";font-weight:45 920;font-display:swap;
+  src:url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/woff2/PretendardVariable.woff2") format("woff2");}
+:root{
+  --bg:#fbfaf7;--surface:#ffffff;--soft:#faf8f4;--hair:#f4f1ea;--rule:#ded9cf;--deco:#d3cec3;
+  --faint:#76736b;--mut:#6b6862;--ink2:#4a4842;--ink:#1b1a17;--inv:#ffffff;
+  --accent:#1451d6;--accent-h:#0f3fa8;--accent-t:rgba(20,81,214,.08);
+  --red:#b42318;--red-deep:#7a1710;--red-t:#fdf5f4;--orange:#b54708;--orange-t:#fdf6ef;
+  --slate:#4a5568;--green:#067647;--green-t:#f1f8f4;--gray:#8a877f;--amber:#93670a;--amber-t:#fcf7e8;
+  --grid:#efebe3;--pop:0 18px 44px rgba(27,26,23,.18);
+  --mono:"Space Mono","JetBrains Mono","SFMono-Regular",Menlo,Consolas,"DejaVu Sans Mono",monospace;
+  --sans:"Pretendard","Inter",-apple-system,"Segoe UI","Apple SD Gothic Neo","Noto Sans KR",sans-serif;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#12110f;--surface:#1a1916;--soft:#201f1b;--hair:#25231f;--rule:#34312b;--deco:#423e37;
+  --faint:#9a958a;--mut:#aaa59a;--ink2:#cfcabe;--ink:#eeeae1;--inv:#12110f;
+  --accent:#6b9bff;--accent-h:#8db1ff;--accent-t:rgba(107,155,255,.12);
+  --red:#f0645a;--red-deep:#ff8a80;--red-t:#2a1614;--orange:#f0954a;--orange-t:#2a1c10;
+  --slate:#a3afc2;--green:#4cc38a;--green-t:#12241a;--gray:#8f8b81;--amber:#e0b050;--amber-t:#2a2210;
+  --grid:#24221e;--pop:0 18px 44px rgba(0,0,0,.5);color-scheme:dark;}}
+:root[data-theme="dark"]{
+  --bg:#12110f;--surface:#1a1916;--soft:#201f1b;--hair:#25231f;--rule:#34312b;--deco:#423e37;
+  --faint:#9a958a;--mut:#aaa59a;--ink2:#cfcabe;--ink:#eeeae1;--inv:#12110f;
+  --accent:#6b9bff;--accent-h:#8db1ff;--accent-t:rgba(107,155,255,.12);
+  --red:#f0645a;--red-deep:#ff8a80;--red-t:#2a1614;--orange:#f0954a;--orange-t:#2a1c10;
+  --slate:#a3afc2;--green:#4cc38a;--green-t:#12241a;--gray:#8f8b81;--amber:#e0b050;--amber-t:#2a2210;
+  --grid:#24221e;--pop:0 18px 44px rgba(0,0,0,.5);color-scheme:dark;}
+
+*{box-sizing:border-box;border-radius:0}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:14px/1.5 var(--sans);font-variant-numeric:tabular-nums;
+  -webkit-font-smoothing:antialiased;overflow-x:hidden}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+button{font:inherit;color:inherit;cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mono{font-family:var(--mono)}
+.ov{font:700 11px/1.3 var(--mono);letter-spacing:.07em;text-transform:uppercase;color:var(--faint)}
+.mut{color:var(--mut)} .faint{color:var(--faint)} .ink2{color:var(--ink2)}
+.sm{font-size:12px} .xs{font-size:11px}
+.b{font-weight:600}
+.nowrap{white-space:nowrap}
+.row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.sp{flex:1}
+.stack>*+*{margin-top:16px}
+
+/* ---------- mockup chrome (not part of product) ---------- */
+.mk-bar{position:sticky;top:0;z-index:50;background:var(--ink);color:var(--inv);display:flex;align-items:center;gap:4px;
+  padding:0 16px;overflow-x:auto;scrollbar-width:none;height:36px}
+.mk-bar::-webkit-scrollbar{display:none}
+.mk-bar .lbl{font:700 10px var(--mono);letter-spacing:.1em;opacity:.6;margin-right:10px;white-space:nowrap}
+.mk-bar button{background:none;border:0;color:inherit;opacity:.62;font:500 12px var(--sans);padding:0 10px;height:36px;white-space:nowrap}
+.mk-bar button:hover{opacity:1}
+.mk-bar button[aria-selected="true"]{opacity:1;box-shadow:inset 0 -2px 0 var(--inv);font-weight:600}
+.mk-bar .tt{margin-left:auto;border:1px solid rgba(255,255,255,.3);height:24px;font:700 10px var(--mono);letter-spacing:.08em;opacity:.85}
+:root[data-theme="dark"] .mk-bar .tt{border-color:rgba(0,0,0,.3)}
+
+/* ---------- app shell ---------- */
+.top{background:var(--surface);border-bottom:1px solid var(--rule);height:52px;display:flex;align-items:center;padding:0 24px;gap:28px}
+.logo{display:flex;align-items:center;gap:9px;font-weight:700;letter-spacing:-.02em;font-size:15px;white-space:nowrap}
+.logo i{width:14px;height:14px;background:var(--ink);display:inline-block;position:relative}
+.logo i:after{content:"";position:absolute;right:-4px;top:-4px;width:7px;height:7px;background:var(--red);border-radius:50%;border:2px solid var(--surface)}
+.nav{display:flex;height:100%;gap:2px}
+.nav a{display:flex;align-items:center;padding:0 12px;color:var(--mut);font-weight:500;height:100%;text-decoration:none;white-space:nowrap}
+.nav a:hover{color:var(--ink)}
+.nav a.on{color:var(--ink);font-weight:600;box-shadow:inset 0 -2px 0 var(--ink)}
+.nav .cnt{font:700 10px var(--mono);background:var(--red);color:#fff;padding:1px 5px;margin-left:6px}
+.top-r{margin-left:auto;display:flex;align-items:center;gap:10px}
+.sel{display:inline-flex;align-items:center;gap:8px;height:32px;padding:0 10px;border:1px solid var(--rule);background:var(--surface);font-size:13px;white-space:nowrap}
+.sel .k{color:var(--faint);font:700 10px var(--mono);letter-spacing:.07em;text-transform:uppercase}
+.sel .car{color:var(--faint);font-size:9px}
+.av{width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;font:700 11px var(--mono);
+  background:var(--hair);color:var(--ink2);border:1px solid var(--rule);flex:none}
+.av.on{background:var(--ink);color:var(--inv);border-color:var(--ink)}
+.health{display:inline-flex;align-items:center;gap:6px;font:700 10px var(--mono);letter-spacing:.06em;color:var(--green);white-space:nowrap}
+.health:before{content:"";width:6px;height:6px;border-radius:50%;background:var(--green)}
+
+.page{max-width:1360px;margin:0 auto;padding:24px 24px 64px}
+.ph{display:flex;align-items:flex-end;gap:16px;margin-bottom:20px;flex-wrap:wrap}
+.ph h1{font-size:27px;font-weight:600;letter-spacing:-.025em;margin:0;line-height:1.15}
+.ph h1.sub{font-size:22px;letter-spacing:-.02em}
+.ph .desc{color:var(--mut);margin-top:4px;font-size:13px}
+.crumb{font:400 12px var(--mono);color:var(--faint);margin-bottom:6px}
+.crumb a{color:var(--mut)}
+.chain{color:var(--deco);margin:0 5px;font-family:var(--mono)}
+
+/* ---------- primitives ---------- */
+.btn{height:32px;padding:0 12px;border:1px solid var(--rule);background:var(--surface);color:var(--ink);font-weight:500;font-size:13px;
+  display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.btn:hover{border-color:var(--faint)}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+:root[data-theme="dark"] .btn.pri{color:#0b1530}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .btn.pri{color:#0b1530}}
+.btn.pri:hover{background:var(--accent-h);border-color:var(--accent-h)}
+.btn.danger{color:var(--red)}
+.btn.ghost{border-color:transparent;background:none;color:var(--mut)}
+.btn.sm{height:26px;padding:0 9px;font-size:12px}
+.btn.lg{height:38px;padding:0 18px;font-size:14px}
+.btn[disabled]{background:var(--hair);color:var(--faint);border-color:var(--hair);cursor:not-allowed}
+.inp{height:32px;border:1px solid var(--rule);background:var(--surface);padding:0 10px;font:inherit;font-size:13px;color:var(--ink);width:100%}
+.inp.focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-t)}
+.inp.num{font-family:var(--mono);width:90px;text-align:right}
+.lab{display:block;font-size:12px;font-weight:600;color:var(--ink2);margin-bottom:5px}
+.hint{font-size:12px;color:var(--mut);margin-top:5px}
+
+.card{background:var(--surface);border:1px solid var(--rule)}
+.card-h{display:flex;align-items:center;gap:10px;padding:0 16px;height:40px;border-bottom:1px solid var(--rule)}
+.card-b{padding:16px}
+.card.lb-red{border-left:3px solid var(--red)} .card.lb-orange{border-left:3px solid var(--orange)}
+.card.lb-amber{border-left:3px solid var(--amber)} .card.lb-accent{border-left:3px solid var(--accent)}
+.card.lb-green{border-left:3px solid var(--green)}
+.dashed{border:1px dashed var(--deco);background:transparent}
+
+/* shape marks */
+.mk{display:inline-block;width:9px;height:9px;flex:none;vertical-align:middle}
+.mk.dot{border-radius:50%;background:currentColor}
+.mk.tri{width:10px;height:9px;background:currentColor;clip-path:polygon(50% 0,100% 100%,0 100%)}
+.mk.dia{width:8px;height:8px;background:currentColor;transform:rotate(45deg)}
+.mk.ring{border-radius:50%;border:2px solid currentColor}
+.mk.dash{height:2px;width:10px;background:currentColor}
+.mk.chk{width:10px;height:6px;border-left:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(-45deg) translate(1px,-1px)}
+.mk.x{width:10px;height:10px;position:relative}
+.mk.x:before,.mk.x:after{content:"";position:absolute;left:4px;top:-1px;width:2px;height:12px;background:currentColor;transform:rotate(45deg)}
+.mk.x:after{transform:rotate(-45deg)}
+.mk.q{width:9px;height:9px;border:2px dotted currentColor;border-radius:50%}
+
+.sev{display:inline-flex;align-items:center;gap:6px;font:700 11px var(--mono);letter-spacing:.04em;white-space:nowrap}
+.sev.s1{color:var(--red)} .sev.s2{color:var(--orange)} .sev.s3{color:var(--ink2)} .sev.s4,.sev.s5{color:var(--gray)}
+.sev.s1.hot{background:var(--red);color:#fff;padding:3px 7px 3px 6px}
+:root[data-theme="dark"] .sev.s1.hot{color:#1a0705}
+.sev .lb{color:inherit}
+.st{display:inline-flex;align-items:center;gap:6px;font:700 11px var(--mono);letter-spacing:.05em;text-transform:uppercase;white-space:nowrap}
+.st.trig{color:var(--red)} .st.esc{color:var(--orange)} .st.ack{color:var(--slate)} .st.res{color:var(--green)} .st.mute{color:var(--gray)}
+.st.warn{color:var(--amber)} .st.info{color:var(--accent)}
+
+.src{display:inline-flex;align-items:center;height:18px;padding:0 5px;font:700 10px var(--mono);letter-spacing:.06em;border:1px solid var(--rule);color:var(--mut);background:var(--surface);white-space:nowrap}
+.src.tag{background:var(--ink);color:var(--inv);border-color:var(--ink)}
+.src.console{color:var(--accent);border-color:var(--accent)}
+.src.customer{color:var(--ink2);border-color:var(--deco);background:var(--hair)}
+.src.msp{color:var(--ink2)}
+.src.code{border-style:dashed;color:var(--faint)}
+.pill{display:inline-flex;align-items:center;height:20px;padding:0 7px;font:700 10px var(--mono);letter-spacing:.06em;text-transform:uppercase;background:var(--hair);color:var(--ink2);white-space:nowrap}
+.pill.prd{background:var(--ink);color:var(--inv)}
+.kbd{font:400 11px var(--mono);border:1px solid var(--rule);padding:0 4px;color:var(--faint)}
+code,.code{font:400 12px var(--mono);background:var(--hair);padding:1px 5px;color:var(--ink2)}
+pre.code{display:block;padding:12px 14px;margin:0;white-space:pre;overflow-x:auto;line-height:1.6;border:1px solid var(--rule)}
+
+/* chips & tabs */
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{height:28px;display:inline-flex;align-items:center;gap:7px;padding:0 10px;border:1px solid var(--rule);background:var(--surface);font-size:13px;color:var(--ink2);white-space:nowrap}
+.chip .n{font:700 11px var(--mono);color:var(--faint)}
+.chip.on{border-color:var(--ink);background:var(--soft);color:var(--ink);font-weight:600}
+.chip.on .n{color:var(--ink)}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--rule);margin-bottom:16px;overflow-x:auto;scrollbar-width:none}
+.tabs a{padding:10px 10px;color:var(--mut);font-weight:500;white-space:nowrap;text-decoration:none;display:flex;align-items:center;gap:7px}
+.tabs a.on{color:var(--ink);font-weight:600;box-shadow:inset 0 -2px 0 var(--ink)}
+.tabs a .n{font:700 10px var(--mono);color:var(--faint)}
+.tabs a .n.hot{background:var(--amber);color:#fff;padding:1px 5px}
+.seg{display:inline-flex;border:1px solid var(--rule)}
+.seg span{padding:0 10px;height:28px;display:flex;align-items:center;font-size:12px;color:var(--mut)}
+.seg span+span{border-left:1px solid var(--rule)}
+.seg span.on{background:var(--ink);color:var(--inv);font-weight:600}
+
+/* tiles */
+.tiles{display:grid;grid-template-columns:repeat(5,1fr);background:var(--surface);border:1px solid var(--rule);margin-bottom:16px}
+.tile{padding:14px 16px 12px;border-left:1px solid var(--hair);position:relative}
+.tile:first-child{border-left:0}
+.tile .v{font:700 30px/1.1 var(--mono);letter-spacing:-.03em;margin-top:6px}
+.tile .d{font-size:12px;color:var(--mut);margin-top:3px}
+.tile.on{background:var(--red-t);box-shadow:inset 0 -2px 0 var(--red)}
+.tile .v.red{color:var(--red)} .tile .v.orange{color:var(--orange)} .tile .v.amber{color:var(--amber)}
+
+/* tables */
+.tw{background:var(--surface);border:1px solid var(--rule);overflow-x:auto}
+table.t{width:100%;border-collapse:collapse;font-size:13px}
+.t th{font:700 10.5px var(--mono);letter-spacing:.07em;text-transform:uppercase;color:var(--faint);text-align:left;padding:0 12px;height:34px;
+  border-bottom:1px solid var(--rule);background:var(--soft);white-space:nowrap}
+.t td{padding:10px 12px;border-bottom:1px solid var(--grid);vertical-align:middle}
+.t tr:last-child td{border-bottom:0}
+.t tbody tr:hover td{background:var(--soft)}
+.t tr.hot td:first-child{box-shadow:inset 3px 0 0 var(--red)}
+.t tr.esc td:first-child{box-shadow:inset 3px 0 0 var(--orange)}
+.t tr.rev td:first-child{box-shadow:inset 3px 0 0 var(--amber)}
+.t tr.dim td{color:var(--faint)}
+.t .r{text-align:right}
+.t .ttl{font-weight:600;color:var(--ink)}
+.t .org{font-size:12px;color:var(--faint);margin-top:2px}
+.t .cbc{width:34px}
+.cb{width:14px;height:14px;border:1.5px solid var(--deco);display:inline-block;vertical-align:middle;background:var(--surface)}
+.cb.on{background:var(--ink);border-color:var(--ink);position:relative}
+.cb.on:after{content:"";position:absolute;left:3px;top:0;width:4px;height:8px;border:solid var(--inv);border-width:0 2px 2px 0;transform:rotate(45deg)}
+
+/* layout grids */
+.g-main{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:20px;align-items:start}
+.g-detail{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:20px;align-items:start}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+.note>.st{height:19px}
+.seg.full{display:flex}.seg.full span{flex:1;justify-content:center}
+.g3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.side{display:grid;grid-template-columns:200px minmax(0,1fr);gap:24px;align-items:start}
+.vnav a{display:block;padding:7px 10px;color:var(--mut);text-decoration:none;font-size:13px;border-left:2px solid transparent}
+.vnav a.on{color:var(--ink);font-weight:600;border-left-color:var(--ink);background:var(--surface)}
+.vnav .ov{padding:14px 10px 6px}
+
+/* people */
+.ord{width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;font:700 11px var(--mono);border:1px solid var(--rule);background:var(--surface);color:var(--ink2);flex:none}
+.ord.first{background:var(--ink);color:var(--inv);border-color:var(--ink)}
+.who{display:inline-flex;align-items:center;gap:8px;white-space:nowrap}
+.plist>div{display:flex;align-items:center;gap:10px;padding:9px 16px;border-top:1px solid var(--grid)}
+.plist>div:first-child{border-top:0}
+.plist>div>div{min-width:0;overflow-wrap:anywhere}
+
+/* timeline */
+.tl{position:relative;padding-left:4px}
+.tl .ev{display:grid;grid-template-columns:20px 64px 1fr;gap:10px;padding:7px 0;position:relative;align-items:start}
+.tl .ev:before{content:"";position:absolute;left:8.5px;top:24px;bottom:-8px;width:1px;background:var(--rule)}
+.tl .ev:last-child:before{display:none}
+.tl .ev .m{display:flex;justify-content:center;padding-top:5px}
+.tl .ev .tm{font:400 11px var(--mono);color:var(--faint);padding-top:2px}
+.tl .ev .tx{font-size:13px}
+.tl .ev .tx .s{display:block;color:var(--mut);font-size:12px}
+
+/* misc */
+.kv{margin:0;display:grid;grid-template-columns:140px 1fr;gap:8px 16px;font-size:13px}
+.kv dt{color:var(--mut)} .kv dd{margin:0}
+.banner{display:flex;align-items:center;gap:12px;padding:10px 14px;border:1px solid var(--rule);background:var(--surface);font-size:13px;margin-bottom:16px}
+.banner.amber{border-left:3px solid var(--amber);background:var(--amber-t)}
+.banner.accent{border-left:3px solid var(--accent);background:var(--accent-t)}
+.banner.red{border-left:3px solid var(--red);background:var(--red-t)}
+.note{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;background:var(--soft);border:1px solid var(--rule);font-size:12.5px;color:var(--ink2)}
+.prog{height:4px;background:var(--hair);position:relative}
+.prog i{position:absolute;left:0;top:0;bottom:0;background:var(--ink)}
+.spark{display:block;width:100%;height:56px}
+.strike{text-decoration:line-through;color:var(--faint)}
+.tog{width:30px;height:16px;border:1.5px solid var(--deco);position:relative;display:inline-block;vertical-align:middle;flex:none;background:var(--surface)}
+.tog:after{content:"";position:absolute;top:2px;left:2px;width:9px;height:9px;background:var(--deco)}
+.tog.on{background:var(--ink);border-color:var(--ink)}
+.tog.on:after{left:15px;background:var(--inv)}
+.tog.lock{opacity:.55}
+.steps{display:flex;gap:0;border:1px solid var(--rule);background:var(--surface);margin-bottom:20px}
+.steps>div{flex:1;padding:12px 16px;border-left:1px solid var(--rule);display:flex;gap:10px;align-items:center;min-width:0}
+.steps>div:first-child{border-left:0}
+.steps .ord{width:22px;height:22px}
+.steps .done .ord{background:var(--green);border-color:var(--green);color:#fff}
+.steps .cur{box-shadow:inset 0 -2px 0 var(--ink);background:var(--soft)}
+.steps .cur .ord{background:var(--ink);color:var(--inv);border-color:var(--ink)}
+.steps .t1{font-weight:600;font-size:13px;white-space:nowrap}
+.steps .t2{font-size:11px;color:var(--faint);font-family:var(--mono)}
+.role{display:grid;grid-template-columns:30px 1fr auto;gap:12px;padding:14px 16px;border-top:1px solid var(--grid);align-items:start}
+.role:first-child{border-top:0}
+.stage{display:flex;align-items:center;gap:0;margin:6px 0 2px}
+.stage>span{flex:1;display:flex;flex-direction:column;gap:6px;font-size:11px;color:var(--faint);position:relative}
+.stage>span b{height:3px;background:var(--rule);display:block}
+.stage>span.done b{background:var(--ink)} .stage>span.done{color:var(--ink2)}
+.stage>span.cur b{background:var(--orange)} .stage>span.cur{color:var(--orange);font-weight:600}
+.drawer{background:var(--surface);border:1px solid var(--rule);box-shadow:var(--pop)}
+
+/* schedule grid */
+.wk{display:grid;grid-template-columns:56px repeat(24,1fr);font-size:11px;position:relative}
+.wk .hd{font:400 10px var(--mono);color:var(--faint);padding:0 0 6px 2px;border-left:1px solid var(--grid)}
+.wk .dl{font:700 11px var(--mono);color:var(--mut);display:flex;align-items:center;height:38px;border-top:1px solid var(--grid)}
+.wk .cell{height:38px;border-top:1px solid var(--grid);border-left:1px solid var(--grid)}
+.wk .bar{height:26px;margin-top:6px;align-self:start;display:flex;align-items:center;gap:6px;padding:0 8px;font-size:12px;font-weight:600;overflow:hidden;white-space:nowrap;z-index:1}
+.wk .bar.a{background:var(--ink);color:var(--inv)}
+.wk .bar.b{background:var(--hair);color:var(--ink);border:1px solid var(--deco)}
+.wk .bar.c{background:var(--soft);color:var(--ink2);border:1px dashed var(--deco)}
+.wk .bar.ovr{background:repeating-linear-gradient(135deg,var(--accent-t) 0 6px,transparent 6px 12px),var(--surface);border:1px solid var(--accent);color:var(--accent)}
+.wk .now{position:absolute;top:18px;bottom:0;width:2px;background:var(--red);z-index:2}
+.wk .now:before{content:"NOW 03:16";position:absolute;top:-16px;left:4px;white-space:nowrap;font:700 9px var(--mono);color:var(--red)}
+
+/* escalation ladder */
+.lad{display:grid;grid-template-columns:44px 110px 1fr 1.3fr 140px 30px;gap:0;align-items:center}
+.lad>div{padding:12px;border-top:1px solid var(--grid);min-height:58px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.lad .h{font:700 10.5px var(--mono);letter-spacing:.07em;text-transform:uppercase;color:var(--faint);min-height:34px;background:var(--soft);border-top:0}
+.ch{height:24px;padding:0 8px;display:inline-flex;align-items:center;gap:5px;font-size:12px;border:1px solid var(--rule);color:var(--faint);background:var(--surface)}
+.ch.on{border-color:var(--ink);color:var(--ink);font-weight:600}
+.axis{position:relative;height:74px;margin:6px 8px 0}
+.axis .ln{position:absolute;left:0;right:0;top:30px;height:1px;background:var(--rule)}
+.axis .pt{position:absolute;top:16px;transform:translateX(-50%);text-align:center;font-size:11px;white-space:nowrap}
+.axis .pt i{display:block;width:12px;height:12px;margin:8px auto 6px;background:var(--surface);border:2px solid var(--ink)}
+.axis .pt.rep i{border-color:var(--accent);border-style:dashed}
+.axis .pt.end i{background:var(--ink)}
+.axis .pt b{font:700 10px var(--mono);color:var(--faint);position:absolute;top:-16px;left:50%;transform:translateX(-50%)}
+
+/* portal */
+.portal-top{background:var(--surface);border-bottom:1px solid var(--rule);height:56px;display:flex;align-items:center;padding:0 24px;gap:16px}
+.portal{max-width:960px;margin:0 auto;padding:32px 24px 64px}
+.hero-status{padding:24px;display:flex;gap:18px;align-items:flex-start}
+.hero-status .big{width:44px;height:44px;border:2px solid var(--orange);display:flex;align-items:center;justify-content:center;color:var(--orange);flex:none}
+.big-q{font-size:22px;font-weight:600;letter-spacing:-.02em;line-height:1.3}
+
+.screen{display:none}
+.screen.on{display:block}
+
+/* responsive */
+@media (max-width:1100px){
+  .g-main,.g-detail{grid-template-columns:minmax(0,1fr)}
+  .tiles{grid-template-columns:repeat(3,1fr)}
+  .tile:nth-child(4){border-left:0}
+  .tile:nth-child(n+4){border-top:1px solid var(--hair)}
+  .g3{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+}
+@media (max-width:760px){
+  .top,.portal-top{padding:0 16px;gap:14px;overflow-x:auto}
+  .portal-top .nav{margin-left:0 !important}
+  .top-r .sel,.top-r .health{display:none}
+  .page,.portal{padding:16px 16px 48px}
+  .ph h1{font-size:23px}
+  .tiles{grid-template-columns:1fr 1fr}
+  .tile:nth-child(n){border-left:1px solid var(--hair);border-top:1px solid var(--hair)}
+  .tile:nth-child(odd){border-left:0}
+  .tile:nth-child(-n+2){border-top:0}
+  .g2,.g3,.side{grid-template-columns:minmax(0,1fr)}
+  .g-main>*,.g-detail>*,.g2>*,.g3>*{min-width:0}
+  .steps{flex-direction:column}
+  .steps>div{border-left:0;border-top:1px solid var(--rule)}
+  .hide-m{display:none !important}
+  .kv{grid-template-columns:110px 1fr}
+  .lad{grid-template-columns:36px 1fr;}
+  .lad .h{display:none}
+  .t.cards thead{display:none}
+  .t.cards tbody tr{display:grid;grid-template-columns:auto auto 1fr;gap:6px 12px;padding:12px 14px;border-bottom:1px solid var(--grid);align-items:center}
+  .t.cards tbody tr:last-child{border-bottom:0}
+  .t.cards td{padding:0;border:0;background:none !important;box-shadow:none !important}
+  .t.cards td:nth-child(1),.t.cards td:nth-child(5),.t.cards td:nth-child(7){display:none}
+  .t.cards td:nth-child(8){text-align:right;grid-row:1;grid-column:3}
+  .t.cards td:nth-child(2),.t.cards td:nth-child(3){grid-row:1}
+  .t.cards td:nth-child(4),.t.cards td:nth-child(6){grid-column:1 / -1}
+  .t.cards td:nth-child(6) .org{display:inline;margin-left:8px}
+  .t.cards tr.hot{box-shadow:inset 3px 0 0 var(--red)} .t.cards tr.esc{box-shadow:inset 3px 0 0 var(--orange)}
+}
+</style>
+</head>
+<body>
+
+<nav class="mk-bar" role="tablist" aria-label="Mockup screens">
+  <span class="lbl">ALARMOPS MOCKUPS</span>
+  <button data-s="incidents">Incidents</button>
+  <button data-s="incident">Incident detail</button>
+  <button data-s="monitoring">Monitoring</button>
+  <button data-s="resource">Resource detail</button>
+  <button data-s="schedule">On-call schedule</button>
+  <button data-s="escalation">Escalation policy</button>
+  <button data-s="contacts">Channel verification</button>
+  <button data-s="maintenance">Maintenance</button>
+  <button data-s="integrations">Integrations</button>
+  <button data-s="onboarding">Onboarding</button>
+  <button data-s="customers">Customers</button>
+  <button data-s="customer">Customer detail</button>
+  <button data-s="settings">Settings</button>
+  <button data-s="portal">Customer portal</button>
+  <button class="tt" id="tt">THEME: AUTO</button>
+</nav>
+
+<!-- Shared top bar template is cloned into each console screen by JS -->
+<template id="topbar">
+  <header class="top">
+    <div class="logo"><i></i>AlarmOps</div>
+    <nav class="nav">
+      <a data-m="incidents">Incidents<span class="cnt">4</span></a>
+      <a data-m="monitoring">Monitoring</a>
+      <a data-m="oncall">On-call</a>
+      <a data-m="customers">Customers</a>
+      <a data-m="settings">Settings</a>
+    </nav>
+    <div class="top-r">
+      <span class="health hide-m">PIPELINE OK · TICK 12s</span>
+      <span class="sel"><span class="k">Customer</span><b class="cust-label">All customers</b><span class="car">▼</span></span>
+      <span class="av on">HK</span>
+    </div>
+  </header>
+</template>
+
+<!-- ============================ 1. INCIDENTS LIST ============================ -->
+<section class="screen" id="s-incidents" data-menu="incidents">
+<div class="page">
+  <div class="ph">
+    <div><h1>Incidents</h1><div class="desc">Monday, Nov 9 · 03:16 KST · auto-refresh every 15s</div></div>
+    <div class="sp"></div>
+    <button class="btn">Mute…</button>
+    <button class="btn">Acknowledge 2 selected</button>
+  </div>
+
+  <div class="banner amber"><span class="st warn"><span class="mk tri"></span></span>
+    <span><b>3 alerts from an unmapped AWS account</b> <span class="mono sm">481 220 935 017</span> have no owner and won't escalate.</span>
+    <span class="sp"></span><a class="b" href="#">Map account →</a></div>
+
+  <div class="tiles">
+    <div class="tile on"><div class="row"><span class="st trig"><span class="mk dot"></span></span><span class="ov">Triggered</span></div><div class="v red">3</div><div class="d">1 SEV-1 · oldest 11m</div></div>
+    <div class="tile"><div class="row"><span class="st esc"><span class="mk tri"></span></span><span class="ov">Escalated</span></div><div class="v orange">1</div><div class="d">step 2 of 4 · next 03:19</div></div>
+    <div class="tile"><div class="row"><span class="st ack"><span class="mk ring"></span></span><span class="ov">Acknowledged</span></div><div class="v">2</div><div class="d">median ack 2m 40s</div></div>
+    <div class="tile"><div class="row"><span class="st res"><span class="mk chk"></span></span><span class="ov">Resolved · 24h</span></div><div class="v">17</div><div class="d">9 auto · 8 manual</div></div>
+    <div class="tile"><div class="row"><span class="st mute"><span class="mk dash"></span></span><span class="ov">Muted</span></div><div class="v">5</div><div class="d">2 maintenance windows</div></div>
+  </div>
+
+  <div class="g-main">
+    <div>
+      <div class="row" style="margin-bottom:12px">
+        <div class="chips">
+          <span class="chip on"><span class="st trig"><span class="mk dot"></span></span>Open<span class="n">6</span></span>
+          <span class="chip"><span class="st ack"><span class="mk ring"></span></span>Acknowledged<span class="n">2</span></span>
+          <span class="chip"><span class="st res"><span class="mk chk"></span></span>Resolved<span class="n">17</span></span>
+        </div>
+        <span class="sp"></span>
+        <span class="sel"><span class="k">Sev</span>Any<span class="car">▼</span></span>
+        <span class="sel hide-m"><span class="k">Source</span>Any<span class="car">▼</span></span>
+        <span class="sel"><span class="k">Assignee</span>Anyone<span class="car">▼</span></span>
+        <input class="inp hide-m" style="width:200px" placeholder="Search title, resource, account">
+      </div>
+      <div class="tw">
+      <table class="t cards">
+        <thead><tr><th class="cbc"><span class="cb"></span></th><th>Sev</th><th>Status</th><th>Incident</th><th class="r">Alerts</th><th>Assignee</th><th class="hide-m">Escalation</th><th class="r">Age</th></tr></thead>
+        <tbody>
+          <tr class="hot"><td class="cbc"><span class="cb on"></span></td><td><span class="sev s1 hot"><span class="mk dot"></span>SEV-1</span></td><td><span class="st trig"><span class="mk dot"></span>Triggered</span></td>
+            <td><a class="ttl" href="#incident" style="color:var(--ink)">payments-db-1 FreeStorageSpace below 10 GB</a><div class="org">Mirae Pay<span class="chain">›</span>Core<span class="chain">›</span>Payments API · RDS · <span class="mono">prd</span></div></td>
+            <td class="r mono b">3</td><td><span class="who"><span class="av on">HK</span>Haeun Kim</span><div class="org">next: Junho Park</div></td>
+            <td class="hide-m"><span class="mono sm">2/4</span> <span class="sm mut">· voice in 2m 48s</span></td><td class="r mono sm">4m</td></tr>
+          <tr class="esc"><td class="cbc"><span class="cb on"></span></td><td><span class="sev s2"><span class="mk tri"></span>SEV-2</span></td><td><span class="st esc"><span class="mk tri"></span>Escalated</span></td>
+            <td><a class="ttl" href="#incident" style="color:var(--ink)">api-alb 5XX rate above 2%</a><div class="org">Hanbit Logistics<span class="chain">›</span>Tracking<span class="chain">›</span>Public API · ALB · <span class="mono">prd</span></div></td>
+            <td class="r mono b">2</td><td><span class="who"><span class="av">JP</span>Junho Park</span><div class="org">Haeun Kim didn't ack in 5m</div></td>
+            <td class="hide-m"><span class="mono sm">2/4</span> <span class="sm mut">· voice in 3m</span></td><td class="r mono sm">11m</td></tr>
+          <tr class="hot"><td class="cbc"><span class="cb"></span></td><td><span class="sev s2"><span class="mk tri"></span>SEV-2</span></td><td><span class="st trig"><span class="mk dot"></span>Triggered</span></td>
+            <td><span class="ttl">node-exporter: KubeNodeNotReady on ip-10-2-14-77</span><div class="org">Daon Retail<span class="chain">›</span>Commerce<span class="chain">›</span>EKS prod · Prometheus</div></td>
+            <td class="r mono b">1</td><td><span class="who"><span class="av">ML</span>Minjae Lee</span><div class="org">next: Haeun Kim</div></td>
+            <td class="hide-m"><span class="mono sm">1/3</span> <span class="sm mut">· Slack sent</span></td><td class="r mono sm">2m</td></tr>
+          <tr class="hot"><td class="cbc"><span class="cb"></span></td><td><span class="sev s3"><span class="mk dia"></span>SEV-3</span></td><td><span class="st trig"><span class="mk dot"></span>Triggered</span></td>
+            <td><span class="ttl">3 alarms from unmapped account</span><div class="org"><span class="st warn" style="font-size:10px"><span class="mk tri"></span>Unmapped</span> · <span class="mono">481220935017</span> · CloudWatch</div></td>
+            <td class="r mono b">3</td><td><span class="mut sm">No owner</span></td>
+            <td class="hide-m"><span class="sm mut">— not escalating</span></td><td class="r mono sm">26m</td></tr>
+          <tr><td class="cbc"><span class="cb"></span></td><td><span class="sev s3"><span class="mk dia"></span>SEV-3</span></td><td><span class="st ack"><span class="mk ring"></span>Ack'd</span></td>
+            <td><span class="ttl">batch-worker-3 CPUUtilization above 90%</span><div class="org">Hanbit Logistics<span class="chain">›</span>Ops<span class="chain">›</span>Batch · EC2 · <span class="mono">prd</span></div></td>
+            <td class="r mono b">1</td><td><span class="who"><span class="av">HK</span>Haeun Kim</span><div class="org">ack'd 02:58</div></td>
+            <td class="hide-m"><span class="sm mut">stopped · re-notify 03:58</span></td><td class="r mono sm">19m</td></tr>
+          <tr><td class="cbc"><span class="cb"></span></td><td><span class="sev s4"><span class="mk ring"></span>SEV-4</span></td><td><span class="st ack"><span class="mk ring"></span>Ack'd</span></td>
+            <td><span class="ttl">grafana: Checkout p95 latency above 800 ms</span><div class="org">Daon Retail<span class="chain">›</span>Commerce<span class="chain">›</span>Checkout · Grafana</div></td>
+            <td class="r mono b">4</td><td><span class="who"><span class="av">ML</span>Minjae Lee</span><div class="org">ack'd 02:41</div></td>
+            <td class="hide-m"><span class="sm mut">stopped</span></td><td class="r mono sm">38m</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <div class="row sm mut" style="margin-top:10px"><span>Showing 6 of 6 open · counts follow current filters</span><span class="sp"></span><span><span class="kbd">J</span> <span class="kbd">K</span> move · <span class="kbd">A</span> ack</span></div>
+    </div>
+
+    <aside class="stack">
+      <div class="card">
+        <div class="card-h"><span class="ov">On call now · by schedule</span><span class="sp"></span><a class="sm" href="#schedule">Schedule</a></div>
+        <div class="plist">
+          <div><span class="av on">HK</span><div><div class="b">Haeun Kim</div><div class="xs faint">Mirae Pay › Payments API · until 09:00</div></div><span class="sp"></span><span class="mono xs mut">1 open</span></div>
+          <div><span class="av on">JP</span><div><div class="b">Junho Park</div><div class="xs faint">Hanbit Logistics · customer default</div></div><span class="sp"></span><span class="mono xs mut">2 open</span></div>
+          <div><span class="av on">ML</span><div><div class="b">Minjae Lee</div><div class="xs faint">Daon Retail › Commerce · override</div></div><span class="sp"></span><span class="mono xs mut">2 open</span></div>
+          <div><span class="av">—</span><div><div class="b">No owner</div><div class="xs faint">Unmapped account 481220935017</div></div><span class="sp"></span><span class="mono xs mut">1 open</span></div>
+        </div>
+        <div class="xs faint" style="padding:8px 16px;border-top:1px solid var(--grid)">Each incident pages the schedule of its own service (service › project › customer › MSP default). Pick a customer above to see its full escalation chain.</div>
+      </div>
+      <div class="card lb-orange">
+        <div class="card-h"><span class="ov">Escalation pending</span></div>
+        <div class="card-b stack" style="padding:12px 16px">
+          <div><div class="row"><span class="sev s1"><span class="mk dot"></span>SEV-1</span><span class="b sm">payments-db-1</span><span class="sp"></span><span class="mono sm" style="color:var(--orange)">2:48</span></div>
+            <div class="xs mut">Step 3 · voice call to Junho Park</div><div class="prog" style="margin-top:6px"><i style="width:62%;background:var(--orange)"></i></div></div>
+          <div><div class="row"><span class="sev s2"><span class="mk tri"></span>SEV-2</span><span class="b sm">api-alb</span><span class="sp"></span><span class="mono sm" style="color:var(--orange)">3:04</span></div>
+            <div class="xs mut">Step 3 · Voice call to Junho Park</div><div class="prog" style="margin-top:6px"><i style="width:38%;background:var(--orange)"></i></div></div>
+        </div>
+      </div>
+    </aside>
+  </div>
+</div>
+</section>
+
+<!-- ============================ 2. INCIDENT DETAIL ============================ -->
+<section class="screen" id="s-incident" data-menu="incidents">
+<div class="page">
+  <div class="crumb"><a href="#incidents">Incidents</a><span class="chain">›</span>INC-20261109-0312-7F3A</div>
+  <div class="card lb-red" style="margin-bottom:20px">
+    <div class="card-b" style="padding:20px 22px">
+      <div class="row" style="gap:14px;margin-bottom:10px"><span class="sev s1 hot"><span class="mk dot"></span>SEV-1</span><span class="st trig"><span class="mk dot"></span>Triggered · 4m 12s</span><span class="mono xs faint">opened 03:12:04 KST · 3 alerts</span></div>
+      <div class="row" style="align-items:flex-start;gap:20px">
+        <div style="flex:1;min-width:280px">
+          <h1 style="font-size:26px;font-weight:600;letter-spacing:-.025em;margin:0 0 6px;line-height:1.2">payments-db-1 FreeStorageSpace below 10 GB</h1>
+          <div class="sm mut">Mirae Pay<span class="chain">›</span>Core<span class="chain">›</span>Payments API<span class="chain">›</span><span class="mono">8273 1104 6650</span> · ap-northeast-2 · <span class="pill prd">prd</span></div>
+        </div>
+        <div class="row">
+          <button class="btn">Mute 1h</button>
+          <button class="btn">Escalate now</button>
+          <button class="btn pri lg">Acknowledge</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="g-detail">
+    <div class="stack">
+      <div class="card">
+        <div class="card-h"><span class="ov">Why it fired</span><span class="sp"></span><a class="sm" href="#resource">Open resource →</a></div>
+        <div class="card-b">
+          <div class="g3" style="gap:0;border:1px solid var(--rule);margin-bottom:14px">
+            <div style="padding:12px 14px"><div class="ov">Current</div><div class="mono" style="font-size:24px;font-weight:700;color:var(--red)">7.4 GB</div><div class="xs mut">FreeStorageSpace · Minimum · 5m</div></div>
+            <div style="padding:12px 14px;border-left:1px solid var(--rule)"><div class="ov">Threshold</div><div class="mono" style="font-size:24px;font-weight:700">&lt; 10 GB</div><div class="row xs mut" style="gap:6px"><span class="src console">CONSOLE</span>set by Minjae Lee · Nov 4</div></div>
+            <div style="padding:12px 14px;border-left:1px solid var(--rule)"><div class="ov">Evaluation</div><div class="mono" style="font-size:24px;font-weight:700">1 / 1</div><div class="row xs mut" style="gap:6px"><span class="src code">CODE</span>SEV-1 is locked</div></div>
+          </div>
+          <svg class="spark" viewBox="0 0 600 56" preserveAspectRatio="none" aria-label="FreeStorageSpace last 3 hours">
+            <line x1="0" y1="30" x2="600" y2="30" stroke="var(--red)" stroke-dasharray="4 4" stroke-width="1"/>
+            <polyline fill="none" stroke="var(--ink)" stroke-width="1.6" points="0,8 50,9 100,10 150,11 200,12 250,14 300,15 350,18 400,22 450,26 500,32 540,38 570,42 600,44"/>
+            <circle cx="600" cy="44" r="3" fill="var(--red)"/>
+          </svg>
+          <div class="row xs faint" style="justify-content:space-between"><span class="mono">00:15</span><span class="mono">01:45</span><span class="mono">03:15</span></div>
+          <div class="note" style="margin-top:12px"><span class="mono xs faint">REASON</span><span>Threshold Crossed: 1 datapoint [7.94E9 (09/11/26 03:11:00)] was less than the threshold (1.0E10).</span></div>
+        </div>
+      </div>
+
+      <div class="card lb-amber">
+        <div class="card-h"><span class="ov">Remediation</span><span class="pill">Approval required</span><span class="sp"></span><span class="xs faint mono">REQ-5521 · expires 03:42</span></div>
+        <div class="card-b">
+          <div class="row" style="align-items:flex-start;gap:16px">
+            <div style="flex:1;min-width:260px">
+              <div class="b" style="font-size:15px">Stop RDS instance <span class="mono" style="font-weight:400">payments-db-1</span></div>
+              <div class="sm mut" style="margin-top:2px">Triggered by an unauthorized change: <code>ModifyDBInstance</code> PubliclyAccessible=true by <span class="mono">arn:aws:iam::827311046650:user/ci-deploy</span> at 03:09</div>
+            </div>
+            <a class="btn" href="#">Open Slack thread ↗</a>
+          </div>
+          <div class="stage" style="margin-top:16px">
+            <span class="done"><b></b>Notified 03:09</span>
+            <span class="cur"><b></b>Pending approval</span>
+            <span><b></b>Approved</span>
+            <span><b></b>Executing</span>
+            <span><b></b>Succeeded</span>
+          </div>
+          <div class="note" style="margin-top:14px"><span class="st info"><span class="mk ring"></span></span><span>Approval happens in Slack only (#mirae-ops). Approver role: <b>Operator</b> or higher. Runs with the customer's <b>Remediator</b> role.</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="tabs" style="margin:0;padding:0 8px">
+          <a class="on">Timeline</a><a>Alerts <span class="n">3</span></a><a>Notifications <span class="n">5</span></a><a>Suppression <span class="n">1</span></a>
+        </div>
+        <div class="card-b tl">
+          <div class="ev"><span class="m"><span class="st esc"><span class="mk tri"></span></span></span><span class="tm">03:14:04</span><span class="tx"><b>Escalated to step 2</b> — SMS queued for Haeun Kim<span class="s">No acknowledgement 2m after the Slack page at 03:12:04 (policy “Mirae Pay — Critical”)</span></span></div>
+          <div class="ev"><span class="m"><span class="st res"><span class="mk chk"></span></span></span><span class="tm">03:12:06</span><span class="tx">Slack message delivered to <b>#mirae-ops</b> and DM to Haeun Kim</span></div>
+          <div class="ev"><span class="m"><span class="st mute"><span class="mk dash"></span></span></span><span class="tm">03:12:05</span><span class="tx">1 alert suppressed as duplicate<span class="s">payments-db-1 FreeStorageSpace repeated within 5m dedup window</span></span></div>
+          <div class="ev"><span class="m"><span class="st trig"><span class="mk dot"></span></span></span><span class="tm">03:12:04</span><span class="tx"><b>Triggered</b> — group of 3 alerts (Mirae Pay · SEV-1) closed after 30s<span class="s">Owner snapshot: Haeun Kim → Junho Park → Minjae Lee</span></span></div>
+        </div>
+      </div>
+    </div>
+
+    <aside class="stack">
+      <div class="card">
+        <div class="card-h"><span class="ov">Escalation</span><span class="sp"></span><span class="mono xs">step 2/4 · repeat 0/1</span></div>
+        <div class="plist">
+          <div><span class="ord first">1</span><span class="av on">HK</span><div><div class="b">Haeun Kim</div><div class="xs faint">Slack ✓ 03:12 · SMS ✓ 03:14</div></div></div>
+          <div><span class="ord">2</span><span class="av">JP</span><div><div class="b">Junho Park</div><div class="xs faint">Voice call at 03:19 if no ack</div></div></div>
+          <div><span class="ord">3</span><span class="av">ML</span><div><div class="b">Minjae Lee</div><div class="xs faint">Everyone at 03:24</div></div></div>
+        </div>
+        <div class="xs mut" style="padding:10px 16px;border-top:1px solid var(--grid)">SEV-1 · pages through maintenance windows</div>
+      </div>
+      <div class="card dashed" style="min-height:178px">
+        <div class="card-h" style="border-bottom:1px dashed var(--deco)"><span class="ov">Root cause analysis</span><span class="sp"></span><span class="pill">After PoC</span></div>
+        <div class="card-b">
+          <div class="sm mut">A read-only investigation agent will summarize likely causes here, using the customer's Reader role.</div>
+          <div style="margin-top:14px;display:grid;gap:7px"><div style="height:8px;background:var(--hair);width:92%"></div><div style="height:8px;background:var(--hair);width:76%"></div><div style="height:8px;background:var(--hair);width:84%"></div></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-h"><span class="ov">Details</span></div>
+        <div class="card-b"><dl class="kv" style="grid-template-columns:96px 1fr">
+          <dt>Source</dt><dd>CloudWatch</dd>
+          <dt>Resource</dt><dd class="mono sm">payments-db-1</dd>
+          <dt>Alarm</dt><dd class="sm">[RDS] payments-db-1 FreeStorageSpace (TagName: payments-db-1)</dd>
+          <dt>Runbook</dt><dd><a href="#">RDS storage full ↗</a></dd>
+          <dt>Last time</dt><dd class="sm">Oct 21 · resolved by Haeun · <span class="mono">CONFIG</span></dd>
+        </dl></div>
+      </div>
+    </aside>
+  </div>
+</div>
+</section>
+
+<!-- ============================ 3. MONITORING ============================ -->
+<section class="screen" id="s-monitoring" data-menu="monitoring">
+<div class="page">
+  <div class="ph">
+    <div><h1>Monitoring</h1><div class="desc">Alarms we manage across 4 customers · 9 AWS accounts · last sync 02:00 KST</div></div>
+    <div class="sp"></div><button class="btn">Sync now</button><button class="btn pri">Change threshold…</button>
+  </div>
+  <div class="tiles">
+    <div class="tile"><div class="ov">Monitored resources</div><div class="v">412</div><div class="d">1,284 alarms</div></div>
+    <div class="tile"><div class="ov">Coverage gaps</div><div class="v">23</div><div class="d">tagged, no alarm yet</div></div>
+    <div class="tile on" style="background:var(--amber-t);box-shadow:inset 0 -2px 0 var(--amber)"><div class="row"><span class="st warn"><span class="mk tri"></span></span><span class="ov">Needs review</span></div><div class="v amber">6</div><div class="d">Monitoring tag removed</div></div>
+    <div class="tile"><div class="ov">Drifted</div><div class="v orange">4</div><div class="d">changed outside console</div></div>
+    <div class="tile"><div class="ov">In ALARM</div><div class="v red">7</div><div class="d">5 customers' alarms</div></div>
+  </div>
+  <div class="tabs"><a>Alarms <span class="n">1,284</span></a><a>Resources <span class="n">412</span></a><a>Coverage gaps <span class="n">23</span></a><a class="on">Needs review <span class="n hot">6</span></a><a>Sync runs</a></div>
+
+  <div class="note" style="margin-bottom:14px"><span class="st warn"><span class="mk tri"></span></span><span>These resources were monitored, but their <code>Monitoring=on</code> tag disappeared outside AlarmOps (often Terraform). <b>We kept their alarms.</b> Choose what to do for each one.</span></div>
+
+  <div class="tw" style="margin-bottom:24px">
+  <table class="t">
+    <thead><tr><th class="cbc"><span class="cb"></span></th><th>Resource</th><th>Customer · account</th><th>Since</th><th>Reason</th><th class="r">Alarms kept</th><th class="r">Actions</th></tr></thead>
+    <tbody>
+      <tr class="rev"><td class="cbc"><span class="cb"></span></td><td><div class="ttl">orders-api-2</div><div class="org mono">EC2 · i-07b3c91fe2a4d0e18</div></td><td>Hanbit Logistics<div class="org mono">3301 8812 4407 · prd</div></td><td class="mono sm">Nov 8 22:14</td><td><span class="sm">Tag removed by <span class="mono">terraform-ci</span></span></td><td class="r mono b">6</td>
+        <td class="r"><div class="row" style="justify-content:flex-end"><button class="btn sm">Re-tag</button><button class="btn sm">Keep</button><button class="btn sm danger">Stop…</button></div></td></tr>
+      <tr class="rev"><td class="cbc"><span class="cb"></span></td><td><div class="ttl">orders-api-3</div><div class="org mono">EC2 · i-0e18d2a7c66b9f301</div></td><td>Hanbit Logistics<div class="org mono">3301 8812 4407 · prd</div></td><td class="mono sm">Nov 8 22:14</td><td><span class="sm">Tag removed by <span class="mono">terraform-ci</span></span></td><td class="r mono b">6</td>
+        <td class="r"><div class="row" style="justify-content:flex-end"><button class="btn sm">Re-tag</button><button class="btn sm">Keep</button><button class="btn sm danger">Stop…</button></div></td></tr>
+      <tr class="rev"><td class="cbc"><span class="cb"></span></td><td><div class="ttl">checkout-redis</div><div class="org mono">ElastiCache · checkout-redis-001</div></td><td>Daon Retail<div class="org mono">5520 1934 8876 · prd</div></td><td class="mono sm">Nov 7 10:02</td><td><span class="sm">Tag value changed to <code>off?</code></span></td><td class="r mono b">4</td>
+        <td class="r"><div class="row" style="justify-content:flex-end"><button class="btn sm" disabled title="TagWriter role not enabled">Re-tag</button><button class="btn sm">Keep</button><button class="btn sm danger">Stop…</button></div></td></tr>
+      <tr class="rev"><td class="cbc"><span class="cb"></span></td><td><div class="ttl">ledger-aurora-r1</div><div class="org mono">AuroraRDS · ledger-aurora-r1</div></td><td>Mirae Pay<div class="org mono">8273 1104 6650 · prd</div></td><td class="mono sm">Nov 6 16:40</td><td><span class="sm">Tags unreadable (AccessDenied)</span></td><td class="r mono b">7</td>
+        <td class="r"><div class="row" style="justify-content:flex-end"><button class="btn sm">Check role</button></div></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="row" style="margin-bottom:10px"><h2 style="font-size:16px;margin:0;font-weight:600">Alarms</h2><span class="mut sm">preview of the Alarms tab · filtered: Hanbit Logistics, EC2</span><span class="sp"></span>
+    <span class="sel"><span class="k">Type</span>EC2<span class="car">▼</span></span><span class="sel"><span class="k">Source</span>Any<span class="car">▼</span></span></div>
+  <div class="tw">
+  <table class="t">
+    <thead><tr><th class="cbc"><span class="cb"></span></th><th>Alarm</th><th>Metric</th><th class="r">Threshold</th><th>Source</th><th class="r">M/N</th><th>Sev</th><th>State</th><th>Drift</th></tr></thead>
+    <tbody>
+      <tr><td class="cbc"><span class="cb on"></span></td><td><div class="ttl">[EC2] batch-worker-3 CPU</div><div class="org mono">i-0a77c2e1f4b9d3a20</div></td><td class="mono sm">CPUUtilization</td><td class="r mono b">&gt; 90 %</td><td><span class="src tag">TAG</span></td><td class="r mono">2/3</td><td><span class="sev s3"><span class="mk dia"></span>SEV-3</span></td><td><span class="st trig"><span class="mk dot"></span>Alarm</span></td><td><span class="st res"><span class="mk chk"></span>In sync</span></td></tr>
+      <tr><td class="cbc"><span class="cb on"></span></td><td><div class="ttl">[EC2] orders-api-1 CPU</div><div class="org mono">i-0f19a3d7b2e6c8410</div></td><td class="mono sm">CPUUtilization</td><td class="r mono b">&gt; 85 %</td><td><span class="src customer">CUSTOMER</span></td><td class="r mono">2/3</td><td><span class="sev s3"><span class="mk dia"></span>SEV-3</span></td><td><span class="st res"><span class="mk chk"></span>OK</span></td><td><span class="st res"><span class="mk chk"></span>In sync</span></td></tr>
+      <tr><td class="cbc"><span class="cb"></span></td><td><div class="ttl">[EC2] orders-api-1 Memory</div><div class="org mono">i-0f19a3d7b2e6c8410</div></td><td class="mono sm">mem_used_percent</td><td class="r mono b">&gt; 80 %</td><td><span class="src msp">MSP</span></td><td class="r mono">2/3</td><td><span class="sev s3"><span class="mk dia"></span>SEV-3</span></td><td><span class="st res"><span class="mk chk"></span>OK</span></td><td><span class="st esc"><span class="mk tri"></span>Drifted</span></td></tr>
+      <tr><td class="cbc"><span class="cb"></span></td><td><div class="ttl">[EC2] orders-api-1 Disk /</div><div class="org mono">i-0f19a3d7b2e6c8410</div></td><td class="mono sm">Disk_root</td><td class="r mono b">&gt; 85 %</td><td><span class="src code">CODE</span></td><td class="r mono">2/3</td><td><span class="sev s3"><span class="mk dia"></span>SEV-3</span></td><td><span class="st res"><span class="mk chk"></span>OK</span></td><td><span class="st res"><span class="mk chk"></span>In sync</span></td></tr>
+      <tr><td class="cbc"><span class="cb"></span></td><td><div class="ttl">[EC2] orders-api-1 StatusCheckFailed</div><div class="org mono">i-0f19a3d7b2e6c8410</div></td><td class="mono sm">StatusCheckFailed</td><td class="r mono b">&gt; 0</td><td><span class="src console">CONSOLE</span></td><td class="r mono">1/1</td><td><span class="sev s1"><span class="mk dot"></span>SEV-1</span></td><td><span class="st res"><span class="mk chk"></span>OK</span></td><td><span class="st res"><span class="mk chk"></span>In sync</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="row xs mut" style="margin-top:10px;gap:14px"><span class="ov" style="font-size:10px">Source key</span><span class="row" style="gap:5px"><span class="src tag">TAG</span>resource tag, read-only, wins</span><span class="row" style="gap:5px"><span class="src console">CONSOLE</span>per-resource value</span><span class="row" style="gap:5px"><span class="src customer">CUSTOMER</span>customer default</span><span class="row" style="gap:5px"><span class="src msp">MSP</span>MSP default</span><span class="row" style="gap:5px"><span class="src code">CODE</span>built-in</span></div>
+</div>
+</section>
+
+<!-- ============================ 4. RESOURCE DETAIL ============================ -->
+<section class="screen" id="s-resource" data-menu="monitoring">
+<div class="page">
+  <div class="crumb"><a href="#monitoring">Monitoring</a><span class="chain">›</span>Resources<span class="chain">›</span>orders-api-1</div>
+  <div class="ph">
+    <div><h1 class="sub">orders-api-1</h1><div class="desc">EC2 · <span class="mono">i-0f19a3d7b2e6c8410</span> · Hanbit Logistics<span class="chain">›</span><span class="mono">3301 8812 4407</span> · ap-northeast-2 · <span class="pill prd">prd</span></div></div>
+    <div class="sp"></div><span class="st res"><span class="mk chk"></span>Monitored</span><span class="xs faint mono">tag set by customer · seen 02:00</span><button class="btn">Sync resource</button>
+  </div>
+  <div class="tabs"><a class="on">Thresholds</a><a>Alarms <span class="n">6</span></a><a>Tags <span class="n">14</span></a><a>History <span class="n">9</span></a></div>
+
+  <div class="g-detail">
+    <div class="stack">
+    <div class="tw">
+      <table class="t">
+        <thead><tr><th>Metric</th><th class="r">Effective</th><th>Source</th><th>How it was decided</th><th class="r">Evaluation</th><th>Sev</th><th></th></tr></thead>
+        <tbody>
+          <tr><td><div class="ttl">CPU</div><div class="org mono">CPUUtilization</div></td><td class="r mono b">85 %</td><td><span class="src customer">CUSTOMER</span></td>
+            <td class="xs mono"><span class="strike">CODE 80</span> → <span class="strike">MSP 80</span> → <b>CUSTOMER 85</b></td><td class="r mono">2 of 3 × 5m</td><td><span class="sev s3"><span class="mk dia"></span>3</span></td><td class="r"><button class="btn sm">Edit</button></td></tr>
+          <tr style="background:var(--accent-t)"><td><div class="ttl">Memory</div><div class="org mono">mem_used_percent</div></td><td class="r mono b">80 %</td><td><span class="src msp">MSP</span></td>
+            <td class="xs mono"><span class="strike">CODE 85</span> → <b>MSP 80</b></td><td class="r mono">2 of 3 × 1m</td><td><span class="sev s3"><span class="mk dia"></span>3</span></td><td class="r"><button class="btn sm" style="border-color:var(--accent);color:var(--accent)">Editing</button></td></tr>
+          <tr><td><div class="ttl">Disk /</div><div class="org mono">Disk_root</div></td><td class="r mono b">90 %</td><td><span class="src tag">TAG</span></td>
+            <td class="xs"><span class="mono">Threshold_Disk_root=90</span><div class="faint">Edit locked — change the tag in your IaC</div></td><td class="r mono">2 of 3 × 5m</td><td><span class="sev s3"><span class="mk dia"></span>3</span></td><td class="r"><button class="btn sm" disabled>Locked</button></td></tr>
+          <tr><td><div class="ttl">Disk /var/log</div><div class="org mono">Disk_var_log</div></td><td class="r mono b">80 %</td><td><span class="src console">CONSOLE</span></td>
+            <td class="xs mono"><span class="strike">CODE 85</span> → <b>CONSOLE 80</b> <span class="faint">Nov 4 · Minjae</span></td><td class="r mono">3 of 5 × 5m</td><td><span class="sev s3"><span class="mk dia"></span>3</span></td><td class="r"><button class="btn sm">Edit</button></td></tr>
+          <tr><td><div class="ttl">Status check</div><div class="org mono">StatusCheckFailed</div></td><td class="r mono b">&gt; 0</td><td><span class="src code">CODE</span></td>
+            <td class="xs mono"><b>CODE 0</b></td><td class="r mono">1 of 1 × 1m <span class="faint">locked</span></td><td><span class="sev s1"><span class="mk dot"></span>1</span></td><td class="r"><button class="btn sm">Edit</button></td></tr>
+          <tr class="dim"><td><div class="ttl" style="color:var(--faint)">Network in</div><div class="org mono">NetworkIn</div></td><td class="r mono">off</td><td><span class="src tag">TAG</span></td>
+            <td class="xs mono">Threshold_NetworkIn=off</td><td class="r mono">—</td><td>—</td><td class="r"><button class="btn sm" disabled>Locked</button></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card lb-orange">
+      <div class="card-h"><span class="ov">Changed outside AlarmOps</span><span class="sp"></span><span class="mono xs faint">detected 01:14 via CloudTrail</span></div>
+      <div class="card-b">
+        <div class="row" style="gap:24px;align-items:flex-start">
+          <div><div class="ov">Alarm</div><div class="sm b">[EC2] orders-api-1 Memory</div></div>
+          <div><div class="ov">Expected</div><div class="mono b">&gt; 80 · 2/3</div></div>
+          <div><div class="ov">Actual</div><div class="mono b" style="color:var(--orange)">&gt; 95 · 3/3</div></div>
+          <div><div class="ov">Changed by</div><div class="mono sm">hanbit-sre/jlee</div></div>
+          <span class="sp"></span>
+          <div class="row"><button class="btn">Accept 95</button><button class="btn">Restore 80</button></div>
+        </div>
+      </div>
+    </div>
+    </div>
+
+    <aside class="drawer">
+      <div class="card-h"><span class="ov">Change memory alarm</span><span class="sp"></span><span class="faint">✕</span></div>
+      <div class="card-b stack">
+        <div class="row" style="gap:16px">
+          <div><label class="lab">Threshold (%)</label><input class="inp num focus" value="75"></div>
+          <div><label class="lab">Statistic</label><select class="inp"><option>Average</option><option>Maximum</option><option>Minimum</option><option>Sum</option><option>p95</option></select></div>
+        </div>
+        <div class="row" style="gap:16px">
+          <div><label class="lab">Period</label><select class="inp"><option>1 min</option><option selected>5 min</option><option>15 min</option><option>1 hour</option></select></div>
+          <div><label class="lab">Alarm when (M of N)</label><div class="row" style="gap:6px"><input class="inp num" style="width:52px" value="2"><span class="mut">of</span><input class="inp num" style="width:52px" value="3"><span class="mut">periods</span></div></div>
+        </div>
+        <div class="xs faint">= alarms if memory is above 75% in 2 of the last 3 five-minute periods (10 of 15 min). Per-metric; defaults come from the severity policy (SEV-1 1 of 1, SEV-2·3 2 of 3, SEV-4·5 3 of 5). 1-min period needs detailed monitoring on the resource.</div>
+        <div><label class="lab">Reason</label><input class="inp" value="OOM kills during nightly batch, catch earlier"></div>
+        <div>
+          <div class="ov" style="margin-bottom:8px">Preview</div>
+          <div style="border:1px solid var(--rule)">
+            <div class="row sm" style="padding:9px 12px;border-bottom:1px solid var(--grid)"><span class="st res"><span class="mk chk"></span></span><span>orders-api-1 Memory</span><span class="sp"></span><span class="mono xs"><span class="src msp">MSP</span> 80 → <span class="src console">CONSOLE</span> 75</span></div>
+            <div class="sm mut" style="padding:9px 12px">Updates the same alarm in place. The alarm name doesn't change.</div>
+          </div>
+        </div>
+        <div class="note"><span>Value is saved on the alarm in account <span class="mono">3301 8812 4407</span> and recorded in History. Requires <b>AlarmWriter</b> <span class="st res" style="font-size:10px"><span class="mk chk"></span>OK</span></span></div>
+        <div class="row"><span class="sp"></span><button class="btn">Cancel</button><button class="btn pri">Apply to 1 alarm</button></div>
+      </div>
+    </aside>
+  </div>
+</div>
+</section>
+
+<!-- ============================ 5. ON-CALL SCHEDULE ============================ -->
+<section class="screen" id="s-schedule" data-menu="oncall">
+<div class="page">
+  <div class="tabs"><a>Now</a><a class="on">Schedules</a><a>Escalation policies</a><a>Contacts</a><a>Maintenance</a></div>
+  <div class="ph">
+    <div><div class="crumb">Schedules<span class="chain">›</span>Infra primary</div><h1 class="sub">Infra primary</h1><div class="desc">Team Infra · Internal · Asia/Seoul · used by 3 customers</div></div>
+    <div class="sp"></div><span class="seg"><span>Day</span><span class="on">Week</span><span>Month</span></span><button class="btn">Add override</button><button class="btn pri">Save</button>
+  </div>
+  <div class="g-main">
+    <div class="card">
+      <div class="card-h"><span class="ov">Week of Nov 9 – 15</span><span class="sp"></span><span class="btn ghost sm">‹</span><span class="btn ghost sm">Today</span><span class="btn ghost sm">›</span></div>
+      <div class="card-b" style="overflow-x:auto">
+        <div class="wk" id="wk" style="min-width:860px"></div>
+        <div class="row xs mut" style="margin-top:14px;gap:16px">
+          <span class="row" style="gap:6px"><span style="width:14px;height:10px;background:var(--ink)"></span>Haeun Kim</span>
+          <span class="row" style="gap:6px"><span style="width:14px;height:10px;background:var(--hair);border:1px solid var(--deco)"></span>Junho Park</span>
+          <span class="row" style="gap:6px"><span style="width:14px;height:10px;border:1px dashed var(--deco)"></span>Minjae Lee</span>
+          <span class="row" style="gap:6px"><span style="width:14px;height:10px;border:1px solid var(--accent);background:repeating-linear-gradient(135deg,var(--accent-t) 0 3px,transparent 3px 6px)"></span>Override</span>
+          <span class="sp"></span><span>Overlaps: the later start wins</span>
+        </div>
+      </div>
+    </div>
+    <aside class="stack">
+      <div class="card">
+        <div class="card-h"><span class="ov">On call now · Mon 03:16</span></div>
+        <div class="plist">
+          <div><span class="ord first">1</span><span class="av on">HK</span><div><div class="b">Haeun Kim</div><div class="xs faint">Shift · Sun 21:00 – Mon 09:00</div></div></div>
+          <div><span class="ord">2</span><span class="av">JP</span><div><div class="b">Junho Park</div><div class="xs faint">Team default order</div></div></div>
+          <div><span class="ord">3</span><span class="av">ML</span><div><div class="b">Minjae Lee</div><div class="xs faint">Team default order</div></div></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-h"><span class="ov">Team default order</span><span class="sp"></span><a class="sm">Add member</a></div>
+        <div class="plist">
+          <div><span class="ord first">1</span><span>Junho Park</span><span class="sp"></span><span class="mono faint">↑ ↓</span></div>
+          <div><span class="ord">2</span><span>Haeun Kim</span><span class="sp"></span><span class="mono faint">↑ ↓</span></div>
+          <div><span class="ord">3</span><span>Minjae Lee</span><span class="sp"></span><span class="mono faint">↑ ↓</span></div>
+        </div>
+        <div class="xs mut" style="padding:8px 16px;border-top:1px solid var(--grid)">Used when no shift covers the time, and as the tail after the shift owner.</div>
+      </div>
+      <div class="card">
+        <div class="card-h"><span class="ov">Overrides</span></div>
+        <div class="plist">
+          <div><span class="av">ML</span><div><div class="b sm">Minjae Lee for Haeun Kim</div><div class="xs faint mono">Wed 18:00 – Thu 09:00 · sick leave</div></div><span class="sp"></span><span class="faint">✕</span></div>
+        </div>
+      </div>
+    </aside>
+  </div>
+</div>
+</section>
+
+<!-- ============================ 6. ESCALATION POLICY ============================ -->
+<section class="screen" id="s-escalation" data-menu="oncall">
+<div class="page">
+  <div class="tabs"><a>Now</a><a>Schedules</a><a class="on">Escalation policies</a><a>Contacts</a><a>Maintenance</a></div>
+  <div class="ph">
+    <div><div class="crumb">Escalation policies<span class="chain">›</span>Mirae Pay — Critical</div><h1 class="sub">Mirae Pay — Critical</h1><div class="desc">Customer default for Mirae Pay · used by 4 services · version 7, edited by Junho Park on Nov 6</div></div>
+    <div class="sp"></div><button class="btn">Duplicate</button><button class="btn pri">Save changes</button>
+  </div>
+
+  <div class="card" style="margin-bottom:16px">
+    <div class="lad">
+      <div class="h">Step</div><div class="h">Wait</div><div class="h">Notify</div><div class="h">Channels</div><div class="h">If all fail</div><div class="h"></div>
+      <div><span class="ord first">1</span></div><div><span class="mono b">0 min</span><span class="xs faint">at open</span></div>
+      <div><span class="sm">Next in owner snapshot</span></div>
+      <div><span class="ch on">Slack channel</span><span class="ch on">Slack DM</span><span class="ch">SMS</span><span class="ch">Voice</span><span class="ch">Email</span></div>
+      <div><span class="tog"></span><span class="xs mut">wait</span></div><div class="faint">⋮</div>
+
+      <div><span class="ord">2</span></div><div><input class="inp num" style="width:56px" value="2"><span class="xs mut">min</span></div>
+      <div><span class="sm">Same person</span></div>
+      <div><span class="ch">Slack channel</span><span class="ch">Slack DM</span><span class="ch on">SMS</span><span class="ch">Voice</span><span class="ch">Email</span></div>
+      <div><span class="tog on"></span><span class="xs mut">skip ahead</span></div><div class="faint">⋮</div>
+
+      <div><span class="ord">3</span></div><div><input class="inp num" style="width:56px" value="5"><span class="xs mut">min</span></div>
+      <div><span class="sm">Next in owner snapshot</span></div>
+      <div><span class="ch">Slack channel</span><span class="ch on">Slack DM</span><span class="ch on">SMS</span><span class="ch on">Voice</span><span class="ch">Email</span></div>
+      <div><span class="tog"></span><span class="xs mut">wait</span></div><div class="faint">⋮</div>
+
+      <div><span class="ord">4</span></div><div><input class="inp num" style="width:56px" value="5"><span class="xs mut">min</span></div>
+      <div><span class="sm">Everyone in snapshot</span></div>
+      <div><span class="ch on">Slack channel</span><span class="ch on">Slack DM</span><span class="ch on">SMS</span><span class="ch on">Voice</span><span class="ch on">Email</span></div>
+      <div><span class="tog"></span><span class="xs mut">wait</span></div><div class="faint">⋮</div>
+    </div>
+    <div class="row" style="padding:12px 16px;border-top:1px solid var(--rule)"><button class="btn sm">+ Add step</button></div>
+  </div>
+
+  <div class="g2" style="margin-bottom:16px">
+    <div class="card"><div class="card-b row" style="gap:12px">
+      <div style="flex:1"><div class="b">Repeat the ladder</div><div class="xs mut">After the last step, start again from step 1. 0 = stop after the last step.</div></div>
+      <div class="row" style="gap:6px"><input class="inp num focus" style="width:56px" value="1"><span class="sm mut">more time</span></div>
+    </div></div>
+    <div class="card"><div class="card-b row" style="gap:12px">
+      <div style="flex:1"><div class="b">Re-notify after acknowledge</div><div class="xs mut">If still unresolved. Empty = suppression default (60 min).</div></div>
+      <div class="row" style="gap:6px"><input class="inp num" style="width:56px" value="60"><span class="sm mut">min</span></div>
+    </div></div>
+  </div>
+
+  <div class="card">
+    <div class="card-h"><span class="ov">Preview · unacknowledged incident</span><span class="sp"></span><span class="xs mut">total 24 min, then stops</span></div>
+    <div class="card-b">
+      <div class="axis">
+        <div class="ln"></div>
+        <div class="pt" style="left:2%"><b>0′</b><i></i>Slack</div>
+        <div class="pt" style="left:10%"><b>2′</b><i></i>SMS</div>
+        <div class="pt" style="left:23%"><b>7′</b><i></i>Next · voice</div>
+        <div class="pt" style="left:37%"><b>12′</b><i></i>Everyone</div>
+        <div class="pt rep" style="left:50%"><b>12′</b><i></i>Repeat · Slack</div>
+        <div class="pt rep" style="left:58%"><b>14′</b><i></i>SMS</div>
+        <div class="pt rep" style="left:72%"><b>19′</b><i></i>Next · voice</div>
+        <div class="pt rep" style="left:86%"><b>24′</b><i></i>Everyone</div>
+        <div class="pt end" style="left:97%"><b>—</b><i></i>Stop</div>
+      </div>
+      <div class="note" style="margin-top:14px"><span class="st info"><span class="mk ring"></span></span><span>During maintenance, SEV-2 and below are muted and stay on their current step. <b>SEV-1 always escalates.</b> Each wait counts from the previous notification.</span></div>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- ============================ 7. CHANNEL VERIFICATION ============================ -->
+<section class="screen" id="s-contacts" data-menu="oncall">
+<div class="page">
+  <div class="tabs"><a>Now</a><a>Schedules</a><a>Escalation policies</a><a class="on">Contacts</a><a>Maintenance</a></div>
+  <div class="ph">
+    <div><h1 class="sub">Contacts</h1><div class="desc">People who can be paged, and whether each channel has been verified.</div></div>
+    <div class="sp"></div><button class="btn">Send links to all unverified</button><button class="btn pri">Add contact</button>
+  </div>
+  <div class="row" style="margin-bottom:12px">
+    <div class="chips"><span class="chip on">All<span class="n">8</span></span><span class="chip"><span class="st ack"><span class="mk ring"></span></span>Unverified<span class="n">5</span></span><span class="chip"><span class="st esc"><span class="mk tri"></span></span>Expired<span class="n">1</span></span></div>
+    <span class="sp"></span><span class="sm mut"><b class="mono" style="color:var(--ink)">18</b> of 24 channels verified</span>
+    <div class="prog" style="width:140px"><i style="width:75%"></i></div>
+  </div>
+  <div class="tw">
+  <table class="t">
+    <thead><tr><th>Contact</th><th>Customer</th><th>Slack</th><th>Email</th><th>Phone · SMS / voice</th><th class="r"></th></tr></thead>
+    <tbody>
+      <tr><td><span class="who"><span class="av">HK</span><div><div class="ttl">Haeun Kim</div><div class="org">Infra · MSP</div></div></span></td><td class="mut">Internal</td>
+        <td><span class="st res"><span class="mk chk"></span>Verified</span><div class="org">slack-lookup · Oct 2</div></td>
+        <td><span class="st res"><span class="mk chk"></span>Verified</span><div class="org">sso · Oct 2</div></td>
+        <td><span class="st res"><span class="mk chk"></span>Verified</span><div class="org mono">+82 10-****-2291 · link · Oct 3</div></td><td class="r"><button class="btn sm">Test</button></td></tr>
+      <tr><td><span class="who"><span class="av">JP</span><div><div class="ttl">Junho Park</div><div class="org">Ops lead · MSP</div></div></span></td><td class="mut">Internal</td>
+        <td><span class="st res"><span class="mk chk"></span>Verified</span><div class="org">slack-lookup · Oct 2</div></td>
+        <td><span class="st res"><span class="mk chk"></span>Verified</span><div class="org">sso · Oct 2</div></td>
+        <td><span class="st esc"><span class="mk tri"></span>Link expired</span><div class="org">sent Nov 6 · not opened</div></td><td class="r"><button class="btn sm">Resend</button></td></tr>
+      <tr style="background:var(--accent-t)"><td><span class="who"><span class="av">SC</span><div><div class="ttl">Soyeon Choi</div><div class="org">IT manager</div></div></span></td><td>Daon Retail</td>
+        <td><span class="st mute"><span class="mk dash"></span>Not set</span></td>
+        <td><span class="st info"><span class="mk ring"></span>Link sent</span><div class="org">14:02 · expires in 23h</div></td>
+        <td><span class="st ack"><span class="mk ring"></span>Unverified</span><div class="org mono">+82 10-****-7710</div></td>
+        <td class="r"><div class="row" style="justify-content:flex-end"><button class="btn sm">Send link</button><button class="btn sm">Mark verified…</button></div></td></tr>
+      <tr><td><span class="who"><span class="av">DY</span><div><div class="ttl">Dohyun Yoon</div><div class="org">SRE</div></div></span></td><td>Hanbit Logistics</td>
+        <td><span class="st res"><span class="mk chk"></span>Verified</span><div class="org">admin:Junho · Nov 1</div></td>
+        <td><span class="st ack"><span class="mk ring"></span>Unverified</span></td>
+        <td><span class="st ack"><span class="mk ring"></span>Unverified</span><div class="org mono">+82 10-****-0384</div></td>
+        <td class="r"><button class="btn sm">Send link</button></td></tr>
+      <tr><td><span class="who"><span class="av">YS</span><div><div class="ttl">Yuna Seo</div><div class="org">Platform</div></div></span></td><td>Mirae Pay</td>
+        <td><span class="st res"><span class="mk chk"></span>Verified</span><div class="org">link · Oct 28</div></td>
+        <td><span class="st res"><span class="mk chk"></span>Verified</span><div class="org">link · Oct 28</div></td>
+        <td><span class="st ack"><span class="mk ring"></span>Unverified</span><div class="org mono">+82 10-****-5521</div></td>
+        <td class="r"><button class="btn sm">Send link</button></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="g2" style="margin-top:16px">
+    <div class="note"><span class="st ack"><span class="mk ring"></span></span><span><b>Unverified channels still receive pages.</b> Verification shows that the address is correct; it doesn't block delivery.</span></div>
+    <div class="drawer"><div class="card-h"><span class="ov">Mark SMS verified · Soyeon Choi</span></div><div class="card-b stack">
+      <div><label class="lab">How was it confirmed? <span class="faint">(required)</span></label><input class="inp focus" value="Called on Nov 9 and read back the number"></div>
+      <div class="row"><span class="xs mut">Recorded as admin:Haeun Kim</span><span class="sp"></span><button class="btn sm">Cancel</button><button class="btn sm pri">Mark verified</button></div>
+    </div></div>
+  </div>
+</div>
+</section>
+
+<!-- ============================ 8. MAINTENANCE ============================ -->
+<section class="screen" id="s-maintenance" data-menu="oncall">
+<div class="page">
+  <div class="tabs"><a>Now</a><a>Schedules</a><a>Escalation policies</a><a>Contacts</a><a class="on">Maintenance</a></div>
+  <div class="ph">
+    <div><h1 class="sub">Maintenance windows</h1><div class="desc">Mute notifications and escalation while planned work happens. Alerts are still recorded.</div></div>
+    <div class="sp"></div><button class="btn pri">New window</button>
+  </div>
+  <div class="banner red"><span class="sev s1"><span class="mk dot"></span></span><span><b>SEV-1 alerts always page, even during maintenance.</b> SEV-2 to SEV-5 are muted. This applies to every source and can't be changed.</span></div>
+  <div class="g-detail">
+    <div>
+      <div class="chips" style="margin-bottom:12px"><span class="chip on">Active<span class="n">2</span></span><span class="chip">Scheduled<span class="n">3</span></span><span class="chip">Ended<span class="n">41</span></span></div>
+      <div class="tw">
+      <table class="t">
+        <thead><tr><th>Scope</th><th>Window (KST)</th><th>Reason</th><th class="r">Muted</th><th>By</th><th></th></tr></thead>
+        <tbody>
+          <tr><td><div class="ttl">Daon Retail<span class="chain">›</span>Commerce<span class="chain">›</span>Checkout</div><div class="org">Service</div></td>
+            <td><div class="mono sm">Nov 9 02:00 → 04:00</div><div class="prog" style="margin-top:5px;width:140px"><i style="width:63%"></i></div><div class="org">44 min left</div></td>
+            <td class="sm">Aurora minor version upgrade</td><td class="r mono b">4</td><td class="sm">Soyeon Choi<div class="org">customer portal</div></td><td class="r"><button class="btn sm danger">End now</button></td></tr>
+          <tr><td><div class="ttl">[EC2] batch-worker-3 CPU</div><div class="org">Single alert · Slack “Mute 1h”</div></td>
+            <td><div class="mono sm">Nov 9 02:58 → 03:58</div><div class="prog" style="margin-top:5px;width:140px"><i style="width:30%"></i></div><div class="org">42 min left</div></td>
+            <td class="sm">Known reindex job</td><td class="r mono b">1</td><td class="sm">Haeun Kim<div class="org">Slack</div></td><td class="r"><button class="btn sm danger">End now</button></td></tr>
+        </tbody>
+      </table>
+      </div>
+      <div class="ov" style="margin:22px 0 10px">Scheduled</div>
+      <div class="tw"><table class="t"><tbody>
+        <tr><td><div class="ttl">Hanbit Logistics · account 3301 8812 4407</div><div class="org">AWS account</div></td><td class="mono sm">Nov 12 23:00 → Nov 13 03:00</td><td class="sm">EKS 1.31 upgrade</td><td class="sm">Junho Park</td><td class="r"><button class="btn sm">Cancel</button></td></tr>
+        <tr><td><div class="ttl">Mirae Pay · RDS (all)</div><div class="org">Resource type</div></td><td class="mono sm">Nov 15 01:00 → 05:00</td><td class="sm">Storage migration</td><td class="sm">Minjae Lee</td><td class="r"><button class="btn sm">Cancel</button></td></tr>
+      </tbody></table></div>
+    </div>
+    <aside class="drawer">
+      <div class="card-h"><span class="ov">New maintenance window</span></div>
+      <div class="card-b stack">
+        <div><label class="lab">Scope</label><div class="seg full"><span>Customer</span><span class="on">Service</span><span>Account</span><span>Type</span></div></div>
+        <div><label class="lab">Service</label><div class="sel" style="width:100%">Hanbit Logistics<span class="chain">›</span>Tracking<span class="chain">›</span>Public API<span class="sp"></span><span class="car">▼</span></div></div>
+        <div class="g2" style="gap:10px"><div><label class="lab">Starts</label><input class="inp mono" value="2026-11-10 22:00"></div><div><label class="lab">Ends</label><input class="inp mono focus" value="2026-11-11 00:30"></div></div>
+        <div class="hint">2h 30m · up to 30 days · can't start in the past</div>
+        <div><label class="lab">Reason</label><input class="inp" value="ALB listener migration"></div>
+        <div class="note"><span>Right now this would mute <b>1 open incident</b> (SEV-2 api-alb 5XX). SEV-1 would still page.</span></div>
+        <div class="row"><span class="sp"></span><button class="btn">Cancel</button><button class="btn pri">Create window</button></div>
+      </div>
+    </aside>
+  </div>
+</div>
+</section>
+
+<!-- ============================ 9. INTEGRATIONS ============================ -->
+<section class="screen" id="s-integrations" data-menu="customers" data-cust="Daon Retail">
+<div class="page">
+  <div class="crumb"><a href="#customers">Customers</a><span class="chain">›</span>Daon Retail</div>
+  <div class="ph"><div><h1 class="sub">Daon Retail</h1></div><div class="sp"></div><button class="btn">Add AWS account</button><button class="btn pri">Add webhook source</button></div>
+  <div class="tabs"><a>Overview</a><a>Org &amp; owners</a><a>AWS accounts <span class="n">2</span></a><a class="on">Integrations <span class="n">4</span></a><a>Monitoring</a><a>Remediation</a><a>Portal access</a></div>
+
+  <div class="g3" style="margin-bottom:20px">
+    <div class="card lb-green"><div class="card-b">
+      <div class="row"><span class="b" style="font-size:15px">CloudWatch</span><span class="sp"></span><span class="st res"><span class="mk chk"></span>Receiving</span></div>
+      <div class="xs mut" style="margin-top:2px">EventBridge · 2 accounts</div>
+      <div class="row" style="margin-top:14px;gap:22px"><div><div class="ov">Last event</div><div class="mono b">03:14</div></div><div><div class="ov">24h</div><div class="mono b">1,208</div></div><div><div class="ov">Rejected</div><div class="mono b">0</div></div></div>
+    </div></div>
+    <div class="card lb-green"><div class="card-b">
+      <div class="row"><span class="b" style="font-size:15px">Prometheus</span><span class="sp"></span><span class="st res"><span class="mk chk"></span>Receiving</span></div>
+      <div class="xs mut" style="margin-top:2px">Alertmanager webhook · EKS prod</div>
+      <div class="row" style="margin-top:14px;gap:22px"><div><div class="ov">Last event</div><div class="mono b">03:13</div></div><div><div class="ov">24h</div><div class="mono b">342</div></div><div><div class="ov">Rejected</div><div class="mono b">0</div></div></div>
+    </div></div>
+    <div class="card lb-orange"><div class="card-b">
+      <div class="row"><span class="b" style="font-size:15px">Grafana</span><span class="sp"></span><span class="st esc"><span class="mk tri"></span>Rejecting</span></div>
+      <div class="xs mut" style="margin-top:2px">Unified alerting · Grafana Cloud</div>
+      <div class="row" style="margin-top:14px;gap:22px"><div><div class="ov">Last event</div><div class="mono b">02:41</div></div><div><div class="ov">24h</div><div class="mono b">58</div></div><div><div class="ov">Rejected</div><div class="mono b" style="color:var(--orange)">12</div></div></div>
+    </div></div>
+  </div>
+
+  <div class="card" style="margin-bottom:20px">
+    <div class="card-h"><span class="ov">CloudWatch accounts · IAM roles</span><span class="sp"></span><span class="xs faint">stack v1.3 · ExternalId per account</span></div>
+    <div style="overflow-x:auto">
+    <table class="t">
+      <thead><tr><th>Account</th><th>Env</th><th>Reader</th><th>EventForwarder</th><th>AlarmWriter</th><th>TagWriter</th><th>Remediator</th><th>First event</th><th class="r"></th></tr></thead>
+      <tbody>
+        <tr><td><div class="ttl mono">5520 1934 8876</div><div class="org">daon-prod · ap-northeast-2</div></td><td><span class="pill prd">prd</span></td>
+          <td><span class="st res"><span class="mk chk"></span>OK</span></td><td><span class="st res"><span class="mk chk"></span>OK</span></td><td><span class="st res"><span class="mk chk"></span>OK</span></td>
+          <td><span class="st mute"><span class="mk dash"></span>Off</span></td><td><span class="st mute"><span class="mk dash"></span>Off</span></td><td class="mono sm">Oct 14 11:02</td><td class="r"><button class="btn sm">Check</button></td></tr>
+        <tr><td><div class="ttl mono">5520 1934 9102</div><div class="org">daon-stg · ap-northeast-2</div></td><td><span class="pill">stg</span></td>
+          <td><span class="st res"><span class="mk chk"></span>OK</span></td><td><span class="st trig"><span class="mk x"></span>Denied</span></td><td><span class="st res"><span class="mk chk"></span>OK</span></td>
+          <td><span class="st mute"><span class="mk dash"></span>Off</span></td><td><span class="st mute"><span class="mk dash"></span>Off</span></td><td class="sm mut">Waiting…</td><td class="r"><button class="btn sm">Check</button></td></tr>
+      </tbody>
+    </table>
+    </div>
+    <div class="banner red" style="margin:0;border-width:1px 0 0 3px">EventForwarder in <span class="mono">5520 1934 9102</span> is denied: trust policy doesn't match ExternalId <span class="mono">ao-daon-7c21</span>. Update the stack, then Check.</div>
+  </div>
+
+  <div class="g2">
+    <div class="card">
+      <div class="card-h"><span class="ov">Webhook sources</span></div>
+      <div class="plist">
+        <div style="align-items:flex-start"><div style="flex:1"><div class="row"><span class="b">EKS prod Alertmanager</span><span class="pill">prometheus</span></div>
+          <div class="mono xs mut" style="margin-top:4px">POST https://ingest.alarmops.dev/ingest/v1/prometheus</div><div class="xs faint">token <span class="mono">in_3f9a…</span> · created Oct 14 by Minjae Lee</div></div><button class="btn sm">Rotate token</button></div>
+        <div style="align-items:flex-start"><div style="flex:1"><div class="row"><span class="b">Grafana Cloud</span><span class="pill">grafana</span><span class="st esc" style="font-size:10px"><span class="mk tri"></span>12 rejected</span></div>
+          <div class="mono xs mut" style="margin-top:4px">POST https://ingest.alarmops.dev/ingest/v1/grafana</div><div class="xs faint">token <span class="mono">in_b20e…</span> · rotated Nov 8 — old token sends 401</div></div><button class="btn sm">Rotate token</button></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-h"><span class="ov">Alertmanager config</span><span class="sp"></span><span class="btn ghost sm">Copy</span></div>
+      <pre class="code" style="border:0">receivers:
+  - name: alarmops
+    webhook_configs:
+      - url: https://ingest.alarmops.dev/ingest/v1/prometheus
+        http_config:
+          authorization:
+            credentials: in_••••••••••••••••
+        send_resolved: true</pre>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- ============================ 10. ONBOARDING ============================ -->
+<section class="screen" id="s-onboarding" data-menu="customers">
+<div class="page">
+  <div class="crumb"><a href="#customers">Customers</a><span class="chain">›</span>New customer</div>
+  <div class="ph"><div><h1 class="sub">Onboard Seoul Bio Labs</h1><div class="desc">Progress is saved after each step. You can finish later from the customer's setup checklist.</div></div></div>
+  <div class="steps">
+    <div class="done"><span class="ord">✓</span><div><div class="t1">Customer</div><div class="t2">seoulbio.co.kr</div></div></div>
+    <div class="done"><span class="ord">✓</span><div><div class="t1">Organization</div><div class="t2">2 projects · 3 services</div></div></div>
+    <div class="cur"><span class="ord">3</span><div><div class="t1">AWS account &amp; roles</div><div class="t2">in progress</div></div></div>
+    <div><span class="ord">4</span><div><div class="t1">Contacts &amp; order</div><div class="t2">—</div></div></div>
+    <div><span class="ord">5</span><div><div class="t1">Review</div><div class="t2">—</div></div></div>
+  </div>
+
+  <div class="g-detail">
+    <div class="stack">
+      <div class="card"><div class="card-b">
+        <div class="g3" style="gap:14px">
+          <div><label class="lab">AWS account ID</label><input class="inp mono" value="7092 4418 3305"><div class="hint" style="color:var(--green)">✓ 12 digits · not mapped elsewhere</div></div>
+          <div><label class="lab">Environment</label><div class="seg"><span class="on">prd</span><span>stg</span><span>dev</span></div></div>
+          <div><label class="lab">Regions</label><div class="sel" style="width:100%">ap-northeast-2 <span class="faint">+ us-east-1 (global)</span><span class="sp"></span><span class="car">▼</span></div></div>
+        </div>
+      </div></div>
+
+      <div class="card">
+        <div class="card-h"><span class="ov">IAM roles</span><span class="sp"></span><span class="xs faint">one CloudFormation stack · trusts only <span class="mono">alarmops-central</span></span></div>
+        <div class="role"><span class="tog on lock"></span><div><div class="row"><span class="b">Reader</span><span class="pill">Required</span></div><div class="sm mut">Discover resources, read alarm state and tags. Also used for read-only investigation.</div></div><span class="st res"><span class="mk chk"></span>OK · 03:15</span></div>
+        <div class="role"><span class="tog on lock"></span><div><div class="row"><span class="b">EventForwarder</span><span class="pill">Required</span></div><div class="sm mut">Forwards CloudWatch alarm state changes and CloudTrail change events to AlarmOps.</div></div><span class="st info"><span class="mk q"></span>Checking…</span></div>
+        <div class="role"><span class="tog on"></span><div><div class="row"><span class="b">AlarmWriter</span><span class="pill">Optional · recommended</span></div><div class="sm mut">Create alarms and change thresholds from the console. Off = thresholds are view-only.</div></div><span class="st mute"><span class="mk dash"></span>Not checked</span></div>
+        <div class="role"><span class="tog"></span><div><div class="row"><span class="b">TagWriter</span><span class="pill">Optional</span></div><div class="sm mut">Add the <code>Monitoring=on</code> tag from the console. Writes that one key only; S3 and Route 53 excluded.</div></div><span class="st mute"><span class="mk dash"></span>Off</span></div>
+        <div class="role"><span class="tog"></span><div><div class="row"><span class="b">Remediator</span><span class="pill">Optional · off by default</span></div><div class="sm mut">Stop EC2/RDS or delete an ELB after an unauthorized change — only after a person approves in Slack. Starts in notify-only mode.</div></div><span class="st mute"><span class="mk dash"></span>Off</span></div>
+      </div>
+      <div class="row"><button class="btn">Back</button><span class="sp"></span><button class="btn ghost">Add Prometheus / Grafana instead</button><button class="btn pri">Continue to contacts</button></div>
+    </div>
+
+    <aside class="stack">
+      <div class="card">
+        <div class="card-h"><span class="ov">Deploy the stack</span></div>
+        <div class="card-b stack">
+          <div class="row sm"><span class="ord first">1</span>Open CloudFormation in account <span class="mono">7092 4418 3305</span></div>
+          <a class="btn" style="width:100%;justify-content:center" href="#">Launch stack in AWS ↗</a>
+          <div class="row sm"><span class="ord">2</span>Keep these parameters</div>
+          <dl class="kv" style="grid-template-columns:96px 1fr;font-size:12px">
+            <dt>ExternalId</dt><dd class="mono">ao-sbl-4e81d0</dd>
+            <dt>TrustedRole</dt><dd class="mono" style="word-break:break-all">arn:aws:iam::1180…:role/alarmops-central</dd>
+            <dt>Roles</dt><dd class="mono">Reader, EventForwarder, AlarmWriter</dd>
+          </dl>
+          <div class="row sm"><span class="ord">3</span>Check the connection</div>
+          <button class="btn" style="width:100%;justify-content:center">Check connection</button>
+        </div>
+      </div>
+      <div class="note"><span>The customer's security team can review the exact policies before deploying. <a href="#">View policy JSON</a></span></div>
+    </aside>
+  </div>
+</div>
+</section>
+
+<!-- ============================ 11. CUSTOMERS LIST ============================ -->
+<section class="screen" id="s-customers" data-menu="customers">
+<div class="page">
+  <div class="ph"><div><h1>Customers</h1><div class="desc">4 customers · 9 AWS accounts · 3 webhook sources</div></div><div class="sp"></div><input class="inp hide-m" style="width:220px" placeholder="Search customers"><button class="btn pri">New customer</button></div>
+  <div class="tw">
+  <table class="t">
+    <thead><tr><th>Customer</th><th>Open incidents</th><th>Sources</th><th>Connection</th><th>Coverage</th><th>Setup</th><th class="r">Owner</th></tr></thead>
+    <tbody>
+      <tr class="hot"><td><div class="ttl">Mirae Pay</div><div class="org mono">miraepay.com</div></td>
+        <td><span class="row" style="gap:10px"><span class="sev s1"><span class="mk dot"></span>1</span><span class="sev s3"><span class="mk dia"></span>0</span></span></td>
+        <td class="sm">CloudWatch · 3 accounts</td><td><span class="st res"><span class="mk chk"></span>All roles OK</span></td>
+        <td><div class="mono sm">128 / 131</div><div class="org">1 needs review</div></td><td><span class="st res"><span class="mk chk"></span>Done</span></td><td class="r"><span class="av">HK</span></td></tr>
+      <tr class="esc"><td><div class="ttl">Hanbit Logistics</div><div class="org mono">hanbit-lg.co.kr</div></td>
+        <td><span class="row" style="gap:10px"><span class="sev s2"><span class="mk tri"></span>1</span><span class="sev s3"><span class="mk dia"></span>1</span></span></td>
+        <td class="sm">CloudWatch · 3 accounts</td><td><span class="st res"><span class="mk chk"></span>All roles OK</span></td>
+        <td><div class="mono sm">171 / 180</div><div class="org" style="color:var(--amber)">▲ 2 needs review</div></td><td><span class="st res"><span class="mk chk"></span>Done</span></td><td class="r"><span class="av">JP</span></td></tr>
+      <tr class="hot"><td><div class="ttl">Daon Retail</div><div class="org mono">daon.kr</div></td>
+        <td><span class="row" style="gap:10px"><span class="sev s2"><span class="mk tri"></span>1</span><span class="sev s4"><span class="mk ring"></span>1</span></span></td>
+        <td class="sm">CloudWatch · 2 · Prometheus · Grafana</td><td><span class="st esc"><span class="mk tri"></span>1 role denied</span></td>
+        <td><div class="mono sm">96 / 112</div><div class="org">14 gaps · 1 needs review</div></td><td><span class="mono sm">5 / 6</span><div class="prog" style="width:70px;margin-top:4px"><i style="width:83%"></i></div></td><td class="r"><span class="av">ML</span></td></tr>
+      <tr><td><div class="ttl">Seoul Bio Labs</div><div class="org mono">seoulbio.co.kr</div></td>
+        <td><span class="mut sm">—</span></td>
+        <td class="sm">CloudWatch · 1 account</td><td><span class="st info"><span class="mk q"></span>Checking</span></td>
+        <td><span class="mut sm">Waiting for first sync</span></td><td><span class="mono sm">2 / 6</span><div class="prog" style="width:70px;margin-top:4px"><i style="width:33%"></i></div></td><td class="r"><span class="av">JP</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+</div>
+</section>
+
+<!-- ============================ 12. CUSTOMER DETAIL ============================ -->
+<section class="screen" id="s-customer" data-menu="customers" data-cust="Daon Retail">
+<div class="page">
+  <div class="crumb"><a href="#customers">Customers</a><span class="chain">›</span>Daon Retail</div>
+  <div class="ph"><div><h1 class="sub">Daon Retail</h1><div class="desc">Retail · <span class="mono">daon.kr</span> · since Oct 14 · escalation “Daon — Standard”</div></div><div class="sp"></div><button class="btn">Edit</button></div>
+  <div class="tabs"><a>Overview</a><a>Org &amp; owners</a><a>AWS accounts <span class="n">2</span></a><a>Integrations <span class="n">4</span></a><a class="on">Monitoring</a><a>Remediation</a><a>Portal access</a></div>
+
+  <div class="row" style="margin-bottom:14px"><span class="chip on" style="cursor:default">Customer: Daon Retail <span class="ov" style="font-size:9px">Locked</span></span><span class="sm mut">Same view as <a href="#monitoring">Monitoring</a>, filtered to this customer.</span></div>
+  <div class="tiles">
+    <div class="tile"><div class="ov">Monitored</div><div class="v">96</div><div class="d">344 alarms</div></div>
+    <div class="tile"><div class="ov">Coverage gaps</div><div class="v">14</div><div class="d">mostly Lambda</div></div>
+    <div class="tile"><div class="ov">Needs review</div><div class="v amber">1</div><div class="d">checkout-redis</div></div>
+    <div class="tile"><div class="ov">Drifted</div><div class="v">0</div><div class="d">all in sync</div></div>
+    <div class="tile"><div class="ov">In ALARM</div><div class="v red">2</div><div class="d">1 incident open</div></div>
+  </div>
+  <div class="g-main">
+    <div>
+      <div class="tabs" style="margin-bottom:12px"><a>Alarms</a><a>Resources</a><a class="on">Coverage gaps <span class="n">14</span></a><a>Needs review <span class="n">1</span></a></div>
+      <div class="tw">
+      <table class="t">
+        <thead><tr><th class="cbc"><span class="cb"></span></th><th>Resource</th><th>Type</th><th>Account</th><th>Monitoring tag</th><th class="r"></th></tr></thead>
+        <tbody>
+          <tr><td class="cbc"><span class="cb on"></span></td><td><div class="ttl">order-events-consumer</div><div class="org mono">arn:aws:lambda:…:function:order-events-consumer</div></td><td class="sm">Lambda</td><td class="mono sm">5520 1934 8876</td><td><code>Monitoring=on</code></td><td class="r"><button class="btn sm">Create alarms</button></td></tr>
+          <tr><td class="cbc"><span class="cb on"></span></td><td><div class="ttl">price-sync</div><div class="org mono">arn:aws:lambda:…:function:price-sync</div></td><td class="sm">Lambda</td><td class="mono sm">5520 1934 8876</td><td><code>Monitoring=on</code></td><td class="r"><button class="btn sm">Create alarms</button></td></tr>
+          <tr><td class="cbc"><span class="cb"></span></td><td><div class="ttl">checkout-queue-dlq</div><div class="org mono">sqs · checkout-queue-dlq</div></td><td class="sm">SQS</td><td class="mono sm">5520 1934 8876</td><td><span class="st mute"><span class="mk dash"></span>No tag</span></td><td class="r"><button class="btn sm" disabled title="TagWriter role is off">Add tag</button></td></tr>
+          <tr><td class="cbc"><span class="cb"></span></td><td><div class="ttl">media-cdn</div><div class="org mono">cloudfront · E2Q8…</div></td><td class="sm">CloudFront</td><td class="mono sm">5520 1934 8876</td><td><span class="st mute"><span class="mk dash"></span>No tag</span></td><td class="r"><button class="btn sm" disabled>Add tag</button></td></tr>
+        </tbody>
+      </table>
+      </div>
+      <div class="xs mut" style="margin-top:8px">Add tag is disabled: TagWriter role is off for this customer. <a href="#onboarding">Enable it</a> or ask the customer to tag.</div>
+    </div>
+    <aside class="stack">
+      <div class="card"><div class="card-h"><span class="ov">Setup checklist</span><span class="sp"></span><span class="mono xs">5 / 6</span></div>
+        <div class="plist">
+          <div><span class="st res"><span class="mk chk"></span></span><span class="sm">Organization and services</span></div>
+          <div><span class="st res"><span class="mk chk"></span></span><span class="sm">AWS prod connected</span></div>
+          <div><span class="st esc"><span class="mk tri"></span></span><span class="sm">AWS stg: EventForwarder denied</span></div>
+          <div><span class="st res"><span class="mk chk"></span></span><span class="sm">Prometheus and Grafana receiving</span></div>
+          <div><span class="st res"><span class="mk chk"></span></span><span class="sm">2 owners with order</span></div>
+          <div><span class="st res"><span class="mk chk"></span></span><span class="sm">Portal: 1 user, grants contacts · silences</span></div>
+        </div></div>
+      <div class="card"><div class="card-h"><span class="ov">Remediation</span></div><div class="card-b row"><span class="tog"></span><span class="sm">Off · Remediator role not deployed</span></div></div>
+    </aside>
+  </div>
+</div>
+</section>
+
+<!-- ============================ 13. SETTINGS ============================ -->
+<section class="screen" id="s-settings" data-menu="settings">
+<div class="page">
+  <div class="ph"><div><h1>Settings</h1><div class="desc">MSP-wide rules. Changes are recorded in the audit log.</div></div></div>
+  <div class="side">
+    <nav class="vnav">
+      <div class="ov">Alarms</div><a class="on">MSP defaults</a><a>Severity mapping</a><a>Suppression</a>
+      <div class="ov">Platform</div><a>Integrations</a><a>Users</a><a>Audit log</a>
+    </nav>
+    <div class="stack">
+      <div class="card">
+        <div class="card-h"><span class="ov">MSP threshold defaults</span><span class="sp"></span><span class="sel" style="height:26px"><span class="k">Type</span>EC2<span class="car">▼</span></span></div>
+        <div class="note" style="border-width:0 0 1px;padding:10px 16px;flex-wrap:wrap;align-items:center;gap:6px">Order: <span class="src code">CODE</span> &lt; <span class="src msp">MSP</span> &lt; <span class="src customer">CUSTOMER</span> &lt; <span class="src console">CONSOLE</span> / <span class="src tag">TAG</span> (tag wins). No environment-variable layer.</div>
+        <div style="overflow-x:auto"><table class="t">
+          <thead><tr><th>Metric</th><th class="r">Code default</th><th class="r">MSP default</th><th class="r">M/N</th><th class="r">Customer overrides</th><th class="r">Alarms using MSP</th><th>Off</th></tr></thead>
+          <tbody>
+            <tr><td><div class="ttl">CPUUtilization</div></td><td class="r mono faint">80</td><td class="r"><input class="inp num" value="80"></td><td class="r mono">2/3</td><td class="r mono">2</td><td class="r mono">286</td><td><span class="tog"></span></td></tr>
+            <tr style="background:var(--accent-t)"><td><div class="ttl">mem_used_percent</div><div class="org">changed — not saved</div></td><td class="r mono faint">85</td><td class="r"><input class="inp num focus" value="75"></td><td class="r mono">2/3</td><td class="r mono">0</td><td class="r mono b">214</td><td><span class="tog"></span></td></tr>
+            <tr><td><div class="ttl">Disk_root</div></td><td class="r mono faint">85</td><td class="r"><input class="inp num" placeholder="—"></td><td class="r mono">2/3</td><td class="r mono">1</td><td class="r mono">—</td><td><span class="tog"></span></td></tr>
+            <tr><td><div class="ttl">StatusCheckFailed</div><div class="org">SEV-1 · M/N locked</div></td><td class="r mono faint">0</td><td class="r"><input class="inp num" placeholder="—"></td><td class="r mono faint">1/1</td><td class="r mono">0</td><td class="r mono">—</td><td><span class="tog"></span></td></tr>
+            <tr><td><div class="ttl">NetworkIn</div></td><td class="r mono faint">—</td><td class="r"><input class="inp num" placeholder="—"></td><td class="r mono">3/5</td><td class="r mono">0</td><td class="r mono">—</td><td><span class="tog on"></span></td></tr>
+          </tbody>
+        </table></div>
+        <div class="row" style="padding:12px 16px;border-top:1px solid var(--rule)"><span class="sm"><b>Preview:</b> 214 alarms in 6 customers change 80 → 75. <span class="mut">12 alarms keep their value (tag or console value wins).</span></span><span class="sp"></span><button class="btn">Discard</button><button class="btn pri">Review &amp; apply</button></div>
+      </div>
+
+      <div class="card">
+        <div class="card-h"><span class="ov">Severity mapping</span><span class="sp"></span><span class="xs faint">one table for all sources and customers</span></div>
+        <div class="card-b" style="padding-bottom:0">
+          <div class="note" style="margin-bottom:12px"><span><code>sev-1</code> … <code>sev-5</code> are read directly before this table. CloudWatch alarms we manage use the severity stored on the alarm.</span></div>
+        </div>
+        <table class="t">
+          <thead><tr><th>External value</th><th>Maps to</th><th>Seen 7d</th><th class="r"></th></tr></thead>
+          <tbody>
+            <tr><td class="mono">critical</td><td><span class="sev s2"><span class="mk tri"></span>SEV-2</span> <span class="xs faint">fixed · SEV-1 must be explicit</span></td><td class="mono sm">412</td><td class="r"><span class="ov">Locked</span></td></tr>
+            <tr><td class="mono">high · error</td><td><span class="sev s2"><span class="mk tri"></span>SEV-2</span></td><td class="mono sm">37</td><td class="r"><button class="btn sm">Edit</button></td></tr>
+            <tr><td class="mono">warning · warn</td><td><span class="sev s3"><span class="mk dia"></span>SEV-3</span></td><td class="mono sm">1,902</td><td class="r"><button class="btn sm">Edit</button></td></tr>
+            <tr><td class="mono">info</td><td><span class="sev s5"><span class="mk dash"></span>SEV-5</span></td><td class="mono sm">88</td><td class="r"><button class="btn sm">Edit</button></td></tr>
+            <tr class="rev"><td class="mono">no match</td><td><span class="sev s3"><span class="mk dia"></span>SEV-3</span> <span class="xs" style="color:var(--amber)">▲ default not decided</span></td><td class="mono sm">6</td><td class="r"><button class="btn sm">Edit</button></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- ============================ 14. CUSTOMER PORTAL ============================ -->
+<section class="screen" id="s-portal" data-portal="1">
+<header class="portal-top">
+  <div class="logo"><i></i>Daon Retail</div><span class="xs faint mono hide-m">STATUS · OPERATED BY ALARMOPS MSP</span>
+  <nav class="nav" style="margin-left:20px"><a class="on">Status</a><a>History</a><a>Contacts</a><a>Maintenance</a></nav>
+  <div class="top-r"><span class="sm mut hide-m">Soyeon Choi</span><span class="av">SC</span></div>
+</header>
+<div class="portal stack">
+  <div class="card lb-orange hero-status">
+    <div class="big"><span class="mk tri" style="width:16px;height:14px"></span></div>
+    <div>
+      <div class="big-q">1 issue is being handled.</div>
+      <div class="mut" style="margin-top:4px">Minjae from your MSP acknowledged it 34 minutes ago. Everything else is running normally.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-h"><span class="ov">In progress</span></div>
+    <div class="card-b">
+      <div class="row" style="align-items:flex-start;gap:16px">
+        <div style="flex:1;min-width:240px">
+          <div class="b" style="font-size:16px">Checkout pages are loading slowly</div>
+          <div class="sm mut" style="margin-top:2px">Affects <b>Checkout</b> · started 02:38 · page load above 0.8 seconds for some customers</div>
+        </div>
+        <span class="sev s4"><span class="mk ring"></span>Low impact</span>
+      </div>
+      <div class="stage" style="margin-top:16px">
+        <span class="done"><b></b>Detected 02:38</span><span class="done"><b></b>Acknowledged 02:41</span><span class="cur"><b></b>Investigating</span><span><b></b>Resolved</span>
+      </div>
+      <div class="g2" style="margin-top:18px;gap:12px">
+        <div class="note"><span><b>Who's on it:</b> Minjae Lee (MSP cloud operations). Next: Haeun Kim.</span></div>
+        <div class="note"><span><b>We told you:</b> email to soyeon@daon.kr at 02:39 · delivered.</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-h"><span class="ov">Planned maintenance</span><span class="sp"></span><a class="sm">Schedule maintenance</a></div>
+    <div class="plist"><div><span class="st mute"><span class="mk dash"></span></span><div style="flex:1"><div class="b sm">Aurora minor version upgrade · Checkout</div><div class="xs faint mono">Today 02:00 → 04:00 · 44 min left</div></div><span class="xs mut">Urgent (SEV-1) issues still page us.</span></div></div>
+  </div>
+
+  <div class="card">
+    <div class="card-h"><span class="ov">Last 30 days</span><span class="sp"></span><span class="xs mut">median time to acknowledge <b class="mono" style="color:var(--ink)">2m 10s</b></span></div>
+    <table class="t">
+      <tbody>
+        <tr><td class="mono sm nowrap">Nov 6</td><td><div class="ttl">Order events delayed</div><div class="org">Orders · fixed by restarting the consumer</div></td><td><span class="st res"><span class="mk chk"></span>Resolved in 18m</span></td></tr>
+        <tr><td class="mono sm nowrap">Oct 30</td><td><div class="ttl">EKS node not ready</div><div class="org">Platform · node replaced automatically</div></td><td><span class="st res"><span class="mk chk"></span>Resolved in 6m</span></td></tr>
+        <tr><td class="mono sm nowrap">Oct 22</td><td><div class="ttl">Search errors above normal</div><div class="org">Search · configuration fix</div></td><td><span class="st res"><span class="mk chk"></span>Resolved in 41m</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+</section>
+
+<script>
+(function(){
+  // schedule grid
+  var wk=document.getElementById('wk');
+  if(wk){
+    var h='<div></div>';
+    for(var i=0;i<24;i++) h+='<div class="hd">'+(i%6===0?String(i).padStart(2,'0')+':00':'')+'</div>';
+    var days=['MON 9','TUE 10','WED 11','THU 12','FRI 13','SAT 14','SUN 15'];
+    var html=h;
+    days.forEach(function(d,r){
+      html+='<div class="dl" style="grid-row:'+(r+2)+'">'+d+'</div>';
+      for(var c=0;c<24;c++) html+='<div class="cell" style="grid-row:'+(r+2)+';grid-column:'+(c+2)+'"></div>';
+    });
+    function bar(row,from,to,cls,label){return '<div class="bar '+cls+'" style="grid-row:'+(row+2)+';grid-column:'+(from+2)+' / '+(to+2)+'">'+label+'</div>';}
+    // weekday: HK 00-09 (night), JP 09-18, ML 18-24 ; Wed override ML
+    for(var r=0;r<5;r++){
+      html+=bar(r,0,9,'a','HK');
+      html+=bar(r,9,18,'b','Junho Park');
+      if(r===2) html+=bar(r,18,24,'ovr','Minjae · override');
+      else html+=bar(r,18,24,'c','Minjae Lee');
+    }
+    html+=bar(3,0,9,'ovr','Minjae · override');
+    html+=bar(5,0,24,'c','Minjae Lee · weekend');
+    html+=bar(6,0,21,'c','Minjae Lee · weekend');
+    html+=bar(6,21,24,'a','HK');
+    wk.innerHTML=html;
+    var now=document.createElement('div');now.className='now';
+    now.style.left='calc(56px + (100% - 56px) * '+(3.27/24)+')';
+    now.style.top='18px';now.style.height='44px';
+    wk.appendChild(now);
+  }
+  // shells
+  var tpl=document.getElementById('topbar');
+  document.querySelectorAll('.screen').forEach(function(s){
+    if(s.dataset.portal) return;
+    var n=tpl.content.cloneNode(true);
+    var m=s.dataset.menu;
+    n.querySelectorAll('.nav a').forEach(function(a){ if(a.dataset.m===m) a.classList.add('on'); });
+    if(s.dataset.cust) n.querySelector('.cust-label').textContent=s.dataset.cust;
+    s.insertBefore(n,s.firstChild);
+  });
+  // tabs
+  var btns=document.querySelectorAll('.mk-bar button[data-s]');
+  function show(id){
+    if(!document.getElementById('s-'+id)) id='incidents';
+    document.querySelectorAll('.screen').forEach(function(s){s.classList.toggle('on',s.id==='s-'+id);});
+    btns.forEach(function(b){b.setAttribute('aria-selected',b.dataset.s===id?'true':'false');});
+    try{localStorage.setItem('ao-tab',id);}catch(e){}
+    window.scrollTo(0,0);
+  }
+  btns.forEach(function(b){b.addEventListener('click',function(){location.hash=b.dataset.s;});});
+  window.addEventListener('hashchange',function(){show(location.hash.slice(1));});
+  document.querySelectorAll('a[href^="#"]').forEach(function(a){
+    var t=a.getAttribute('href').slice(1); if(!document.getElementById('s-'+t)) a.addEventListener('click',function(e){e.preventDefault();});
+  });
+  var init=location.hash.slice(1);
+  if(!init){try{init=localStorage.getItem('ao-tab')||'';}catch(e){}}
+  show(init||'incidents');
+  // theme
+  var modes=['auto','light','dark'],tt=document.getElementById('tt'),cur='auto';
+  try{cur=localStorage.getItem('ao-theme')||'auto';}catch(e){}
+  function applyTheme(m){cur=m;if(m==='auto')document.documentElement.removeAttribute('data-theme');else document.documentElement.setAttribute('data-theme',m);tt.textContent='THEME: '+m.toUpperCase();try{localStorage.setItem('ao-theme',m);}catch(e){}}
+  applyTheme(cur);
+  tt.addEventListener('click',function(){applyTheme(modes[(modes.indexOf(cur)+1)%3]);});
+})();
+</script>
+</body>
+</html>

@@ -78,7 +78,7 @@
 |---|---|---|
 | teamId | FK Team (Cascade) | PK(teamId, contactId) |
 | contactId | FK Contact (Cascade) | |
-| order | int | 팀 기본 순서(oncall R1-4, R2-1) |
+| order | int | 로테이션 순서 = 유일한 순서(D-28). 현재 당번을 맨 앞에 두고 이 순서로 꼬리를 만든다(oncall R1-4, R2-1) |
 
 ### Customer
 | 필드 | 타입 | 비고 |
@@ -541,9 +541,12 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 |---|---|---|
 | id, scheduleId, contactId | | |
 | startAt, endAt | timestamptz | `[startAt, endAt)`, 겹치면 늦게 시작한 것(R2-3) |
-| reason, createdBy | | |
+| reason, createdBy | |
+| kind | enum `COVER, SWAP` default COVER | D-28 |
+| status | enum `PENDING, ACCEPTED, DECLINED, CANCELLED` default PENDING | 해석에는 ACCEPTED만 쓴다(D-28) |
+| requestedAt, respondedAt | timestamptz? | | |
 
-- IX(scheduleId, startAt, endAt). 결과 순서: 대체 근무 > 시프트 > 팀 기본 순서 꼬리(R2-1).
+- IX(scheduleId, startAt, endAt). 결과 순서: 수락된 대체 근무 > 시프트 > 로테이션 순서 꼬리(R2-1, D-28).
 
 ### EscalationPolicy
 | 필드 | 타입 | 비고 |
@@ -554,6 +557,8 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 | repeatCount | int default **1** | 사다리 끝에서 처음으로 돌아가는 횟수(D-20). 0 = 반복 없음 |
 | renotifyAfterAckSec | int? | ack 후 미해결 재알림(R5-2). null이면 SuppressionPolicy 값 |
 | isDefault | bool | 고객사당 하나(부분 UQ(customerId) where isDefault) |
+| teamId | text? FK Team | 팀 기본 정책(D-28). 고객사 정책은 팀 정책의 프리셋만 바꾼 것 |
+| preset | enum `STANDARD, URGENT, QUIET, CUSTOM` default STANDARD | D-28. STANDARD/URGENT/QUIET이면 단계는 프리셋에서 생성, 단계를 직접 고치면 CUSTOM |
 
 ### EscalationStep
 | 필드 | 타입 | 비고 |
@@ -566,7 +571,7 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 | channels | text[] | `SLACK_CHANNEL, SLACK_DM, SMS, VOICE, EMAIL`(D-11) |
 | advanceOnAllFail | bool default false | 모든 채널 실패 시 즉시 다음 단계(oncall 새 구현 5, 정책값) |
 
-- 예시 사다리(0분 Slack → 5분 문자 → 10분 음성 → 15분 다음 순번)는 시드 데이터. 확정 아님.
+- 프리셋(D-28): STANDARD 0분 Slack → 2분 SMS → 7분 다음 사람 전화 → 12분 전원 / URGENT 0분 전화 → 5분 다음 사람 전화 / QUIET 0분 Slack.
 - 뮤트 종료 직후 밀린 단계 처리(R4-6)는 미결(Q-DM-15).
 
 ## 6. 통지

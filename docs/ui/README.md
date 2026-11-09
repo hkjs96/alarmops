@@ -31,8 +31,7 @@
 | Incident 상세(RCA 자리, 자동 조치 패널) | `screens/incident-detail.md` | 있음 | 하은 |
 | Monitoring(알람·리소스·빈틈·Needs review) | `screens/monitoring.md` | 있음 | 민재 |
 | Resource 상세(임계치 출처·드리프트·이력) | `screens/resource-detail.md` | 있음 | 민재 |
-| 온콜 스케줄 편집 | `screens/oncall-schedule.md` | 있음 | 준호 |
-| 에스컬레이션 정책 편집 | `screens/escalation-policy.md` | 있음 | 준호 |
+| 온콜 팀(순서·당번·교환·프리셋, D-28) | `screens/oncall-team.md` | 있음 | 하은, 준호 |
 | 채널 검증(Contacts) | `screens/channel-verification.md` | 있음 | 준호 |
 | 점검 창 | `screens/maintenance-windows.md` | 있음 | 준호, 민재 |
 | Integrations | `screens/integrations.md` | 있음 | 준호, 민재 |

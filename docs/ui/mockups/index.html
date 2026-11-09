@@ -297,6 +297,41 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
 .hero-status .big{width:44px;height:44px;border:2px solid var(--orange);display:flex;align-items:center;justify-content:center;color:var(--orange);flex:none}
 .big-q{font-size:22px;font-weight:600;letter-spacing:-.02em;line-height:1.3}
 
+
+/* on-call team (D-28) */
+.oc-chain{display:flex;align-items:center;gap:12px;padding:16px;flex-wrap:wrap}
+.oc-p{display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid var(--rule);background:var(--surface);min-width:0;flex:1}
+.oc-p.first{border-color:var(--ink);box-shadow:inset 3px 0 0 var(--ink)}
+.oc-arr{color:var(--faint);font:700 14px var(--mono)}
+.oc-wk{font:700 10.5px var(--mono);letter-spacing:.07em;text-transform:uppercase;color:var(--faint);padding:10px 16px 6px;background:var(--soft);border-top:1px solid var(--grid)}
+.oc-days>div{display:flex;align-items:center;gap:12px;padding:9px 16px;border-top:1px solid var(--grid);min-height:44px}
+.oc-days .d{font:700 12px var(--mono);width:56px;color:var(--ink2);flex:none}
+.oc-days .nm{flex:1;min-width:0}
+.oc-days .now{box-shadow:inset 3px 0 0 var(--ink);background:var(--soft)}
+.oc-days .pend{background:var(--accent-t);box-shadow:inset 3px 0 0 var(--accent)}
+.oc-strip{display:grid;grid-template-columns:repeat(7,1fr);border-top:1px solid var(--grid)}
+.oc-strip span{text-align:center;padding:8px 0;font:700 12px var(--mono);border-left:1px solid var(--grid);color:var(--ink2)}
+.oc-strip span:first-child{border-left:0}
+.oc-strip span i{display:block;font:400 10px var(--mono);color:var(--faint);font-style:normal}
+.oc-strip span.me{background:var(--soft);color:var(--ink);box-shadow:inset 0 -2px 0 var(--ink)}
+.oc-presets{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.oc-presets>div{border:1px solid var(--rule);padding:10px 12px;background:var(--surface);cursor:pointer;min-height:44px}
+.oc-presets>div b{display:block}
+.oc-presets>div span{font-size:12px;color:var(--mut)}
+.oc-presets>div.on{border-color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink);background:var(--soft)}
+.oc-presets>div.add{border-style:dashed}
+.oc-sent{font-size:15px;line-height:1.55;padding:12px 14px;border-left:3px solid var(--ink);background:var(--soft)}
+.oc-adv summary{cursor:pointer;font-weight:600;font-size:13px;color:var(--ink2);padding:6px 0}
+.oc-pending{flex-wrap:wrap}
+@media (max-width:760px){
+  .oc-chain{flex-direction:column;align-items:stretch;gap:6px}
+  .oc-arr{transform:rotate(90deg);align-self:center;line-height:1}
+  .oc-presets{grid-template-columns:minmax(0,1fr)}
+  .oc-pending{flex-direction:column;align-items:flex-start;gap:8px}
+  .oc-cta{width:100%;justify-content:center;min-height:44px}
+  .oc-adv .lad>div{min-height:0;padding:8px}
+}
+
 .screen{display:none}
 .screen.on{display:block}
 
@@ -347,12 +382,12 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
   <button data-s="incident">Incident detail</button>
   <button data-s="monitoring">Monitoring</button>
   <button data-s="resource">Resource detail</button>
-  <button data-s="schedule">On-call schedule</button>
-  <button data-s="escalation">Escalation policy</button>
+  <button data-s="oncall">On-call team</button>
   <button data-s="contacts">Channel verification</button>
   <button data-s="maintenance">Maintenance</button>
   <button data-s="integrations">Integrations</button>
   <button data-s="onboarding">Onboarding</button>
+  <button data-s="onboard-oncall">Onboarding · on-call</button>
   <button data-s="customers">Customers</button>
   <button data-s="customer">Customer detail</button>
   <button data-s="settings">Settings</button>
@@ -708,119 +743,99 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
 </div>
 </section>
 
-<!-- ============================ 5. ON-CALL SCHEDULE ============================ -->
-<section class="screen" id="s-schedule" data-menu="oncall">
+<!-- ============================ 5. ON-CALL TEAM (D-28) ============================ -->
+<section class="screen" id="s-oncall" data-menu="oncall">
 <div class="page">
-  <div class="tabs"><a>Now</a><a class="on">Schedules</a><a>Escalation policies</a><a>Contacts</a><a>Maintenance</a></div>
+  <div class="tabs"><a class="on">Teams <span class="n">2</span></a><a>Contacts</a><a>Maintenance</a></div>
   <div class="ph">
-    <div><div class="crumb">Schedules<span class="chain">›</span>Infra primary</div><h1 class="sub">Infra primary</h1><div class="desc">Team Infra · Internal · Asia/Seoul · used by 3 customers</div></div>
-    <div class="sp"></div><span class="seg"><span>Day</span><span class="on">Week</span><span>Month</span></span><button class="btn">Add override</button><button class="btn pri">Save</button>
+    <div><div class="crumb">On-call<span class="chain">›</span>Infra team</div><h1 class="sub">Infra team</h1><div class="desc">3 people · Asia/Seoul · shifts hand over at 09:00 · used by 3 customers</div></div>
+    <div class="sp"></div><span class="seg hide-m"><span class="on">Infra team</span><span>Data team</span></span><button class="btn pri oc-cta">Cover or swap a shift</button>
   </div>
-  <div class="g-main">
-    <div class="card">
-      <div class="card-h"><span class="ov">Week of Nov 9 – 15</span><span class="sp"></span><span class="btn ghost sm">‹</span><span class="btn ghost sm">Today</span><span class="btn ghost sm">›</span></div>
-      <div class="card-b" style="overflow-x:auto">
-        <div class="wk" id="wk" style="min-width:860px"></div>
-        <div class="row xs mut" style="margin-top:14px;gap:16px">
-          <span class="row" style="gap:6px"><span style="width:14px;height:10px;background:var(--ink)"></span>Haeun Kim</span>
-          <span class="row" style="gap:6px"><span style="width:14px;height:10px;background:var(--hair);border:1px solid var(--deco)"></span>Junho Park</span>
-          <span class="row" style="gap:6px"><span style="width:14px;height:10px;border:1px dashed var(--deco)"></span>Minjae Lee</span>
-          <span class="row" style="gap:6px"><span style="width:14px;height:10px;border:1px solid var(--accent);background:repeating-linear-gradient(135deg,var(--accent-t) 0 3px,transparent 3px 6px)"></span>Override</span>
-          <span class="sp"></span><span>Overlaps: the later start wins</span>
-        </div>
-      </div>
+
+  <div class="banner accent oc-pending">
+    <span class="st info"><span class="mk q"></span>Pending</span>
+    <span style="flex:1;min-width:0"><b>Minjae covers your Thu 12 shift</b> (09:00 – Fri 09:00). Waiting for Minjae to accept. You stay on call until then.</span>
+    <span class="row" style="gap:6px"><button class="btn sm">Remind</button><button class="btn sm ghost">Cancel</button></span>
+  </div>
+
+  <div class="card oc-now">
+    <div class="card-h"><span class="ov">If something breaks now · Mon 9, 03:16</span><span class="sp"></span><a class="sm">Change order</a></div>
+    <div class="oc-chain">
+      <div class="oc-p first"><span class="ord first">1</span><span class="av on">HK</span><div><div class="b">Haeun Kim</div><div class="xs mut">On shift until 09:00</div></div></div>
+      <span class="oc-arr">→</span>
+      <div class="oc-p"><span class="ord">2</span><span class="av">JP</span><div><div class="b">Junho Park</div><div class="xs mut">Next in rotation</div></div></div>
+      <span class="oc-arr">→</span>
+      <div class="oc-p"><span class="ord">3</span><span class="av">ML</span><div><div class="b">Minjae Lee</div><div class="xs mut">Then Minjae</div></div></div>
     </div>
-    <aside class="stack">
-      <div class="card">
-        <div class="card-h"><span class="ov">On call now · Mon 03:16</span></div>
-        <div class="plist">
-          <div><span class="ord first">1</span><span class="av on">HK</span><div><div class="b">Haeun Kim</div><div class="xs faint">Shift · Sun 21:00 – Mon 09:00</div></div></div>
-          <div><span class="ord">2</span><span class="av">JP</span><div><div class="b">Junho Park</div><div class="xs faint">Team default order</div></div></div>
-          <div><span class="ord">3</span><span class="av">ML</span><div><div class="b">Minjae Lee</div><div class="xs faint">Team default order</div></div></div>
-        </div>
+    <div class="xs mut" style="padding:10px 16px;border-top:1px solid var(--grid)">This is the only order. Whoever is on shift goes first, then the rest of the rotation in order.</div>
+  </div>
+
+  <div class="g-main" style="margin:16px 0">
+    <div class="card">
+      <div class="card-h"><span class="ov">Shifts</span><span class="sp"></span><span class="xs mut">Your next shift: <b class="mono">Thu 12, 09:00</b></span></div>
+      <div class="oc-wk">This week · Nov 9 – 15</div>
+      <div class="oc-days">
+        <div class="now"><span class="d">Mon 9</span><span class="av on">HK</span><span class="nm">Haeun Kim</span><span class="pill prd">Now</span></div>
+        <div><span class="d">Tue 10</span><span class="av">JP</span><span class="nm">Junho Park</span><a class="sm">Swap</a></div>
+        <div><span class="d">Wed 11</span><span class="av">ML</span><span class="nm">Minjae Lee</span><a class="sm">Swap</a></div>
+        <div class="pend"><span class="d">Thu 12</span><span class="av on">HK</span><span class="nm">Haeun Kim <span class="faint">→ Minjae</span></span><span class="pill">Pending</span></div>
+        <div><span class="d">Fri 13</span><span class="av">JP</span><span class="nm">Junho Park</span><a class="sm">Swap</a></div>
+        <div><span class="d">Sat 14</span><span class="av">ML</span><span class="nm">Minjae Lee</span><a class="sm">Swap</a></div>
+        <div><span class="d">Sun 15</span><span class="av on">HK</span><span class="nm">Haeun Kim</span><a class="sm">Swap</a></div>
       </div>
-      <div class="card">
-        <div class="card-h"><span class="ov">Team default order</span><span class="sp"></span><a class="sm">Add member</a></div>
-        <div class="plist">
-          <div><span class="ord first">1</span><span>Junho Park</span><span class="sp"></span><span class="mono faint">↑ ↓</span></div>
-          <div><span class="ord">2</span><span>Haeun Kim</span><span class="sp"></span><span class="mono faint">↑ ↓</span></div>
-          <div><span class="ord">3</span><span>Minjae Lee</span><span class="sp"></span><span class="mono faint">↑ ↓</span></div>
-        </div>
-        <div class="xs mut" style="padding:8px 16px;border-top:1px solid var(--grid)">Used when no shift covers the time, and as the tail after the shift owner.</div>
+      <div class="oc-wk">Next week · Nov 16 – 22</div>
+      <div class="oc-strip">
+        <span><i>Mon</i>JP</span><span><i>Tue</i>ML</span><span class="me"><i>Wed</i>HK</span><span><i>Thu</i>JP</span><span><i>Fri</i>ML</span><span class="me"><i>Sat</i>HK</span><span><i>Sun</i>JP</span>
       </div>
-      <div class="card">
-        <div class="card-h"><span class="ov">Overrides</span></div>
-        <div class="plist">
-          <div><span class="av">ML</span><div><div class="b sm">Minjae Lee for Haeun Kim</div><div class="xs faint mono">Wed 18:00 – Thu 09:00 · sick leave</div></div><span class="sp"></span><span class="faint">✕</span></div>
-        </div>
+      <div class="xs mut" style="padding:10px 16px;border-top:1px solid var(--grid)">Each shift is 24 h from 09:00. Rotation: Haeun → Junho → Minjae.</div>
+    </div>
+
+    <aside class="card oc-sheet">
+      <div class="card-h"><span class="ov">Cover or swap a shift</span></div>
+      <div class="card-b stack">
+        <div><label class="lab">What</label><div class="seg full"><span class="on">Someone covers me</span><span>Swap days</span></div></div>
+        <div><label class="lab">When</label><div class="sel" style="width:100%">Thu 12 · 09:00 – Fri 09:00<span class="sp"></span><span class="car">▼</span></div><div class="hint">Or pick part of a shift: 18:00 – 23:00</div></div>
+        <div><label class="lab">Who</label><div class="chips"><span class="chip">Junho Park</span><span class="chip on">Minjae Lee</span></div></div>
+        <div class="note"><span>Minjae gets a Slack message to accept. Nothing changes until Minjae accepts.</span></div>
+        <button class="btn pri" style="width:100%;justify-content:center">Send request</button>
       </div>
     </aside>
   </div>
-</div>
-</section>
 
-<!-- ============================ 6. ESCALATION POLICY ============================ -->
-<section class="screen" id="s-escalation" data-menu="oncall">
-<div class="page">
-  <div class="tabs"><a>Now</a><a>Schedules</a><a class="on">Escalation policies</a><a>Contacts</a><a>Maintenance</a></div>
-  <div class="ph">
-    <div><div class="crumb">Escalation policies<span class="chain">›</span>Mirae Pay — Critical</div><h1 class="sub">Mirae Pay — Critical</h1><div class="desc">Customer default for Mirae Pay · used by 4 services · version 7, edited by Junho Park on Nov 6</div></div>
-    <div class="sp"></div><button class="btn">Duplicate</button><button class="btn pri">Save changes</button>
-  </div>
-
-  <div class="card" style="margin-bottom:16px">
-    <div class="lad">
-      <div class="h">Step</div><div class="h">Wait</div><div class="h">Notify</div><div class="h">Channels</div><div class="h">If all fail</div><div class="h"></div>
-      <div><span class="ord first">1</span></div><div><span class="mono b">0 min</span><span class="xs faint">at open</span></div>
-      <div><span class="sm">Next in owner snapshot</span></div>
-      <div><span class="ch on">Slack channel</span><span class="ch on">Slack DM</span><span class="ch">SMS</span><span class="ch">Voice</span><span class="ch">Email</span></div>
-      <div><span class="tog"></span><span class="xs mut">wait</span></div><div class="faint">⋮</div>
-
-      <div><span class="ord">2</span></div><div><input class="inp num" style="width:56px" value="2"><span class="xs mut">min</span></div>
-      <div><span class="sm">Same person</span></div>
-      <div><span class="ch">Slack channel</span><span class="ch">Slack DM</span><span class="ch on">SMS</span><span class="ch">Voice</span><span class="ch">Email</span></div>
-      <div><span class="tog on"></span><span class="xs mut">skip ahead</span></div><div class="faint">⋮</div>
-
-      <div><span class="ord">3</span></div><div><input class="inp num" style="width:56px" value="5"><span class="xs mut">min</span></div>
-      <div><span class="sm">Next in owner snapshot</span></div>
-      <div><span class="ch">Slack channel</span><span class="ch on">Slack DM</span><span class="ch on">SMS</span><span class="ch on">Voice</span><span class="ch">Email</span></div>
-      <div><span class="tog"></span><span class="xs mut">wait</span></div><div class="faint">⋮</div>
-
-      <div><span class="ord">4</span></div><div><input class="inp num" style="width:56px" value="5"><span class="xs mut">min</span></div>
-      <div><span class="sm">Everyone in snapshot</span></div>
-      <div><span class="ch on">Slack channel</span><span class="ch on">Slack DM</span><span class="ch on">SMS</span><span class="ch on">Voice</span><span class="ch on">Email</span></div>
-      <div><span class="tog"></span><span class="xs mut">wait</span></div><div class="faint">⋮</div>
-    </div>
-    <div class="row" style="padding:12px 16px;border-top:1px solid var(--rule)"><button class="btn sm">+ Add step</button></div>
-  </div>
-
-  <div class="g2" style="margin-bottom:16px">
-    <div class="card"><div class="card-b row" style="gap:12px">
-      <div style="flex:1"><div class="b">Repeat the ladder</div><div class="xs mut">After the last step, start again from step 1. 0 = stop after the last step.</div></div>
-      <div class="row" style="gap:6px"><input class="inp num focus" style="width:56px" value="1"><span class="sm mut">more time</span></div>
-    </div></div>
-    <div class="card"><div class="card-b row" style="gap:12px">
-      <div style="flex:1"><div class="b">Re-notify after acknowledge</div><div class="xs mut">If still unresolved. Empty = suppression default (60 min).</div></div>
-      <div class="row" style="gap:6px"><input class="inp num" style="width:56px" value="60"><span class="sm mut">min</span></div>
-    </div></div>
-  </div>
-
-  <div class="card">
-    <div class="card-h"><span class="ov">Preview · unacknowledged incident</span><span class="sp"></span><span class="xs mut">total 24 min, then stops</span></div>
-    <div class="card-b">
-      <div class="axis">
-        <div class="ln"></div>
-        <div class="pt" style="left:2%"><b>0′</b><i></i>Slack</div>
-        <div class="pt" style="left:10%"><b>2′</b><i></i>SMS</div>
-        <div class="pt" style="left:23%"><b>7′</b><i></i>Next · voice</div>
-        <div class="pt" style="left:37%"><b>12′</b><i></i>Everyone</div>
-        <div class="pt rep" style="left:50%"><b>12′</b><i></i>Repeat · Slack</div>
-        <div class="pt rep" style="left:58%"><b>14′</b><i></i>SMS</div>
-        <div class="pt rep" style="left:72%"><b>19′</b><i></i>Next · voice</div>
-        <div class="pt rep" style="left:86%"><b>24′</b><i></i>Everyone</div>
-        <div class="pt end" style="left:97%"><b>—</b><i></i>Stop</div>
+  <div class="g2">
+    <div class="card">
+      <div class="card-h"><span class="ov">How we get alerted</span><span class="sp"></span><span class="xs mut">team default</span></div>
+      <div class="card-b stack">
+        <div class="oc-presets">
+          <div class="on"><b>Standard</b><span>Slack, SMS, then call</span></div>
+          <div><b>Urgent</b><span>Call right away</span></div>
+          <div><b>Quiet</b><span>Slack only</span></div>
+        </div>
+        <div class="oc-sent">Slack <b>Haeun</b> now, SMS Haeun at <b>2 min</b>, call <b>Junho</b> at <b>7 min</b>, then alert <b>everyone</b> at <b>12 min</b>.</div>
+        <div class="xs mut">Stops as soon as anyone acknowledges. If nobody does, it runs once more from the start, then stops.</div>
+        <div class="note"><span class="st info"><span class="mk ring"></span></span><span>During maintenance, SEV-2 and below stay quiet. <b>SEV-1 always alerts.</b></span></div>
+        <details class="oc-adv">
+          <summary>Advanced: edit steps</summary>
+          <div class="lad" style="margin-top:10px;border:1px solid var(--rule)">
+            <div class="h">Step</div><div class="h">At</div><div class="h">Who</div><div class="h">How</div><div class="h">If all fail</div><div class="h"></div>
+            <div><span class="ord first">1</span></div><div><span class="mono b">0 min</span></div><div class="sm">Person on shift</div><div><span class="ch on">Slack</span></div><div><span class="tog"></span></div><div class="faint">⋮</div>
+            <div><span class="ord">2</span></div><div><input class="inp num" style="width:56px" value="2"><span class="xs mut">min</span></div><div class="sm">Same person</div><div><span class="ch on">SMS</span></div><div><span class="tog"></span></div><div class="faint">⋮</div>
+            <div><span class="ord">3</span></div><div><input class="inp num" style="width:56px" value="7"><span class="xs mut">min</span></div><div class="sm">Next person</div><div><span class="ch on">Call</span></div><div><span class="tog"></span></div><div class="faint">⋮</div>
+            <div><span class="ord">4</span></div><div><input class="inp num" style="width:56px" value="12"><span class="xs mut">min</span></div><div class="sm">Everyone</div><div><span class="ch on">Slack</span><span class="ch on">SMS</span><span class="ch on">Call</span></div><div><span class="tog"></span></div><div class="faint">⋮</div>
+          </div>
+          <div class="row" style="margin-top:10px;gap:8px"><button class="btn sm">+ Add step</button><span class="sp"></span><span class="xs mut">Editing steps turns this into a Custom preset.</span></div>
+        </details>
       </div>
-      <div class="note" style="margin-top:14px"><span class="st info"><span class="mk ring"></span></span><span>During maintenance, SEV-2 and below are muted and stay on their current step. <b>SEV-1 always escalates.</b> Each wait counts from the previous notification.</span></div>
+    </div>
+
+    <div class="card">
+      <div class="card-h"><span class="ov">Who uses this team</span><span class="sp"></span><a class="sm">Add customer</a></div>
+      <div class="plist">
+        <div><div style="flex:1"><div class="b">Daon Retail</div><div class="xs faint">All 3 services</div></div><span class="pill">Standard</span></div>
+        <div><div style="flex:1"><div class="b">Mirae Pay</div><div class="xs faint">payments-api, settlement · checkout uses Data team</div></div><span class="pill prd">Urgent</span></div>
+        <div><div style="flex:1"><div class="b">Hanbit Logistics</div><div class="xs faint">All 2 services</div></div><span class="pill">Standard</span></div>
+      </div>
+      <div class="xs mut" style="padding:10px 16px;border-top:1px solid var(--grid)">A customer can pick a different preset. People and order always come from this team.</div>
     </div>
   </div>
 </div>
@@ -829,7 +844,7 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
 <!-- ============================ 7. CHANNEL VERIFICATION ============================ -->
 <section class="screen" id="s-contacts" data-menu="oncall">
 <div class="page">
-  <div class="tabs"><a>Now</a><a>Schedules</a><a>Escalation policies</a><a class="on">Contacts</a><a>Maintenance</a></div>
+  <div class="tabs"><a href="#oncall">Teams <span class="n">2</span></a><a class="on">Contacts</a><a>Maintenance</a></div>
   <div class="ph">
     <div><h1 class="sub">Contacts</h1><div class="desc">People who can be paged, and whether each channel has been verified.</div></div>
     <div class="sp"></div><button class="btn">Send links to all unverified</button><button class="btn pri">Add contact</button>
@@ -882,7 +897,7 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
 <!-- ============================ 8. MAINTENANCE ============================ -->
 <section class="screen" id="s-maintenance" data-menu="oncall">
 <div class="page">
-  <div class="tabs"><a>Now</a><a>Schedules</a><a>Escalation policies</a><a>Contacts</a><a class="on">Maintenance</a></div>
+  <div class="tabs"><a href="#oncall">Teams <span class="n">2</span></a><a>Contacts</a><a class="on">Maintenance</a></div>
   <div class="ph">
     <div><h1 class="sub">Maintenance windows</h1><div class="desc">Mute notifications and escalation while planned work happens. Alerts are still recorded.</div></div>
     <div class="sp"></div><button class="btn pri">New window</button>
@@ -1003,7 +1018,7 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
     <div class="done"><span class="ord">✓</span><div><div class="t1">Customer</div><div class="t2">seoulbio.co.kr</div></div></div>
     <div class="done"><span class="ord">✓</span><div><div class="t1">Organization</div><div class="t2">2 projects · 3 services</div></div></div>
     <div class="cur"><span class="ord">3</span><div><div class="t1">AWS account &amp; roles</div><div class="t2">in progress</div></div></div>
-    <div><span class="ord">4</span><div><div class="t1">Contacts &amp; order</div><div class="t2">—</div></div></div>
+    <div><span class="ord">4</span><div><div class="t1">On-call</div><div class="t2">—</div></div></div>
     <div><span class="ord">5</span><div><div class="t1">Review</div><div class="t2">—</div></div></div>
   </div>
 
@@ -1025,7 +1040,7 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
         <div class="role"><span class="tog"></span><div><div class="row"><span class="b">TagWriter</span><span class="pill">Optional</span></div><div class="sm mut">Add the <code>Monitoring=on</code> tag from the console. Writes that one key only; S3 and Route 53 excluded.</div></div><span class="st mute"><span class="mk dash"></span>Off</span></div>
         <div class="role"><span class="tog"></span><div><div class="row"><span class="b">Remediator</span><span class="pill">Optional · off by default</span></div><div class="sm mut">Stop EC2/RDS or delete an ELB after an unauthorized change — only after a person approves in Slack. Starts in notify-only mode.</div></div><span class="st mute"><span class="mk dash"></span>Off</span></div>
       </div>
-      <div class="row"><button class="btn">Back</button><span class="sp"></span><button class="btn ghost">Add Prometheus / Grafana instead</button><button class="btn pri">Continue to contacts</button></div>
+      <div class="row"><button class="btn">Back</button><span class="sp"></span><button class="btn ghost">Add Prometheus / Grafana instead</button><button class="btn pri">Continue to on-call</button></div>
     </div>
 
     <aside class="stack">
@@ -1046,6 +1061,43 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
       </div>
       <div class="note"><span>The customer's security team can review the exact policies before deploying. <a href="#">View policy JSON</a></span></div>
     </aside>
+  </div>
+</div>
+</section>
+
+<!-- ============================ 10b. ONBOARDING · ON-CALL STEP ============================ -->
+<section class="screen" id="s-onboard-oncall" data-menu="customers">
+<div class="page">
+  <div class="crumb"><a href="#customers">Customers</a><span class="chain">›</span>New customer</div>
+  <div class="ph"><div><h1 class="sub">Onboard Seoul Bio Labs</h1><div class="desc">Two questions. You can change both later on the On-call page.</div></div></div>
+  <div class="steps">
+    <div class="done"><span class="ord">✓</span><div><div class="t1">Customer</div><div class="t2">seoulbio.co.kr</div></div></div>
+    <div class="done"><span class="ord">✓</span><div><div class="t1">Organization</div><div class="t2">2 projects · 3 services</div></div></div>
+    <div class="done"><span class="ord">✓</span><div><div class="t1">AWS account &amp; roles</div><div class="t2">7092 4418 3305</div></div></div>
+    <div class="cur"><span class="ord">4</span><div><div class="t1">On-call</div><div class="t2">in progress</div></div></div>
+    <div><span class="ord">5</span><div><div class="t1">Review</div><div class="t2">—</div></div></div>
+  </div>
+  <div style="max-width:760px" class="stack">
+    <div class="card"><div class="card-b stack">
+      <div class="b">1. Which team answers alerts for Seoul Bio Labs?</div>
+      <div class="oc-presets">
+        <div class="on"><b>Infra team</b><span>Haeun, Junho, Minjae</span></div>
+        <div><b>Data team</b><span>Sora, Taeyang</span></div>
+        <div class="add"><b>+ New team</b><span>Name and people</span></div>
+      </div>
+    </div></div>
+    <div class="card"><div class="card-b stack">
+      <div class="b">2. How should we alert them?</div>
+      <div class="oc-presets">
+        <div class="on"><b>Standard</b><span>Slack, SMS, then call</span></div>
+        <div><b>Urgent</b><span>Call right away</span></div>
+        <div><b>Quiet</b><span>Slack only</span></div>
+      </div>
+      <div class="oc-sent">If something breaks now: Slack <b>Haeun</b> now, SMS Haeun at <b>2 min</b>, call <b>Junho</b> at <b>7 min</b>, then alert <b>everyone</b> at <b>12 min</b>.</div>
+      <div class="xs mut">Runs once more if nobody acknowledges. SEV-1 alerts even during maintenance.</div>
+    </div></div>
+    <div class="note"><span>Customer contacts (for the portal and status emails) can be added on the <a href="#contacts">Contacts</a> page after setup.</span></div>
+    <div class="row"><button class="btn">Back</button><span class="sp"></span><button class="btn pri">Continue to review</button></div>
   </div>
 </div>
 </section>
@@ -1230,35 +1282,6 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}
 
 <script>
 (function(){
-  // schedule grid
-  var wk=document.getElementById('wk');
-  if(wk){
-    var h='<div></div>';
-    for(var i=0;i<24;i++) h+='<div class="hd">'+(i%6===0?String(i).padStart(2,'0')+':00':'')+'</div>';
-    var days=['MON 9','TUE 10','WED 11','THU 12','FRI 13','SAT 14','SUN 15'];
-    var html=h;
-    days.forEach(function(d,r){
-      html+='<div class="dl" style="grid-row:'+(r+2)+'">'+d+'</div>';
-      for(var c=0;c<24;c++) html+='<div class="cell" style="grid-row:'+(r+2)+';grid-column:'+(c+2)+'"></div>';
-    });
-    function bar(row,from,to,cls,label){return '<div class="bar '+cls+'" style="grid-row:'+(row+2)+';grid-column:'+(from+2)+' / '+(to+2)+'">'+label+'</div>';}
-    // weekday: HK 00-09 (night), JP 09-18, ML 18-24 ; Wed override ML
-    for(var r=0;r<5;r++){
-      html+=bar(r,0,9,'a','HK');
-      html+=bar(r,9,18,'b','Junho Park');
-      if(r===2) html+=bar(r,18,24,'ovr','Minjae · override');
-      else html+=bar(r,18,24,'c','Minjae Lee');
-    }
-    html+=bar(3,0,9,'ovr','Minjae · override');
-    html+=bar(5,0,24,'c','Minjae Lee · weekend');
-    html+=bar(6,0,21,'c','Minjae Lee · weekend');
-    html+=bar(6,21,24,'a','HK');
-    wk.innerHTML=html;
-    var now=document.createElement('div');now.className='now';
-    now.style.left='calc(56px + (100% - 56px) * '+(3.27/24)+')';
-    now.style.top='18px';now.style.height='44px';
-    wk.appendChild(now);
-  }
   // shells
   var tpl=document.getElementById('topbar');
   document.querySelectorAll('.screen').forEach(function(s){
