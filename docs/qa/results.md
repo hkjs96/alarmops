@@ -123,3 +123,38 @@
 - P1 모바일 THEN: 단계별 한 줄 세로 배치. P1 고객 단위 탐지: pagingHealth 4종(D에서 계산) → Customers 열·필터, Now 기본 필터(10곳 초과), Customer 배너. 샘플 Kumho Clinic·Lumen Bank 추가. P1 Fri 13: 수락 대리(Wed 11)와 대기 요청(Fri 13 전체) 분리.
 - P2: Custom 전환 경고+Before/After, Leave 교대 경계(Thu 19 09:00 → Wed 25 09:00)·축소/유일 호출자 경고, Junho 12 전부 표시, Rotations 편집 진입점+영향 미리보기, 390 카드, 용어·복수형·교대 시각.
 - 화면 워크스루(작성자): T1–T8 화면에서 답 확인. T8: Customers › Paging problems → Kumho Clinic, Lumen Bank 외 계산상 문제 고객(Hanbit·Haneul·Iruda: 미검증 채널)도 표시됨.
+
+## 최종 점검 (v5) — 2026-11-09
+
+독립 평가자 관점, 화면만 보고 판단(명세 미참조). 대상: `docs/ui/mockups/index.html` (D-32 2단계 연락 상태 반영 커밋 이후). Playwright, 1440·390px. 캡처: `docs/ui/mockups/shots/v5-*.png`.
+
+### 시나리오
+
+| 시나리오 | 페르소나 | 결과 | 클릭 | 헤맴 | 관찰 | 점수(5) |
+|---|---|---|---|---|---|---|
+| T1 Mirae Pay payments-db-1 누가 호출되나 | 하은 | 성공 | 1~2 | 낮음 | Now 조회·Resource·Responders 모두 "Slack+call Haeun(night desk) → 10분 Yuna → 15분 everyone(5) → 1회 반복 → 30분 정지"로 동일. Incident는 03:12/03:22/03:27 실제 시각으로 환산, 일치 | 5 |
+| T2 준호 휴가 11/20–24 → 민재 | 준호 | 성공 | 3 | 낮음 | 교대 단위 경계(Thu 19 09:00 → Wed 25 09:00), 넘어가는 교대 3건, everyone 축소 16건 경고가 적용 전 보임. Hanbit on-call(10:00 교대)도 "09:00에 복귀"로 표기돼 경계 규칙과 살짝 어긋남(P3) | 4 |
+| T3 Daon에 고객 담당자 추가, step 2로 전화 | 준호 | 성공 | 3 | 낮음 | All at once → Custom 전환 경고와 Before/After가 명확. 단 **BEFORE에 아직 추가 안 된 Jaehyun이 everyone(4)로 이미 포함**(P2) | 4 |
+| T4 신규 고객 all-at-once | 준호 | 성공 | 2 | 낮음 | 온보딩 5단계·진행 저장·다음 단계 입구 명확 | 5 |
+| T5 준호 담당 12곳 + 현재 근무 | 준호 | 성공 | 1 | 낮음 | 12곳 전부·경로(template/added/rotation) 표시, 현재 Hanbit on-call. 단 **Rotations의 Wed 11 "Junho covers 18:00–23:00 (accepted)"가 준호 Upcoming shifts에 없음**(P2) | 4 |
+| T6 하은 폰에서 night desk 교대 | 하은 | 성공 | 2 | 낮음 | 자기 행(Sun 8 NOW) "Cover or swap" → 폼(대상·전체/일부·사유), 수락 전 변경 없음 안내. 390에서 깨짐 없음 | 5 |
+| T7 night desk 순서 편집 + 영향 고객 | 민재 | 성공 | 2 | 중간 | 영향 6곳, everyone 불변 설명, Before→After 교대 목록. 단 **순서 변경이 지금 근무 중(Sun 8 NOW Haeun→Junho)과 대기 요청(Fri 13)을 바꾸는데 경고 없음**(P2) | 4 |
+| T8 Unreachable vs At risk 고객 찾기 | 준호 | 성공 | 1 | 낮음 | Customers 칩 Unreachable 3 / At risk 2, 빨강 먼저 정렬, 행 좌측 빨강/노랑 띠, 정의 문장. Now도 같은 칩(10곳 초과 시 문제 고객만 기본). 샘플이 14곳이라 30+ 규모는 직접 확인 못 함(P2, 데이터 한계) | 4 |
+
+### 불일치·용어·레이아웃 (16개 화면 스캔)
+
+| 구분 | 위치 | 내용 | 등급 |
+|---|---|---|---|
+| 불일치 | Responders › Add person 미리보기 | BEFORE가 추가 후 인원(4, Jaehyun 포함)을 보여 줌 | P2 |
+| 불일치 | People › Junho vs Rotations Wed 11 | 수락된 부분 대리(18:00–23:00)가 개인 일정에 없음 | P2 |
+| 경고 누락 | Rotations › Edit members & order | 현재 교대·대기 중 요청에 영향 주는 변경에 경고 없음 | P2 |
+| 규모 | Customers / Now | 샘플 14곳. 30+에서 칩·정렬은 동작하겠지만 화면으로 미검증 | P2 |
+| 표현 차이 | Haneul Air 배너 vs Now | 배너 "step 4 (call Junho, Sora)" vs Now "call everyone in Responders (2)" | P3 |
+| 시간 경계 | Leave & replace | 10:00 교대 로테이션도 "Wed 25 09:00 복귀"로 표기 | P3 |
+| 용어 | Now Responders 열 | "1 incl. 1 customer person" 어색 | P3 |
+| 용어 | 고객 예시 선택 | "(paging problem)" — 2단계(Unreachable/At risk) 미반영 | P3 |
+| 레이아웃 | 390px 전 화면 | 페이지 가로 스크롤 없음(상단 목업 탭 바만 자체 스크롤), 콘솔 오류 0 | — |
+| 양호 | D-32 | 2단계가 Customers 열·칩, Now 칩·정렬, Responders 배너(빨강/노랑, ●/▲)에 일관 | — |
+
+### 판정
+**통과** — P1 없음. P2 4건은 다음 화면 이슈로 추적(구현 전 수정 권장).
