@@ -1,4 +1,5 @@
 import { cloudwatchFingerprint, FINGERPRINT_VERSION } from '../fingerprint.js';
+import { sha256 } from '../hash.js';
 import { capRaw } from '../raw.js';
 import { cloudwatchSeverity } from '../severity.js';
 import type { CustomerResolvedBy, NormalizedEvent } from '../types.js';
@@ -93,7 +94,8 @@ export function normalizeCloudWatch(ev: CloudWatchEventBridgeEvent, ctx: CloudWa
 
   return {
     schemaVersion: 1,
-    dedupKey: `${occurredAt}#${(ev.id ?? '').slice(0, 8)}`,
+    // Security B-3: tenant-scoped (account) and the full EventBridge event id; RawEvent.dedupKey is a global UQ.
+    dedupKey: cloudwatchDedupKey(ev.account, ev.id),
     source: 'CLOUDWATCH',
     sourceId: null,
     customerId,
@@ -122,4 +124,9 @@ export function normalizeCloudWatch(ev: CloudWatchEventBridgeEvent, ctx: CloudWa
 export function toIso(v: string | undefined | null, fallback: Date): string {
   const t = v ? Date.parse(v) : NaN;
   return new Date(Number.isFinite(t) ? t : fallback.getTime()).toISOString().replace(/\.\d{3}Z$/, (m) => (m === '.000Z' ? 'Z' : m));
+}
+
+/** Security B-3: `sha256("cloudwatch:{account}:{full event id}")`. Never truncate the id or drop the account. */
+export function cloudwatchDedupKey(account: string, eventId: string): string {
+  return sha256(`cloudwatch:${account}:${eventId ?? ''}`);
 }

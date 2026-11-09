@@ -648,6 +648,8 @@ model IntegrationSource {
   tokenPrefix    String?    @db.Char(4)
   tokenRotatedAt DateTime?  @db.Timestamptz(3)
   enabled        Boolean    @default(true)
+  /// Security B-2: accept `?token=` only when true. Query strings land in access logs; header is the default.
+  allowQueryToken Boolean   @default(false)
   lastReceivedAt DateTime?  @db.Timestamptz(3)
   rawEvents      RawEvent[]
 
@@ -704,7 +706,8 @@ model RawEvent {
 
 model Alert {
   id                 String          @id @default(cuid())
-  fingerprint        String          @unique
+  /// Identity is (customerId, fingerprint): UQ NULLS NOT DISTINCT in raw SQL (security B-4/B-6).
+  fingerprint        String
   fingerprintVersion Int
   customerId         String?
   sourceId           String?
@@ -739,6 +742,7 @@ model Alert {
   @@index([customerId, status])
   @@index([customerId, lastEventAt(sort: Desc)])
   @@index([awsAccountId])
+  @@index([fingerprint])
 }
 
 model AlertGroup {
@@ -925,6 +929,7 @@ model Resource {
   remediationRequests RemediationRequest[]
 
   @@unique([cloudAccountId, region, resourceType, resourceKey])
+  @@unique([id, customerId]) // target of RemediationRequest composite FK (security B-5)
   @@index([customerId, resourceType, monitoringState])
 }
 
@@ -1046,7 +1051,8 @@ model RemediationRequest {
   customer       Customer          @relation(fields: [customerId], references: [id], onDelete: Cascade)
   cloudAccountId String
   resourceId     String
-  resource       Resource          @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  /// Composite FK (resourceId, customerId) → Resource(id, customerId): request customer = resource customer (B-5).
+  resource       Resource          @relation(fields: [resourceId, customerId], references: [id, customerId], onDelete: Cascade)
   trigger        Json
   action         RemediationAction
   status         RemediationStatus
@@ -1062,6 +1068,7 @@ model RemediationRequest {
   version        Int               @default(0)
 
   // partial UQ(customerId, resourceId, action) where status in active set — raw SQL
+  // CHECK: status in (APPROVED, EXECUTING, SUCCEEDED, FAILED) ⇒ decidedBy and decidedAt not null — raw SQL (B-5)
   @@index([customerId, requestedAt(sort: Desc)])
 }
 

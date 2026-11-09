@@ -23,8 +23,8 @@ export const sha = (s: string) => createHash('sha256').update(s).digest('hex');
 export function store(): MemoryStore {
   const s = new MemoryStore();
   s.sources.push(
-    { id: 'src_prom', customerId: 'cus_1', kind: 'PROMETHEUS', tokenHash: sha(PROM_TOKEN), enabled: true },
-    { id: 'src_graf', customerId: 'cus_2', kind: 'GRAFANA', tokenHash: sha(GRAF_TOKEN), enabled: true },
+    { id: 'src_prom', customerId: 'cus_1', kind: 'PROMETHEUS', tokenHash: sha(PROM_TOKEN), enabled: true, allowQueryToken: false },
+    { id: 'src_graf', customerId: 'cus_2', kind: 'GRAFANA', tokenHash: sha(GRAF_TOKEN), enabled: true, allowQueryToken: true },
   );
   s.accounts.set('123456789012', 'cus_1');
   return s;

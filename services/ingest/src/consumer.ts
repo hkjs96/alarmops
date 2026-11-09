@@ -41,10 +41,19 @@ export async function processMessage(msg: AlertEventsMessage, deps: ConsumerDeps
   const wallNow = deps.now?.() ?? new Date();
 
   // 1. Alert row (create or re-read on conflict), needed for RawEvent.alertId.
-  let alert = await deps.repo.findAlert(ev.fingerprint);
+  // Security B-4: identity is (customerId, fingerprint). If the account/source now maps to another customer,
+  // a new alert is opened for the new customer; the old customer's alert is never touched.
+  let alert = await deps.repo.findAlert(ev.customerId, ev.fingerprint);
   if (!alert) {
+    const prev = await deps.repo.findAlertInOtherScope(ev.customerId, ev.fingerprint);
+    if (prev) {
+      deps.log?.('warn', 'alert_tenant_reassigned', {
+        fingerprint: ev.fingerprint, previousAlertId: prev.id, previousCustomerId: prev.customerId,
+        customerId: ev.customerId, awsAccountId: ev.awsAccountId, sourceId: ev.sourceId,
+      });
+    }
     const created = await deps.repo.createAlert(freshAlert(ev, occurredAt));
-    alert = created === 'EXISTS' ? await deps.repo.findAlert(ev.fingerprint) : created;
+    alert = created === 'EXISTS' ? await deps.repo.findAlert(ev.customerId, ev.fingerprint) : created;
     if (!alert) throw new Error('alert vanished after create conflict');
   }
 
@@ -57,7 +66,7 @@ export async function processMessage(msg: AlertEventsMessage, deps: ConsumerDeps
   const windows = await deps.repo.activeMaintenance(ev.customerId, occurredAt);
   let result: DecisionResult | null = null;
   for (let attempt = 0; attempt < MAX_VERSION_RETRIES && !result; attempt++) {
-    if (attempt > 0) alert = (await deps.repo.findAlert(ev.fingerprint)) ?? alert;
+    if (attempt > 0) alert = (await deps.repo.findAlert(ev.customerId, ev.fingerprint)) ?? alert;
     const st = effectiveState(alert, alert.lastEventAt, occurredAt);
     const r = decide(
       { eventType: ev.eventType, state: ev.state, previousState: ev.previousState, severity: ev.severity, occurredAt,
@@ -146,7 +155,7 @@ export function applyEvent(a: AlertRow, ev: NormalizedEvent, at: Date, st: Finge
     ...a,
     lastNotifiedAt: st.lastNotifiedAt, episodeOpen: st.episodeOpen, episodeStartedAt: st.episodeStartedAt,
     episodeNotified: st.episodeNotified, recentEpisodes: st.recentEpisodes, quarantinedUntil: st.quarantinedUntil,
-    customerId: a.customerId ?? ev.customerId,
+    customerId: a.customerId, // B-4: never re-tenant an existing alert; a scope change opens a new one
     region: ev.region ?? a.region,
     resourceType: ev.resource?.type ?? a.resourceType,
     metricKey: ev.metric?.key ?? a.metricKey,

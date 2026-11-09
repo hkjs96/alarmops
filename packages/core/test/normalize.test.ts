@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { capRaw, detectWebhookKind, normalizeCloudWatch, normalizeWebhook, RAW_MAX_BYTES, type CloudWatchEventBridgeEvent } from '../src/index.js';
+import { capRaw, cloudwatchDedupKey, detectWebhookKind, sha256, normalizeCloudWatch, normalizeWebhook, RAW_MAX_BYTES, type CloudWatchEventBridgeEvent } from '../src/index.js';
 import { clone, fixture, t } from './helpers.js';
 
 const cwCtx = { customerForAccount: (a: string) => (a === '123456789012' ? 'cus_1' : null), receivedAt: t('2026-11-09T03:12:02Z') };
@@ -14,7 +14,19 @@ describe('CloudWatch EventBridge → normalized (API-CONTRACT §3)', () => {
       resource: { type: 'EC2', key: 'i-0abc', name: 'web-1' }, metric: { key: 'CPUUtilization', namespace: 'AWS/EC2' },
       alarm: { managed: true }, occurredAt: '2026-11-09T03:12:00Z', receivedAt: '2026-11-09T03:12:02.000Z', parseError: null,
     });
-    expect(e.dedupKey).toBe('2026-11-09T03:12:00Z#a1b2c3d4');
+    expect(e.dedupKey).toBe(sha256(`cloudwatch:${e.awsAccountId}:${fixture<any>('cloudwatch-managed.json').id}`));
+  });
+
+  it('B-3: two accounts, same timestamp and same event-id prefix → different dedupKeys', () => {
+    const a = fixture<CloudWatchEventBridgeEvent>('cloudwatch-managed.json');
+    const b = clone(a);
+    b.account = '210987654321';
+    const ea = normalizeCloudWatch(a, cwCtx);
+    const eb = normalizeCloudWatch(b, cwCtx);
+    expect(ea.occurredAt).toBe(eb.occurredAt);
+    expect(ea.dedupKey).not.toBe(eb.dedupKey);
+    // same account, ids sharing the first 8 chars no longer collide either
+    expect(cloudwatchDedupKey('1', 'a1b2c3d4-0000')).not.toBe(cloudwatchDedupKey('1', 'a1b2c3d4-1111'));
   });
 
   it('customer comes from the envelope account only; unknown account → UNMAPPED', () => {

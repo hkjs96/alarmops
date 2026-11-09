@@ -32,3 +32,15 @@ if (!migration.startsWith(generated)) {
   process.exit(1);
 }
 console.log('migration 0001_init in sync with schema.prisma');
+
+// 3. Hand-written constraints that guard tenant isolation and the D-15 approval path must stay present.
+const required = [
+  ['Alert (customerId, fingerprint) UQ NULLS NOT DISTINCT (B-4/B-6)', /CREATE UNIQUE INDEX "Alert_customerId_fingerprint_key" ON "Alert"\("customerId", "fingerprint"\) NULLS NOT DISTINCT/],
+  ['RemediationRequest decided CHECK (B-5)', /"RemediationRequest_decided_chk"\s+CHECK \("status" NOT IN \('APPROVED', 'EXECUTING', 'SUCCEEDED', 'FAILED'\) OR \("decidedBy" IS NOT NULL AND "decidedAt" IS NOT NULL\)\)/],
+  ['RemediationRequest composite FK to Resource(id, customerId) (B-5)', /FOREIGN KEY \("resourceId", "customerId"\) REFERENCES "Resource"\("id", "customerId"\)/],
+  ['RemediationRequest active partial UQ (D-15)', /"RemediationRequest_active_key"/],
+];
+const missing = required.filter(([, re]) => !re.test(migration)).map(([name]) => name);
+if (/CREATE UNIQUE INDEX "Alert_fingerprint_key"/.test(migration)) missing.push('Alert.fingerprint must not be globally unique (B-4)');
+if (missing.length) { console.error('missing required constraints:\n- ' + missing.join('\n- ')); process.exit(1); }
+console.log(`hand-written constraints present (${required.length})`);

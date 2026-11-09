@@ -21,6 +21,8 @@ export interface IntegrationSourceRow {
   kind: 'CLOUDWATCH' | 'PROMETHEUS' | 'GRAFANA';
   tokenHash: string | null;
   enabled: boolean;
+  /** Security B-2: accept `?token=` for this source only when true (default false). */
+  allowQueryToken: boolean;
 }
 
 export interface IngestRejectionInput {
@@ -82,13 +84,20 @@ export interface AlertRepository {
   /** INSERT RawEvent; 'DUPLICATE' when dedupKey already exists (F-3, G-8). */
   insertRawEvent(ev: NormalizedEvent, alertId: string): Promise<{ id: string } | 'DUPLICATE'>;
   setRawEventDecision(rawEventId: string, d: RawEventDecision): Promise<void>;
-  findAlert(fingerprint: string): Promise<AlertRow | null>;
+  /**
+   * Alert identity is (customerId, fingerprint) — UQ NULLS NOT DISTINCT in Postgres (security B-4/B-6).
+   * Never look an alert up by fingerprint alone: an account moved to another customer must open a new alert.
+   */
+  findAlert(customerId: string | null, fingerprint: string): Promise<AlertRow | null>;
+  /** Most recent alert with this fingerprint owned by a different customer scope (reassignment audit only). */
+  findAlertInOtherScope(customerId: string | null, fingerprint: string): Promise<{ id: string; customerId: string | null } | null>;
   /** Create; 'EXISTS' on unique conflict (P2002) so the caller re-reads (F-7, known-bugs 1-6). */
   createAlert(row: AlertRow): Promise<AlertRow | 'EXISTS'>;
   /** Conditional update `WHERE id = ? AND version = ?`, bumps version. 'CONFLICT' if version moved. */
   updateAlert(row: AlertRow, expectedVersion: number): Promise<AlertRow | 'CONFLICT'>;
   loadPolicy(): Promise<SuppressionPolicy>;
   activeMaintenance(customerId: string | null, at: Date): Promise<MaintenanceWindow[]>;
+  /** Safe without customerId: group keys always embed the customer scope (fingerprint.ts TENANT SCOPE INVARIANT). */
   findOpenGroup(groupKey: string): Promise<GroupRow | null>;
   groupIdExists(id: string): Promise<boolean>;
   /** INSERT; 'EXISTS' when another OPEN group for the key won the race (partial UQ). */

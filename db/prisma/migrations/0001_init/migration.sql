@@ -373,6 +373,7 @@ CREATE TABLE "IntegrationSource" (
     "tokenPrefix" CHAR(4),
     "tokenRotatedAt" TIMESTAMPTZ(3),
     "enabled" BOOLEAN NOT NULL DEFAULT true,
+    "allowQueryToken" BOOLEAN NOT NULL DEFAULT false,
     "lastReceivedAt" TIMESTAMPTZ(3),
 
     CONSTRAINT "IntegrationSource_pkey" PRIMARY KEY ("id")
@@ -1055,9 +1056,6 @@ CREATE INDEX "RawEvent_alertId_occurredAt_idx" ON "RawEvent"("alertId", "occurre
 CREATE INDEX "RawEvent_groupId_idx" ON "RawEvent"("groupId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Alert_fingerprint_key" ON "Alert"("fingerprint");
-
--- CreateIndex
 CREATE INDEX "Alert_customerId_status_idx" ON "Alert"("customerId", "status");
 
 -- CreateIndex
@@ -1065,6 +1063,9 @@ CREATE INDEX "Alert_customerId_lastEventAt_idx" ON "Alert"("customerId", "lastEv
 
 -- CreateIndex
 CREATE INDEX "Alert_awsAccountId_idx" ON "Alert"("awsAccountId");
+
+-- CreateIndex
+CREATE INDEX "Alert_fingerprint_idx" ON "Alert"("fingerprint");
 
 -- CreateIndex
 CREATE INDEX "AlertGroup_status_closeAt_idx" ON "AlertGroup"("status", "closeAt");
@@ -1101,6 +1102,9 @@ CREATE INDEX "Resource_customerId_resourceType_monitoringState_idx" ON "Resource
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Resource_cloudAccountId_region_resourceType_resourceKey_key" ON "Resource"("cloudAccountId", "region", "resourceType", "resourceKey");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Resource_id_customerId_key" ON "Resource"("id", "customerId");
 
 -- CreateIndex
 CREATE INDEX "ManagedAlarm_customerId_driftStatus_idx" ON "ManagedAlarm"("customerId", "driftStatus");
@@ -1295,7 +1299,7 @@ ALTER TABLE "RemediationPolicy" ADD CONSTRAINT "RemediationPolicy_customerId_fke
 ALTER TABLE "RemediationRequest" ADD CONSTRAINT "RemediationRequest_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "RemediationRequest" ADD CONSTRAINT "RemediationRequest_resourceId_fkey" FOREIGN KEY ("resourceId") REFERENCES "Resource"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "RemediationRequest" ADD CONSTRAINT "RemediationRequest_resourceId_customerId_fkey" FOREIGN KEY ("resourceId", "customerId") REFERENCES "Resource"("id", "customerId") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "RemediationRequest" ADD CONSTRAINT "RemediationRequest_decidedBy_fkey" FOREIGN KEY ("decidedBy") REFERENCES "Contact"("id") ON DELETE SET NULL ON UPDATE CASCADE;
@@ -1396,3 +1400,11 @@ ALTER TABLE "SuppressionPolicy" ADD CONSTRAINT "SuppressionPolicy_ranges_chk" CH
   AND "flappingWindowDays" >= (1.0/24) AND "flappingWindowDays" <= 30
   AND "flappingQuarantineSec" BETWEEN 0 AND 86400 AND "groupWaitSec" BETWEEN 0 AND 300
   AND "renotifyAfterSec" BETWEEN 0 AND 86400);
+
+-- Alert: identity is (customerId, fingerprint); unmapped (null customer) rows share one scope (security B-4/B-6)
+CREATE UNIQUE INDEX "Alert_customerId_fingerprint_key" ON "Alert"("customerId", "fingerprint") NULLS NOT DISTINCT;
+
+-- RemediationRequest: a decided/executed request must record who decided and when (D-15, security B-5).
+-- Customer = resource customer is enforced by the composite FK RemediationRequest_resourceId_customerId_fkey.
+ALTER TABLE "RemediationRequest" ADD CONSTRAINT "RemediationRequest_decided_chk"
+  CHECK ("status" NOT IN ('APPROVED', 'EXECUTING', 'SUCCEEDED', 'FAILED') OR ("decidedBy" IS NOT NULL AND "decidedAt" IS NOT NULL));

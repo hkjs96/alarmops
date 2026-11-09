@@ -29,8 +29,8 @@ describe('config & token helpers', () => {
     expect(() => assertBudget(60, 50_000)).not.toThrow();
   });
   it('bearer preferred over query; digest compare is length-safe', () => {
-    expect(extractToken({ authorization: 'Bearer a' }, { token: 'b' })).toBe('a');
-    expect(extractToken({}, { token: 'b' })).toBe('b');
+    expect(extractToken({ authorization: 'Bearer a' }, { token: 'b' })).toEqual({ token: 'a', via: 'header' });
+    expect(extractToken({}, { token: 'b' })).toEqual({ token: 'b', via: 'query' });
     expect(extractToken({}, null)).toBeNull();
     expect(digestEquals('ab', 'ab')).toBe(true);
     expect(digestEquals('ab', 'abcd')).toBe(false);

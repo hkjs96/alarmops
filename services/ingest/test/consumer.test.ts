@@ -119,11 +119,53 @@ describe('alert consumer', () => {
     const { repo, deps } = setup();
     const ev: NormalizedEvent = { ...cw(), source: 'PROMETHEUS', sourceId: 'src_prom', previousState: null, fingerprint: 'prometheus:src_prom:abc', dedupKey: 'k1', awsAccountId: null };
     await processMessage(ev, deps);
-    const a = repo.alerts.get('prometheus:src_prom:abc')!;
+    const a = repo.alerts.get('cus_1|prometheus:src_prom:abc')!;
     a.status = 'ACKNOWLEDGED';
     const again = await processMessage({ ...ev, dedupKey: 'k2', occurredAt: '2026-11-09T04:12:00Z' }, deps);
     expect(again).toMatchObject({ decision: 'SUPPRESS', reason: 'not_actionable', groupId: null });
-    expect(repo.alerts.get('prometheus:src_prom:abc')!.status).toBe('ACKNOWLEDGED');
+    expect(repo.alerts.get('cus_1|prometheus:src_prom:abc')!.status).toBe('ACKNOWLEDGED');
+  });
+
+  it('B-4: account moved to another customer → new alert for the new customer, old one untouched, logged', async () => {
+    const { repo, deps } = setup();
+    const logs: Array<{ msg: string; data?: Record<string, unknown> }> = [];
+    const d = { ...deps, log: (_l: string, msg: string, data?: Record<string, unknown>) => logs.push({ msg, data }) };
+    await processMessage(cw(), d);
+    const old = structuredClone([...repo.alerts.values()][0]!);
+    expect(old.customerId).toBe('cus_1');
+    // CloudAccount 123456789012 is remapped to cus_9
+    const moved = { ...cw((e) => at(e, '2026-11-09T04:00:00Z', 'h0000001')), customerId: 'cus_9' };
+    const out = await processMessage(moved, d);
+    expect(out).toMatchObject({ kind: 'PROCESSED', decision: 'NOTIFY' });
+    expect(repo.alerts.size).toBe(2);
+    expect(repo.alerts.get(`cus_1|${old.fingerprint}`)).toEqual(old);
+    const fresh = repo.alerts.get(`cus_9|${old.fingerprint}`)!;
+    expect(fresh.id).not.toBe(old.id);
+    expect(fresh.customerId).toBe('cus_9');
+    expect(out.kind === 'PROCESSED' && out.alertId).toBe(fresh.id);
+    expect(logs.find((l) => l.msg === 'alert_tenant_reassigned')?.data).toMatchObject({ previousAlertId: old.id, previousCustomerId: 'cus_1', customerId: 'cus_9' });
+    // unmapped → mapped correction also opens a new alert rather than adopting the unmapped one
+    await processMessage(cw(() => {}, '333333333333'), d);
+    const unmappedFp = [...repo.alerts.values()].find((a) => a.awsAccountId === '333333333333')!;
+    await processMessage({ ...cw((e) => at(e, '2026-11-09T04:30:00Z', 'h0000002'), '333333333333'), customerId: 'cus_2' }, d);
+    expect(repo.alerts.get(`-|${unmappedFp.fingerprint}`)!.customerId).toBeNull();
+    expect(repo.alerts.get(`cus_2|${unmappedFp.fingerprint}`)).toBeDefined();
+  });
+
+  it('B-6: two customers with identical labels never share an Alert or Group', async () => {
+    const { repo, deps } = setup();
+    const base = { ...cw(), source: 'PROMETHEUS' as const, previousState: null, awsAccountId: null };
+    const { webhookFingerprint } = await import('@alarmops/core');
+    const labels = { alertname: 'HighCPU', instance: 'web-1' };
+    const a = await processMessage({ ...base, sourceId: 'src_a', customerId: 'cus_1', fingerprint: webhookFingerprint('PROMETHEUS', 'src_a', null, labels), dedupKey: 'ka' }, deps);
+    const b = await processMessage({ ...base, sourceId: 'src_b', customerId: 'cus_2', fingerprint: webhookFingerprint('PROMETHEUS', 'src_b', null, labels), dedupKey: 'kb' }, deps);
+    expect(a.kind === 'PROCESSED' && b.kind === 'PROCESSED').toBe(true);
+    if (a.kind !== 'PROCESSED' || b.kind !== 'PROCESSED') return;
+    expect(a.alertId).not.toBe(b.alertId);
+    expect(a.groupId).not.toBe(b.groupId);
+    const groups = [...repo.groups.values()];
+    expect(groups.find((g) => g.id === a.groupId)!.customerId).toBe('cus_1');
+    expect(groups.find((g) => g.id === b.groupId)!.customerId).toBe('cus_2');
   });
 
   it('handler reports only failing records (partial batch)', async () => {

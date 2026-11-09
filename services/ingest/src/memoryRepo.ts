@@ -9,7 +9,7 @@ import type { AlertRepository, AlertRow, IngestRejectionInput, IntegrationSource
 export class MemoryStore implements AlertRepository, SourceRepository {
   rawEvents = new Map<string, NormalizedEvent & { id: string; alertId: string } & Partial<RawEventDecision>>();
   rawByKey = new Map<string, string>();
-  alerts = new Map<string, AlertRow>(); // by fingerprint
+  alerts = new Map<string, AlertRow>(); // by alertScopeKey(customerId, fingerprint)
   groups = new Map<string, GroupRow>();
   sources: IntegrationSourceRow[] = [];
   accounts = new Map<string, string>();
@@ -33,21 +33,29 @@ export class MemoryStore implements AlertRepository, SourceRepository {
     const r = this.rawEvents.get(id);
     if (r) Object.assign(r, d);
   }
-  async findAlert(fp: string) {
-    const a = this.alerts.get(fp);
+  async findAlert(customerId: string | null, fp: string) {
+    const a = this.alerts.get(alertScopeKey(customerId, fp));
     return a ? structuredClone(a) : null;
   }
+  async findAlertInOtherScope(customerId: string | null, fp: string) {
+    const others = [...this.alerts.values()].filter((a) => a.fingerprint === fp && a.customerId !== customerId);
+    const last = others.sort((x, y) => y.lastEventAt.getTime() - x.lastEventAt.getTime())[0];
+    return last ? { id: last.id, customerId: last.customerId } : null;
+  }
   async createAlert(row: AlertRow) {
-    if (this.alerts.has(row.fingerprint)) return 'EXISTS' as const;
-    this.alerts.set(row.fingerprint, structuredClone(row));
+    const k = alertScopeKey(row.customerId, row.fingerprint);
+    if (this.alerts.has(k)) return 'EXISTS' as const;
+    this.alerts.set(k, structuredClone(row));
     return structuredClone(row);
   }
   async updateAlert(row: AlertRow, expectedVersion: number) {
-    const cur = this.alerts.get(row.fingerprint);
+    const k = alertScopeKey(row.customerId, row.fingerprint);
+    const cur = this.alerts.get(k);
     if (this.forceConflicts > 0) { this.forceConflicts--; if (cur) cur.version++; return 'CONFLICT' as const; }
     if (!cur || cur.version !== expectedVersion) return 'CONFLICT' as const;
     const next = { ...structuredClone(row), version: expectedVersion + 1 };
-    this.alerts.set(row.fingerprint, next);
+    if (cur.customerId !== row.customerId) return 'CONFLICT' as const;
+    this.alerts.set(k, next);
     return structuredClone(next);
   }
   async loadPolicy() { return this.policy; }
@@ -84,3 +92,5 @@ export class MemoryStore implements AlertRepository, SourceRepository {
   async customerForAccount(a: string) { return this.accounts.get(a) ?? null; }
   async severityTable() { return this.table; }
 }
+
+export const alertScopeKey = (customerId: string | null, fingerprint: string): string => `${customerId ?? '-'}|${fingerprint}`;

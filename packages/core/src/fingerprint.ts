@@ -1,5 +1,14 @@
 import { sha256 } from './hash.js';
 
+/**
+ * TENANT SCOPE INVARIANT (security review B-6). Every fingerprint and every group key MUST embed a customer
+ * scope: CloudWatch → AWS account id, Prometheus/Grafana → IntegrationSource id (owned by exactly one
+ * customer), group key → customerId, else account, else source (grouping.ts `groupKey`).
+ * The repository additionally keys Alert by (customerId, fingerprint) (B-4), but read paths such as
+ * `findOpenGroup(groupKey)` rely on this invariant. Changing a rule here without a scope breaks tenant
+ * isolation; `test/tenant-scope.test.ts` guards it.
+ */
+
 /** Bump when a rule changes (fingerprint 제안 5, Q-DM-04 still open). */
 export const FINGERPRINT_VERSION = 1;
 

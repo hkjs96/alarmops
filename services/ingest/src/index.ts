@@ -9,6 +9,7 @@ export { makeConsumerHandler, processMessage, applyEvent } from './consumer.js';
 export { AccountCustomerCache } from './accountCache.js';
 export { SqsQueueSender, messageAttributes } from './sqs.js';
 export { MemoryStore } from './memoryRepo.js';
-export { extractToken, hashToken, digestEquals } from './token.js';
+export { extractToken, hashToken, digestEquals, redactToken } from './token.js';
+export { SourceRateLimiter, DEFAULT_SOURCE_LIMIT_PER_MIN } from './rateLimit.js';
 export { requireEnv, NotConfiguredError, assertBudget } from './config.js';
 export type * from './ports.js';
