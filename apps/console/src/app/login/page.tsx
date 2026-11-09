@@ -1,7 +1,10 @@
-import Link from "next/link";
+import { isMock } from "@/lib/api";
 
 /** Google SSO placeholder (DECISIONS 이전 원칙 1: app-level Google SSO, no Supabase Auth). Not wired yet. */
-export default function LoginPage() {
+export default async function LoginPage({ searchParams }: { searchParams: Promise<{ next?: string }> }) {
+  const { next } = await searchParams;
+  const mock = isMock();
+  const devHref = "/auth/dev-login" + (next ? `?next=${encodeURIComponent(next)}` : "");
   return (
     <div className="page" style={{ maxWidth: 420, paddingTop: 72 }}>
       <div className="card">
@@ -13,8 +16,8 @@ export default function LoginPage() {
             Continue with Google
           </button>
           <p id="sso-note" className="xs mut" style={{ marginTop: 12 }}>
-            Google SSO is not connected in this build. Mock mode signs you in as Haeun Kim.{" "}
-            <Link href="/incidents">Continue to console →</Link>
+            Google SSO is not connected in this build.{" "}
+            {mock ? <>Mock mode: <a href={devHref}>sign in as Haeun Kim (dev) →</a></> : "Sign-in is unavailable until SSO is configured."}
           </p>
         </div>
       </div>

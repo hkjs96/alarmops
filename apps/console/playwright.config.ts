@@ -7,9 +7,9 @@ export default defineConfig({
   use: { baseURL: `http://localhost:${PORT}` },
   webServer: {
     command: `npx next start -p ${PORT}`,
-    url: `http://localhost:${PORT}/incidents`,
+    url: `http://localhost:${PORT}/login`,
     reuseExistingServer: true,
-    env: { MOCK_API: "1" },
+    env: { MOCK_API: "1", E2E_ALLOW_MOCK: "1" },
     timeout: 120_000,
   },
 });

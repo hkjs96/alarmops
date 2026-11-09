@@ -10,7 +10,7 @@ import { FilterBar } from "./FilterBar";
 export default async function IncidentsPage({ searchParams }: { searchParams: Promise<SP> }) {
   const sp = await searchParams;
   const q = parseQuery(sp);
-  const api = getApi();
+  const api = await getApi();
   const now = nowMs();
   const nowIso = new Date(now).toISOString();
 

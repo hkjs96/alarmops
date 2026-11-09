@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Avatar, Card, EmptyState, Mark, SevBadge, SourceChip, StatusBadge, Tabs, cx, type Shape } from "@alarmops/design-system";
 import { getApi, nowMs } from "@/lib/api";
+import { safeExternalUrl } from "@/lib/safe-url";
 import { ApiError } from "@/lib/api/client";
 import type { IncidentDetail, IncidentEvent, NotificationLogEntry, RemediationStage } from "@/lib/api/types";
 import { displayStatus, orgChainParts } from "@/lib/incidents";
@@ -119,7 +120,7 @@ function Escalation({ inc, now }: { inc: IncidentDetail; now: number }) {
 
 export default async function IncidentPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const api = getApi();
+  const api = await getApi();
   let inc: IncidentDetail;
   try {
     inc = await api.getIncident(id);
@@ -205,7 +206,9 @@ export default async function IncidentPage({ params }: { params: Promise<{ id: s
                   <div className="b" style={{ fontSize: 15 }}>{rem.action} <span className="mono" style={{ fontWeight: 400 }}>{rem.target}</span></div>
                   <div className="sm mut" style={{ marginTop: 2, overflowWrap: "anywhere" }}>Triggered by an unauthorized change: {rem.trigger}</div>
                 </div>
-                {rem.slackThreadUrl ? <a className="btn" href={rem.slackThreadUrl} target="_blank" rel="noreferrer">Open Slack thread ↗</a> : null}
+                {rem.slackThreadUrl ? (safeExternalUrl(rem.slackThreadUrl, { slack: true })
+                  ? <a className="btn" href={safeExternalUrl(rem.slackThreadUrl, { slack: true })!} target="_blank" rel="noopener noreferrer">Open Slack thread ↗</a>
+                  : <span className="sm mut mono" style={{ overflowWrap: "anywhere" }}>{rem.slackThreadUrl}</span>) : null}
               </div>
               {rem.mode === "NOTIFY_ONLY" ? (
                 <div className="note" style={{ marginTop: 14 }}>Notify-only mode — no action will run.</div>
@@ -260,7 +263,7 @@ export default async function IncidentPage({ params }: { params: Promise<{ id: s
               <dt>Source</dt><dd>{inc.details.source}</dd>
               <dt>Resource</dt><dd className="mono sm">{inc.details.resource}</dd>
               <dt>Alarm</dt><dd className="sm">{inc.details.alarm}</dd>
-              {inc.details.runbookUrl ? <><dt>Runbook</dt><dd><a href={inc.details.runbookUrl} target="_blank" rel="noreferrer">{inc.details.runbookLabel ?? "Runbook"} ↗</a></dd></> : null}
+              {inc.details.runbookUrl ? <><dt>Runbook</dt><dd>{safeExternalUrl(inc.details.runbookUrl) ? <a href={safeExternalUrl(inc.details.runbookUrl)!} target="_blank" rel="noopener noreferrer">{inc.details.runbookLabel ?? "Runbook"} ↗</a> : <span className="sm mono" style={{ overflowWrap: "anywhere" }}>{inc.details.runbookUrl}</span>}</dd></> : null}
               {inc.details.lastTime ? <><dt>Last time</dt><dd className="sm">{inc.details.lastTime}</dd></> : null}
             </dl>
           </Card>

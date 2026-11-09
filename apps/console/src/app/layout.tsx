@@ -4,14 +4,19 @@ import "./globals.css";
 import { TopNav } from "@/components/TopNav";
 import { themeInitScript } from "@/components/ThemeToggle";
 import { getApi } from "@/lib/api";
+import { getSession } from "@/lib/auth";
 
 export const metadata: Metadata = { title: "AlarmOps", description: "AlarmOps console" };
 export const dynamic = "force-dynamic";
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const api = getApi();
-  const [me, list] = await Promise.all([api.me(), api.listIncidents({ status: "open" })]);
-  const unacked = list.counts.triggered + list.counts.escalated;
+  // /login renders without a session; everything else is gated by middleware.
+  let nav: { name: string; unacked: number } | null = null;
+  if (await getSession()) {
+    const api = await getApi();
+    const [me, list] = await Promise.all([api.me(), api.listIncidents({ status: "open" })]);
+    nav = { name: me.name, unacked: list.counts.triggered + list.counts.escalated };
+  }
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
@@ -21,7 +26,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       </head>
       <body>
         <a href="#main" className="skip">Skip to content</a>
-        <TopNav unackedCount={unacked} userName={me.name} />
+        {nav ? <TopNav unackedCount={nav.unacked} userName={nav.name} /> : null}
         <main id="main">{children}</main>
       </body>
     </html>
