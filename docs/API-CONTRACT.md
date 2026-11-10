@@ -60,7 +60,8 @@ Slack ──▶ POST /api/slack/interactive        문자·음성 업체 ──�
 | 401 | `UNAUTHENTICATED` | 세션·토큰·서명 없음/불일치 |
 | 403 | `FORBIDDEN`, `ROLE_REQUIRED`, `PORTAL_GRANT_REQUIRED`, `CAPABILITY_DISABLED` | 역할·포털 권한·고객 선택 기능(AlarmWriter 등) 꺼짐 |
 | 404 | `NOT_FOUND` | 없음 또는 범위 밖 |
-| 403 | `NOT_A_RESPONDER` | 연락처 열람: 그 고객의 Responder가 아님(D-35) |
+| 403 | `NOT_A_RESPONDER` | 연락처 열람: 그 고객의 Responder가 아니고 ADMIN도 아님(D-35) |
+| 422 | `EMERGENCY_REASON_REQUIRED` | 연락처 비상 열람: Responder가 아닌 ADMIN이 `reason` 없이(또는 공백만) 호출(D-35) |
 | 409 | `VERSION_CONFLICT`, `ALREADY_EXISTS`, `INVALID_TRANSITION`, `TAG_WINS` | 경합, 중복 생성(4b5b079), 상태 전이 불가, 리소스 태그가 값 결정(D-08) |
 | 413 | `PAYLOAD_TOO_LARGE` | 수집 본문 1MB 초과 |
 | 422 | `ROLE_UPDATE_REQUIRED` | 고객 스택이 옛 버전 |
@@ -251,7 +252,7 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 3. 포털(고객) 사용자: 자기 고객 하나. `callHealth`는 실제 값과 무관하게 `"OK"` 고정(MSP 내부 정보라 내보내지 않는다. 콘솔 타입에서 필수 필드라 빼지 않는다), `mine`은 `false`.
 4. 미매핑 계정은 트리에 없다(고객이 아니다).
 5. `ETag` / `If-None-Match` 지원(304). 콘솔은 30초마다, 그리고 Acknowledge·저장 뒤에 다시 부른다. ETag는 호출자 범위를 포함해 계산한다(다른 사용자의 트리와 같은 ETag 금지).
-6. slug 예약어(`incidents` `incident` `monitoring` `call-order` `people` `maintenance` `thresholds` `alarms` `resources` `settings` `new` `-`)는 프로젝트·서비스·고객 생성 시 접미사를 붙여 피한다(DATA-MODEL에 `slug` 컬럼 추가 필요 — 미결 Q-API-09).
+6. slug 예약어(`incidents` `incident` `monitoring` `call-order` `people` `maintenance` `thresholds` `alarms` `resources` `settings` `new` `-`)는 프로젝트·서비스·고객 생성 시 접미사를 붙여 피한다(컬럼과 규칙: DATA-MODEL §1 Customer · Project / Service. 이름 변경 시 옛 주소 처리만 미결 Q-API-09).
 
 **목록의 범위 필터.** 아래 목록은 모두 `customer` · `project` · `service`(slug) · `mine=1`을 받는다(§2 "범위 필터"): `/incidents`, `/resources`, `/managed-alarms`, `/oncall/now`, `/contacts`, `/contacts/needs-action`, `/maintenance-windows`, `/threshold-changes`, `/remediation-requests`, `/rotations?scope=CUSTOMER`. 응답 항목의 `org.customer` · `org.project` · `org.service`(`OrgRef`)에는 `{ id, name, slug }`가 있다 — `slug`는 필수이고, 범위 안일 때만 나간다(단건이 404면 slug도 없다. 콘솔이 slug로 주소를 만들기 때문에 명시한다).
 
@@ -334,8 +335,9 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 | GET `/accounts/{id}/status` | 역할별 상태·첫/마지막 수신(P4-1) | V |
 | POST `/unmapped-accounts/{awsAccountId}/map` | `{ customerId, serviceId? }` 미매핑 복구(P2-3). INTERNAL 전용(고객 사용자는 404) | A |
 | GET/POST `/assignments`, DELETE `/assignments/{id}`, PUT `/assignments/order` | | A |
-| GET/POST `/contacts`, PATCH/DELETE `/contacts/{id}` | `kind: INTERNAL\|CUSTOMER`(D-29). GET 쿼리 `kind`, `customerId`, `customer`·`project`·`service`(slug), `mine`(§8.0: 범위를 주면 그 범위에서 호출·알림 받는 사람), `needsAction=true`(미확인·만료·미설정), `q`. **목록·단건 응답의 전화·이메일은 항상 가린 값**(`phoneMasked: "010-••••-4821"`, `emailMasked: "y•••@mirae.example"`)이고 `canReveal: boolean`이 붙는다. 전체 값은 `/contacts/{id}/reveal`로만. 응답 항목에 `customerCount`(INTERNAL) 또는 `responderRole`·`scopes[]`(CUSTOMER), 채널별 `{status, via, at, expiresAt}`. CUSTOMER를 다른 고객이나 MSP 로테이션에 넣으면 422 `CROSS_CUSTOMER`, NOTIFY_ONLY를 단계·로테이션에 넣으면 422 `NOT_PAGEABLE` | A, P(contacts, 자기 고객 CUSTOMER만) |
-| POST `/contacts/{id}/reveal` | **연락처 전체 값 열람(D-35).** 본문 `{ channel: "PHONE"\|"EMAIL"\|"SLACK", reason? }` → `{ channel, value, revealedAt, auditId }`. `Cache-Control: no-store`. 허용: CUSTOMER 연락처는 **그 고객의 Responder인 MSP 직원**(직접 또는 템플릿 경유)과 그 고객의 포털 사용자(P contacts), INTERNAL 연락처는 같은 고객의 Responder인 직원. ADMIN 역할만으로는 안 된다. 아니면 403 `NOT_A_RESPONDER`(볼 수 있는 연락처에 대한 쓰기성 동작이라 403. 연락처가 범위 밖이면 없는 ID와 같은 404). **호출마다 AuditLog 1행**(`action: CONTACT_REVEAL`, 누가·누구의·어떤 채널·`customerId`·시각, 값 자체는 기록하지 않음). 감사 기록에 실패하면 값을 주지 않는다(500). 1인당 분당 30회 초과 429. GET이 아닌 이유: 프리페치·캐시·로그에 값이 남지 않게 | O(그 고객의 Responder), P(contacts) |
+| GET/POST `/contacts`, PATCH/DELETE `/contacts/{id}` | `kind: INTERNAL\|CUSTOMER`(D-29). GET 쿼리 `kind`, `customerId`, `customer`·`project`·`service`(slug), `mine`(§8.0: 범위를 주면 그 범위에서 호출·알림 받는 사람), `needsAction=true`(미확인·만료·미설정), `q`. **목록·단건 응답의 전화·이메일은 항상 가린 값**(`phoneMasked: "010-••••-4821"`, `emailMasked: "y•••@mirae.example"`)이고 `canReveal: boolean`과 `revealRequiresReason: boolean`이 붙는다(Responder면 `true`/`false`, Responder가 아닌 ADMIN이면 `true`/`true`, 그 밖은 `false`/`false` — D-35). 전체 값은 `/contacts/{id}/reveal`로만. 응답 항목에 `customerCount`(INTERNAL) 또는 `responderRole`·`scopes[]`(CUSTOMER), 채널별 `{status, via, at, expiresAt}`. CUSTOMER를 다른 고객이나 MSP 로테이션에 넣으면 422 `CROSS_CUSTOMER`, NOTIFY_ONLY를 단계·로테이션에 넣으면 422 `NOT_PAGEABLE` | A, P(contacts, 자기 고객 CUSTOMER만) |
+| POST `/contacts/{id}/reveal` | **연락처 전체 값 열람(D-35).** 본문 `{ channel: "PHONE"\|"EMAIL"\|"SLACK", reason? }` → `{ channel, value, mode: "NORMAL"\|"EMERGENCY", revealedAt, auditId }`(`auditId` = ContactRevealLog.id). `Cache-Control: no-store`. **일반(NORMAL):** CUSTOMER 연락처는 그 고객의 Responder인 MSP 직원(직접 또는 템플릿 경유)과 그 고객의 포털 사용자(P contacts), INTERNAL 연락처는 같은 고객의 Responder인 직원. `reason`은 선택이고 주면 기록한다. **비상(EMERGENCY):** 호출자가 그 고객의 Responder가 아닌 **ADMIN(MSP)** 이면 `reason`이 필수다(앞뒤 공백을 뺀 뒤 1~500자, 직접 입력한 글). 없으면 422 `EMERGENCY_REASON_REQUIRED`이고 값은 주지 않는다. 서버가 호출자를 보고 mode를 정한다(클라이언트가 고르지 않는다. Responder인 ADMIN은 NORMAL). 비상은 CUSTOMER 연락처에만 있다. **그 밖:** Responder도 ADMIN도 아니면 403 `NOT_A_RESPONDER`(볼 수 있는 연락처에 대한 쓰기성 동작이라 403). **연락처가 범위 밖이면 없는 ID와 같은 404(§2) — 이 판정이 먼저다**: 범위 밖 호출자에게 403·422를 주지 않는다. **호출마다 ContactRevealLog 1행**(누가 · 누구의 연락처 · 고객 · 채널 · mode · 사유 · 시각, 값 자체는 기록하지 않음) + AuditLog 1행(`action: contact.reveal`). 기록에 실패하면 값을 주지 않는다(500). **비상 열람 뒤:** 같은 트랜잭션에서 그 고객의 주 Responder에게 가는 알림 1건을 아웃박스(NotificationJob)에 넣는다(내용: 누가 · 누구의 연락처 · 사유 · 시각. 연락처 값은 넣지 않는다). 주 Responder가 없으면 다른 ADMIN 전원에게(Q-API-14). 1인당 분당 30회 초과 429, 비상은 1인당 시간당 10회. GET이 아닌 이유: 프리페치·캐시·로그에 값이 남지 않게 | O(그 고객의 Responder), A(비상, 사유 필수), P(contacts) |
+| GET `/contact-reveals?mode=&customer=&actorUserId=&contactId=&from=&to=` | **열람 기록 목록(D-35 검토 보기).** ContactRevealLog 커서 목록, 최신순. 항목 `{ id, at, mode, actor:{id,name}, contact:{id,name}, org.customer, channel, reason, notified:[{contactId,name}] }` — 연락처 값은 없다. `mode=EMERGENCY`가 Settings › Audit log의 `Emergency reveals`. ADMIN은 전 고객, 그 밖의 직원은 자기가 Responder인 고객의 기록만(범위 밖 `customer`는 404) | A, O(자기 고객) |
 | (삭제) `/customers/{id}/people` | Responders & paging 탭으로 통합(`/customers/{id}/responders`, ContactScope는 아래) | |
 | POST `/contacts/{id}/scopes`, DELETE `/contacts/{id}/scopes/{sid}` | `{ scopeType: CUSTOMER\|PROJECT\|SERVICE, scopeId, role: NOTIFY\|APPROVER\|PORTAL_USER }`. 중복 409 | A, P(contacts) |
 | POST `/contacts/verify-bulk` | `{ contactIds[] }` 또는 `{ kind?, customerId?, filter: "needsAction" }` → `{ sent, notSet[] }`. 미설정(NOT_SET) 채널은 링크 대상 아님 → `notSet`으로 반환해 "Ask to add" | A |
@@ -421,7 +423,7 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 | 수집(EventBridge 규칙 1, 웹훅 2) | 3 |
 | SQS 큐(alert-events, alarm-commands; DLQ 제외) | 2 |
 | 내부 틱 | 1 |
-| 콘솔 REST(§8) | 약 103 (11/10: `/scope-tree`, `/contacts/{id}/reveal`, `/maintenance-windows/preview` 추가) |
+| 콘솔 REST(§8) | 약 103 (11/10: `/scope-tree`, `/contacts/{id}/reveal`, `/maintenance-windows/preview`, `/contact-reveals` 추가) |
 | Slack 인터랙티브 | 1 (action 7종) |
 | 확인 링크·업체 콜백·채널 확인 링크 | 3 |
 
@@ -437,9 +439,10 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 | Q-API-06 | 국내 문자·음성 업체 선정과 콜백 서명 방식 | 솔라피 후보 |
 | Q-API-07 | 고객 포털(소연) API를 같은 `/api/v1`에 역할로 나눌지, `/api/portal/v1`로 분리할지 | 같은 경로 + 범위 강제 |
 | Q-API-08 | Ack 단위 결정 전 `POST /alerts/{id}/ack` 노출 여부 | 비활성 |
-| Q-API-09 | Customer·Project·Service `slug` 컬럼과 예약어 처리(접미사 제안), 이름 변경 시 옛 주소 처리(404 vs 리다이렉트 — 포털은 리다이렉트 금지) | 미정, backend |
+| Q-API-09 | slug 이름 변경 시 옛 주소 처리(404 vs 리다이렉트 — 포털은 리다이렉트 금지). ~~`slug` 컬럼과 예약어 처리~~는 정해짐(DATA-MODEL §1, 11/10) | 미정, backend. 현재: slug는 만든 뒤 바꾸지 않음 |
 | Q-API-10 | 프로젝트·서비스 단계의 `callHealth`를 계산해 트리에 줄지(지금은 고객 단계만) | 고객 단계만 |
 | Q-API-11 | `Undo`를 "이전 값 다시 저장"으로 할 때 알람 엔진 명령(`APPLY_THRESHOLD`)이 이미 나간 임계치 변경의 처리(두 번째 명령으로 덮어씀 vs 첫 명령 취소) | 두 번째 명령 |
-| Q-API-13 | 콘솔 주소 형식이 문서(`?filter=<c>/<p>/<s>`, `/c/…/incidents/<id>`, 미매핑 `/incidents/<id>`)와 콘솔 브랜치 구현(`?customer=&project=&service=`, `/c/…/incident/<id>`, 미매핑 `/c/-/incident/<id>`)이 다르다. API에는 영향 없음(API는 slug 파라미터) | 미정, 사용자 결정 |
-| Q-API-12 | 연락처 열람 규칙의 예외(그 고객에 Responder가 한 명도 없을 때 ADMIN 비상 열람 + 사유 필수) | 예외 없음, security 검토 |
+| ~~Q-API-13~~ | ~~콘솔 주소 형식(문서 vs 콘솔 브랜치 구현)~~ **닫힘(11/10, 사용자 결정): 콘솔 구현 형식으로 확정** — 목록 `?customer=&project=&service=` · `?mine=1`, 패널 `/c/<customer>/<project>/<service>/incident/<id>`, 미매핑 `/c/-/incident/<id>`. 기준 `docs/ui/screens/shell-scope.md` §7 | 닫힘 |
+| ~~Q-API-12~~ | ~~연락처 열람 규칙의 예외~~ **닫힘(11/10, 사용자 결정, D-35): ADMIN 비상 열람 + 사유 필수, 모든 열람 기록, 비상 열람은 검토 목록 + 주 Responder 알림** — §8 `/contacts/{id}/reveal`, `/contact-reveals` | 닫힘 |
+| Q-API-14 | D-35의 "주 Responder"(비상 열람 알림 대상)를 무엇으로 정하나: 고객 호출 순서 1단계의 첫 대상 vs 고객마다 지정하는 컬럼. 비상 `reason` 최소 길이, 비상 호출 한도 | 호출 순서 1단계 첫 대상(없으면 다른 ADMIN 전원), 1자 이상, 시간당 10회. security 검토 |
 | (DATA-MODEL Q-DM-01~19) | | DATA-MODEL §9 |

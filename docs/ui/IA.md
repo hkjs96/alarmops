@@ -38,7 +38,7 @@ SHOWING:  Mirae Pay × › Core × › All services                 Outside this
 | **Settings** (오른쪽) | MSP defaults · Severity mapping · Suppression · Integrations(전체) · Users · Audit log | `/settings/*` | `settings.md` |
 | 고객 포털 | 같은 셸을 한 고객에 잠금: Incidents · Monitoring · Call order · People · Maintenance (읽기, grant가 있는 것만 쓰기) | `portal.…/…` | `customer-portal.md` |
 
-- **확인 필요(시안에 없음):** E 시안의 메뉴는 Incidents · Monitoring · Call order · People · Maintenance + Settings다. `Customers` 메뉴를 그대로 두는 것과 Rotations·Templates를 Call order의 탭으로 두는 것은 이 문서의 배치안이다.
+- **배치 확정(11/10, D-26):** `Customers`는 상단 메뉴로 남는다. Rotations·Templates는 `Call order`의 탭이다. (E 시안의 메뉴에는 Customers와 이 탭들이 그려져 있지 않다. 화면은 새 셸로 아직 다시 그리지 않았다.)
 - 고객 상세의 `Monitoring`, `Responders & paging` 탭은 없어졌다. 같은 내용은 트리에서 그 고객을 고른 Monitoring · Call order · People이다. 고객 상세에는 "Open Call order for Mirae Pay →" 같은 링크만 둔다.
 - 고객사 담당자(VIEWER 강제, org-tenant R4-3)는 포털로만 들어온다.
 
@@ -46,13 +46,13 @@ SHOWING:  Mirae Pay × › Core × › All services                 Outside this
 
 | 대상 | 형식 | 예 |
 |---|---|---|
-| 목록 + 필터 | `/<screen>?filter=<customer>[/<project>[/<service>]]`, `?filter=mine` | `/incidents?filter=mirae/core` |
-| 범위가 있는 패널 | `/c/<customer>[/<project>[/<service>]]/<screen>[/<id>]` (+ `?filter=` 목록 필터) | `/c/mirae/core/checkout/call-order`, `/c/mirae/thresholds`, `/c/mirae/people/yuna-seo` |
+| 목록 + 필터 | `/<screen>?customer=<slug>[&project=<slug>[&service=<slug>]]`, `?mine=1` | `/incidents?customer=mirae&project=core` |
+| 범위가 있는 패널 | `/c/<customer>[/<project>[/<service>]]/<screen>[/<id>]` (+ 목록 필터 쿼리). 인시던트 패널은 단수 `incident` | `/c/mirae/core/checkout/call-order`, `/c/mirae/thresholds`, `/c/mirae/people/yuna-seo`, `/c/mirae/core/payments-api/incident/<id>` |
 | 생성 | `/c/<customer>[/…]/maintenance/new`, `/c/<customer>[/…]/people/new` | 범위를 고르기 전: `/maintenance/new` |
-| 미매핑 인시던트 | `/incidents/<id>` | 고객이 없으므로 `/c/` 없음 |
+| 미매핑 인시던트 | `/c/-/incident/<id>` | 고객이 없으므로 고객 자리에 `-`(예약 slug) |
 | 관리 화면 | `/customers…`, `/settings/…`, `/call-order/rotations`, `/call-order/templates` | 트리 필터를 쓰지 않는 화면(§4) |
 
-경로 = 패널의 범위, `?filter=` = 목록 필터. `Copy link`는 `?filter=`를 뺀다. 편집 상태는 주소에 없다. 세부: `screens/shell-scope.md` §7.
+경로 = 패널의 범위, 쿼리(`customer` · `project` · `service` · `mine`) = 목록 필터. `Copy link`는 목록 필터 쿼리를 뺀다. 편집 상태는 주소에 없다. 세부: `screens/shell-scope.md` §7.
 
 ## 3. 반응형
 
@@ -105,6 +105,6 @@ SHOWING:  Mirae Pay × › Core × › All services                 Outside this
 | 저장 | 버튼·알림·확인창에 고객을 포함한 전체 경로. 확인은 서비스 둘 이상이거나 넓힌 저장만, 나머지는 바로 + `Undo` | D-33 |
 | 스탯 타일 | 현재 필터 기준 수치(합 = 목록 수). 메뉴의 Incidents 배지만 필터와 무관 | known-bugs 9-5, D-34 |
 | 범위 밖 | "Not found" 하나(존재를 드러내지 않음). 포털은 본문·상태 코드까지 같다 | API §2 |
-| 연락처 | 가린 값이 기본. 전체 값은 그 고객의 Responder만, 열람 기록 | D-35 |
+| 연락처 | 가린 값이 기본. 전체 값은 그 고객의 Responder만. MSP ADMIN은 사유를 적는 비상 열람만. 모든 열람 기록, 비상 열람은 검토 목록 + 주 Responder 알림 | D-35 |
 | 시간 | KST 표시, 상대 시각 + 절대 시각 툴팁 | DATA-MODEL §0 |
 | 다크 모드 | 시스템 설정 따름 + 수동 토글 | ui/README |

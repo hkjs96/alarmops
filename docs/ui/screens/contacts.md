@@ -8,7 +8,7 @@
 
 ## 셸·범위 (D-33, `shell-scope.md`)
 - 트리 필터: Needs action 목록에도 적용된다(고객·프로젝트·서비스). 기본 All customers.
-- 연락처 값은 가린 채로 보인다. 전체 값 열람은 D-35(그 고객의 Responder만, 기록).
+- 연락처 값은 가린 채로 보인다. 전체 값 열람은 D-35(그 고객의 Responder만. MSP ADMIN은 사유를 적는 비상 열람. 모두 기록).
 - 일괄 Send links는 여러 고객에 닿을 수 있다 → 보내기 전 대상 수와 고객 목록을 보여 준다.
 
 ## Needs action 정의 (모든 화면 공통)

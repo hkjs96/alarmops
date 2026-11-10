@@ -28,12 +28,13 @@
 - 왼쪽 트리(Customer › Project › Service)가 범위를 고르는 유일한 장치다. 본문을 덮지 않고 밀어낸다. 휴대폰은 단계 시트
 - 메뉴 아래 필터 줄: `Showing: …` + 필터가 걸렸을 때 `Outside this view: …`
 - 목록의 기본 보기는 All customers, `My customers`는 필터(D-34)
+- 연락처는 가린 값이 기본. 전체 값은 그 고객의 Responder만, MSP ADMIN은 사유를 적는 비상 열람만(D-35)
 - 편집은 범위가 정해진 패널에서만. 읽기 전용으로 열리고 `Edit`를 눌러야 편집. 저장 버튼에 전체 경로
 - 저장 확인은 서비스 둘 이상이거나 범위를 넓혔을 때만. 서비스 하나는 바로 적용 + `Undo`
-- 주소: 패널 `/c/<customer>/<project>/<service>/<screen>`, 목록 필터 `?filter=<customer>/<project>/<service>`
+- 주소: 목록 필터 `?customer=<slug>&project=<slug>&service=<slug>` · `?mine=1`, 패널 `/c/<customer>[/<project>[/<service>]]/<screen>`, 인시던트 패널 `/c/<customer>/<project>/<service>/incident/<id>`(미매핑 `/c/-/incident/<id>`). 기준: `screens/shell-scope.md` §7
 - 반응형: 1408px 이상은 트리가 패널 옆에 남고, 그 아래는 패널을 열 때 띠로 접히고, 760px 이하는 시트
 - Call order 하위: Call order · Rotations · Templates. Integrations는 Customers 고객 관리 탭 + Settings › Integrations(전체). Reports는 PoC 이후
-- Customers 메뉴 위치와 Call order 탭 구성은 E 시안에 없는 배치안이다(`IA.md` §1, 확인 필요)
+- Customers는 상단 메뉴, Rotations·Templates는 Call order의 탭으로 확정(D-26, 11/10)
 
 ## 화면 목록
 "시안" 열: E = `scope-variants.html` 변형 E(새 셸), I = `index.html`(옛 셸, 내용 유효).

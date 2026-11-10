@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 경로 | `/call-order` (Call order 메뉴 첫 탭), 필터 `?filter=` |
+| 경로 | `/call-order` (Call order 메뉴 첫 탭), 필터 `?customer=&project=&service=` · `?mine=1`. 탭 `/call-order/rotations`, `/call-order/templates` |
 | 목적 | 고객사 전체에서 지금 누가 당번이고, 지금 무언가 터지면 고객별로 누가 먼저 호출되는지 한 화면에 (D-30·D-31 개정) |
 | 페르소나 | 하은(야간 당번, 모바일), 준호(P2-2) |
 | 탭 | Call order · Rotations · Templates (People·Maintenance는 메뉴, D-26 개정) |

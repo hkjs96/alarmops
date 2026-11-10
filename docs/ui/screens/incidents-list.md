@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 경로 | `/incidents` (로그인 기본), 필터 `?filter=<customer>/<project>/<service>` 또는 `?filter=mine` |
+| 경로 | `/incidents` (로그인 기본), 필터 `?customer=<slug>&project=<slug>&service=<slug>` 또는 `?mine=1` |
 | 목적 | 지금 울리는 인시던트 수, 가장 심각한 것, 담당자를 스크롤 없이 파악 |
 | 페르소나 | 하은 P1-1(한눈 파악), P1-3(내 것만), 준호 P2-3(미매핑 배너) |
 
@@ -15,7 +15,7 @@
 | 메뉴 배지 | 전 고객의 열린 인시던트 수 하나. 필터와 무관 |
 | `Outside this view` | 필터가 걸리면 필터 줄에 `Outside this view: 4 open (1 from an unmapped account) · 2 acknowledged`. 목록의 open + 밖의 open = 배지. 누르면 필터를 지우고 알림에 `Back to <필터>` |
 | 행 | 모든 행에 `고객(굵게) › 프로젝트 › 서비스`. 행에서 바로 `Acknowledge`(알림에 전체 경로 + `Undo`) |
-| 패널 | 행을 누르면 인시던트 패널(`/c/<customer>/<project>/<service>/incidents/<id>`). 읽기 + Acknowledge. 편집 칸 없음 |
+| 패널 | 행을 누르면 인시던트 패널(`/c/<customer>/<project>/<service>/incident/<id>`, 미매핑 `/c/-/incident/<id>`). 읽기 + Acknowledge. 편집 칸 없음 |
 | 열 우선순위 | Sev, Status, 경로, Incident, `Acknowledge`는 끝까지. Paged → Age 순으로 숨김, 690px 미만 카드 |
 
 ## 레이아웃

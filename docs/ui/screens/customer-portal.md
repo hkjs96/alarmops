@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 경로 | `portal.<host>/…` — 콘솔과 **같은 셸을 한 고객에 잠근 것**(D-33). 주소에 `/c/<customer>`가 없다: `/<screen>?filter=<project>/<service>`, 패널 `/<project>/<service>/<screen>` |
+| 경로 | `portal.<host>/…` — 콘솔과 **같은 셸을 한 고객에 잠근 것**(D-33). 주소에 `/c/<customer>`가 없다: 목록 `/<screen>?project=<slug>&service=<slug>`, 패널 `/<project>/<service>/<screen>`(인시던트는 `/<project>/<service>/incident/<id>`) |
 | 목적 | 고객사 담당자가 자기 회사 상태를 쉬운 말로 확인. 다른 고객사의 이름·사람·알림이 어디에도 없음 |
 | 페르소나 | 소연 P3-1, P3-2, P3-3 |
 

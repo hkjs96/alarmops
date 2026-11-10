@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 경로 | 패널 `/c/<customer>/<project>/<service>/incidents/{id}`, 미매핑은 `/incidents/{id}`. 전체 화면 상세도 같은 주소(패널의 "Open full view") |
+| 경로 | 패널 `/c/<customer>/<project>/<service>/incident/{id}`(단수), 미매핑은 `/c/-/incident/{id}`. 전체 화면 상세도 같은 주소(패널의 "Open full view") |
 | 목적 | 무엇이 왜 터졌는지 읽고 Ack → 원인 → Resolve. 에스컬레이션 이유가 타임라인만으로 읽힘 |
 | 페르소나 | 하은 P1-2, P1-4, P1-5 / 소연 P3-2(포털에서 읽기 전용 축약판) |
 

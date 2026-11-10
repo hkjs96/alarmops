@@ -18,7 +18,7 @@
 | 동시성 | 경합하는 상태 행(`Alert`, `AlertGroup`, `Incident`, `ManagedAlarm`)은 `version int`를 두고 `UPDATE ... WHERE id=? AND version=?`로 쓴다. 충돌 시 재읽기 최대 3회 | grouping I-7, fingerprint F-4, known-bugs 3-2 |
 | 중복 흡수 | 생성 경합은 `INSERT ... ON CONFLICT`(Prisma `upsert`/P2002 흡수)로 처리. 상태 전이는 상태 조건 `updateMany` | fingerprint F-7, known-bugs 1-6 |
 | 부분 갱신 | 빈약한 후속 페이로드는 이미 아는 필드를 null로 덮지 않는다(`COALESCE` 갱신) | known-bugs 1-5 |
-| 추가만 | `RawEvent`, `IncidentEvent`, `ThresholdChange`, `AuditLog`, `NotificationLog`는 INSERT만 | fingerprint F-3, D-08 |
+| 추가만 | `RawEvent`, `IncidentEvent`, `ThresholdChange`, `AuditLog`, `ContactRevealLog`, `NotificationLog`는 INSERT만 | fingerprint F-3, D-08 |
 | 비밀값 | 토큰·서명 비밀은 평문 저장 금지. 수집 토큰은 SHA-256 해시 + 접두 4자만 저장. Slack 웹훅 URL 등 발송 비밀은 미결(아래 Q-DM-09) | org-tenant R5-1 |
 
 ## 1. 조직 · 사람 · 권한
@@ -115,6 +115,7 @@ Customer.responderTemplateId text? FK — 고객이 쓰는 템플릿(하나, 선
 |---|---|---|
 | id | text PK | |
 | name | text UQ | org-tenant R1-1 |
+| slug | text UQ | 콘솔 주소·API 범위 필터의 고객 이름(`/c/<slug>/…`, `?customer=<slug>`). 형식·예약어는 아래 "slug 규칙" |
 | isInternal | bool default false | 내부 시스템용 가짜 고객사(R1-2) |
 | loginDomains | text[] | 비면 고객사 담당자 로그인 불가(R4-3) |
 | portalGrants | text[] | `contacts, silences, channels` 중 선택, 기본 빈 값(R4-4) |
@@ -129,6 +130,7 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 | id | PK | |
 | customerId | FK Customer (Cascade) | |
 | name | text | UQ(customerId, name) (R1-1) |
+| slug | text | UQ(customerId, slug). "slug 규칙" |
 
 | Service | 타입 | 비고 |
 |---|---|---|
@@ -136,6 +138,15 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 | customerId | FK Customer | 비정규화(원칙 0) |
 | projectId | FK Project (Cascade) | |
 | name | text | UQ(projectId, name) |
+| slug | text | UQ(projectId, slug). "slug 규칙" |
+
+**slug 규칙 (Customer · Project · Service, D-33).**
+- 형식 `^[a-z0-9][a-z0-9-]{0,63}$`. **부모 안에서 유일**: Customer는 MSP 전체, Project는 고객 안, Service는 프로젝트 안.
+- **예약어는 쓸 수 없다**(세 단계 모두 같은 목록): `incidents` `incident` `monitoring` `call-order` `people` `maintenance` `thresholds` `alarms` `resources` `settings` `new` `-`. 주소에서 slug 자리와 화면 이름 자리가 겹치기 때문이다(`/c/<customer>/<project>/<service>/incident/<id>`, 포털 `/<project>/<service>/<screen>`). `-`는 미매핑 계정 인시던트의 고객 자리(`/c/-/incident/<id>`)다.
+- 만들 때 이름에서 만든다(소문자, 영숫자 밖은 `-`, 한글 등으로 비면 `customer`·`project`·`service` + 짧은 접미사). 예약어이거나 부모 안에서 겹치면 `-2`, `-3`… 접미사를 붙인다. 직접 넣은 slug가 예약어·중복이면 400 `VALIDATION_FAILED` / 409 `ALREADY_EXISTS`.
+- DB는 UQ와 형식 CHECK, 예약어는 서비스 계층에서 검증한다(목록이 화면 추가로 늘 수 있다).
+- 만든 뒤에는 바꾸지 않는다(이름만 바뀐다). 이름 변경 때 slug도 바꿀지와 옛 주소 처리는 미결(API-CONTRACT Q-API-09).
+- 마이그레이션: 기존 행은 이름에서 채운 뒤 NOT NULL.
 
 ### CloudAccount (고객 AWS 계정, D-07)
 | 필드 | 타입 | 비고 |
@@ -714,6 +725,28 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 
 - IX(customerId, at desc), IX(targetType, targetId).
 
+### ContactRevealLog (연락처 열람 기록, 추가만, D-35)
+| 필드 | 타입 | 비고 |
+|---|---|---|
+| id | text PK | API 응답의 `auditId` |
+| at | timestamptz | 언제 |
+| actorUserId | FK User | 누가 |
+| actorRole | text | 열람 시점의 콘솔 역할(나중에 역할이 바뀌어도 남는다) |
+| contactId | text | 누구의 연락처. FK를 걸지 않는다(연락처가 지워져도 기록은 남는다) |
+| contactName | text | 열람 시점 이름 사본 |
+| customerId | text? | 어느 고객. CUSTOMER 연락처는 그 고객, INTERNAL 연락처는 열람 근거가 된 고객(없으면 null). FK 없음 |
+| channel | enum `PHONE, EMAIL, SLACK` | |
+| mode | enum `NORMAL, EMERGENCY` | NORMAL = 그 고객의 Responder(또는 포털 사용자), EMERGENCY = Responder가 아닌 ADMIN |
+| reason | text? | EMERGENCY면 필수(CHECK `mode <> 'EMERGENCY' OR length(btrim(reason)) > 0`), 500자 이하. NORMAL은 선택 |
+| notifiedContactIds | text[] | EMERGENCY: 알림을 넣은 주 Responder(없으면 다른 ADMIN). NORMAL은 빈 배열 |
+| requestId, ip, userAgent | | |
+
+- **연락처 값(전화번호·이메일)은 저장하지 않는다.** 가린 값도 저장하지 않는다.
+- INSERT만. 열람 응답과 같은 트랜잭션에서 쓰고, 실패하면 값을 주지 않는다. EMERGENCY면 같은 트랜잭션에서 NotificationJob(주 Responder 알림, 값 미포함)도 넣는다.
+- AuditLog에도 한 줄(`action: contact.reveal`, targetType `Contact`, `after: { revealLogId, mode }`) — 전체 감사 기록에서 보이게.
+- IX(customerId, at desc), IX(mode, at desc) — 검토 보기 `Emergency reveals`, IX(actorUserId, at desc), IX(contactId, at desc).
+- "주 Responder"의 정의는 미결(API-CONTRACT Q-API-14). 현재: 고객 단계 PagingConfig 1단계의 첫 대상(로테이션이면 지금 당번).
+
 ### TickHeartbeat (D-10)
 | 필드 | 비고 |
 |---|---|
@@ -779,7 +812,7 @@ erDiagram
     Customer ||--o{ NotificationChannel : routes_to
 ```
 
-전역 테이블(관계 없음): `MspOrg`, `SeverityMapping`, `SuppressionPolicy`, `TickHeartbeat`, `AuditLog`, `IngestRejection`.
+전역 테이블(관계 없음): `MspOrg`, `SeverityMapping`, `SuppressionPolicy`, `TickHeartbeat`, `AuditLog`, `ContactRevealLog`(FK는 actorUserId만), `IngestRejection`.
 
 ## 9. 미결 목록
 

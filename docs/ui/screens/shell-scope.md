@@ -101,7 +101,7 @@
 | 알림과 Undo (E10) | 저장하면 패널이 닫히고 알림 하나: `Saved for Hanbit Logistics › Fulfilment › Orders API · step 2 5 → 4 min · 1 service` + **`Undo`**(확인 없이 적용된 저장에만, 9초). Undo는 저장 전 값으로 되돌린다. 확인창을 거친 저장에는 Undo가 없다. 버튼·알림·확인창의 경로는 항상 고객 포함 |
 | 임계치 기본값은 고객 단계 (E13) | 프로젝트·서비스 기본값은 없다. 목록이 프로젝트로 걸러진 채 편집에 들어가면 "This changes all of Mirae Pay, not only Core." |
 | 사람 목록 = 호출 문장 (E16) | People을 범위로 거르면 그 범위에서 호출되거나 알림 받는 모든 사람이 나온다(상위에서 온 사람은 `from Mirae Pay`). 패널의 `Paged · Also notified`와 같은 계산 |
-| 연락처 열람 (D-35) | 목록·패널은 가린 값(`010-••••-4821`). `Reveal`은 그 고객의 Responder인 직원에게만 보이고 누르면 기록된다("Shown to you · logged"). API `POST /contacts/{id}/reveal`. 시안에는 가린 값만 있고 `Reveal` 버튼은 아직 그리지 않았다 |
+| 연락처 열람 (D-35) | 목록·패널은 가린 값(`010-••••-4821`). **기본:** `Reveal`은 그 고객의 Responder에게만 보이고 누르면 값 + "Shown to you · logged". **비상:** Responder가 아닌 MSP ADMIN에게는 `Reveal (emergency)…`가 보인다 → 창 "You are not a responder for <고객>. Tell us why you need this contact." + 사유 입력 칸(필수, 직접 입력) + "<고객>'s primary responder will be notified." → `Reveal and log` → 값 + "Emergency reveal · logged · <주 Responder> notified". 사유가 비면 버튼이 꺼져 있다. 그 밖의 직원에게는 버튼이 없다. 모든 열람은 기록되고, 비상 열람은 Settings › Audit log의 `Emergency reveals`에 모인다. API `POST /contacts/{id}/reveal` `{reason?}`. 시안에는 가린 값만 있고 `Reveal` 버튼은 아직 그리지 않았다 |
 
 ## 5. 생성 흐름과 MSP 전체 변경
 
@@ -119,18 +119,19 @@
 
 | 대상 | 주소 | 비고 |
 |---|---|---|
-| 목록 | `/<screen>` + `?filter=<customer>[/<project>[/<service>]]` 또는 `?filter=mine` | screen = `incidents` `monitoring` `call-order` `people` `maintenance`. 화면 안 칩은 `&show=` |
-| 패널 | `/c/<customer>[/<project>[/<service>]]/<screen>[/<id>]` + `?filter=…` | 경로 = 패널의 범위, `?filter=` = 목록 필터(새로 고쳐도 둘 다 유지) (E5, T13) |
-| 예 | `/c/mirae/call-order?filter=mirae/core` · `/c/hanbit/fulfilment/orders-api/call-order` · `/c/mirae/thresholds` · `/c/mirae/core/payments-api/alarms/<resource>` · `/c/mirae/core/payments-api/incidents/<id>` · `/c/mirae/people/<slug>` · `/c/mirae/core/maintenance/new` | 미매핑 계정 인시던트는 `/incidents/<id>` |
-| `Copy link` | `?filter=`를 뺀다 | 받는 사람은 자기 필터를 유지한다 |
+| 목록 | `/<screen>` + `?customer=<slug>[&project=<slug>[&service=<slug>]]` 또는 `?mine=1` | screen = `incidents` `monitoring` `call-order` `people` `maintenance`. `project`는 `customer`가, `service`는 `project`가 있어야 한다. `customer`와 `mine`이 같이 오면 `customer`가 이긴다. 화면 안 칩은 `&show=` |
+| 패널 | `/c/<customer>[/<project>[/<service>]]/<screen>[/<id>]` + 목록 필터 쿼리 | 경로 = 패널의 범위, 쿼리(`customer` · `project` · `service` · `mine`) = 목록 필터(새로 고쳐도 둘 다 유지) (E5, T13). 패널 screen = `incident`(단수) `call-order` `thresholds` `alarms` `people` `maintenance` `resources` |
+| 예 | `/c/mirae/call-order?customer=mirae&project=core` · `/c/hanbit/fulfilment/orders-api/call-order` · `/c/mirae/thresholds` · `/c/mirae/core/payments-api/alarms/<resource>` · `/c/mirae/core/payments-api/incident/<id>` · `/c/mirae/people/<slug>` · `/c/mirae/core/maintenance/new` | 인시던트 패널은 단수 `incident`(목록은 `/incidents`). 서비스가 없는 인시던트는 있는 단계까지(`/c/mirae/incident/<id>`) |
+| 미매핑 계정 인시던트 | `/c/-/incident/<id>` | 고객이 없으므로 고객 자리에 `-`. `-`는 예약 slug라 고객 이름과 겹치지 않는다. INTERNAL 사용자만 |
+| `Copy link` | 목록 필터 쿼리(`customer` · `project` · `service` · `mine`)를 뺀다 | 받는 사람은 자기 필터를 유지한다 |
 | 편집 상태 | 주소에 없다 | 링크는 항상 읽기 화면으로 열린다 |
 | 없는 것 | "Not found" 하나 | 없는 ID와 볼 수 없는 ID가 같은 화면. 주소는 친 그대로 둔다 |
-| 포털 | `portal.…/<project>/<service>/<screen>` — `/c/<customer>` 없음 | §10 |
+| 포털 | 목록 `portal.…/<screen>?project=<slug>&service=<slug>`, 패널 `portal.…/<project>/<service>/<screen>[/<id>]`(인시던트는 `…/incident/<id>`) — `/c/<customer>`와 `customer=` 없음 | §10 |
 
-콘솔 브랜치(`feat/console-scope`)의 현재 구현은 이 표와 다르다: 목록 필터 `?customer=&project=&service=`(`?mine=1`), 패널 `/c/<customer>/<project>/<service>/incident/<id>`, 미매핑 `/c/-/incident/<id>`. 어느 쪽으로 맞출지는 정하지 않았다(API-CONTRACT Q-API-13). API는 어느 쪽이든 slug 파라미터 `customer`·`project`·`service`·`mine`을 쓴다.
+이 표는 콘솔 구현(`feat/console-scope`)과 같은 형식이다(11/10 확정, 구 Q-API-13). 옛 형식 `?filter=<customer>/<project>/<service>` · `?filter=mine` · 패널 `…/incidents/<id>` · 미매핑 `/incidents/<id>`는 쓰지 않는다. 콘솔 주소의 쿼리 이름은 API의 slug 파라미터(`customer` · `project` · `service` · `mine`, API-CONTRACT §2)와 같다.
 
 
-프로젝트·서비스 slug는 부모 안에서 유일하고 화면 이름(`incidents` `monitoring` `call-order` `people` `maintenance` `thresholds` `alarms` `resources` `settings` `new`)과 같을 수 없다(백엔드 검증).
+고객·프로젝트·서비스 slug는 부모 안에서 유일하고(고객은 MSP 안에서) 형식은 `^[a-z0-9][a-z0-9-]{0,63}$`이다. 예약어(`incidents` `incident` `monitoring` `call-order` `people` `maintenance` `thresholds` `alarms` `resources` `settings` `new` `-`)와 같을 수 없다(백엔드 검증, 이름에서 만들 때 겹치면 접미사를 붙인다). 컬럼: DATA-MODEL §1 Customer · Project / Service.
 
 ## 8. 반응형
 
@@ -177,9 +178,11 @@
 
 ## 12. 아직 정하지 않은 것
 
-- Customers 메뉴(고객 관리: 목록·온보딩·계정·연동·자동 조치·포털 권한)와 Call order 탭(Rotations·Templates)은 E 시안에 없다. 위치는 `IA.md` §1의 배치안이고 화면은 새 셸로 다시 그리지 않았다.
+- Customers 메뉴(고객 관리)와 Call order 탭(Rotations·Templates)의 위치는 확정됐다(D-26). 다만 E 시안에 없어 화면은 새 셸로 아직 다시 그리지 않았다.
 - 1408px 경계를 낮출지(1280에서도 트리 + 표 + 패널이 들어간다).
 - 프로젝트·서비스 단계의 호출 문제 표식을 서버가 계산할지(지금은 고객 단계만, D-32).
 - 저장 `Undo`의 유효 시간(시안 9초)과 서버 처리(API-CONTRACT §8.8: 이전 값을 다시 저장).
+- "주 Responder"(비상 열람 알림 대상)의 정의(API-CONTRACT Q-API-14).
+- 이름을 바꿨을 때 옛 slug 주소의 처리(Q-API-09).
 - 포털에서 Acknowledge 할 수 있는 사람(기존: 불가, R4-3).
 - 독립 재평가와 `/persona-check`는 이 단순화 뒤에 다시 하지 않았다.

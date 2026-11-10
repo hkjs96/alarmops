@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 경로 | `/maintenance` (메뉴, D-26 개정), 필터 `?filter=`. 창 패널 `/c/<c>[/<p>[/<s>]]/maintenance/<id>`, 생성 `/c/<c>[/<p>[/<s>]]/maintenance/new` |
+| 경로 | `/maintenance` (메뉴, D-26 개정), 필터 `?customer=&project=&service=` · `?mine=1`. 창 패널 `/c/<c>[/<p>[/<s>]]/maintenance/<id>`, 생성 `/c/<c>[/<p>[/<s>]]/maintenance/new` |
 | 목적 | 점검 창 생성·해제. 모든 소스 같은 규칙: SEV-1은 울림, SEV-2 이하 묵음(D-17) |
 | 페르소나 | 준호, 민재, 소연(grant `silences`) |
 
