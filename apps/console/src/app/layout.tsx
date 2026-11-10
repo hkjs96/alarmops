@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import "@alarmops/design-system/styles.css";
 import "./globals.css";
-import { TopNav } from "@/components/TopNav";
+import { ScopeShell } from "@/components/ScopeShell";
+import { shellInitScript } from "@/lib/shell-prefs";
 import { themeInitScript } from "@/components/ThemeToggle";
 import { getApi } from "@/lib/api";
 import { getSession } from "@/lib/auth";
@@ -11,23 +12,28 @@ export const dynamic = "force-dynamic";
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   // /login renders without a session; everything else is gated by middleware.
-  let nav: { name: string; unacked: number } | null = null;
+  let shell: { name: string; open: number; customers: Awaited<ReturnType<Awaited<ReturnType<typeof getApi>>["scopeTree"]>>["customers"] } | null = null;
   if (await getSession()) {
     const api = await getApi();
-    const [me, list] = await Promise.all([api.me(), api.listIncidents({ status: "open" })]);
-    nav = { name: me.name, unacked: list.counts.triggered + list.counts.escalated };
+    const [me, list, tree] = await Promise.all([api.me(), api.listIncidents({ status: "active" }), api.scopeTree()]);
+    // badge = open in ALL customers, whatever the list filter is
+    shell = { name: me.name, open: list.counts.open, customers: tree.customers };
   }
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+        {shell ? <script dangerouslySetInnerHTML={{ __html: shellInitScript }} /> : null}
         {/* eslint-disable-next-line @next/next/no-page-custom-font */}
         <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap" />
       </head>
       <body>
         <a href="#main" className="skip">Skip to content</a>
-        {nav ? <TopNav unackedCount={nav.unacked} userName={nav.name} /> : null}
-        <main id="main">{children}</main>
+        {shell ? (
+          <ScopeShell customers={shell.customers} userName={shell.name} openCount={shell.open}>{children}</ScopeShell>
+        ) : (
+          <main id="main">{children}</main>
+        )}
       </body>
     </html>
   );

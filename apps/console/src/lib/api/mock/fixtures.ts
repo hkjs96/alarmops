@@ -1,10 +1,12 @@
 /**
- * Mock data matching docs/ui/mockups/index.html (Incidents + Incident detail screens).
+ * Mock data matching docs/ui/mockups/index.html (Incidents + Incident detail screens) and the
+ * seven open incidents of docs/ui/mockups/scope-variants.html (variant E).
  * Clock is frozen at Mon Nov 9 2026 03:16:16 KST so ages match the mockup.
  */
 import type {
   IncidentDetail, IncidentEvent, IncidentListItem, NotificationLogEntry, OncallNowEntry, Severity,
 } from "../types";
+import { orgOf } from "./scope-fixtures";
 
 export const MOCK_NOW = "2026-11-08T18:16:16Z"; // 03:16:16 KST
 const KST = (hhmmss: string, day = "2026-11-09") => {
@@ -14,21 +16,16 @@ const KST = (hhmmss: string, day = "2026-11-09") => {
   return d.toISOString().replace(".000", "");
 };
 
-const org = (c: [string, string] | null, p?: [string, string], s?: [string, string]) => ({
-  customer: c ? { id: c[0], name: c[1] } : null,
-  project: p ? { id: p[0], name: p[1] } : null,
-  service: s ? { id: s[0], name: s[1] } : null,
-});
-
-const MIRAE: [string, string] = ["cus_mirae", "Mirae Pay"];
-const HANBIT: [string, string] = ["cus_hanbit", "Hanbit Logistics"];
-const DAON: [string, string] = ["cus_daon", "Daon Retail"];
+const MIRAE = "mirae";
+const HANBIT = "hanbit";
+const DAON = "daon";
+const org = orgOf;
 
 export const openIncidents: IncidentListItem[] = [
   {
     id: "inc-7f3a0c91b2d4-20261108181204", number: 5521, key: "INC-20261109-0312-7F3A",
     title: "payments-db-1 FreeStorageSpace below 10 GB", severity: "SEV_1", status: "TRIGGERED", escalated: false,
-    org: org(MIRAE, ["prj_core", "Core"], ["svc_payapi", "Payments API"]), unmapped: false,
+    org: org(MIRAE, "Core", "Payments API"), unmapped: false,
     awsAccountIds: ["827311046650"], resourceTypes: ["RDS"], source: "CLOUDWATCH", env: "prd", memberCount: 3,
     assignee: { contactId: "ct_haeun", name: "Haeun Kim", via: "on shift in MSP night desk" },
     assigneeNote: "next: call Yuna at 03:22",
@@ -41,7 +38,7 @@ export const openIncidents: IncidentListItem[] = [
   {
     id: "inc-a1b5e2c07d33-20261108180512", number: 5519, key: "INC-20261109-0305-A1B5",
     title: "api-alb 5XX rate above 2%", severity: "SEV_2", status: "TRIGGERED", escalated: true,
-    org: org(HANBIT, ["prj_tracking", "Tracking"], ["svc_pubapi", "Public API"]), unmapped: false,
+    org: org(HANBIT, "Tracking", "Public API"), unmapped: false,
     awsAccountIds: ["330188124407"], resourceTypes: ["ALB"], source: "CLOUDWATCH", env: "prd", memberCount: 2,
     assignee: { contactId: "ct_junho", name: "Junho Park", via: "on shift in Hanbit on-call" },
     assigneeNote: "on shift in Hanbit on-call · called 03:12",
@@ -54,7 +51,7 @@ export const openIncidents: IncidentListItem[] = [
   {
     id: "inc-0d9c71f4e8a2-20261108181401", number: 5522, key: "INC-20261109-0314-0D9C",
     title: "node-exporter: KubeNodeNotReady on ip-10-2-14-77", severity: "SEV_2", status: "TRIGGERED", escalated: false,
-    org: org(DAON, ["prj_commerce", "Commerce"], ["svc_eks", "EKS prod"]), unmapped: false,
+    org: org(DAON, "Platform", "EKS prod"), unmapped: false,
     awsAccountIds: [], resourceTypes: ["Node"], source: "PROMETHEUS", memberCount: 1,
     assignee: { contactId: "ct_junho", name: "Junho, Minjae, Soyeon", via: "all at once" },
     assigneeNote: "all at once · next: call all 3 at 7 min",
@@ -74,7 +71,7 @@ export const openIncidents: IncidentListItem[] = [
   {
     id: "inc-c3e8d02f6a71-20261108175710", number: 5517, key: "INC-20261109-0257-C3E8",
     title: "batch-worker-3 CPUUtilization above 90%", severity: "SEV_3", status: "ACKNOWLEDGED", escalated: false,
-    org: org(HANBIT, ["prj_ops", "Ops"], ["svc_batch", "Batch"]), unmapped: false,
+    org: org(HANBIT, "Ops", "Batch"), unmapped: false,
     awsAccountIds: ["330188124407"], resourceTypes: ["EC2"], source: "CLOUDWATCH", env: "prd", memberCount: 1,
     assignee: { contactId: "ct_haeun", name: "Haeun Kim" }, assigneeNote: "ack'd 02:58",
     escalation: { step: 0, totalSteps: 3, repeat: 0, repeatCount: 1, nextAt: null, doneAt: KST("02:58:00"), summary: "stopped · re-notify 03:58" },
@@ -83,16 +80,25 @@ export const openIncidents: IncidentListItem[] = [
   {
     id: "inc-9b2f4410ed58-20261108173802", number: 5514, key: "INC-20261109-0238-9B2F",
     title: "grafana: Checkout p95 latency above 800 ms", severity: "SEV_4", status: "ACKNOWLEDGED", escalated: false,
-    org: org(DAON, ["prj_commerce", "Commerce"], ["svc_checkout", "Checkout"]), unmapped: false,
+    org: org(DAON, "Commerce", "Checkout"), unmapped: false,
     awsAccountIds: [], resourceTypes: ["Service"], source: "GRAFANA", memberCount: 4,
     assignee: { contactId: "ct_minjae", name: "Minjae Lee" }, assigneeNote: "ack'd 02:41",
     escalation: { step: 0, totalSteps: 3, repeat: 0, repeatCount: 1, nextAt: null, doneAt: KST("02:41:00"), summary: "stopped" },
     triggeredAt: KST("02:38:02"), acknowledgedAt: KST("02:41:00"), resolvedAt: null, version: 6,
   },
+  {
+    id: "inc-4e1d90a3c7b6-20261108171940", number: 5511, key: "INC-20261109-0219-4E1D",
+    title: "web-1 CPUUtilization above 80%", severity: "SEV_4", status: "ACKNOWLEDGED", escalated: false,
+    org: org("bora", "Main", "Web"), unmapped: false,
+    awsAccountIds: ["560914472281"], resourceTypes: ["EC2"], source: "CLOUDWATCH", env: "prd", memberCount: 1,
+    assignee: { contactId: "ct_haeun", name: "Haeun Kim" }, assigneeNote: "ack'd 02:20",
+    escalation: { step: 0, totalSteps: 4, repeat: 0, repeatCount: 1, nextAt: null, doneAt: KST("02:20:50"), summary: "stopped" },
+    triggeredAt: KST("02:19:40"), acknowledgedAt: KST("02:20:50"), resolvedAt: null, version: 3,
+  },
 ];
 
 /** 17 resolved in the last 24h: 9 auto, 8 manual (tile "9 auto · 8 manual"). */
-const RESOLVED_TITLES: [string, Severity, [string, string], string, string][] = [
+const RESOLVED_TITLES: [string, Severity, string, string, string][] = [
   ["orders-api-1 CPUUtilization above 85%", "SEV_3", HANBIT, "Ops", "EC2"],
   ["checkout-redis CurrConnections above 5k", "SEV_3", DAON, "Commerce", "ElastiCache"],
   ["ledger-aurora-r1 ReplicaLag above 30s", "SEV_2", MIRAE, "Core", "RDS"],
@@ -120,7 +126,7 @@ export const resolvedIncidents: IncidentListItem[] = RESOLVED_TITLES.map(([title
   return {
     id: `inc-r${String(i).padStart(2, "0")}`, number: 5490 + i, key: `INC-R-${5490 + i}`, title, severity,
     status: "RESOLVED", escalated: false,
-    org: org(cus, [`prj_${project.toLowerCase()}`, project]), unmapped: false,
+    org: org(cus, project), unmapped: false,
     awsAccountIds: [], resourceTypes: [rtype],
     source: rtype === "Prometheus" ? "PROMETHEUS" : rtype === "Grafana" ? "GRAFANA" : "CLOUDWATCH",
     memberCount: 1 + (i % 3),

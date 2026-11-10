@@ -2,6 +2,7 @@ import {
   Avatar, Banner, Button, Card, EmptyState, Input, Select, SevBadge, SourceChip, StatusBadge, Table, Tabs,
   SEVERITIES, STATUSES, type ThresholdSource,
 } from "@alarmops/design-system";
+import { ScopeDemo } from "./ScopeDemo";
 
 const TOKENS = ["bg", "surface", "soft", "hair", "rule", "deco", "faint", "mut", "ink2", "ink", "accent", "red", "orange", "slate", "green", "gray", "amber"];
 const SOURCES: ThresholdSource[] = ["TAG", "CONSOLE", "CUSTOMER", "MSP", "CODE"];
@@ -14,6 +15,8 @@ export default function DesignPage() {
   return (
     <div className="page stack">
       <div className="ph"><div><h1>Design system</h1><div className="desc">@alarmops/design-system — warm paper, square corners, mono overlines, one blue accent. Toggle theme in the top bar.</div></div></div>
+
+      <Card title="Scope · filter line, outside line, unsaved-changes dialog"><ScopeDemo /></Card>
 
       <Card title="Color tokens">
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))", gap: 8 }}>

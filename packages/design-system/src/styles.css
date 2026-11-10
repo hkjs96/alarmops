@@ -1,4 +1,5 @@
 @import "./tokens.css";
+@import "./scope.css";
 
 /* ---------- base ---------- */
 *, *::before, *::after { box-sizing: border-box; border-radius: 0; }
@@ -20,7 +21,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .sp { flex: 1; }
 .stack > * + * { margin-top: 16px; }
-.chain { color: var(--deco); margin: 0 5px; font-family: var(--mono); }
+.chain { color: var(--mut); margin: 0 5px; font-family: var(--mono); }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 /* ---------- button ---------- */
@@ -171,6 +172,7 @@ table.t { width: 100%; border-collapse: collapse; font-size: 13px; }
 @media (max-width: 760px) {
   .btn, .chip, .sel { min-height: 44px; }
   .btn.sm { min-height: 44px; }
+  .sel select { min-height: 44px; }
   .tiles { grid-template-columns: 1fr 1fr; }
   .tile:nth-child(n) { border-left: 1px solid var(--hair); border-top: 1px solid var(--hair); }
   .tile:nth-child(odd) { border-left: 0; }

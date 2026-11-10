@@ -1,6 +1,10 @@
 import { apiBaseUrl, mockMode, NotConfiguredError } from "./mode";
 import { safeExternalUrl } from "./safe-url";
-import { assertIds, assertVersion, assertId, assertBulkAction, MAX_BULK_IDS } from "./validate";
+import { safeNextPath } from "./safe-next";
+import { assertBulkItems, assertVersion, assertId, assertBulkAction, isId, isSlug, MAX_BULK_IDS } from "./validate";
+import { parsePanelRoute, parseScopeParams } from "./scope";
+import { ApiError, isHidden } from "./api/client";
+import { securityHeaders } from "../../next.config";
 import { signSession, verifySession, sessionSecret, DEV_USER } from "./auth/session";
 import { createHttpApi } from "./api/client";
 
@@ -70,18 +74,122 @@ describe("C-4 safeExternalUrl", () => {
 });
 
 describe("C-5 input validation", () => {
-  it("ids list 1..200", () => {
-    expect(assertIds(["a", "b"])).toEqual(["a", "b"]);
-    expect(() => assertIds([])).toThrow();
-    expect(() => assertIds(Array.from({ length: MAX_BULK_IDS + 1 }, (_, i) => `i${i}`))).toThrow();
-    expect(assertIds(Array.from({ length: MAX_BULK_IDS }, (_, i) => `i${i}`))).toHaveLength(200);
-    expect(() => assertIds("a")).toThrow();
-    expect(() => assertIds([1])).toThrow();
+  it("bulk items 1..200, each with an id and the version the user saw", () => {
+    const it = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `i${i}`, version: i }));
+    expect(assertBulkItems([{ id: "a", version: 1, extra: "dropped" }])).toEqual([{ id: "a", version: 1 }]);
+    expect(() => assertBulkItems([])).toThrow();
+    expect(() => assertBulkItems(it(MAX_BULK_IDS + 1))).toThrow();
+    expect(assertBulkItems(it(MAX_BULK_IDS))).toHaveLength(200);
+    for (const bad of ["a", ["a"], [1], [{ id: "a" }], [{ id: "a", version: "1" }], [{ id: "..", version: 1 }], [null]]) expect(() => assertBulkItems(bad)).toThrow();
   });
   it("version integer, id shape, action enum", () => {
     expect(assertVersion(3)).toBe(3);
     for (const v of [1.5, "3", -1, NaN, null]) expect(() => assertVersion(v)).toThrow();
     expect(() => assertId("../x")).toThrow();
     expect(() => assertBulkAction("delete")).toThrow();
+  });
+});
+
+describe("R-6 one id / slug validator", () => {
+  it("refuses dot-only ids everywhere an id is accepted", () => {
+    for (const bad of [".", "..", "...", "", "a/b", "a b", "../x", "a".repeat(129), 5, null, undefined]) {
+      expect(isId(bad), String(bad)).toBe(false);
+      expect(() => assertId(bad)).toThrow();
+    }
+    for (const ok of ["inc-7f3a0c91b2d4-20261108181204", "a.b", ".a", "a..b", "x:y_z", "A1"]) expect(isId(ok), ok).toBe(true);
+    // the panel address and server-action input use the same check
+    expect(parsePanelRoute("mirae", ["incident", ".."])).toBeNull();
+    expect(parsePanelRoute("mirae", ["incident", "."])).toBeNull();
+    expect(parsePanelRoute("-", ["incident", "..."])).toBeNull();
+    expect(parsePanelRoute("mirae", ["incident", "a.b"])).not.toBeNull();
+    expect(() => assertBulkItems([{ id: "..", version: 1 }])).toThrow();
+  });
+  it("slugs: lower-case letters, digits and dashes; never dots", () => {
+    for (const bad of [".", "..", "-", "-a", "A", "a.b", "a/b", "", "a".repeat(65), 1, null]) expect(isSlug(bad), String(bad)).toBe(false);
+    for (const ok of ["mirae", "payments-api", "0a", "a".repeat(64)]) expect(isSlug(ok)).toBe(true);
+    expect(parseScopeParams({ customer: ".." }).malformed).toBe(true);
+    expect(parseScopeParams({ customer: "mirae", project: "." }).malformed).toBe(true);
+    expect(parsePanelRoute("..", ["incident", "x"])).toBeNull();
+    expect(parsePanelRoute("mirae", ["..", "incident", "x"])).toBeNull();
+  });
+});
+
+describe("R-5 a 403 on a read is the same as a 404", () => {
+  it("isHidden", () => {
+    expect(isHidden(new ApiError(404, "NOT_FOUND", "Not found.", "r"))).toBe(true);
+    expect(isHidden(new ApiError(403, "FORBIDDEN", "No.", "r"))).toBe(true);
+    for (const s of [400, 401, 409, 500, 503]) expect(isHidden(new ApiError(s, "X", "x", "r"))).toBe(false);
+    expect(isHidden(new Error("x"))).toBe(false);
+  });
+});
+
+describe("R-4 security response headers", () => {
+  const h = (prod: boolean) => Object.fromEntries(securityHeaders(prod).map((x) => [x.key, x.value]));
+  it("no framing, no sniffing, short referrer", () => {
+    const p = h(true);
+    expect(p["X-Frame-Options"]).toBe("DENY");
+    expect(p["X-Content-Type-Options"]).toBe("nosniff");
+    expect(p["Referrer-Policy"]).toBe("strict-origin-when-cross-origin");
+    expect(p["Content-Security-Policy"]).toContain("frame-ancestors 'none'");
+  });
+  it("CSP: own origin plus Google Fonts only; no eval and no remote scripts in production", () => {
+    const d = Object.fromEntries(h(true)["Content-Security-Policy"]!.split("; ").map((x) => [x.split(" ")[0]!, x.split(" ").slice(1)]));
+    expect(d["default-src"]).toEqual(["'self'"]);
+    expect(d["script-src"]).toEqual(["'self'", "'unsafe-inline'"]);
+    expect(d["style-src"]).toEqual(["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"]);
+    expect(d["font-src"]).toEqual(["'self'", "https://fonts.gstatic.com"]);
+    expect(d["connect-src"]).toEqual(["'self'"]);
+    expect(d["object-src"]).toEqual(["'none'"]);
+    expect(d["base-uri"]).toEqual(["'self'"]);
+    expect(d["form-action"]).toEqual(["'self'"]);
+    expect(h(true)["Content-Security-Policy"]).not.toMatch(/unsafe-eval|\*|http:/);
+    expect(h(false)["Content-Security-Policy"]).toContain("'unsafe-eval'"); // next dev only
+  });
+});
+
+describe("S-3 next= is a path on this origin, or it is dropped", () => {
+  it("keeps the console's own addresses", () => {
+    for (const ok of [
+      "/incidents", "/incidents?customer=mirae&project=core&status=ACKNOWLEDGED", "/c/mirae/core/payments-api/incident/inc-7f3a0c91b2d4-20261108181204?mine=1",
+      "/people?customer=hanbit", "/incidents?q=db%201", "/incidents?q=a%2Fb", "/settings/msp-defaults#x", "/",
+    ]) expect(safeNextPath(ok), ok).toBe(ok);
+  });
+  it("refuses other hosts, however they are spelled", () => {
+    for (const bad of [
+      "//evil.example", "/\\evil.example", "/\\/evil.example", "\\\\evil.example", "https://evil.example", "http:evil.example", "javascript:alert(1)", "evil.example", "",
+      "/%09/evil.example", "/\t/evil.example", "/%0A/evil.example", "/\n/evil.example", "/%0d/evil.example", "/\r/evil.example", "/ /evil.example".replace(" ", "\u0000"),
+      "/%2F%2Fevil.example", "/%2f/evil.example", "/%5Cevil.example", "/%5c%5cevil.example", "/%252F%252Fevil.example", "/%25252F%25252Fevil.example", "/%2509/evil.example",
+      "/incidents//evil.example", "/incidents?next=//evil.example", "/x%", "/%E0%A4%A", "/" + "a".repeat(2100), "/%25252525252Fx",
+      5, null, undefined, ["/incidents"],
+    ]) expect(safeNextPath(bad), String(bad)).toBe("/incidents");
+    expect(safeNextPath("//evil.example", "")).toBe("");
+  });
+  it("what it returns always resolves to the same origin", () => {
+    for (const raw of ["/%09/evil.example", "/incidents", "/\\evil.example", "/a/../b", "/./x"]) {
+      const u = new URL(safeNextPath(raw), "https://console.example");
+      expect(u.origin, raw).toBe("https://console.example");
+    }
+    expect(safeNextPath("/a/../b")).toBe("/b");
+  });
+});
+
+describe("S-4 If-Match on every write to one incident", () => {
+  it("ack, resolve and escalate send the version the user saw", async () => {
+    const f = vi.fn(async () => new Response("{}", { status: 200 }));
+    const api = createHttpApi({ baseUrl: "https://api.test", fetch: f as unknown as typeof fetch });
+    await api.ack("i1", 3); await api.resolve("i1", 4, {}); await api.escalate("i1", 5);
+    const sent = (f.mock.calls as unknown as [string, RequestInit][]).map(([u, init]) => [u.split("/").pop(), (init.headers as Record<string, string>)["If-Match"]]);
+    expect(sent).toEqual([["ack", "3"], ["resolve", "4"], ["escalate", "5"]]);
+  });
+});
+
+describe("transport and feature headers", () => {
+  const h = (prod: boolean) => Object.fromEntries(securityHeaders(prod).map((x) => [x.key, x.value]));
+  it("HSTS in production only", () => {
+    expect(h(true)["Strict-Transport-Security"]).toBe("max-age=31536000; includeSubDomains");
+    expect(h(false)["Strict-Transport-Security"]).toBeUndefined();
+  });
+  it("Permissions-Policy switches off what the console never uses", () => {
+    for (const p of [true, false]) expect(h(p)["Permissions-Policy"]).toBe("camera=(), microphone=(), geolocation=(), payment=(), usb=()");
   });
 });

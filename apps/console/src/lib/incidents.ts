@@ -1,6 +1,6 @@
 import type { DisplayStatus } from "@alarmops/design-system";
 import { SEVERITIES } from "@alarmops/design-system";
-import type { IncidentCounts, IncidentListItem, IncidentListQuery } from "./api/types";
+import type { IncidentCounts, IncidentListItem, IncidentListQuery, OutsideCounts } from "./api/types";
 
 /** One definition used on every screen: Escalated = TRIGGERED with an unacked escalation step. */
 export function displayStatus(i: Pick<IncidentListItem, "status" | "escalated">): DisplayStatus {
@@ -8,9 +8,13 @@ export function displayStatus(i: Pick<IncidentListItem, "status" | "escalated">)
   return i.status;
 }
 
-/** "Open" = not resolved (TRIGGERED + ACKNOWLEDGED). Nav badge = open and not acknowledged. */
-export const isOpen = (i: Pick<IncidentListItem, "status">) => i.status !== "RESOLVED";
-export const needsAck = (i: Pick<IncidentListItem, "status">) => i.status === "TRIGGERED";
+/**
+ * One meaning of "open" everywhere (API-CONTRACT §8.0): triggered or escalated, nobody has acknowledged it.
+ * The menu badge, the tree numbers, counts.open and the "Outside this view" line all use isOpen.
+ * "Active" = not resolved yet (open + acknowledged): what the default list shows.
+ */
+export const isOpen = (i: Pick<IncidentListItem, "status">) => i.status === "TRIGGERED";
+export const isActive = (i: Pick<IncidentListItem, "status">) => i.status !== "RESOLVED";
 
 /** Default sort (incidents-list.md 미결 제안): unacked first, then severity, then oldest first. */
 export function sortIncidents<T extends Pick<IncidentListItem, "status" | "severity" | "triggeredAt">>(items: T[]): T[] {
@@ -40,7 +44,7 @@ export function matchesBaseFilters(i: IncidentListItem, q: IncidentListQuery, me
 }
 
 export function matchesStatus(i: IncidentListItem, status: IncidentListQuery["status"]): boolean {
-  if (!status || status === "open") return isOpen(i);
+  if (!status || status === "active") return isActive(i);
   return i.status === status;
 }
 
@@ -60,7 +64,7 @@ export function computeCounts(base: IncidentListItem[], nowMs: number, muted: nu
     acknowledged: ack.length,
     resolved24h: res.length,
     muted,
-    open: base.filter(isOpen).length,
+    open: trig.length + esc.length,
     meta: {
       triggeredSev1: trig.filter((i) => i.severity === "SEV_1").length,
       oldestTriggeredAt: oldest,
@@ -75,4 +79,17 @@ export function computeCounts(base: IncidentListItem[], nowMs: number, muted: nu
 
 export function orgChainParts(i: Pick<IncidentListItem, "org">): string[] {
   return [i.org.customer?.name, i.org.project?.name, i.org.service?.name].filter((x): x is string => Boolean(x));
+}
+
+/**
+ * What a scope filter hides (T12). `inView` is the scope filter only. Resolved incidents are not counted.
+ * open includes unmapped, so: open in view + outside.open = all open = the nav badge.
+ */
+export function outsideCounts(all: IncidentListItem[], inView: (i: IncidentListItem) => boolean): OutsideCounts {
+  const out = all.filter((i) => isActive(i) && !inView(i));
+  return {
+    open: out.filter(isOpen).length,
+    unmapped: out.filter((i) => isOpen(i) && i.unmapped).length,
+    acknowledged: out.filter((i) => i.status === "ACKNOWLEDGED").length,
+  };
 }
