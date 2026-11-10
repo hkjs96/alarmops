@@ -39,6 +39,8 @@ export interface IncidentRow {
   nextEscalationAt: Date | null;
   renotifiedAt: Date | null;
   renotifyCount: number;
+  /** PROPOSED column: last manual "Escalate now" — at most one per MANUAL_ESCALATE_MIN_GAP_SEC per incident (R-7). */
+  lastManualEscalationAt?: Date | null;
   /** PROPOSED column: when a firing group was last opened/merged into this incident. Auto-resolve only looks strictly after it (I-5). */
   lastMergedAt: Date | null;
   pagingConfigId: string | null;

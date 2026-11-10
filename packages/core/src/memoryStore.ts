@@ -6,7 +6,8 @@ import type { NotificationIntent } from './escalation.js';
 import type { GroupRow } from './grouping.js';
 import type { IncidentRow } from './incident.js';
 import type { MaintenanceWindow } from './maintenance.js';
-import { MAX_ATTEMPTS, retryAt, type DeliveryLog, type NotificationJob } from './notify.js';
+import { CLAIM_LEASE_SEC } from './limits.js';
+import { MAX_ATTEMPTS, fairOrder, retryAt, sanitizeProviderError, type DeliveryLog, type DeliveryReason, type NotificationJob } from './notify.js';
 import type { Contact, Leave, Override, PagingConfig, PagingWorld, Responder, Rotation } from './paging.js';
 import { DEFAULT_POLICY, type SuppressionPolicy } from './policy.js';
 import type {
@@ -155,9 +156,9 @@ export class MemoryTickStore implements TickRepository {
       return m.length > 0 && m.every((x) => !(this.episodes.get(x.alertId) ?? true));
     }).sort((a, b) => a.triggeredAt.getTime() - b.triggeredAt.getTime()).slice(0, limit).map((i) => structuredClone(i));
   }
-  async listEscalationDue(now: Date, limit: number) {
+  async listEscalationDue(now: Date, limit: number, excludeIds: string[] = []) {
     return [...this.incidents.values()]
-      .filter((i) => i.status !== 'RESOLVED' && i.nextEscalationAt != null && i.nextEscalationAt.getTime() <= now.getTime())
+      .filter((i) => !excludeIds.includes(i.id) && i.status !== 'RESOLVED' && i.nextEscalationAt != null && i.nextEscalationAt.getTime() <= now.getTime())
       .sort((a, b) => a.nextEscalationAt!.getTime() - b.nextEscalationAt!.getTime() || a.id.localeCompare(b.id))
       .slice(0, limit).map((i) => structuredClone(i));
   }
@@ -177,6 +178,14 @@ export class MemoryTickStore implements TickRepository {
     this.incidents.set(next.id, next);
     this.insertEvents(c.events ?? []);
     this.insertJobs(c.jobs ?? [], new Date(Math.max(...(c.events ?? []).map((e) => e.at.getTime()), 0)));
+    if (c.restoreAckSkipped) {
+      const r = c.restoreAckSkipped;
+      for (const j of this.jobs.values()) {
+        if (j.incidentId === next.id && j.status === 'SKIPPED' && j.lastError === 'acknowledged' && j.purpose !== 'RENOTIFY' && j.stepIndex === r.stepIndex && j.repeat === r.repeat) {
+          j.status = 'QUEUED'; j.lastError = null; j.nextAttemptAt = r.at;
+        }
+      }
+    }
     if (c.memberEffect) for (const m of this.incidentMembers.get(next.id)?.values() ?? []) this.alertAcked.set(m.alertId, c.memberEffect === 'ACK');
     if (c.resolution) this.resolutions.push(c.resolution);
     if (c.audit) this.audits.push(c.audit);
@@ -189,38 +198,68 @@ export class MemoryTickStore implements TickRepository {
   protected insertJobs(intents: NotificationIntent[], at: Date) {
     for (const i of intents) {
       if (this.jobs.has(i.idempotencyKey)) continue;
-      this.jobs.set(i.idempotencyKey, { ...structuredClone(i), id: this.nextId('job'), status: 'QUEUED', attempts: 0, nextAttemptAt: at, lastError: null, providerMessageId: null, createdAt: at });
+      this.jobs.set(i.idempotencyKey, { ...structuredClone(i), id: this.nextId('job'), status: 'QUEUED', attempts: 0, claimSeq: 0, nextAttemptAt: at, lastError: null, providerMessageId: null, createdAt: at });
     }
   }
 
   async claimDueJobs(now: Date, limit: number) {
-    const due = [...this.jobs.values()]
-      .filter((j) => (j.status === 'QUEUED' || j.status === 'SENDING') && j.nextAttemptAt.getTime() <= now.getTime())
-      .sort((a, b) => a.nextAttemptAt.getTime() - b.nextAttemptAt.getTime() || a.createdAt.getTime() - b.createdAt.getTime());
+    const due = fairOrder([...this.jobs.values()].filter((j) => (j.status === 'QUEUED' || j.status === 'SENDING') && j.nextAttemptAt.getTime() <= now.getTime()));
     const out: NotificationJob[] = [];
     for (const j of due) {
       if (out.length >= limit) break;
-      if (j.attempts >= MAX_ATTEMPTS) { j.status = 'FAILED'; j.lastError = j.lastError ?? 'gave up after a send that never finished'; continue; }
-      j.status = 'SENDING'; j.attempts++; j.nextAttemptAt = retryAt(j.attempts, now);
+      if (j.attempts >= MAX_ATTEMPTS) {
+        // Every allowed send was started and the last one never reported back: give up, on the record (R-3).
+        j.status = 'FAILED'; j.lastError = j.lastError ?? 'gave up after a send that never finished';
+        const channel = j.channel === 'SLACK_BOT' || j.channel === 'SLACK_WEBHOOK';
+        this.logs.push({
+          id: this.nextId('log'), at: now, customerId: j.customerId, incidentId: j.incidentId, jobId: j.id, channel: j.channel, status: 'FAILED',
+          targetSummary: channel ? 'Slack channel' : j.contactName ?? 'Unknown person', targetKind: channel ? 'MSP_CHANNEL' : 'STAFF', contactId: channel ? null : j.contactId,
+          escalationStep: j.stepIndex, attempt: j.attempts, providerMessageId: null, error: j.lastError, errorCode: 'GAVE_UP', warnings: [],
+        });
+        continue;
+      }
+      j.status = 'SENDING'; j.claimSeq++; j.nextAttemptAt = new Date(now.getTime() + CLAIM_LEASE_SEC * 1000);
       out.push(structuredClone(j));
     }
     return out;
   }
-  async incidentStatus(id: string) { return this.incidents.get(id)?.status ?? null; }
+  private jobById(jobId: string, claimSeq: number): NotificationJob | null {
+    const j = [...this.jobs.values()].find((x) => x.id === jobId);
+    return j && j.status === 'SENDING' && j.claimSeq === claimSeq ? j : null;
+  }
+  async beginSend(jobId: string, claimSeq: number, now: Date) {
+    const j = this.jobById(jobId, claimSeq);
+    if (!j) return null;
+    j.attempts++; j.nextAttemptAt = retryAt(j.attempts, now);
+    return j.attempts;
+  }
+  async releaseJob(jobId: string, claimSeq: number, now: Date) {
+    const j = this.jobById(jobId, claimSeq);
+    if (!j) return false;
+    j.status = 'QUEUED'; j.nextAttemptAt = now;
+    return true;
+  }
+  async findIncidentById(id: string) { const i = this.incidents.get(id); return i ? structuredClone(i) : null; }
   async getContact(id: string) { const c = this.contacts.get(id); return c ? { ...c } : null; }
   async slackDestinations(job: NotificationJob) {
-    const msp = this.slackChannels.get('msp') ?? [];
+    const msp = { channels: this.slackChannels.get('msp') ?? [], owner: 'MSP' as const };
     if (job.targetRef === 'msp-default' || !job.customerId) return msp;
     const own = this.slackChannels.get(`customer:${job.customerId}`) ?? [];
-    return own.length ? own : msp;
+    return own.length ? { channels: own, owner: 'CUSTOMER' as const } : msp;
   }
-  async completeJob(jobId: string, r: { status: 'SENT' | 'FAILED' | 'SKIPPED' | 'QUEUED'; providerMessageId?: string | null; error?: string | null }, log?: DeliveryLog) {
-    const j = [...this.jobs.values()].find((x) => x.id === jobId);
-    if (!j) return;
+  async completeJob(
+    jobId: string, claimSeq: number,
+    r: { status: 'SENT' | 'FAILED' | 'SKIPPED' | 'QUEUED'; providerMessageId?: string | null; error?: string | null; errorCode?: DeliveryReason | null },
+    log?: DeliveryLog, event?: IncidentEventInput,
+  ) {
+    const j = this.jobById(jobId, claimSeq);
+    if (!j) return false; // WHERE status='SENDING' AND claimSeq=? matched nothing
     j.status = r.status;
     if (r.providerMessageId) j.providerMessageId = r.providerMessageId;
-    j.lastError = r.error ?? (r.status === 'SENT' ? null : j.lastError);
+    j.lastError = r.error != null ? (r.status === 'SKIPPED' ? r.error : sanitizeProviderError(r.error)) : r.status === 'SENT' ? null : j.lastError;
     if (log) this.logs.push({ ...log, id: this.nextId('log') });
+    if (event) this.insertEvents([event]);
+    return true;
   }
 
   async writeHeartbeat(hb: HeartbeatWrite) {

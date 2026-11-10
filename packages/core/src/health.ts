@@ -3,11 +3,16 @@
  * UNREACHABLE: no step reaches any verified contact. AT_RISK: some step relies on an unverified contact,
  * a phone channel without a verified phone, or a rotation gap within the horizon (14 days).
  */
+import { SMS_VOICE_REQUIRE_VERIFIED } from './limits.js';
 import { onCallAt, resolveStep, shiftAt, type PagingConfig, type PagingWorld, type StepChannel, type Contact, isPageableFor } from './paging.js';
 
 export type HealthLevel = 'OK' | 'AT_RISK' | 'UNREACHABLE';
 export type ProblemCode = 'NO_PAGEABLE_RESPONDER' | 'NO_VERIFIED_PHONE' | 'STEP_UNVERIFIED_ONLY' | 'ROTATION_GAP';
-export interface Problem { code: ProblemCode; stepIndex?: number; contactIds: string[]; rotationId?: string; from?: string; to?: string; message: string }
+export interface Problem {
+  code: ProblemCode; stepIndex?: number; contactIds: string[]; rotationId?: string; from?: string; to?: string; message: string;
+  /** NO_VERIFIED_PHONE while SMS_VOICE_REQUIRE_VERIFIED: the SMS / call of this step to these people is NOT sent (Q-DM-16). */
+  skipped?: boolean;
+}
 export interface PagingHealth { level: HealthLevel; problems: Problem[] }
 
 export const HEALTH_HORIZON_DAYS = 14;
@@ -27,7 +32,7 @@ export function pagingHealth(
   config: PagingConfig | null,
   w: PagingWorld,
   now: Date,
-  opts: { slackChannelVerified?: boolean; horizonDays?: number } = {},
+  opts: { slackChannelVerified?: boolean; horizonDays?: number; smsVoiceRequireVerified?: boolean } = {},
 ): PagingHealth {
   const problems: Problem[] = [];
   const slackOk = opts.slackChannelVerified ?? false;
@@ -52,7 +57,13 @@ export function pagingHealth(
     }
     if (step.channels.some((c) => c === 'SMS' || c === 'VOICE')) {
       const noPhone = targets.filter((t) => !reachableVia(w.contacts.get(t.contactId)!, 'SMS', false)).map((t) => t.contactId);
-      if (noPhone.length) problems.push({ code: 'NO_VERIFIED_PHONE', stepIndex: step.index, contactIds: noPhone, message: `Step ${step.index + 1} calls or texts people without a verified phone.` });
+      const skipped = opts.smsVoiceRequireVerified ?? SMS_VOICE_REQUIRE_VERIFIED;
+      if (noPhone.length) {
+        problems.push({
+          code: 'NO_VERIFIED_PHONE', stepIndex: step.index, contactIds: noPhone, ...(skipped ? { skipped: true } : {}),
+          message: skipped ? `Step ${step.index + 1}: SMS and calls to people without a verified phone are not sent.` : `Step ${step.index + 1} calls or texts people without a verified phone.`,
+        });
+      }
     }
     if (step.targetType === 'ROTATION' && step.targetId) {
       const gap = rotationGap(step.targetId, w, now, opts.horizonDays ?? HEALTH_HORIZON_DAYS);

@@ -11,10 +11,11 @@
  * - Every notification has a deterministic key (incident + purpose + step + repeat + channel + target), so planning
  *   the same state twice produces the same keys (outbox UQ absorbs duplicates).
  * - Ack stops paging (R6-3, D-24). Acked and unresolved incidents are re-notified (R5-2).
- * - Maintenance mutes everything but SEV-1 (D-17); the step counter is not touched while muted (R4-6).
+ * - Maintenance mutes everything but SEV-1 (D-17), manual escalation included (R-7); the step counter is not touched while muted (R4-6).
  */
+import { MAX_ALL_RESPONDERS, MAX_RENOTIFY, MAX_REPEAT, MAX_SENDS_PER_CYCLE } from './limits.js';
 import { coveringWindow, type MaintenanceWindow } from './maintenance.js';
-import { resolvePagingConfig, resolveStep, type PagingConfig, type PagingWorld, type ResolvedTarget, type ScopeLevel, type StepChannel, type TargetType } from './paging.js';
+import { resolvePagingConfig, resolveStep, type EscalationStep, type PagingConfig, type PagingWorld, type ResolvedTarget, type ScopeLevel, type StepChannel, type TargetType } from './paging.js';
 import type { Severity } from './types.js';
 
 export interface SnapshotStep {
@@ -75,7 +76,7 @@ export function buildSnapshot(
   });
   return {
     capturedAt: at.toISOString(), pagingConfigId: hit.config.id, level: hit.inheritedFrom, planLabel: planLabel(hit.config),
-    steps, repeatCount: Math.max(0, Math.floor(hit.config.repeatCount)), renotifyAfterAckSec: hit.config.renotifyAfterAckSec ?? null,
+    steps, repeatCount: clampRepeat(hit.config.repeatCount), renotifyAfterAckSec: hit.config.renotifyAfterAckSec ?? null,
     leaveApplied: [...leaveApplied],
   };
 }
@@ -89,7 +90,34 @@ export function parseSnapshot(raw: unknown): AssignmentSnapshot | null {
     if (!st || typeof st.atMin !== 'number' || !Number.isFinite(st.atMin) || !Array.isArray(st.channels) || !Array.isArray(st.resolved)) return null;
     if (st.resolved.some((r) => !r || typeof r.contactId !== 'string')) return null;
   }
-  return s as AssignmentSnapshot;
+  // The engine never trusts the stored repeat count beyond the cap (R-1c).
+  return { ...(s as AssignmentSnapshot), repeatCount: clampRepeat(s.repeatCount) };
+}
+
+const clampRepeat = (n: number): number => (Number.isFinite(n) ? Math.max(0, Math.min(MAX_REPEAT, Math.floor(n))) : 0);
+
+/**
+ * How many notifications one incident produces with this call order (R-1): `perCycle` = one pass of the ladder,
+ * `perHour` = the busiest 60-minute window including repeats. A step sends one message per person channel per
+ * person, plus one for the Slack channel. `allResponders` = people an ALL_RESPONDERS step reaches now.
+ */
+export function estimateSends(steps: Array<Pick<EscalationStep, 'atMin' | 'targetType' | 'channels'>>, repeatCount: number, allResponders: number): { perCycle: number; perHour: number } {
+  if (steps.length === 0) return { perCycle: 0, perHour: 0 };
+  const people = (s: Pick<EscalationStep, 'targetType'>) => (s.targetType === 'ALL_RESPONDERS' ? Math.max(1, Math.min(allResponders, MAX_ALL_RESPONDERS)) : 1);
+  const count = steps.map((s) => s.channels.reduce((n, ch) => n + (ch === 'SLACK_CHANNEL' ? 1 : people(s)), 0));
+  const perCycle = count.reduce((a, b) => a + b, 0);
+  // Same clock as nextStep(): a step waits atMin(i) − atMin(i−1) after the previous page; a repeat waits the last gap.
+  const gap = repeatGapMin(steps) + steps[0]!.atMin;
+  const sends: Array<{ at: number; n: number }> = [];
+  let t = 0;
+  for (let cycle = 0; cycle <= clampRepeat(repeatCount); cycle++) {
+    steps.forEach((s, i) => {
+      t += i === 0 ? (cycle === 0 ? s.atMin : gap) : Math.max(0, s.atMin - steps[i - 1]!.atMin);
+      sends.push({ at: t, n: count[i]! });
+    });
+  }
+  const perHour = Math.max(...sends.map((a) => sends.filter((b) => b.at >= a.at && b.at < a.at + 60).reduce((n, b) => n + b.n, 0)));
+  return { perCycle, perHour };
 }
 
 /** "Haeun Kim → Yuna Seo → everyone in Responders (5)" — the timeline line written at open. */
@@ -128,7 +156,7 @@ export const CATCHUP_TOLERANCE_MS = 90_000;
 export const RECHECK_MS = 5 * 60_000;
 const MIN = 60_000;
 
-export function repeatGapMin(steps: SnapshotStep[]): number {
+export function repeatGapMin(steps: Array<{ atMin: number }>): number {
   const n = steps.length;
   const d = n >= 2 ? steps[n - 1]!.atMin - steps[n - 2]!.atMin : 0;
   return d > 0 ? d : REPEAT_GAP_DEFAULT_MIN;
@@ -178,6 +206,7 @@ export function renotifyDueAt(inc: EscalationState, policySec: number): Date | n
   const after = renotifyAfterSec(inc, policySec);
   const base = inc.renotifiedAt ?? inc.acknowledgedAt;
   if (!snap || !snap.steps.length || after <= 0 || !base) return null;
+  if (inc.renotifyCount >= MAX_RENOTIFY) return null; // N-2: reminders stop after the cap
   return new Date(base.getTime() + after * 1000);
 }
 
@@ -265,7 +294,8 @@ function intentsFor(inc: EscalationState, step: SnapshotStep, purpose: NotifyPur
     if (ch === 'SLACK_CHANNEL') add('SLACK_BOT', SCOPE_CHANNEL_TARGET, null);
     else for (const r of step.resolved) add(ch, r.contactId, r);
   }
-  return [...out.values()];
+  // Hard stop per step (R-1c): a snapshot that slipped past the API cap cannot flood the outbox.
+  return [...out.values()].slice(0, MAX_SENDS_PER_CYCLE);
 }
 
 /** Incident with no paging snapshot (unmapped account, no config): one post to the MSP default channel, nobody is paged (R1-9). */
@@ -305,7 +335,7 @@ export interface PlanContext {
   mutedUntil?: Date | null;
   /** All notifications of the last fired step ended FAILED/SKIPPED (only matters when that step has advanceOnAllFail). */
   lastStepAllFailed?: boolean;
-  /** Manual "Escalate now": fire the next step regardless of wait and mute. */
+  /** Manual "Escalate now": fire the next step regardless of the wait. A maintenance mute still applies (R-7; SEV-1 is never muted). */
   force?: { by: string };
 }
 
@@ -320,7 +350,7 @@ export function planEscalation(inc: EscalationState, ctx: PlanContext): Escalati
   const { now } = ctx;
   if (inc.status === 'RESOLVED') return { kind: 'NONE', reason: 'RESOLVED', patch: reschedule(inc, null) };
   const snap = parseSnapshot(inc.assignmentSnapshot);
-  const muted = !!ctx.mutedUntil && !ctx.force;
+  const muted = !!ctx.mutedUntil;
   const muteRecheck = ctx.mutedUntil ? new Date(Math.min(ctx.mutedUntil.getTime(), now.getTime() + RECHECK_MS)) : null;
 
   if (inc.status === 'ACKNOWLEDGED') {

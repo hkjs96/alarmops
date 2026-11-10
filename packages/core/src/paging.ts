@@ -3,6 +3,8 @@
  * One function is shared by alert routing, `/oncall/now`, `/oncall/paging-path` and paging health
  * (known-bugs 7-3: inheritance display and routing must be the same function).
  */
+import { MAX_ALL_RESPONDERS } from './limits.js';
+
 export type ScopeLevel = 'SERVICE' | 'PROJECT' | 'CUSTOMER';
 export type TargetType = 'PERSON' | 'ROTATION' | 'ALL_RESPONDERS';
 export type StepChannel = 'SLACK_CHANNEL' | 'SLACK_DM' | 'SMS' | 'VOICE' | 'EMAIL';
@@ -132,14 +134,16 @@ export function isPageableFor(w: PagingWorld, contactId: string): boolean {
   return true;
 }
 
-export interface ResolvedTarget { contactId: string; name: string; via: string }
+/** `kind` lets a serializer tell MSP staff from the customer's own people without another lookup (absent = treat as staff). */
+export interface ResolvedTarget { contactId: string; name: string; via: string; kind?: 'INTERNAL' | 'CUSTOMER' }
 
 /** Resolve one step to concrete people at `at`. Invalid or inactive targets drop out (they show in health). */
 export function resolveStep(step: EscalationStep, w: PagingWorld, at: Date): ResolvedTarget[] {
   const out = new Map<string, ResolvedTarget>();
   const push = (id: string | null, via: string) => {
     if (!id || out.has(id) || !isPageableFor(w, id)) return;
-    out.set(id, { contactId: id, name: w.contacts.get(id)?.name ?? id, via });
+    const c = w.contacts.get(id);
+    out.set(id, { contactId: id, name: c?.name ?? id, via, kind: c?.kind ?? 'INTERNAL' });
   };
   if (step.targetType === 'PERSON') {
     if (step.targetId) {
@@ -155,7 +159,9 @@ export function resolveStep(step: EscalationStep, w: PagingWorld, at: Date): Res
     }
   } else {
     // ALL_RESPONDERS: PAGEABLE responders, leave applied (remove absent, add replacement, no dupes).
+    // Cut at MAX_ALL_RESPONDERS (R-1): the API refuses to save such a step, this covers people added afterwards.
     for (const r of w.responders) {
+      if (out.size >= MAX_ALL_RESPONDERS) break;
       if (r.customerId !== w.customerId || r.role !== 'PAGEABLE') continue;
       const rep = applyLeave(w.leaves, r.contactId, at);
       push(rep, rep === r.contactId ? 'responders' : 'leave');

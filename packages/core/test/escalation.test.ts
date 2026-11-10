@@ -298,10 +298,12 @@ describe('planEscalation is idempotent and words its events with the base time (
     expect(late.patch.nextEscalationAt).toEqual(at(35));
   });
 
-  it('manual escalate fires the next step now, even when muted; nothing left → DONE', () => {
-    const p = planEscalation({ ...inc, escalationStep: 1, escalationBaseAt: T0 }, { now: at(0, 30), ...POLICY, mutedUntil: at(60), force: { by: 'Haeun Kim' } });
+  it('manual escalate fires the next step now; a maintenance mute still holds it (R-7); nothing left → DONE', () => {
+    const p = planEscalation({ ...inc, escalationStep: 1, escalationBaseAt: T0 }, { now: at(0, 30), ...POLICY, force: { by: 'Haeun Kim' } });
     if (p.kind !== 'STEP') throw new Error();
     expect(p.event.message).toBe('Escalated manually by Haeun Kim → step 2/4: SMS Haeun Kim.');
+    // muted (the caller passes mutedUntil only when the incident is not SEV-1): nothing is sent, the step counter stays
+    expect(planEscalation({ ...inc, escalationStep: 1, escalationBaseAt: T0 }, { now: at(0, 30), ...POLICY, mutedUntil: at(60), force: { by: 'Haeun Kim' } }).kind).toBe('MUTED');
     expect(planEscalation({ ...inc, escalationStep: 4, escalationRepeat: 1, escalationDoneAt: at(29) }, { now: at(40), ...POLICY, force: { by: 'x' } })).toMatchObject({ kind: 'NONE', reason: 'DONE' });
   });
 

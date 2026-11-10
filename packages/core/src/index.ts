@@ -1,4 +1,5 @@
 export * from './types.js';
+export * from './limits.js';
 export * from './hash.js';
 export * from './severity.js';
 export * from './fingerprint.js';

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  FakeSender, MAX_ATTEMPTS, RETRY_DELAYS_SEC, ack, dispatchJob, heartbeatHealth, minuteKey, resolveDestination, retryAt, runTick, scheduleNext, unack,
+  CLAIM_LEASE_SEC, FakeSender, MAX_ATTEMPTS, RETRY_DELAYS_SEC, SMS_VOICE_REQUIRE_VERIFIED, ack, dispatchJob, heartbeatHealth, minuteKey, resolveDestination, retryAt, runTick, scheduleNext, unack,
   type Contact, type NotificationJob, type TickSummary,
 } from '../src/index.js';
 import { PATTERNS, Sim, T0, at, closedGroup, config, seedWorld, step } from './world.js';
@@ -313,7 +313,7 @@ describe('notification dispatch port', () => {
   const job = (o: Partial<NotificationJob> = {}): NotificationJob => ({
     id: 'job_1', idempotencyKey: 'inc:ESCALATION:1:0:SMS:ct_haeun', incidentId: 'inc', customerId: 'cus_mirae', purpose: 'ESCALATION', channel: 'SMS',
     targetRef: 'ct_haeun', contactId: 'ct_haeun', contactName: 'Haeun Kim', stepIndex: 1, repeat: 0, payload: { title: 't', severity: 'SEV_2', text: 'x', stepLabel: 'Step 2/4' },
-    status: 'SENDING', attempts: 1, nextAttemptAt: T0, lastError: null, providerMessageId: null, createdAt: T0, ...o,
+    status: 'SENDING', attempts: 1, claimSeq: 1, nextAttemptAt: T0, lastError: null, providerMessageId: null, createdAt: T0, ...o,
   });
   const ctx = (o: object = {}) => ({ now: T0, senders: { SMS: new FakeSender('sms') }, incidentStatus: 'TRIGGERED' as const, contact: contact(), slackChannels: [], ...o });
 
@@ -362,7 +362,8 @@ describe('notification dispatch port', () => {
     sim.store.dedupeTicks = false;
     await sim.tick(['group', 'escalation']);
     const claimed = await sim.store.claimDueJobs(T0, 10); // claimed, then the process dies
-    expect(claimed[0]).toMatchObject({ status: 'SENDING', attempts: 1, nextAttemptAt: at(0, 30) });
+    // a claim is a lease, not an attempt (R-3)
+    expect(claimed[0]).toMatchObject({ status: 'SENDING', attempts: 0, claimSeq: 1, nextAttemptAt: at(0, CLAIM_LEASE_SEC) });
     sim.now = at(0, 20);
     await sim.tick(['notify']);
     expect(sim.sms.sent).toHaveLength(0);
@@ -376,13 +377,26 @@ describe('notification dispatch port', () => {
     expect(await dispatchJob(job(), ctx({ senders: { SMS: sms } }))).toMatchObject({ status: 'FAILED', log: { status: 'FAILED', attempt: 1 } });
     expect(await dispatchJob(job(), ctx({ senders: {} }))).toMatchObject({ status: 'FAILED', error: 'No SMS sender is configured' });
     const throwing = { send: async () => { throw new Error('socket hang up'); } };
-    expect(await dispatchJob(job(), ctx({ senders: { SMS: throwing } }))).toEqual({ status: 'RETRY', error: 'socket hang up' });
+    expect(await dispatchJob(job(), ctx({ senders: { SMS: throwing } }))).toEqual({ status: 'RETRY', error: 'socket hang up', errorCode: 'PROVIDER_ERROR' });
     expect(await dispatchJob(job({ attempts: 5 }), ctx({ senders: { SMS: throwing } }))).toMatchObject({ status: 'FAILED' });
   });
 
-  it('channel verification (R9-3, D-32): unverified addresses are still used and flagged; missing address / inactive person is a skip without a log', async () => {
-    const unverified = await dispatchJob(job(), ctx({ contact: contact({ phoneVerifiedAt: null }) }));
+  it('channel verification (R9-3, D-32, Q-DM-16): SMS/voice to an unverified number follows SMS_VOICE_REQUIRE_VERIFIED; missing address / inactive person is a skip without a log', async () => {
+    // switch off (R9-3 as specified): still sent, flagged
+    const unverified = await dispatchJob(job(), ctx({ contact: contact({ phoneVerifiedAt: null }), requireVerifiedPhone: false }));
     expect(unverified).toMatchObject({ status: 'SENT', warnings: ['UNVERIFIED_ADDRESS'], log: { warnings: ['UNVERIFIED_ADDRESS'] } });
+    // switch on — and the default, which must be the safe value
+    expect(SMS_VOICE_REQUIRE_VERIFIED).toBe(true);
+    for (const o of [{ requireVerifiedPhone: true }, {}]) {
+      for (const channel of ['SMS', 'VOICE'] as const) {
+        const sms = new FakeSender('x');
+        expect(await dispatchJob(job({ channel }), ctx({ contact: contact({ phoneVerifiedAt: null }), senders: { SMS: sms, VOICE: sms }, ...o }))).toEqual({ status: 'SKIPPED', reason: 'unverified' });
+        expect(sms.attempts).toHaveLength(0);
+      }
+    }
+    // Slack DM and e-mail are not part of the switch
+    expect(await dispatchJob(job({ channel: 'EMAIL' }), ctx({ contact: contact({ emailVerifiedAt: null }), senders: { EMAIL: new FakeSender('e') }, requireVerifiedPhone: true })))
+      .toMatchObject({ status: 'SENT', warnings: ['UNVERIFIED_ADDRESS'] });
     expect(await dispatchJob(job(), ctx())).toMatchObject({ status: 'SENT', warnings: [] });
     expect(await dispatchJob(job(), ctx({ contact: contact({ phone: null }) }))).toEqual({ status: 'SKIPPED', reason: 'no_address' });
     expect(await dispatchJob(job(), ctx({ contact: contact({ active: false }) }))).toEqual({ status: 'SKIPPED', reason: 'contact_inactive' });

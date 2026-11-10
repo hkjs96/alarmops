@@ -15,8 +15,9 @@
 import { buildSnapshot, incidentMute, planEscalation, scheduleNext, snapshotSummary, unownedInitialIntent, type NotificationIntent } from './escalation.js';
 import { GROUP_GRACE_SEC, representative, type GroupRow } from './grouping.js';
 import { addMember, mergeOrOpen, newIncident, incidentId, resolve, type IncidentRow } from './incident.js';
+import { NOTIFY_RESERVE_MS, SMS_VOICE_REQUIRE_VERIFIED } from './limits.js';
 import type { MaintenanceWindow } from './maintenance.js';
-import { dispatchJob, NOTIFY_BATCH, type DeliveryLog, type NotificationJob, type Senders } from './notify.js';
+import { dispatchJob, NOTIFY_BATCH, type DeliveryLog, type DeliveryReason, type NotificationJob, type Senders } from './notify.js';
 import type { Contact, PagingConfig, PagingWorld } from './paging.js';
 import type { SuppressionPolicy } from './policy.js';
 import type { Severity, Source } from './types.js';
@@ -107,6 +108,12 @@ export interface IncidentCommit {
   audit?: AuditInput;
   /** D-24: an incident ack acknowledges every member alert (Alert.status FIRING → ACKNOWLEDGED); UNACK reverts that. */
   memberEffect?: 'ACK' | 'UNACK';
+  /**
+   * Undo of an ack (R-8): pages of this step/repeat that were cancelled BECAUSE of the ack
+   * (status SKIPPED, reason `acknowledged`, purpose INITIAL/ESCALATION) go back to QUEUED, due at `at`.
+   * Pages of earlier steps are never restored; sent or failed pages are not touched.
+   */
+  restoreAckSkipped?: { stepIndex: number; repeat: number; at: Date };
 }
 
 export interface HeartbeatRow {
@@ -150,8 +157,8 @@ export interface TickRepository {
   // ② / ③ incidents
   /** Active incidents with ≥1 member and no member episode open (I-5), oldest first. */
   listAutoResolvable(limit: number): Promise<IncidentRow[]>;
-  /** nextEscalationAt ≤ now, earliest first. */
-  listEscalationDue(now: Date, limit: number): Promise<IncidentRow[]>;
+  /** nextEscalationAt ≤ now, earliest first. `excludeIds`: incidents that already failed in this tick (N-8). */
+  listEscalationDue(now: Date, limit: number, excludeIds?: string[]): Promise<IncidentRow[]>;
   /** Not revoked, covering `at`, for this customer (plus MSP-wide windows). */
   maintenanceWindows(customerId: string | null, at: Date): Promise<MaintenanceWindow[]>;
   /** True when the step has notifications and all of them ended FAILED or SKIPPED. */
@@ -160,15 +167,33 @@ export interface TickRepository {
 
   // ④ outbox
   /**
-   * Claim QUEUED (or stuck SENDING) jobs with nextAttemptAt ≤ now: status SENDING, attempts+1,
-   * nextAttemptAt = retryAt(attempts) — all in the claiming UPDATE (R1-2).
+   * Claim due jobs (QUEUED, or SENDING whose lease ran out) with nextAttemptAt ≤ now, in `fairOrder` (round-robin
+   * by customer, SEV-1 first — R-1): status SENDING, claimSeq+1, nextAttemptAt = now + CLAIM_LEASE_SEC, all in the
+   * claiming UPDATE. `attempts` is NOT touched (R-3). A due job that already used MAX_ATTEMPTS sends (the process
+   * died during the last one) becomes FAILED with a NotificationLog row (errorCode GAVE_UP) and is not returned.
    */
   claimDueJobs(now: Date, limit: number): Promise<NotificationJob[]>;
-  incidentStatus(incidentId: string): Promise<IncidentRow['status'] | null>;
+  /**
+   * Right before the provider call: `attempts+1, nextAttemptAt = retryAt(attempts) WHERE status='SENDING' AND claimSeq=?`.
+   * Returns the new attempt number, or null when the claim is no longer ours (then the caller must not send).
+   */
+  beginSend(jobId: string, claimSeq: number, now: Date): Promise<number | null>;
+  /** Give back a claimed job that was not reached (budget): QUEUED, due now. Guarded by the claim token. */
+  releaseJob(jobId: string, claimSeq: number, now: Date): Promise<boolean>;
+  /** The incident a job belongs to (status for the ack check, org position and severity for the maintenance check). */
+  findIncidentById(incidentId: string): Promise<IncidentRow | null>;
   getContact(contactId: string): Promise<Contact | null>;
   /** Slack destinations for a job: the incident's most specific scope channels (R4-3), or the MSP default. */
-  slackDestinations(job: NotificationJob): Promise<string[]>;
-  completeJob(jobId: string, r: { status: 'SENT' | 'FAILED' | 'SKIPPED' | 'QUEUED'; providerMessageId?: string | null; error?: string | null }, log?: DeliveryLog): Promise<void>;
+  slackDestinations(job: NotificationJob): Promise<{ channels: string[]; owner: 'CUSTOMER' | 'MSP' }>;
+  /**
+   * Write the result `WHERE status='SENDING' AND claimSeq=?` (R-2): a run that lost its claim changes nothing and
+   * gets false — a SENT job can never go back to QUEUED. `log` and `event` are written in the same transaction.
+   */
+  completeJob(
+    jobId: string, claimSeq: number,
+    r: { status: 'SENT' | 'FAILED' | 'SKIPPED' | 'QUEUED'; providerMessageId?: string | null; error?: string | null; errorCode?: DeliveryReason | null },
+    log?: DeliveryLog, event?: IncidentEventInput,
+  ): Promise<boolean>;
 
   // ⑤ heartbeat
   writeHeartbeat(hb: HeartbeatWrite): Promise<void>;
@@ -187,8 +212,16 @@ export interface TickDeps {
   /** Max rows per phase (default 200; outbox 50 per R1-4). */
   batch?: number;
   notifyBatch?: number;
-  /** Wall-clock budget; phases stop taking new work after it (default 45s of the 50s response limit). */
+  /**
+   * Wall-clock budget; phases stop taking new work after it (default 45s of the 50s response limit).
+   * The phases before the outbox stop NOTIFY_RESERVE_MS earlier (at most a quarter of the budget), so pages go out
+   * even when grouping and escalation are busy (R-3).
+   */
   budgetMs?: number;
+  /** Per provider call (default SEND_TIMEOUT_MS). */
+  sendTimeoutMs?: number;
+  /** Q-DM-16 switch (default SMS_VOICE_REQUIRE_VERIFIED). */
+  smsVoiceRequireVerified?: boolean;
   log?: (level: 'info' | 'warn' | 'error', msg: string, data?: Record<string, unknown>) => void;
 }
 
@@ -220,7 +253,9 @@ export async function runTick(input: TickInput, deps: TickDeps): Promise<TickRes
 
   const jobs = new Set<TickJob>(input.jobs?.length ? input.jobs : TICK_JOBS);
   const batch = deps.batch ?? DEFAULT_BATCH;
-  const deadline = started.getTime() + (deps.budgetMs ?? DEFAULT_BUDGET_MS);
+  const budget = Math.max(0, deps.budgetMs ?? DEFAULT_BUDGET_MS);
+  const deadline = started.getTime() + budget;
+  const softDeadline = deadline - Math.min(NOTIFY_RESERVE_MS, Math.floor(budget / 4));
   const sum: TickSummary = {
     scheduledAt: key,
     group: { closed: 0, delivered: 0, opened: 0, merged: 0, empty: 0, paused: 0, conflicts: 0 },
@@ -229,7 +264,7 @@ export async function runTick(input: TickInput, deps: TickDeps): Promise<TickRes
     notify: { sent: 0, failed: 0, retried: 0, skipped: 0 },
     errors: [], truncated: false, durationMs: 0,
   };
-  const ctx: Ctx = { ...deps, clock, batch, deadline, sum, policy: await deps.repo.loadPolicy() };
+  const ctx: Ctx = { ...deps, clock, batch, deadline, softDeadline, sum, policy: await deps.repo.loadPolicy() };
 
   const phases: Array<[TickJob, () => Promise<void>, () => Record<string, unknown>]> = [
     ['group', () => groupPhase(ctx), () => sum.group],
@@ -267,12 +302,14 @@ interface Ctx extends TickDeps {
   clock: () => Date;
   batch: number;
   deadline: number;
+  /** Deadline of every phase before the outbox. */
+  softDeadline: number;
   sum: TickSummary;
   policy: SuppressionPolicy;
 }
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
-const overBudget = (c: Ctx): boolean => {
-  if (c.clock().getTime() < c.deadline) return false;
+const overBudget = (c: Ctx, phase: TickJob = 'group'): boolean => {
+  if (c.clock().getTime() < (phase === 'notify' ? c.deadline : c.softDeadline)) return false;
   c.sum.truncated = true;
   return true;
 };
@@ -395,14 +432,14 @@ async function openIncident(c: Ctx, g: GroupRow, firing: GroupMember[], now: Dat
     inc = { ...inc, projectId: org?.projectId ?? null, serviceId: org?.serviceId ?? null, assignmentSnapshot: snapshot, pagingConfigId: snapshot?.pagingConfigId ?? null };
     if (snapshot) {
       events.push({ incidentId: inc.id, customerId: inc.customerId, at: inc.triggeredAt, kind: 'NOTE', actorType: 'SYSTEM', actorId: null,
-        message: `Paging steps at open: ${snapshotSummary(snapshot)}`, data: { pagingConfigId: snapshot.pagingConfigId, level: snapshot.level } });
+        message: `Paging steps at open: ${snapshotSummary(snapshot)}`, data: { note: 'PAGING_ORDER', pagingConfigId: snapshot.pagingConfigId, level: snapshot.level } });
     }
   }
   if (!inc.assignmentSnapshot) {
     // Unmapped account or no call order: nobody is paged (R1-9). Say so once on the MSP channel and the timeline.
     jobs.push(unownedInitialIntent(inc));
     events.push({ incidentId: inc.id, customerId: inc.customerId, at: inc.triggeredAt, kind: 'NOTE', actorType: 'SYSTEM', actorId: null,
-      message: inc.customerId ? 'Nobody is paged: no call order is configured for this customer.' : 'Nobody is paged: the AWS account is not assigned to a customer.' });
+      message: inc.customerId ? 'Nobody is paged: no call order is configured for this customer.' : 'Nobody is paged: the AWS account is not assigned to a customer.', data: { note: 'NO_OWNER' } });
   }
   inc = { ...inc, nextEscalationAt: scheduleNext(inc, { now, renotifyAfterSec: c.policy.renotifyAfterSec }) };
   return { row: inc, events, jobs };
@@ -437,18 +474,28 @@ async function reconcilePhase(c: Ctx): Promise<void> {
 // ───────────────────────────── ③ escalation + re-notify ─────────────────────────────
 
 async function escalationPhase(c: Ctx): Promise<void> {
-  const due = await c.repo.listEscalationDue(c.clock(), c.batch);
-  if (due.length >= c.batch) c.sum.truncated = true;
-  for (const inc of due) {
-    if (overBudget(c)) return;
-    c.sum.escalation.checked++;
-    try {
-      await escalateOne(c, inc);
-    } catch (err) {
-      c.sum.errors.push({ phase: 'escalation', id: inc.id, message: errMsg(err) });
+  // N-8: an incident that fails stays first in the due list. Ask again without the ones that failed, so a block
+  // of broken incidents cannot starve the rest of the batch (they are tried again next tick, not pushed back).
+  const failed: string[] = [];
+  for (let round = 0; round < MAX_ESCALATION_ROUNDS; round++) {
+    const due = await c.repo.listEscalationDue(c.clock(), c.batch, failed.length ? failed : undefined);
+    if (due.length >= c.batch) c.sum.truncated = true;
+    let failedNow = 0;
+    for (const inc of due) {
+      if (overBudget(c)) return;
+      c.sum.escalation.checked++;
+      try {
+        await escalateOne(c, inc);
+      } catch (err) {
+        failed.push(inc.id);
+        failedNow++;
+        c.sum.errors.push({ phase: 'escalation', id: inc.id, message: errMsg(err) });
+      }
     }
+    if (failedNow === 0 || due.length < c.batch) return;
   }
 }
+const MAX_ESCALATION_ROUNDS = 3;
 
 async function escalateOne(c: Ctx, inc: IncidentRow): Promise<void> {
   const now = c.clock();
@@ -484,33 +531,70 @@ async function escalateOne(c: Ctx, inc: IncidentRow): Promise<void> {
 
 async function notifyPhase(c: Ctx): Promise<void> {
   const limit = c.notifyBatch ?? NOTIFY_BATCH;
+  // R-3: look at the budget BEFORE claiming — a tick that cannot send must not touch the jobs at all.
+  if (overBudget(c, 'notify')) return;
   const jobs = await c.repo.claimDueJobs(c.clock(), limit);
   if (jobs.length >= limit) c.sum.truncated = true;
-  for (const job of jobs) {
-    // Claimed jobs we do not reach keep their pre-written nextAttemptAt and come back by themselves.
-    if (overBudget(c)) return;
+  const windows = new Map<string, MaintenanceWindow[]>();
+  for (let i = 0; i < jobs.length; i++) {
+    const job = jobs[i]!;
+    if (overBudget(c, 'notify')) {
+      // Not reached: hand the claims back untouched (no attempt counted, due at once for the next tick).
+      for (const rest of jobs.slice(i)) {
+        try { await c.repo.releaseJob(rest.id, rest.claimSeq, c.clock()); } catch (err) { c.sum.errors.push({ phase: 'notify', id: rest.id, message: errMsg(err) }); }
+      }
+      return;
+    }
     try {
       const now = c.clock();
+      const inc = await c.repo.findIncidentById(job.incidentId);
       const person = job.contactId ? await c.repo.getContact(job.contactId) : null;
-      const slack = job.channel === 'SLACK_BOT' || job.channel === 'SLACK_WEBHOOK' ? await c.repo.slackDestinations(job) : [];
-      const out = await dispatchJob(job, { now, senders: c.senders, incidentStatus: await c.repo.incidentStatus(job.incidentId), contact: person, slackChannels: slack });
-      if (out.status === 'SENT') {
-        await c.repo.completeJob(job.id, { status: 'SENT', providerMessageId: out.providerMessageId }, out.log);
-        c.sum.notify.sent++;
-      } else if (out.status === 'FAILED') {
-        await c.repo.completeJob(job.id, { status: 'FAILED', error: out.error }, out.log);
-        c.sum.notify.failed++;
-      } else if (out.status === 'RETRY') {
-        await c.repo.completeJob(job.id, { status: 'QUEUED', error: out.error });
-        c.sum.notify.retried++;
-      } else {
-        await c.repo.completeJob(job.id, { status: 'SKIPPED', error: out.reason });
-        c.sum.notify.skipped++;
+      const slack = job.channel === 'SLACK_BOT' || job.channel === 'SLACK_WEBHOOK' ? await c.repo.slackDestinations(job) : { channels: [], owner: 'MSP' as const };
+      let muted = false;
+      if (inc && inc.status !== 'RESOLVED' && inc.severity !== 'SEV_1') {
+        const k = inc.customerId ?? '';
+        if (!windows.has(k)) windows.set(k, await c.repo.maintenanceWindows(inc.customerId, now));
+        muted = !!incidentMute({ customerId: inc.customerId, projectId: inc.projectId, serviceId: inc.serviceId, accountIds: inc.accountIds, resourceTypes: inc.resourceTypes, severity: inc.severity }, windows.get(k)!, now);
       }
+      const out = await dispatchJob(job, {
+        now, senders: c.senders, incidentStatus: inc?.status ?? null, contact: person, slackChannels: slack.channels, slackOwner: slack.owner, muted,
+        requireVerifiedPhone: c.smsVoiceRequireVerified ?? SMS_VOICE_REQUIRE_VERIFIED, sendTimeoutMs: c.sendTimeoutMs,
+        beginSend: () => c.repo.beginSend(job.id, job.claimSeq, c.clock()),
+      });
+      if (out.status === 'LOST') continue;
+      let written: boolean;
+      if (out.status === 'SENT') {
+        written = await c.repo.completeJob(job.id, job.claimSeq, { status: 'SENT', providerMessageId: out.providerMessageId }, out.log);
+        if (written) c.sum.notify.sent++;
+      } else if (out.status === 'FAILED') {
+        written = await c.repo.completeJob(job.id, job.claimSeq, { status: 'FAILED', error: out.error, errorCode: out.errorCode }, out.log);
+        if (written) c.sum.notify.failed++;
+      } else if (out.status === 'RETRY') {
+        written = await c.repo.completeJob(job.id, job.claimSeq, { status: 'QUEUED', error: out.error, errorCode: out.errorCode });
+        if (written) c.sum.notify.retried++;
+      } else {
+        written = await c.repo.completeJob(job.id, job.claimSeq, { status: 'SKIPPED', error: out.reason }, undefined, inc ? skipEvent(job, out.reason, now) : undefined);
+        if (written) c.sum.notify.skipped++;
+        // R-9: a recipient outside the job's tenant means a broken snapshot or job row — never silent.
+        if (out.reason === 'tenant_mismatch') c.sum.errors.push({ phase: 'notify', id: job.id, message: 'recipient does not belong to the incident customer; not sent' });
+      }
+      if (!written) c.log?.('warn', 'notify_result_discarded', { jobId: job.id, claimSeq: job.claimSeq, outcome: out.status });
     } catch (err) {
       c.sum.errors.push({ phase: 'notify', id: job.id, message: errMsg(err) });
     }
   }
+}
+
+const CHANNEL_WORD: Partial<Record<NotificationJob['channel'], string>> = { SMS: 'SMS', VOICE: 'Call' };
+
+/** Skips an operator has to know about get a timeline line (Q-DM-16: unverified phone). Others stay silent (R1-3). */
+function skipEvent(job: NotificationJob, reason: string, now: Date): IncidentEventInput | undefined {
+  if (reason !== 'unverified') return undefined;
+  return {
+    incidentId: job.incidentId, customerId: job.customerId, at: now, kind: 'NOTE', actorType: 'SYSTEM', actorId: null,
+    message: `${job.payload.stepLabel}: ${CHANNEL_WORD[job.channel] ?? job.channel} to ${job.contactName ?? 'this person'} was not sent — the phone number is not verified.`,
+    data: { note: 'SKIPPED_UNVERIFIED', stepIndex: job.stepIndex, repeat: job.repeat, channel: job.channel, contactId: job.contactId },
+  };
 }
 
 // ───────────────────────────── heartbeat staleness (D-10) ─────────────────────────────
