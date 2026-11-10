@@ -313,3 +313,94 @@
 **머지 보류 — P1 1건(P1-A).** 이전 P1 3건(같은 자리 두 번 탭, 패널 Undo·Resolve, 폰 토스트)과 P2 8건 중 확인 대상 전부가 고쳐졌고 회귀는 없다. 그러나 데스크톱에서 Ack 후 다음 행으로 마우스를 옮기면 다른 고객의 인시던트가 Ack되는 경로가 새로 확인됐다(4/4 재현, 빌드본 포함). 수정 방향 제안: 포인터가 행을 벗어났다고 바로 재정렬하지 말고 5초(또는 포인터가 목록 밖으로 나갈 때)까지 순서를 유지. P1-A 수정 후 H3-b와 "Ack 안전 추가 시도" 표만 재실행하면 됨. P2-A·P2-B는 같은 PR에서 처리 권장(P2-A는 Undo를 Acknowledge가 있던 자리와 겹치지 않게 두면 해결).
 
 점검 한계: 목 서버에 목록 자동 갱신(12초 tick)·다른 사람의 Ack로 인한 재정렬이 없어 "고정 중 서버가 목록을 바꾸는 경우"는 못 봄. 터치는 Playwright 에뮬레이션(실기기 아님). 대비 4.5:1은 눈으로만 확인. 샌드박스에서 Google Fonts가 막혀 Space Mono는 대체 글꼴로 렌더링됨.
+
+## Console 범위 틀 최종 점검 — 2026-11-10
+
+대상: `apps/console` (feat/console-scope, 커밋 `de84c34` = `acfb425` + origin/main 문서 PR #6 병합). 수정한 쪽과 무관한 독립 점검. 빌드본을 직접 기동(`next build` → `E2E_ALLOW_MOCK=1 MOCK_API=1 next start -p 3119`, 시나리오마다 재기동해 Ack 상태 초기화, 34곳은 `MOCK_CUSTOMERS=34`)하고 Playwright로 1440×900·1280×900·1024×768(마우스), 390×740·390×844(터치)를 조작했다. 마우스는 곡선 경로로 12ms 간격 이동. 모든 Ack/Undo/Resolve 구간에서 프레임마다 각 행의 x·y·폭·높이와 행 순서를 기록해 변화를 셌고, 결과는 화면이 아니라 새 세션으로 다시 읽은 서버 상태로 확인했다. 캡처: `docs/qa/shots/console-scope/qa-1110c/` (gitignore 대상, 로컬 전용).
+
+### 통합 (origin/main 병합 뒤)
+
+| 항목 | 결과 |
+|---|---|
+| 병합 | 충돌 없음(문서만 추가·변경, `package-lock.json` 변화 없음) |
+| `npm test` | 통과 — console 76, core 81, design-system 83, ingest 32 (합 272), db 스키마 검사 통과 |
+| `npm run typecheck` | 통과 (console, core, design-system, ingest) |
+| console `eslint .` | 통과 (경고 0) |
+| `next build` | 통과 |
+| Playwright (3107) | 81 / 81 통과 |
+
+### 이전 실패 항목 재실행
+
+| # | 이전 문제 | 폭 | 결과 | 측정·관찰 | 캡처 |
+|---|---|---|---|---|---|
+| P1-A | 1행 Ack 뒤 2행 Acknowledge로 이동해 클릭 (0.3 / 0.7 / 1.5초) | 1440 | 통과 | 3회 모두 포인터 밑은 2행(Hanbit) 버튼, 서버에서도 Mirae Pay·Hanbit만 Ack, Daon은 Triggered 그대로. 행 이동 0건 | A1-700 |
+| P1-A | 1·2·3행 연달아 Ack (간격 0.65초, 0.2초) | 1440 | 통과 | 두 속도 모두 세 건이 각자 Ack, 미매핑 계정 행만 Triggered. 행 이동 0건. 14초 더 기다려도 재정렬 없음 | A2-three |
+| P1-A | 패널이 열린 상태에서 목록 1행 → 2행 | 1440·1280 | 통과 | Mirae Pay·Hanbit Ack, 행 이동 0건, 표 넘침 0px | B-panel-1440, B-panel-1280 |
+| P1-A | 스크롤한 뒤 1행 → 2행 | 1440×700 | 통과 | 300px 내린 상태에서 동일. 행 이동 0건 | C-scrolled |
+| P1-A | 필터를 켠 상태 (SEV-2, 고객=Daon) | 1440 | 통과 | SEV-2: Hanbit → Daon 순서대로 Ack, 목록 밖 두 건은 그대로. 고객 필터: 1건 Ack, "Outside this view: 3 open … · 2 acknowledged" 일치. 행 이동 0건 | D-filter |
+| 행 고정 | Ack / Undo(행 메뉴, 토스트) / Resolve(패널) 뒤 행 위치 | 1440·1280·390 | 통과 | 모든 구간에서 어떤 행의 상자도 변하지 않음(프레임 기록 0건, 전후 비교 일치). Resolve한 행은 제자리에 "Resolved ✓", 다른 사람이 바꾼 행도 제자리 | B2-resolved-1440, X2-others |
+| 재정렬 줄 | "N acknowledged in place · Re-sort" | 1440·390 | 통과 | 1·2·3건마다 숫자 일치. Undo하면 줄이 사라지고, 재정렬 뒤 Undo는 "1 reopened in place", Resolve는 "1 no longer in this list". Re-sort를 눌렀을 때만 순서가 바뀜(Ack'd 묶음으로 이동). 더블클릭해도 한 번만 정렬되고 그 자리에는 아무것도 없음. 패널 열고 닫기·14초 대기로는 정렬되지 않음 | A2-resorted, F-resorted |
+| P2-A | Undo 위치, 같은 자리 느린 두 번째 누름 | 1440 목록 | 통과 | Ack 자리(x1303–1403)에 0.3·0.7·1.5·3.0초 뒤 다시 눌러도 아무 일 없음(그 자리는 글자뿐, 패널도 안 열림). Undo는 "⋯"(x1199–1231) → "Undo acknowledge"(행 아래쪽에 뜸), 토스트, 패널 링크 세 곳. "⋯" 더블클릭은 열렸다 닫힐 뿐 Undo에 닿지 않음 | E-menu |
+| P2-A | 같은 자리 느린 두 번째 탭 | 390 목록·패널 | 통과 | 목록: 0.15·0.7·1.5·3.0초 탭 모두 무시, 1건만 Ack. "⋯"는 카드 반대쪽(x315–359, 44×44). 패널: 0.3·1.0·1.5·2.5초 탭 모두 무시, "Undo acknowledge"는 왼쪽 아래(x29–141)로 Ack 버튼(x228–361)과 떨어져 있음 | M1-acked-390, M3-panel-acked-390 |
+| P2-B | 패널 열린 상태에서 Ack 뒤 넘침·잘림 | 1440·1280 | 통과 | 목록에서 Ack, 패널에서 Ack, Resolve 뒤 모두 표 넘침 0px, 잘린 버튼·글자 0개, 문서 가로 넘침 0 | B2-panel-acked-1280 |
+| P3-A | 키보드 Ack 뒤 포커스 | 1440 | 통과 | Enter 뒤 포커스가 그 행의 "Acknowledged ✓"에 남음. Shift+Tab → "⋯" → Enter → 메뉴 항목 → Enter로 Undo, 포커스는 돌아온 Acknowledge 버튼. Enter 3번·A 3번을 쉬지 않고 눌러도 1건만 Ack | K1-focus |
+| 409 | 다른 세션이 먼저 바꾼 행·패널 | 1440 | 통과 | 행: "Changed since loaded" + Reload / "Not acknowledged", Ack 자리는 비어 있고 행 이동 없음, Reload 뒤 제자리에서 Ack'd. 패널: "Someone else updated this incident. Nothing was changed…" + Reload. 오래된 패널의 Escalate now도 같은 안내(호출 안 됨) | K2-409 |
+| 패널 Resolve | Ack 뒤 5초, 확인 상자 | 1440·1280·390 | 통과 | Resolve…는 약 5.3초 뒤에 나타남. 누르면 확인 상자, 기본 포커스 "Keep it open", 같은 자리 두 번째 누름으로는 닫히지도 Resolve되지도 않음. "Resolve incident"로만 Resolved | B2-resolve-ask-1280, M3-panel-ask-390 |
+
+### 엉뚱한 인시던트를 Ack/Undo/Resolve하려는 새 시도
+
+| # | 시도 | 폭 | 결과 | 관찰 |
+|---|---|---|---|---|
+| X1 | 패널을 연 채 J → A | 1440 | 통과(참고) | 포커스가 패널 안이면 J·A 무시. 목록 쪽을 누른 뒤에는 포커스된 행이 Ack되고 토스트가 경로를 말함. 패널에 보이는 인시던트가 아니라 포커스된 행 기준이라는 점만 기억할 것 |
+| X2 | 내가 움직이는 동안 다른 세션이 1행 Ack, 3행 Resolve | 1440 | 통과 (P3-D) | 1행은 제자리에서 Ack'd로 바뀌고 내 2행 클릭은 2행에 적용. 3행 Acknowledge를 누르면 "Not acknowledged" + Reload, Reload 뒤 제자리에 "Left this list". 행 이동 0건. 다만 그 행은 빨간 TRIGGERED 배지와 "next: call all 3…" 문구가 그대로 남음 |
+| X3 | Ack 뒤 창 폭을 바꿈 (-1, -40, +60px) | 1440 | 통과(참고) | -1·-40px은 변화 없음. +60px은 Ack한 행 높이가 99→79.5로 풀리며 아래 행이 20px 올라옴(사용자가 창을 바꾼 경우). 2행 버튼 자리에는 버튼이 아닌 빈 칸이 옴 |
+| X4 | 1행 Ack → 2행 패널 열기 → Esc → 2행 Acknowledge 자리 클릭 | 1440 | 통과 | 순서·y 좌표 그대로, 그 자리는 여전히 2행 버튼 |
+| X5 | A 키를 누른 채 유지(40회 반복), 패널 Acknowledge에서 Enter를 8초 유지 | 1440 | 통과 | A: 1건만 Ack, 오류 문구 없음. Enter: Acknowledge → 글자 → Resolve… → 확인 상자 "Keep it open" → 닫힘에서 멈춤. Resolve되지 않음 |
+| X6 | 1·2행 Ack 뒤 토스트 Undo, 재정렬된 행의 Undo 항목 더블클릭 | 1440 | 통과 | 토스트는 마지막 것(Hanbit)을 이름으로 말하고 그것만 취소. 재정렬 뒤 Mirae Pay 행 Undo → 그 행만 Triggered, 두 번째 클릭은 빈 칸에 떨어짐, 순서 유지 |
+| X7 | 16px 고정 스크롤바(Windows식) | 1440×760 | 통과 | 표 폭 변화 없음, 행 이동 0건, 2행 클릭은 2행에 적용 |
+| X8 | 느린 네트워크(지연 0.9초): 2행 제목 클릭 직후, 패널이 바뀌기 전에 패널 Acknowledge | 1440 | 통과 | 누른 순간 화면에 보이던 Mirae Pay가 Ack되고 토스트도 Mirae Pay. 바뀐 패널(Hanbit)은 Acknowledge 그대로 |
+| X9 | Ack 뒤 스크롤해서 다음 카드 버튼을 누름 | 390 | 통과 (P3-C) | 버튼이 y≈500이면 0.3·0.9초 모두 그 카드(Hanbit)가 Ack. 버튼이 토스트 밑(y 611–676)에 오면 탭이 토스트에 먹혀 아무것도 Ack되지 않음 |
+| X10 | 패널 409 직후 같은 자리 | 1440 | 통과(참고) | 409면 Resolve…가 5초 대기 없이 바로 나옴. 확인 상자를 거치므로 한 번 더 눌러도 Resolve되지 않음 |
+
+### 회귀 점검
+
+| 시나리오 | 폭 | 결과 | 관찰 |
+|---|---|---|---|
+| 시트로 타이핑 없이 Daon Retail › Commerce › Checkout | 390×844 | 통과 | 4탭, `?customer=daon&project=commerce&service=checkout`, "Outside this view: 4 open (1 from an unmapped account) · 2 acknowledged" |
+| Only with problems (34곳) | 1440 | 통과 | 34곳 → 5곳(Mirae Pay / Daon Retail, Hanbit Logistics, Kumho Clinic, Lumen Bank), "1 of 7 / 4 of 27", 주소·목록 7행 그대로. Other customers 27곳은 이름순(Byeol Media … Zio Fashion) |
+| Ctrl/⌘K | 1440 | 통과 | "checkout" → 두 고객 안내 + 두 줄, Enter만으로는 선택 없음, ↓↓ Enter → Daon 필터. ⌘K도 열림, Esc 닫힘 |
+| 딥 링크 새로고침·뒤로·앞으로 | 1440 | 통과 | 필터+패널 주소 새로고침 뒤 패널 유지, 뒤로 2번(필터 목록 → 전체), 앞으로 2번 뒤 같은 패널 |
+| Not found | 1440 (390은 없는 고객 경로만) | 통과 | 없는 고객(쿼리·경로), 없는 id, 다른 고객 경로+남의 id, `..`, `%2e%2e`, `<script>` 모두 같은 "Not found", 메뉴·트리 유지 |
+| 트리가 내용을 밀어냄 | 1440·1280·1024 | 통과 | 1440: 트리 272 + 본문 1168(패널 442 포함, 표 688). 1280: 목록은 트리 272 + 본문, 패널 열면 45px 레일. 1024: 45px 레일. 전부 문서 가로 넘침 0, 표 넘침 0 |
+| 가로 넘침 | 390 | 통과 | /incidents, Resolved 탭, 패널, /people, /customers, /settings, /monitoring, /oncall, Not found, 필터 목록 모두 scrollWidth 390 |
+| 첫 화면에 첫 인시던트 | 390×740·1440×900 | 통과 | 390: 첫 카드 Acknowledge y 618–662, 하단 메뉴(685) 위. 1440: 첫 행 y 491, 4행까지 보임 |
+| Customers 메뉴(스텁) | 1440·390 | 통과 | 상단·하단 메뉴에 Customers, 트리와 필터 줄 유지, "This list will show Daon Retail › Commerce", 주소에 필터 유지 |
+| 다크, 콘솔 오류 | 1440 | 통과 | Ack한 행·메뉴·재정렬 줄·토스트 다크 정상. 앱 오류 0건(샌드박스에서 Google Fonts 요청만 실패) |
+
+### 보안 재검토 (`git diff cdc5a1c..HEAD -- apps packages`, 읽기 전용)
+
+| # | 항목 | 결과 | 확인 |
+|---|---|---|---|
+| S-3 | `next=` 검증 (`lib/safe-next.ts`) | 통과 | 실행 중인 `/auth/dev-login`에 40개 값 시도. `/\evil`, `/%5Cevil`, `/%255Cevil`, `//evil`, `/%2f%2fevil`, 2~4겹 인코딩, `/%09/evil`, `/%2509/evil`, `/%0a/`, `/%0d%0aSet-Cookie:`, `/%00/`, `/.//evil`, `/./%2fevil`, `/..%2f%2fevil`, `https:evil`, `https:/evil`, `https://evil`, `javascript:`, U+2028, U+0085, 앞 공백, 빈 값은 전부 `/incidents`로. 유니코드 빗금(U+2215, U+FF0F, U+2044, U+FF3C)과 `/@evil`, `/;@evil`은 퍼센트 인코딩된 같은 출처 경로로만 감. `next`를 두 번 주면 첫 값만 사용. Location이 다른 호스트를 가리킨 경우 0건. 로그인 화면의 dev 링크도 같은 검사를 거쳐 나쁜 값은 `next` 없이 출력 |
+| S-4 | Escalate에 If-Match | 통과 | 서버 액션이 id·version을 검증해 `If-Match`로 보냄(ack·resolve와 동일, 단위 테스트 있음). 실제 화면에서 오래된 패널의 "Escalate now"는 409 안내만 뜨고 상태 변화 없음 |
+| R-4 | 응답 헤더 (`curl -I`) | 통과 | /login, 리다이렉트(/incidents, /api/x), /auth/dev-login, 404 모두 CSP(`frame-ancestors 'none'`, `object-src 'none'`, 원격 스크립트 없음, 빌드본에 `unsafe-eval` 없음), X-Frame-Options DENY, Referrer-Policy, nosniff, Permissions-Policy, HSTS. 세션 쿠키 HttpOnly · SameSite=Lax |
+| — | 그 밖의 변경 | 통과 | 추가된 코드에 `dangerouslySetInnerHTML`·`eval`·새 외부 요청·새 환경 변수·저장소 사용 없음. 행 메뉴·재정렬은 화면 상태뿐이고 서버 호출은 기존 액션(세션 확인 → 입력 검증 → API) 그대로. 로그인 없는 POST는 /login으로 |
+| 참고 | [차단] 아님 | — | `X-Powered-By: Next.js` 헤더가 나감(`poweredByHeader: false` 권장). `next=` 값의 쿼리에 `//`가 있으면(예: `?q=http://…`) 안전한 쪽으로 `/incidents`로 떨어짐. CSP의 `script-src 'unsafe-inline'`은 이전과 같음(nonce는 다음 단계) |
+
+### 문제 목록
+
+| 등급 | # | 문제 | 재현 |
+|---|---|---|---|
+| P1 | — | 없음 | — |
+| P2 | — | 없음 | — |
+| P3 | C | 폰에서 토스트(약 9초)가 화면 아래 띠(y 611–676)를 덮는다. 방금 Ack한 카드의 "Acknowledged ✓"와 "⋯"가 가려지고, 그 띠에 온 다른 카드의 Acknowledge는 눌러도 반응이 없다(Ack되지 않음 — 안전한 쪽). Undo 직후에는 첫 카드의 Acknowledge가 "Acknowledge undone" 토스트 밑에 있어 다시 누르려면 ×를 먼저 눌러야 함 | 390×740, 첫 카드 Acknowledge → 190px 스크롤 → 다음 카드 Acknowledge 탭 (M1-acked-390) |
+| P3 | D | 다른 사람이 Resolve해 목록에서 빠진 행이 "Left this list"라고만 하고 빨간 TRIGGERED 배지·"next: call…" 문구는 그대로다. 아직 호출 중인 것처럼 읽힘. 배지를 흐리게 하거나 "Resolved by someone else"로 | 1440, 두 세션: B가 3행 Resolve → A가 3행 Acknowledge → Reload (X2-others) |
+| P3 | E | Ack 뒤 포커스가 놓이는 "Acknowledged ✓" 글자에서 Space를 한 번 더 누르면 페이지가 약 290px 스크롤된다(Enter는 아무 일 없음) | 1440, Acknowledge에 포커스 → Space → Space |
+| P3 | F | 패널에서 Ack하면 주 버튼 줄의 위치가 바뀐다(1280: y 409 → 357, 1440: 455 → 471 → 431, 390: 541 → 517). 그 자리에 누를 수 있는 것이 오지는 않음 | 패널 주소에서 Acknowledge (B2-panel-acked-1280) |
+| P3 | B | 이전 P3-B 중 패널 도착 시 제목의 굵은 파란 포커스 테두리는 그대로 | R-1280-panel |
+
+### 판정
+
+**머지 가능 — P1 0건, P2 0건, [차단] 0건.** P1-A는 고쳐졌다: 1행 Ack 뒤 2행으로 옮겨 누르면 2행이 Ack되고(0.3/0.7/1.5초, 패널 열림, 스크롤, 필터, 세 건 연속 모두), Ack·Undo·Resolve 어느 구간에서도 행 상자가 움직이지 않았으며 재정렬은 Re-sort·탭·필터·검색 변경 때만 일어난다. P2-A(Undo가 Ack 자리와 떨어짐)·P2-B(패널 옆 넘침)도 통과, 새로 시도한 10가지 경로에서 엉뚱한 인시던트가 Ack/Undo/Resolve된 경우는 없었다. P3 5건은 백로그. 남은 관문은 사용자 승인.
+
+점검 한계: 목 서버에는 새 인시던트가 들어오는 자동 갱신이 없어 "N new · Show" 줄은 화면에서 못 봄(단위 테스트만 있음). 터치는 Playwright 에뮬레이션이고 폰 스크롤은 휠 입력으로 대신함. 대비 4.5:1은 눈으로만 확인. 샌드박스에서 Google Fonts가 막혀 Space Mono는 대체 글꼴로 렌더링됨.
