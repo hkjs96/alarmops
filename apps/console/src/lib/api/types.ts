@@ -4,7 +4,7 @@
  * Where the contract does not pin the response shape yet, fields are the minimum the
  * screens in docs/ui/screens/incidents-list.md / incident-detail.md need — flagged "PROPOSED".
  */
-import type { Severity, ThresholdSource } from "@alarmops/design-system";
+import type { ScopeCustomerNode, Severity, ThresholdSource } from "@alarmops/design-system";
 
 export type { Severity };
 export type IncidentStatus = "TRIGGERED" | "ACKNOWLEDGED" | "RESOLVED";
@@ -24,6 +24,8 @@ export interface ApiErrorBody {
 export interface OrgRef {
   id: string;
   name: string;
+  /** PROPOSED: URL-safe name used in `?customer=&project=&service=` and `/c/<customer>/<project>/<service>/…` */
+  slug?: string;
 }
 
 /** service › project › customer resolution result shown as the org chain. */
@@ -131,16 +133,37 @@ export interface UnmappedSummary {
   alertCount: number;
 }
 
+/**
+ * PROPOSED: incidents the scope filter hides, over all customers the user may see. Scope filter only
+ * (customer/project/service or mine); status, severity and search do not change it.
+ * Invariant: open incidents in the filtered list + `open` = the nav badge.
+ */
+export interface OutsideCounts {
+  /** triggered or escalated, nobody acknowledged; includes `unmapped` */
+  open: number;
+  /** of `open`: from an AWS account that is not assigned to a customer */
+  unmapped: number;
+  acknowledged: number;
+}
+
 export interface IncidentListResponse extends Paginated<IncidentListItem> {
   counts: IncidentCounts;
   /** PROPOSED: unmapped-account banner source */
   unmapped: UnmappedSummary[];
+  /** PROPOSED: null when no scope filter is set */
+  outside: OutsideCounts | null;
 }
 
 export interface IncidentListQuery {
   status?: "open" | IncidentStatus;
   severity?: Severity;
   customerId?: string;
+  /** PROPOSED scope filter by slug. project needs customer, service needs project. Unknown or out-of-scope slug → 404. */
+  customer?: string;
+  project?: string;
+  service?: string;
+  /** PROPOSED: only customers the signed-in user is a responder for (plus unmapped accounts) */
+  mine?: boolean;
   assignee?: "me";
   unmapped?: boolean;
   source?: AlertSource;
@@ -271,4 +294,14 @@ export interface Me {
   name: string;
   email: string;
   role: "VIEWER" | "OPERATOR" | "ADMIN";
+}
+
+/**
+ * PROPOSED: GET /scope-tree — customer › project › service with what the tree shows per node:
+ * openIncidents (same definition as the nav badge), callHealth (customer level, D-32 paging-health level),
+ * ownSteps (project/service has a paging override), mine (signed-in user is a responder). slug is unique within its parent.
+ */
+export type ScopeTreeCustomer = ScopeCustomerNode;
+export interface ScopeTreeResponse {
+  customers: ScopeTreeCustomer[];
 }

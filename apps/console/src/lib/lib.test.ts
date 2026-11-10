@@ -36,7 +36,7 @@ describe("incidents logic", () => {
   });
   it("counts match mockup tiles", () => {
     const c = computeCounts(openIncidents, NOW, 5, 2);
-    expect([c.triggered, c.escalated, c.acknowledged, c.open]).toEqual([3, 1, 2, 6]);
+    expect([c.triggered, c.escalated, c.acknowledged, c.open]).toEqual([3, 1, 3, 7]);
   });
   it("parses query and drops unknown values", () => {
     expect(parseQuery({ status: "RESOLVED", severity: "SEV_9", assignee: "me" })).toMatchObject({ status: "RESOLVED", severity: undefined, assignee: "me" });
@@ -64,8 +64,8 @@ describe("mock api", () => {
   it("lists open with counts on the same filter basis", async () => {
     const api = createMockApi(createStore(), () => NOW);
     const r = await api.listIncidents({ status: "open" });
-    expect(r.items).toHaveLength(6);
-    expect(r.counts).toMatchObject({ triggered: 3, escalated: 1, acknowledged: 2, resolved24h: 17, muted: 5 });
+    expect(r.items).toHaveLength(7);
+    expect(r.counts).toMatchObject({ triggered: 3, escalated: 1, acknowledged: 3, resolved24h: 17, muted: 5 });
     const f = await api.listIncidents({ status: "open", customerId: "cus_daon" });
     expect(f.items).toHaveLength(f.counts.open);
   });
@@ -83,7 +83,7 @@ describe("mock api", () => {
     const ids = openIncidents.map((i) => i.id);
     const p = await api.bulkPreview("ack", ids);
     expect(p.targets).toHaveLength(4);
-    expect(p.skipped).toHaveLength(2);
+    expect(p.skipped).toHaveLength(3);
     const r = await api.bulkExecute("ack", ids);
     expect((await api.listIncidents({ status: "open" })).counts.triggered).toBe(0);
     await api.bulkUndo(r.undoToken);

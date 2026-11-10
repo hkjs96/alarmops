@@ -1,6 +1,6 @@
 import type {
   BulkPreview, BulkResult, IncidentDetail, IncidentEvent, IncidentListQuery, IncidentListResponse, Me,
-  NotificationLogEntry, OncallNowEntry, Paginated, ResolveKind, ApiErrorBody,
+  NotificationLogEntry, OncallNowEntry, Paginated, ResolveKind, ApiErrorBody, ScopeTreeResponse,
 } from "./types";
 
 export class ApiError extends Error {
@@ -29,6 +29,8 @@ export interface ConsoleApi {
   bulkExecute(action: "ack" | "resolve", ids: string[]): Promise<BulkResult>;
   bulkUndo(undoToken: string): Promise<{ restored: string[] }>;
   oncallNow(customerId?: string): Promise<OncallNowEntry[]>;
+  /** PROPOSED (not in API-CONTRACT yet): GET /scope-tree */
+  scopeTree(): Promise<ScopeTreeResponse>;
 }
 
 /** Empty params are dropped (known-bugs 9-6). */
@@ -79,5 +81,6 @@ export function createHttpApi(opts: { baseUrl: string; fetch?: typeof fetch; hea
     bulkExecute: (action, ids) => call("POST", "/incidents/bulk", { action, ids, preview: false }),
     bulkUndo: (undoToken) => call("POST", "/incidents/bulk/undo", { undoToken }),
     oncallNow: (customerId) => call("GET", "/oncall/now" + toQuery({ customerId })),
+    scopeTree: () => call("GET", "/scope-tree"),
   };
 }

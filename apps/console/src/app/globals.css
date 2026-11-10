@@ -7,12 +7,12 @@ body { overflow-x: hidden; }
 .skip { position: absolute; left: -999px; top: 0; background: var(--surface); padding: 8px 12px; z-index: 100; }
 .skip:focus { left: 8px; }
 
-.top { background: var(--surface); border-bottom: 1px solid var(--rule); height: 52px; display: flex; align-items: center; padding: 0 24px; gap: 28px; }
-.logo { display: flex; align-items: center; gap: 9px; font-weight: 700; letter-spacing: -0.02em; font-size: 15px; white-space: nowrap; color: var(--ink); }
+.top { background: var(--surface); border-bottom: 1px solid var(--rule); height: 52px; display: flex; align-items: center; padding: 0 24px; gap: 28px; flex: none; }
+.logo { display: flex; align-items: center; gap: 9px; font-weight: 700; letter-spacing: -0.02em; font-size: 15px; white-space: nowrap; color: var(--ink); min-height: 44px; }
 .logo:hover { text-decoration: none; }
 .logo i { width: 14px; height: 14px; background: var(--ink); display: inline-block; position: relative; }
 .logo i::after { content: ""; position: absolute; right: -4px; top: -4px; width: 7px; height: 7px; background: var(--red); border-radius: 50%; border: 2px solid var(--surface); }
-.nav { display: flex; height: 100%; gap: 2px; }
+.nav { display: flex; height: 100%; gap: 2px; min-width: 0; }
 .nav a, .bnav a { display: flex; align-items: center; padding: 0 12px; color: var(--mut); font-weight: 500; height: 100%; text-decoration: none; white-space: nowrap; }
 .nav a:hover { color: var(--ink); }
 .nav a.on { color: var(--ink); font-weight: 600; box-shadow: inset 0 -2px 0 var(--ink); }
@@ -21,6 +21,43 @@ body { overflow-x: hidden; }
 .health { display: inline-flex; align-items: center; gap: 6px; font: 700 11px var(--mono); letter-spacing: 0.06em; color: var(--green); white-space: nowrap; }
 .health::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
 .bnav { display: none; }
+.top .show-m-flex { display: none; }
+@media (max-width: 1240px) { .health { display: none; } }
+@media (max-width: 960px) { .top { gap: 14px; padding: 0 16px; } .nav a { padding: 0 8px; } }
+
+/* ---------- scope shell (docs/ui/scope-variants.md §7.6) ----------
+   Desktop: nav, filter line, then one row: tree | list | panel. Each of the three scrolls on its own and they never overlap:
+   the tree is in the flow and pushes the list; the panel takes its width from the same row.
+   Room is given up in this order (T3): list columns drop (container queries on the list) → the panel narrows 600 → 440px →
+   the list becomes cards (320px and up) → the panel is the whole view, still beside the tree. */
+.shell-lay { display: flex; min-width: 0; }
+.shell-main { flex: 1; min-width: 0; display: flex; container: shellmain / inline-size; }
+.shell-main > .page { flex: 1 1 726px; min-width: 0; max-width: none; margin: 0; container: page / inline-size; padding-right: max(24px, calc(100% - 1334px)); }
+.shell-main > .page:has(+ .panel) { padding-right: 12px; }
+.shell-main > .panel { flex: 0 1000 600px; min-width: 440px; }
+.shell-main h1:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.shell-main h1:focus { outline: 0; }
+@container shellmain (max-width: 795px) {
+  .shell-main > .page:has(+ .panel) { display: none; }
+  .shell-main > .panel { flex: 1 1 auto; min-width: 0; border-left: 0; }
+  .shell-main > .panel .panel-back { display: block; }
+}
+@media (min-width: 761px) {
+  .shell { height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+  .shell-lay { flex: 1; min-height: 0; }
+  .shell-main > .page { overflow-y: auto; }
+  .shell .stree { height: 100%; overflow: hidden; }
+  .shell .stree:not(.rail) > :not(.stree-rz) { min-width: var(--stree-w, 0); }
+  .shell.ready .stree { transition: width 180ms cubic-bezier(0.2, 0, 0, 1); }
+  .shell.ready .stree.rsz { transition: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .shell.ready .stree { transition: none; }
+}
+.toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 70; display: flex; align-items: center; gap: 10px; max-width: min(640px, calc(100vw - 32px)); padding: 8px 8px 8px 14px; background: var(--ink); color: var(--inv); font-size: 13px; box-shadow: var(--pop); }
+.toast > span { min-width: 0; overflow-wrap: anywhere; }
+.toast .btn { flex: none; }
+.toast .btn.ghost { color: var(--inv); }
 
 .page { max-width: 1360px; margin: 0 auto; padding: 24px 24px 64px; }
 .ph { display: flex; align-items: flex-end; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
@@ -59,13 +96,67 @@ body { overflow-x: hidden; }
 .spark { display: block; width: 100%; height: 56px; }
 .paged { margin-top: 10px; font-size: 13px; display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; }
 
-/* incidents table → phone cards */
+/* ---------- incidents list ---------- */
+.inc-filters { margin-bottom: 12px; flex-wrap: wrap; row-gap: 8px; }
+.shell-main .tiles { display: flex; flex-wrap: wrap; gap: 1px; background: var(--hair); }
+.shell-main .tile, .shell-main .tile:nth-child(n) { flex: 1 1 150px; border: 0; background: var(--surface); }
+.shell-main .tile.on { background: var(--red-t); }
+.t.inc td { overflow-wrap: break-word; }
+.t.inc .c-title { min-width: 150px; }
+.t.inc tbody tr { cursor: pointer; }
+.t.inc tr.cur td { background: var(--accent-t); }
+.t.inc tr.cur td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+.t.inc .ttl { color: var(--ink); }
+.t.inc .c-sev, .t.inc .c-status, .t.inc .c-age, .t.inc .c-act { white-space: nowrap; }
+.t.inc .c-act { width: 1%; }
+.t.inc .c-age .lbl { display: none; }
+.inc-path { color: var(--ink2); }
+.inc-path b { color: var(--ink); font-weight: 700; }
+.inc-path .chain { margin: 0 5px; }
+.inc-path .sub { display: block; font-size: 12px; color: var(--mut); margin-top: 2px; }
+.t.inc .who { white-space: normal; }
+/* column priority by list width: Paged first, then Age. Sev, Status, path, incident and Acknowledge always stay. */
+@container page (max-width: 999px) { .t.inc .c-paged { display: none; } }
+@container page (max-width: 799px) { .t.inc .c-age { display: none; } .inc-keys { display: none; } .t.inc th, .t.inc td { padding-left: 8px; padding-right: 8px; } }
+/* below 690px the rows are cards (also every phone) */
+@container page (max-width: 689px) {
+  .t.inc thead { display: none; }
+  .t.inc, .t.inc tbody { display: block; }
+  .t.inc tbody tr { display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 6px 12px; padding: 12px 14px; border-bottom: 1px solid var(--grid); align-items: center; }
+  .t.inc tbody tr:last-child { border-bottom: 0; }
+  .t.inc td { padding: 0; border: 0; background: none !important; box-shadow: none !important; }
+  .t.inc tr.hot { box-shadow: inset 3px 0 0 var(--red); }
+  .t.inc tr.esc { box-shadow: inset 3px 0 0 var(--orange); }
+  .t.inc tr.cur { box-shadow: inset 3px 0 0 var(--accent); background: var(--accent-t); }
+  .t.inc .c-age { display: block; grid-row: 1; grid-column: 3; text-align: right; }
+  .t.inc .c-age .lbl { display: inline; color: var(--mut); font-family: var(--sans); }
+  .t.inc .c-path, .t.inc .c-title, .t.inc .c-act { grid-column: 1 / -1; width: auto; }
+  .t.inc .c-act { text-align: left; }
+  .t.inc .c-act:empty { display: none; }
+  .t.inc .c-act .btn { min-height: 44px; min-width: 132px; }
+  .t.inc .ttl { display: flex; align-items: center; min-height: 44px; }
+  .tw:has(.t.inc) { overflow-x: visible; }
+}
+
+/* ---------- incident inside the panel ---------- */
+.inc-detail .crumb { margin-bottom: 8px; }
+.inc-title { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; margin: 0 0 6px; line-height: 1.25; overflow-wrap: anywhere; }
+.inc-detail .g-detail, .inc-detail .g3 { grid-template-columns: minmax(0, 1fr); }
+.inc-detail .g3 > div + div { border-left: 0; border-top: 1px solid var(--rule); }
+.inc-detail .inc-hero { flex-direction: column; align-items: stretch !important; gap: 14px !important; }
+.inc-detail .hero-actions { flex-wrap: wrap; }
+.inc-detail .hero-actions .btn.pri { flex: 1; }
+.inc-detail .stage { flex-wrap: wrap; gap: 6px 0; }
+.inc-detail .stage > span { min-width: 80px; }
+
 @media (max-width: 1100px) {
   .g-main, .g-detail { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 760px) {
-  .top { padding: 0 16px; gap: 14px; }
+  .top { padding: 0 12px; gap: 10px; }
   .hide-m { display: none !important; }
+  .top .show-m-flex { display: inline-flex; }
+  .top .btn { min-width: 44px; }
   .bnav {
     display: grid; grid-template-columns: repeat(5, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
     background: var(--surface); border-top: 1px solid var(--rule); height: 56px;
@@ -74,22 +165,17 @@ body { overflow-x: hidden; }
   .bnav a.on { color: var(--ink); font-weight: 600; box-shadow: inset 0 2px 0 var(--ink); }
   .bnav .cnt { margin-left: 3px; }
   main { padding-bottom: 56px; }
-  .page { padding: 16px 16px 48px; }
+  .page, .shell-main > .page, .shell-main > .page:has(+ .panel) { padding: 16px 16px 48px; }
+  .shell .stree { display: none; }
+  .shell-lay, .shell-main { display: block; }
+  .shell-main > .panel { min-width: 0; border-left: 0; }
+  .shell-main > .panel .panel-body { overflow: visible; }
+  .toast { bottom: 68px; }
+  .toast .btn { min-height: 44px; min-width: 44px; }
   .ph h1 { font-size: 23px; }
   .g-main > *, .g-detail > * { min-width: 0; }
   .g3 { grid-template-columns: minmax(0, 1fr); }
   .g3 > div + div { border-left: 0; border-top: 1px solid var(--rule); }
-  .t.cards thead { display: none; }
-  .t.cards tbody tr { display: grid; grid-template-columns: auto auto 1fr; gap: 6px 12px; padding: 12px 14px; border-bottom: 1px solid var(--grid); align-items: center; }
-  .t.cards tbody tr:last-child { border-bottom: 0; }
-  .t.cards td { padding: 0; border: 0; background: none !important; box-shadow: none !important; }
-  .t.cards td.c-sel, .t.cards td.c-alerts, .t.cards td.c-esc { display: none; }
-  .t.cards td.c-age { text-align: right; grid-row: 1; grid-column: 3; }
-  .t.cards td.c-sev, .t.cards td.c-status { grid-row: 1; }
-  .t.cards td.c-title, .t.cards td.c-who { grid-column: 1 / -1; }
-  .t.cards td.c-who .org { display: inline; margin-left: 8px; }
-  .t.cards tr.hot { box-shadow: inset 3px 0 0 var(--red); }
-  .t.cards tr.esc { box-shadow: inset 3px 0 0 var(--orange); }
   .kv { grid-template-columns: 96px minmax(0, 1fr); }
   .tl .ev { grid-template-columns: 20px 58px minmax(0, 1fr); }
   .hero-actions { width: 100%; }

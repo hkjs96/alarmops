@@ -1,15 +1,19 @@
-/** Top menu + sub-routes per docs/ui/IA.md §1 (D-26, D-31). */
+/** Top menu of the scope shell (docs/ui/scope-variants.md §7, variant E). Settings sub-routes keep their tabs. */
 export interface NavSection {
   key: string;
   label: string;
+  /** short label for the phone bottom bar */
+  short?: string;
   href: string;
+  /** first path segments that belong to this section */
+  match: string[];
   sub: { label: string; href: string }[];
 }
 
 export const NAV: NavSection[] = [
-  { key: "incidents", label: "Incidents", href: "/incidents", sub: [] },
+  { key: "incidents", label: "Incidents", href: "/incidents", match: ["incidents", "c"], sub: [] },
   {
-    key: "monitoring", label: "Monitoring", href: "/monitoring/alarms",
+    key: "monitoring", label: "Monitoring", href: "/monitoring/alarms", match: ["monitoring"],
     sub: [
       { label: "Alarms", href: "/monitoring/alarms" },
       { label: "Resources", href: "/monitoring/resources" },
@@ -18,19 +22,11 @@ export const NAV: NavSection[] = [
       { label: "Sync runs", href: "/monitoring/sync-runs" },
     ],
   },
+  { key: "call-order", label: "Call order", href: "/call-order", match: ["call-order"], sub: [] },
+  { key: "people", label: "People", href: "/people", match: ["people"], sub: [] },
+  { key: "maintenance", label: "Maintenance", short: "Maint.", href: "/maintenance", match: ["maintenance"], sub: [] },
   {
-    key: "oncall", label: "On-call", href: "/oncall/now",
-    sub: [
-      { label: "Now", href: "/oncall/now" },
-      { label: "Rotations", href: "/oncall/rotations" },
-      { label: "People", href: "/oncall/people" },
-      { label: "Templates", href: "/oncall/templates" },
-      { label: "Maintenance", href: "/oncall/maintenance" },
-    ],
-  },
-  { key: "customers", label: "Customers", href: "/customers", sub: [] },
-  {
-    key: "settings", label: "Settings", href: "/settings/msp-defaults",
+    key: "settings", label: "Settings", href: "/settings/msp-defaults", match: ["settings"],
     sub: [
       { label: "MSP defaults", href: "/settings/msp-defaults" },
       { label: "Severity mapping", href: "/settings/severity-mapping" },
@@ -44,5 +40,5 @@ export const NAV: NavSection[] = [
 
 export function sectionFor(pathname: string): NavSection | undefined {
   const seg = pathname.split("/")[1] ?? "";
-  return NAV.find((s) => s.key === seg);
+  return NAV.find((s) => s.match.includes(seg));
 }

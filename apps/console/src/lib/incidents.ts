@@ -1,6 +1,6 @@
 import type { DisplayStatus } from "@alarmops/design-system";
 import { SEVERITIES } from "@alarmops/design-system";
-import type { IncidentCounts, IncidentListItem, IncidentListQuery } from "./api/types";
+import type { IncidentCounts, IncidentListItem, IncidentListQuery, OutsideCounts } from "./api/types";
 
 /** One definition used on every screen: Escalated = TRIGGERED with an unacked escalation step. */
 export function displayStatus(i: Pick<IncidentListItem, "status" | "escalated">): DisplayStatus {
@@ -75,4 +75,17 @@ export function computeCounts(base: IncidentListItem[], nowMs: number, muted: nu
 
 export function orgChainParts(i: Pick<IncidentListItem, "org">): string[] {
   return [i.org.customer?.name, i.org.project?.name, i.org.service?.name].filter((x): x is string => Boolean(x));
+}
+
+/**
+ * What a scope filter hides (T12). `inView` is the scope filter only. Resolved incidents are not counted.
+ * open includes unmapped, so: open in view + outside.open = all open = the nav badge.
+ */
+export function outsideCounts(all: IncidentListItem[], inView: (i: IncidentListItem) => boolean): OutsideCounts {
+  const out = all.filter((i) => isOpen(i) && !inView(i));
+  return {
+    open: out.filter(needsAck).length,
+    unmapped: out.filter((i) => needsAck(i) && i.unmapped).length,
+    acknowledged: out.filter((i) => i.status === "ACKNOWLEDGED").length,
+  };
 }

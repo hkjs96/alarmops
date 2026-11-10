@@ -1,4 +1,5 @@
 @import "./tokens.css";
+@import "./scope.css";
 
 /* ---------- base ---------- */
 *, *::before, *::after { box-sizing: border-box; border-radius: 0; }

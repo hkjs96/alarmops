@@ -1,6 +1,6 @@
 /** Server action input checks (security review C-5). Server actions accept arbitrary client input. */
 export const MAX_BULK_IDS = 200;
-const ID_RE = /^[A-Za-z0-9._:-]{1,128}$/;
+export const ID_RE = /^[A-Za-z0-9._:-]{1,128}$/;
 
 export class InvalidInputError extends Error {
   readonly code = "INVALID_INPUT";

@@ -19,7 +19,7 @@ export const isMock = () => mockMode();
 export async function getApi(): Promise<ConsoleApi> {
   const session = await requireSession();
   if (isMock()) {
-    g.__aoMockStore ??= createStore();
+    g.__aoMockStore ??= createStore({ customers: process.env.MOCK_CUSTOMERS === "34" ? 34 : 14 });
     return createMockApi(g.__aoMockStore);
   }
   return createHttpApi({ baseUrl: apiBaseUrl(), headers: () => ({ authorization: `Bearer ${session.token}` }) });
