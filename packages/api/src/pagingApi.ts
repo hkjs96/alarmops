@@ -3,7 +3,7 @@
  * GET /oncall/paging-path. D-30: each customer owns its steps; service › project › customer, first existing wins.
  */
 import {
-  MAX_ALL_RESPONDERS, MAX_AT_MIN, MAX_REPEAT, MAX_SENDS_PER_CYCLE, MAX_SENDS_PER_HOUR, MAX_STEPS, estimateSends, isPageableFor, pagingPath, resolvePagingConfig, sentence, templateSteps,
+  MAX_ALL_RESPONDERS, MAX_AT_MIN, MAX_REPEAT, MAX_SENDS_PER_CYCLE, MAX_SENDS_PER_HOUR, MAX_STEPS, estimateSends, isPageableFor, pagingPath, resolvePagingConfig, sendCapViolation, sentence, templateSteps,
   type EscalationStep, type PagingConfig, type PagingWorld, type ScopeLevel, type StepChannel, type TargetType,
 } from '@alarmops/core';
 import { customerWide, inScope, requireAuth, requireRole, scopeOf, type AuthContext } from './auth.js';
@@ -31,7 +31,15 @@ function view(cfg: PagingConfig, w: PagingWorld, now: Date) {
     ...(cfg.style === 'SHARED_ROTATION' && first?.targetType === 'ROTATION' && first.targetId ? { sharedRotationId: first.targetId } : {}),
     steps: stepsOut(cfg.steps), repeatCount: cfg.repeatCount, version: cfg.version,
     sentence: path?.sentence ?? sentence([], cfg.repeatCount),
+    // R-12: re-checked on every read with the responders as they are NOW. `exceeded` is null, or the code a PUT of
+    // these same steps would get today; incidents opened meanwhile are cut down to the limits by the engine.
+    sendCap: sendCap(cfg, w),
   };
+}
+function sendCap(cfg: PagingConfig, w: PagingWorld) {
+  const responders = w.responders.filter((r) => r.customerId === cfg.customerId && r.role === 'PAGEABLE' && isPageableFor(w, r.contactId)).length;
+  const est = estimateSends([...cfg.steps].sort((a, b) => a.index - b.index), cfg.repeatCount, responders);
+  return { perCycle: est.perCycle, perHour: est.perHour, limits: { perCycle: MAX_SENDS_PER_CYCLE, perHour: MAX_SENDS_PER_HOUR, allResponders: MAX_ALL_RESPONDERS }, exceeded: sendCapViolation(cfg, w)?.code ?? null };
 }
 const stepsOut = (steps: EscalationStep[]) =>
   [...steps].sort((a, b) => a.index - b.index).map((s) => ({ atMin: s.atMin, targetType: s.targetType, ...(s.targetId ? { targetId: s.targetId } : {}), channels: s.channels }));
@@ -108,20 +116,19 @@ async function buildConfig(body: unknown, base: Pick<PagingConfig, 'id' | 'custo
       if (r.scope === 'CUSTOMER' && r.customerId !== base.customerId) throw unprocessable('CROSS_CUSTOMER', 'A customer rotation can only be used by its own customer.', { field });
     }
   }
-  // R-1: what one incident may send. Checked for template-built steps too.
-  const responders = w.responders.filter((r) => r.customerId === base.customerId && r.role === 'PAGEABLE' && isPageableFor(w, r.contactId)).length;
-  const everyone = built.find((s) => s.targetType === 'ALL_RESPONDERS');
-  if (everyone && responders > MAX_ALL_RESPONDERS) {
-    throw unprocessable('RESPONDER_LIMIT_EXCEEDED', `A step that pages everyone in Responders can reach at most ${MAX_ALL_RESPONDERS} people; this customer has ${responders} pageable responders. Page a rotation or named people instead, or reduce the responders.`,
-      { field: `steps[${everyone.index}].targetType`, responders, limit: MAX_ALL_RESPONDERS });
+  // R-1: what one incident may send. Checked for template-built steps too. Same function as paging health and the
+  // responder re-validation (R-12), so "allowed when saved" and "allowed now" are one rule.
+  const cap = sendCapViolation({ steps: built, repeatCount: repeat as number }, w);
+  if (cap?.code === 'RESPONDER_LIMIT_EXCEEDED') {
+    throw unprocessable('RESPONDER_LIMIT_EXCEEDED', `A step that pages everyone in Responders can reach at most ${MAX_ALL_RESPONDERS} people; this customer has ${cap.responders} pageable responders. Page a rotation or named people instead, or reduce the responders.`,
+      { field: `steps[${cap.stepIndex}].targetType`, responders: cap.responders, limit: MAX_ALL_RESPONDERS });
   }
-  const sends = estimateSends(built, repeat as number, responders);
-  if (sends.perCycle > MAX_SENDS_PER_CYCLE || sends.perHour > MAX_SENDS_PER_HOUR) {
-    const over = sends.perCycle > MAX_SENDS_PER_CYCLE
-      ? `${sends.perCycle} notifications per incident in one pass of the steps (limit ${MAX_SENDS_PER_CYCLE})`
-      : `${sends.perHour} notifications per incident within one hour, repeats included (limit ${MAX_SENDS_PER_HOUR})`;
+  if (cap) {
+    const over = cap.perCycle > MAX_SENDS_PER_CYCLE
+      ? `${cap.perCycle} notifications per incident in one pass of the steps (limit ${MAX_SENDS_PER_CYCLE})`
+      : `${cap.perHour} notifications per incident within one hour, repeats included (limit ${MAX_SENDS_PER_HOUR})`;
     throw unprocessable('SEND_CAP_EXCEEDED', `This call order would send ${over}. Use fewer steps, channels or repeats, or page fewer people per step.`,
-      { perCycle: sends.perCycle, perHour: sends.perHour, limits: { perCycle: MAX_SENDS_PER_CYCLE, perHour: MAX_SENDS_PER_HOUR } });
+      { perCycle: cap.perCycle, perHour: cap.perHour, limits: cap.limits });
   }
   return { ...base, style: st, plan: pl, edited, repeatCount: repeat as number, version: 0, steps: built };
 }

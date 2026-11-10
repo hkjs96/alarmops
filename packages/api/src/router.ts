@@ -3,9 +3,10 @@
  * `createApi(deps).handle(request)` is all an adapter needs.
  */
 import { createHash } from 'node:crypto';
-import { DEFAULT_API_CONFIG, type ApiConfig } from './audience.js';
+import { IDEMPOTENCY_MAX_PER_USER } from '@alarmops/core';
+import { strictApiConfig, type ApiConfig } from './audience.js';
 import { requireAuth, scopeKey } from './auth.js';
-import { ApiError, errorResponse, header, notFound, type ApiRequest, type ApiResponse } from './http.js';
+import { ApiError, errorResponse, header, isRecord, notFound, type ApiRequest, type ApiResponse } from './http.js';
 import { actOnIncident, bulkIncidents, getIncident, getNotifications, getTimeline, listIncidents, undoIncidents } from './incidents.js';
 import { deletePagingOverride, getCustomerPaging, getPagingPath, putCustomerPaging, putPagingOverride } from './pagingApi.js';
 import type { ApiRepository } from './repo.js';
@@ -14,21 +15,29 @@ import { getScopeTree } from './scope.js';
 export interface ApiDeps {
   repo: ApiRepository;
   now?: () => Date;
-  /** Policy switches with safe defaults (see audience.ts). */
+  /**
+   * Policy switches with safe defaults (see audience.ts). Build it with `loadApiConfig(process.env)`; a value that
+   * is not the boolean `true` is treated as off (R-15).
+   */
   config?: Partial<ApiConfig>;
   log?: (level: 'warn' | 'error', msg: string, data?: Record<string, unknown>) => void;
 }
 
 type Handler = (req: ApiRequest, deps: { repo: ApiRepository; now: () => Date; config: ApiConfig }, p: string[]) => Promise<ApiResponse>;
-interface Route { method: ApiRequest['method']; pattern: string[]; run: Handler }
+interface Route {
+  method: ApiRequest['method']; pattern: string[]; run: Handler;
+  /** false → the response is never stored for Idempotency-Key replay (read-only requests, N-19). */
+  replayable?: (req: ApiRequest) => boolean;
+}
 
-const route = (method: ApiRequest['method'], path: string, run: Handler): Route => ({ method, pattern: path.split('/').filter(Boolean), run });
+const route = (method: ApiRequest['method'], path: string, run: Handler, replayable?: Route['replayable']): Route => ({ method, pattern: path.split('/').filter(Boolean), run, replayable });
 
 /** Order matters only where a literal and a parameter compete (`/incidents/bulk` before `/incidents/:id`). */
 export const ROUTES: Route[] = [
   route('GET', '/scope-tree', (r, d) => getScopeTree(r, d)),
   route('GET', '/incidents', (r, d) => listIncidents(r, d)),
-  route('POST', '/incidents/bulk', (r, d) => bulkIncidents(r, d)),
+  // A preview changes nothing: running it again IS the replay, so its (large) body is not kept (N-19).
+  route('POST', '/incidents/bulk', (r, d) => bulkIncidents(r, d), (r) => !(isRecord(r.body) && r.body.preview === true)),
   route('POST', '/incidents/bulk/undo', (r, d) => undoIncidents(r, d)),
   route('GET', '/incidents/:id', (r, d, p) => getIncident(r, d, p[0]!)),
   route('GET', '/incidents/:id/timeline', (r, d, p) => getTimeline(r, d, p[0]!)),
@@ -68,7 +77,7 @@ const stable = (v: unknown): string =>
       : JSON.stringify(v) ?? 'null';
 
 export function createApi(deps: ApiDeps) {
-  const inner = { repo: deps.repo, now: deps.now ?? (() => new Date()), config: { ...DEFAULT_API_CONFIG, ...deps.config } };
+  const inner = { repo: deps.repo, now: deps.now ?? (() => new Date()), config: strictApiConfig(deps.config) };
   async function handle(req: ApiRequest): Promise<ApiResponse> {
     try {
       const auth = requireAuth(req); // every console route needs a session (401 before anything else)
@@ -79,7 +88,10 @@ export function createApi(deps: ApiDeps) {
       //        customers, sub-scopes, kind or role nothing is replayed — the request runs again and is authorised now;
       //      - it is bound to method + canonical path + If-Match + body hash: the same key with another request is 422;
       //      - only successful responses are stored, so failing requests cannot fill the store.
-      const idem = req.method === 'GET' ? undefined : header(req, 'idempotency-key');
+      // N-19: - read-only requests (bulk preview) are not stored at all;
+      //       - a user holds at most IDEMPOTENCY_MAX_PER_USER live entries (the store drops the oldest).
+      const replayable = m.route.replayable ? m.route.replayable(req) : true;
+      const idem = req.method === 'GET' || !replayable ? undefined : header(req, 'idempotency-key');
       const idemKey = idem ? sha([auth.userId, sha(scopeKey(auth)), sha(idem)].join('|')) : undefined;
       const fingerprint = idem ? sha([req.method, m.canonical, header(req, 'if-match') ?? '', stable(req.body)].join('\n')) : '';
       if (idemKey) {
@@ -91,7 +103,7 @@ export function createApi(deps: ApiDeps) {
       }
       const res = await m.route.run(req, inner, m.params);
       if (idemKey && res.status >= 200 && res.status < 300) {
-        await inner.repo.putIdempotent(idemKey, { fingerprint, res: { status: res.status, headers: res.headers, body: res.body } }, new Date(inner.now().getTime() + IDEMPOTENCY_TTL_MS));
+        await inner.repo.putIdempotent(idemKey, { fingerprint, res: { status: res.status, headers: res.headers, body: res.body } }, new Date(inner.now().getTime() + IDEMPOTENCY_TTL_MS), { owner: auth.userId, maxPerOwner: IDEMPOTENCY_MAX_PER_USER });
       }
       return res;
     } catch (err) {

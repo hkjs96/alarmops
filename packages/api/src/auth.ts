@@ -81,6 +81,65 @@ export function nodeVisible(s: ScopeFilter, n: { customerId: string; projectId?:
 const RANK: Record<Role, number> = { VIEWER: 0, OPERATOR: 1, ADMIN: 2 };
 
 const isStr = (v: unknown): v is string => typeof v === 'string' && v.length > 0;
+const ROLES: readonly Role[] = ['VIEWER', 'OPERATOR', 'ADMIN'];
+/** Own data property only — never a getter, never something inherited (R-16). */
+const own = (o: object, k: string): unknown => {
+  const d = Object.getOwnPropertyDescriptor(o, k);
+  return d && 'value' in d ? d.value : undefined;
+};
+const nullProto = <T extends object>(fields: T): T => Object.freeze(Object.assign(Object.create(null) as T, fields));
+
+/**
+ * The AuthContext this package works with, rebuilt field by field from what the session adapter handed over
+ * (B-1, R-16, N-15), or null = "not signed in".
+ * - Only OWN data properties are read: a polluted `Object.prototype.role` / `.kind` / `.customerIds` gives nothing.
+ * - Exact primitive types: `userId`, `kind` and every id are primitive strings (no String objects, no arrays, no
+ *   objects with toString); `role` counts only when it is exactly 'VIEWER' | 'OPERATOR' | 'ADMIN' — anything else
+ *   is left out, so the user reads as the scope allows and every write answers 403.
+ * - `subScopes` may only narrow customers the user has: an entry for a customer that is not in `customerIds`
+ *   (wrong case, typo, another tenant) used to be ignored — which WIDENED the view to the whole customer. It is 401 now.
+ * - The result is a frozen copy on a null prototype: later mutation of the adapter's object, or of
+ *   Object.prototype, cannot change what was checked.
+ */
+export function normalizeAuth(a: unknown): AuthContext | null {
+  if (!isRecord(a)) return null;
+  const userId = own(a, 'userId');
+  const kind = own(a, 'kind');
+  const name = own(a, 'name');
+  const rawIds = own(a, 'customerIds');
+  const rawSubs = own(a, 'subScopes');
+  const role = own(a, 'role');
+  if (!isStr(userId)) return null;
+  if (kind !== 'INTERNAL' && kind !== 'CUSTOMER') return null;
+  if (name !== undefined && typeof name !== 'string') return null;
+  let customerIds: readonly string[] | '*';
+  if (rawIds === '*') customerIds = '*';
+  else if (Array.isArray(rawIds) && rawIds.every(isStr)) customerIds = Object.freeze([...rawIds]);
+  else return null;
+  let subScopes: AuthContext['subScopes'];
+  if (rawSubs !== undefined) {
+    if (!Array.isArray(rawSubs)) return null;
+    const list: Array<{ customerId: string; projectId?: string; serviceId?: string }> = [];
+    for (const x of rawSubs) {
+      if (!isRecord(x)) return null;
+      const customerId = own(x, 'customerId');
+      const projectId = own(x, 'projectId');
+      const serviceId = own(x, 'serviceId');
+      if (!isStr(customerId) || (projectId !== undefined && !isStr(projectId)) || (serviceId !== undefined && !isStr(serviceId))) return null;
+      // N-15: a narrowing for a customer the user does not have. '*' is honoured for INTERNAL staff only.
+      const has = customerIds === '*' ? kind === 'INTERNAL' : customerIds.includes(customerId);
+      if (!has) return null;
+      list.push(nullProto({ customerId, ...(projectId !== undefined ? { projectId } : {}), ...(serviceId !== undefined ? { serviceId } : {}) }));
+    }
+    subScopes = Object.freeze(list);
+  }
+  return nullProto({
+    userId, kind, customerIds,
+    ...(typeof name === 'string' ? { name } : {}),
+    ...(typeof role === 'string' && (ROLES as readonly string[]).includes(role) ? { role: role as Role } : {}),
+    ...(subScopes ? { subScopes } : {}),
+  }) as AuthContext;
+}
 
 /**
  * Shape check of what the session adapter handed over (security B-1). Anything this package does not expect is
@@ -89,21 +148,14 @@ const isStr = (v: unknown): v is string => typeof v === 'string' && v.length > 0
  * scope allows) and every write answers 403 (requireRole).
  */
 export function isAuthContext(a: unknown): a is AuthContext {
-  if (!isRecord(a) || !isStr(a.userId)) return false;
-  if (a.kind !== 'INTERNAL' && a.kind !== 'CUSTOMER') return false;
-  if (a.name !== undefined && typeof a.name !== 'string') return false;
-  if (!(a.customerIds === '*' || (Array.isArray(a.customerIds) && a.customerIds.every(isStr)))) return false;
-  if (a.subScopes !== undefined) {
-    const ok = Array.isArray(a.subScopes) && a.subScopes.every((x) => isRecord(x) && isStr(x.customerId)
-      && (x.projectId === undefined || isStr(x.projectId)) && (x.serviceId === undefined || isStr(x.serviceId)));
-    if (!ok) return false;
-  }
-  return true;
+  return normalizeAuth(a) !== null;
 }
 
+/** Always the normalised copy (see normalizeAuth) — handlers never touch the adapter's object. */
 export function requireAuth(req: ApiRequest): AuthContext {
-  if (!isAuthContext(req.auth)) throw unauthenticated();
-  return req.auth;
+  const auth = normalizeAuth(req.auth);
+  if (!auth) throw unauthenticated();
+  return auth;
 }
 
 /**
@@ -114,9 +166,22 @@ export function requireAuth(req: ApiRequest): AuthContext {
 export function requireRole(auth: AuthContext, min: Role): void {
   // Fail closed (B-1): the stored role counts for INTERNAL staff only; every other kind — including a kind this
   // code does not know — is VIEWER. Own-property lookup, so 'constructor' and friends are not roles.
-  const effective: Role = auth.kind === 'INTERNAL' ? auth.role : 'VIEWER';
-  if (!Object.hasOwn(RANK, effective) || RANK[effective] < RANK[min]) throw roleRequired(min);
+  if (!hasRole(auth, min)) throw roleRequired(min);
 }
+
+/**
+ * The role that counts: the stored one for INTERNAL staff when it is an own, primitive, known role; VIEWER for
+ * every other kind; null (no role at all — not even VIEWER-gated actions) for INTERNAL staff without a valid role.
+ */
+export function effectiveRole(auth: { kind: unknown; role?: unknown }): Role | null {
+  if (auth.kind !== 'INTERNAL') return 'VIEWER';
+  const role: unknown = Object.hasOwn(auth, 'role') ? auth.role : undefined;
+  return typeof role === 'string' && (ROLES as readonly string[]).includes(role) ? (role as Role) : null;
+}
+export const hasRole = (auth: { kind: unknown; role?: unknown }, min: Role): boolean => {
+  const role = effectiveRole(auth);
+  return role !== null && RANK[role] >= RANK[min];
+};
 
 /** Stable identity of the caller's range, for ETags that must differ between users (§8.0 rule 5). */
 export const scopeKey = (auth: AuthContext): string =>

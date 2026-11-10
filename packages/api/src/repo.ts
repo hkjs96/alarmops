@@ -120,5 +120,9 @@ export interface ApiRepository {
 
   // ── idempotency (API-CONTRACT §2 "멱등", 24h) ──
   getIdempotent(key: string, now: Date): Promise<IdempotentEntry | null>;
-  putIdempotent(key: string, entry: IdempotentEntry, expiresAt: Date): Promise<void>;
+  /**
+   * Store a response for replay. N-19: `owner` (the user id) may hold at most `maxPerOwner` live entries — in the
+   * same statement the owner's expired entries are removed and, if still at the cap, the oldest one is dropped.
+   */
+  putIdempotent(key: string, entry: IdempotentEntry, expiresAt: Date, cap: { owner: string; maxPerOwner: number }): Promise<void>;
 }

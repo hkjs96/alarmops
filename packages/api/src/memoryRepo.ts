@@ -15,7 +15,7 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
   resources = new Map<string, { id: string; name: string; customerId: string; serviceId: string | null }>();
   verifiedSlack = new Set<string>();
   undo = new Map<string, UndoRecord>();
-  idempotent = new Map<string, { entry: IdempotentEntry; expiresAt: Date }>();
+  idempotent = new Map<string, { entry: IdempotentEntry; expiresAt: Date; owner: string }>();
   /** Last version of deleted paging configs, so a re-created one continues the sequence (N-3). */
   configTombstones = new Map<string, number>();
   /** Counts scoped reads, so tests can assert that out-of-scope ids never reach an unscoped lookup. */
@@ -183,5 +183,14 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     const hit = this.idempotent.get(key);
     return hit && hit.expiresAt.getTime() > now.getTime() ? structuredClone(hit.entry) : null;
   }
-  async putIdempotent(key: string, entry: IdempotentEntry, expiresAt: Date) { this.idempotent.set(key, { entry: structuredClone(entry), expiresAt }); }
+  async putIdempotent(key: string, entry: IdempotentEntry, expiresAt: Date, cap: { owner: string; maxPerOwner: number }) {
+    const now = this.clock();
+    // Map keeps insertion order: the first key of an owner is that owner's oldest entry.
+    const mine = [...this.idempotent].filter(([, v]) => v.owner === cap.owner);
+    for (const [k, v] of mine) if (v.expiresAt.getTime() <= now.getTime()) this.idempotent.delete(k);
+    const live = [...this.idempotent].filter(([k, v]) => v.owner === cap.owner && k !== key);
+    for (const [k] of live.slice(0, Math.max(0, live.length - (cap.maxPerOwner - 1)))) this.idempotent.delete(k);
+    this.idempotent.delete(key);
+    this.idempotent.set(key, { entry: structuredClone(entry), expiresAt, owner: cap.owner });
+  }
 }

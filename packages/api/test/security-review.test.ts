@@ -128,19 +128,20 @@ describe('R-5: Idempotency-Key replays only the same request for the same, curre
   it('the key is bound to method + path + If-Match + body: reuse for another request is 422 and does not run', async () => {
     const w = await world();
     const k = { 'Idempotency-Key': 'kb' };
-    const preview = await w.call(USERS.haeun, 'POST', '/incidents/bulk', { headers: k, body: { action: 'resolve', preview: true, items: [{ id: w.ids.mirae, version: 1 }] } });
+    // (a preview is never stored — N-19 — so the binding is shown with two real requests)
+    const preview = await w.call(USERS.haeun, 'POST', '/incidents/bulk', { headers: k, body: { action: 'resolve', preview: false, items: [{ id: w.ids.mirae, version: 1 }] } });
     expect(preview.status).toBe(200);
     const exec = await w.call(USERS.haeun, 'POST', '/incidents/bulk', { headers: k, body: { action: 'resolve', preview: false, items: [{ id: w.ids.hanbit, version: 1 }] } });
     expect(exec.status).toBe(422);
     expect(body(exec).error.code).toBe('IDEMPOTENCY_KEY_REUSED');
     expect(w.store.incidents.get(w.ids.hanbit)!.status).toBe('TRIGGERED');
     // same body, keys in another order, and the /api/v1 prefix: the same request
-    const again = await w.call(USERS.haeun, 'POST', '/api/v1/incidents/bulk', { headers: k, body: { items: [{ version: 1, id: w.ids.mirae }], preview: true, action: 'resolve' } });
+    const again = await w.call(USERS.haeun, 'POST', '/api/v1/incidents/bulk', { headers: k, body: { items: [{ version: 1, id: w.ids.mirae }], preview: false, action: 'resolve' } });
     expect(again).toEqual(preview);
     // another If-Match is another request
-    const a = await w.call(USERS.haeun, 'POST', `/incidents/${w.ids.mirae}/ack`, { headers: { 'If-Match': '1', 'Idempotency-Key': 'ka' } });
+    const a = await w.call(USERS.haeun, 'POST', `/incidents/${w.ids.hanbit}/ack`, { headers: { 'If-Match': '1', 'Idempotency-Key': 'ka' } });
     expect(a.status).toBe(200);
-    expect((await w.call(USERS.haeun, 'POST', `/incidents/${w.ids.mirae}/ack`, { headers: { 'If-Match': '2', 'Idempotency-Key': 'ka' } })).status).toBe(422);
+    expect((await w.call(USERS.haeun, 'POST', `/incidents/${w.ids.hanbit}/ack`, { headers: { 'If-Match': '2', 'Idempotency-Key': 'ka' } })).status).toBe(422);
   });
 
   it('failed requests are not stored (a viewer cannot fill the store) and are simply evaluated again', async () => {
@@ -393,7 +394,11 @@ describe('Q-1: what a portal (customer) user receives', () => {
     const t = body(await w.call(USERS.viewer, 'GET', `/incidents/${w.ids.mirae}/timeline`));
     expect(t.items.find((e: any) => e.kind === 'ACKED')).toMatchObject({ actorId: 'usr_haeun', message: 'Acknowledged by Haeun Kim. Paging stopped.' });
     expect(t.items.find((e: any) => /not verified/.test(e.message)).message).toBe('Step 4/4: Call to Yuna Seo was not sent — the phone number is not verified.');
-    const n = body(await w.call(USERS.viewer, 'GET', `/incidents/${w.ids.mirae}/notifications`));
+    // provider text is for OPERATOR and ADMIN (review 2, R-13); an internal VIEWER gets the reason code only
+    const v = body(await w.call(USERS.viewer, 'GET', `/incidents/${w.ids.mirae}/notifications`));
+    expect(v.items[1]).toMatchObject({ channel: 'SMS', status: 'FAILED', reason: 'PROVIDER_REJECTED', error: null });
+    expect(JSON.stringify(v)).not.toMatch(/vendor|rejected \(/);
+    const n = body(await w.call(USERS.haeun, 'GET', `/incidents/${w.ids.mirae}/notifications`));
     expect(n.items[1]).toMatchObject({ channel: 'SMS', status: 'FAILED', targetSummary: 'Haeun Kim', reason: 'PROVIDER_REJECTED', error: 'vendor: number [number] rejected ([secret], [secret])', providerMessageId: null });
     expect(n.items[0]).toMatchObject({ targetSummary: 'Customer Slack channel', providerMessageId: expect.stringMatching(/^slack-\d$/) });
     expect(JSON.stringify(n)).not.toMatch(/82100008995|sk_live|AC123|C_MIRAE|C_MSP/); // not even staff get the raw provider text or a channel id

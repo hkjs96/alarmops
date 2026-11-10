@@ -10,7 +10,7 @@ import {
 import { DEFAULT_API_CONFIG, serializerFor, type ApiConfig, type EventCtx, type IncidentSerializer, type UserInfo } from './audience.js';
 import { requireAuth, requireRole, scopeOf, type AuthContext, type ScopeFilter } from './auth.js';
 import {
-  ApiError, decodeCursor, encodeCursor, ifMatch, invalid, invalidTransition, isRecord, limitOf, notFound, ok, q, validation, versionConflict,
+  ApiError, decodeCursor, encodeCursor, ifMatch, invalid, invalidTransition, isRecord, limitOf, notFound, ok, q, rateLimited, validation, versionConflict,
   type ApiRequest, type ApiResponse,
 } from './http.js';
 import type { ApiRepository, IncidentFilter, NodeFilter, OrgTree, UndoRecord } from './repo.js';
@@ -298,7 +298,7 @@ export async function actOnIncident(req: ApiRequest, deps: Deps, id: string, act
   }
   const t = transition(action, inc, auth, now, await deps.repo.loadPolicy(), req.requestId, body, mutedUntil);
   if (!t.ok) {
-    if (t.code === 'RATE_LIMITED') throw new ApiError(429, t.code, t.message, t.details);
+    if (t.code === 'RATE_LIMITED') throw rateLimited(t.message, Number(t.details.retryAfterSec));
     if (t.code === 'MUTED_BY_MAINTENANCE') throw new ApiError(409, t.code, t.message, t.details);
     throw invalidTransition(t.message);
   }

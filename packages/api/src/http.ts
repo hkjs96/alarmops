@@ -33,13 +33,20 @@ const BASE_HEADERS = { 'content-type': 'application/json; charset=utf-8', 'cache
 export const ok = (body: unknown, headers: Record<string, string> = {}, status = 200): ApiResponse => ({ status, headers: { ...BASE_HEADERS, ...headers }, body });
 
 export class ApiError extends Error {
-  constructor(readonly status: number, readonly code: string, message: string, readonly details: Record<string, unknown> = {}) {
+  /** `headers`: extra response headers of this error (e.g. `retry-after` on 429). Never used on 404 (§2). */
+  constructor(readonly status: number, readonly code: string, message: string, readonly details: Record<string, unknown> = {}, readonly headers: Record<string, string> = {}) {
     super(message);
   }
 }
 
+/** 429 with `Retry-After` (seconds, RFC 9110) and the same number in `details.retryAfterSec`. */
+export const rateLimited = (message: string, retryAfterSec: number): ApiError => {
+  const sec = Math.max(1, Math.ceil(retryAfterSec));
+  return new ApiError(429, 'RATE_LIMITED', message, { retryAfterSec: sec }, { 'retry-after': String(sec) });
+};
+
 export function errorResponse(e: ApiError, requestId: string): ApiResponse {
-  return { status: e.status, headers: { ...BASE_HEADERS }, body: { error: { code: e.code, message: e.message, details: e.details, requestId } } };
+  return { status: e.status, headers: { ...BASE_HEADERS, ...e.headers }, body: { error: { code: e.code, message: e.message, details: e.details, requestId } } };
 }
 
 /**
