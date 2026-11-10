@@ -13,9 +13,9 @@
  * - Ack stops paging (R6-3, D-24). Acked and unresolved incidents are re-notified (R5-2).
  * - Maintenance mutes everything but SEV-1 (D-17), manual escalation included (R-7); the step counter is not touched while muted (R4-6).
  */
-import { MAX_ALL_RESPONDERS, MAX_RENOTIFY, MAX_REPEAT, MAX_SENDS_PER_CYCLE } from './limits.js';
+import { MAX_ALL_RESPONDERS, MAX_RENOTIFY, MAX_REPEAT, MAX_SENDS_PER_CYCLE, MAX_SENDS_PER_HOUR } from './limits.js';
 import { coveringWindow, type MaintenanceWindow } from './maintenance.js';
-import { resolvePagingConfig, resolveStep, type EscalationStep, type PagingConfig, type PagingWorld, type ResolvedTarget, type ScopeLevel, type StepChannel, type TargetType } from './paging.js';
+import { isPageableFor, resolvePagingConfig, resolveStep, type EscalationStep, type PagingConfig, type PagingWorld, type ResolvedTarget, type ScopeLevel, type StepChannel, type TargetType } from './paging.js';
 import type { Severity } from './types.js';
 
 export interface SnapshotStep {
@@ -42,6 +42,20 @@ export interface AssignmentSnapshot {
   renotifyAfterAckSec: number | null;
   /** Contact ids that were replaced because of an active leave. */
   leaveApplied: string[];
+  /** Set when the engine had to cut this order down to the send caps (R-12); written to the timeline at open. */
+  clamped?: SendCapClamp;
+}
+
+/** What `clampSnapshot` removed so one incident stays inside MAX_SENDS_PER_CYCLE / MAX_SENDS_PER_HOUR. */
+export interface SendCapClamp {
+  /** What the order would have sent, before the cut. */
+  perCycle: number;
+  perHour: number;
+  repeatCountBefore: number;
+  repeatCountAfter: number;
+  /** People removed from steps (largest steps first, last-listed people first). */
+  removedPeople: number;
+  removedSteps: number;
 }
 
 const STYLE_LABEL: Record<PagingConfig['style'], string> = {
@@ -74,11 +88,57 @@ export function buildSnapshot(
       ...(s.advanceOnAllFail ? { advanceOnAllFail: true } : {}), ...(label ? { label } : {}),
     };
   });
-  return {
+  // R-12: the caps are enforced HERE, with the people the steps reach right now — not only when the order was saved.
+  // Responders added after the PUT, or a row written around the API, cannot make one incident send more than the caps.
+  return clampSnapshot({
     capturedAt: at.toISOString(), pagingConfigId: hit.config.id, level: hit.inheritedFrom, planLabel: planLabel(hit.config),
     steps, repeatCount: clampRepeat(hit.config.repeatCount), renotifyAfterAckSec: hit.config.renotifyAfterAckSec ?? null,
     leaveApplied: [...leaveApplied],
+  });
+}
+
+const stepSends = (s: Pick<SnapshotStep, 'channels' | 'resolved'>): number => s.channels.reduce((n, ch) => n + (ch === 'SLACK_CHANNEL' ? 1 : s.resolved.length), 0);
+const MAX_SNAPSHOT_STEPS = 50;
+
+/**
+ * Cut a frozen call order down to the send caps (R-12). Deterministic, so reading the same row twice gives the same
+ * result. In order:
+ * 1. while one pass sends more than MAX_SENDS_PER_CYCLE: remove the last-listed person from the step that sends
+ *    the most (a step never loses its last person or its Slack channel); when no step can shrink, drop the last step;
+ * 2. while the busiest hour sends more than MAX_SENDS_PER_HOUR: one repeat less.
+ * Nothing changes when the order is inside the caps (every order the API accepts, unless responders were added since).
+ */
+export function clampSnapshot(snap: AssignmentSnapshot): AssignmentSnapshot {
+  let steps = snap.steps.length > MAX_SNAPSHOT_STEPS ? snap.steps.slice(0, MAX_SNAPSHOT_STEPS) : snap.steps;
+  let repeat = clampRepeat(snap.repeatCount);
+  const measure = () => sendsOf(steps.map((s) => ({ atMin: s.atMin, n: stepSends(s) })), repeat);
+  const before = measure();
+  if (steps === snap.steps && before.perCycle <= MAX_SENDS_PER_CYCLE && before.perHour <= MAX_SENDS_PER_HOUR) return repeat === snap.repeatCount ? snap : { ...snap, repeatCount: repeat };
+  let removedPeople = 0;
+  let removedSteps = snap.steps.length - steps.length;
+  steps = steps.map((s) => ({ ...s, resolved: [...s.resolved] }));
+  for (let total = measure().perCycle; total > MAX_SENDS_PER_CYCLE; total = measure().perCycle) {
+    let big: SnapshotStep | null = null;
+    for (const s of steps) if (s.resolved.length > 1 && s.channels.some((c) => c !== 'SLACK_CHANNEL') && (!big || stepSends(s) > stepSends(big))) big = s;
+    if (big) { big.resolved.pop(); removedPeople++; } else if (steps.length > 1) { steps = steps.slice(0, -1); removedSteps++; } else break;
+  }
+  const repeatBefore = repeat;
+  while (repeat > 0 && measure().perHour > MAX_SENDS_PER_HOUR) repeat--;
+  if (removedPeople === 0 && removedSteps === 0 && repeat === repeatBefore) return repeat === snap.repeatCount ? snap : { ...snap, repeatCount: repeat };
+  return {
+    ...snap, steps, repeatCount: repeat,
+    clamped: snap.clamped ?? { perCycle: before.perCycle, perHour: before.perHour, repeatCountBefore: repeatBefore, repeatCountAfter: repeat, removedPeople, removedSteps },
   };
+}
+
+/** The timeline line for a clamped order. */
+export function clampMessage(c: SendCapClamp): string {
+  const cut = [
+    c.removedPeople ? `${c.removedPeople} ${c.removedPeople === 1 ? 'person was' : 'people were'} left out of the largest steps` : '',
+    c.removedSteps ? `${c.removedSteps} step${c.removedSteps === 1 ? ' was' : 's were'} dropped` : '',
+    c.repeatCountAfter !== c.repeatCountBefore ? `repeats were reduced from ${c.repeatCountBefore} to ${c.repeatCountAfter}` : '',
+  ].filter(Boolean).join('; ');
+  return `Send limit applied: this call order would send ${c.perCycle} notifications per pass and ${c.perHour} in one hour (limits ${MAX_SENDS_PER_CYCLE} / ${MAX_SENDS_PER_HOUR}) — ${cut}. Review the call order or the Responders list.`;
 }
 
 /** R3-3: a broken snapshot is "no snapshot" (the screen must not crash and nobody is paged from garbage). */
@@ -90,8 +150,8 @@ export function parseSnapshot(raw: unknown): AssignmentSnapshot | null {
     if (!st || typeof st.atMin !== 'number' || !Number.isFinite(st.atMin) || !Array.isArray(st.channels) || !Array.isArray(st.resolved)) return null;
     if (st.resolved.some((r) => !r || typeof r.contactId !== 'string')) return null;
   }
-  // The engine never trusts the stored repeat count beyond the cap (R-1c).
-  return { ...(s as AssignmentSnapshot), repeatCount: clampRepeat(s.repeatCount) };
+  // The engine never trusts the stored numbers beyond the caps (R-1c, R-12): repeats, fan-out per pass and per hour.
+  return clampSnapshot({ ...(s as AssignmentSnapshot), repeatCount: clampRepeat(s.repeatCount) });
 }
 
 const clampRepeat = (n: number): number => (Number.isFinite(n) ? Math.max(0, Math.min(MAX_REPEAT, Math.floor(n))) : 0);
@@ -102,10 +162,14 @@ const clampRepeat = (n: number): number => (Number.isFinite(n) ? Math.max(0, Mat
  * person, plus one for the Slack channel. `allResponders` = people an ALL_RESPONDERS step reaches now.
  */
 export function estimateSends(steps: Array<Pick<EscalationStep, 'atMin' | 'targetType' | 'channels'>>, repeatCount: number, allResponders: number): { perCycle: number; perHour: number } {
-  if (steps.length === 0) return { perCycle: 0, perHour: 0 };
   const people = (s: Pick<EscalationStep, 'targetType'>) => (s.targetType === 'ALL_RESPONDERS' ? Math.max(1, Math.min(allResponders, MAX_ALL_RESPONDERS)) : 1);
-  const count = steps.map((s) => s.channels.reduce((n, ch) => n + (ch === 'SLACK_CHANNEL' ? 1 : people(s)), 0));
-  const perCycle = count.reduce((a, b) => a + b, 0);
+  return sendsOf(steps.map((s) => ({ atMin: s.atMin, n: s.channels.reduce((n, ch) => n + (ch === 'SLACK_CHANNEL' ? 1 : people(s)), 0) })), repeatCount);
+}
+
+/** `n` notifications at each step → one pass and the busiest 60-minute window, on the engine's own clock. */
+export function sendsOf(steps: Array<{ atMin: number; n: number }>, repeatCount: number): { perCycle: number; perHour: number } {
+  if (steps.length === 0) return { perCycle: 0, perHour: 0 };
+  const perCycle = steps.reduce((a, b) => a + b.n, 0);
   // Same clock as nextStep(): a step waits atMin(i) − atMin(i−1) after the previous page; a repeat waits the last gap.
   const gap = repeatGapMin(steps) + steps[0]!.atMin;
   const sends: Array<{ at: number; n: number }> = [];
@@ -113,11 +177,50 @@ export function estimateSends(steps: Array<Pick<EscalationStep, 'atMin' | 'targe
   for (let cycle = 0; cycle <= clampRepeat(repeatCount); cycle++) {
     steps.forEach((s, i) => {
       t += i === 0 ? (cycle === 0 ? s.atMin : gap) : Math.max(0, s.atMin - steps[i - 1]!.atMin);
-      sends.push({ at: t, n: count[i]! });
+      sends.push({ at: t, n: s.n });
     });
   }
-  const perHour = Math.max(...sends.map((a) => sends.filter((b) => b.at >= a.at && b.at < a.at + 60).reduce((n, b) => n + b.n, 0)));
+  // Sliding window over the time-ordered sends (linear).
+  let perHour = 0;
+  let sum = 0;
+  let lo = 0;
+  for (let hi = 0; hi < sends.length; hi++) {
+    sum += sends[hi]!.n;
+    while (sends[hi]!.at - sends[lo]!.at >= 60) sum -= sends[lo++]!.n;
+    perHour = Math.max(perHour, sum);
+  }
   return { perCycle, perHour };
+}
+
+export type SendCapViolation =
+  | { code: 'RESPONDER_LIMIT_EXCEEDED'; stepIndex: number; responders: number; limit: number }
+  | { code: 'SEND_CAP_EXCEEDED'; perCycle: number; perHour: number; limits: { perCycle: number; perHour: number } };
+
+/**
+ * Is this call order inside the send caps with the customer's CURRENT responders (R-1, R-12)? One function for
+ * every place that has to ask: the paging PUT, paging health, and any write that changes who is a responder
+ * (`sendCapViolations` below) — so the answer cannot drift between "when it was saved" and "now".
+ */
+export function sendCapViolation(cfg: Pick<PagingConfig, 'steps' | 'repeatCount'>, w: PagingWorld): SendCapViolation | null {
+  const responders = w.responders.filter((r) => r.customerId === w.customerId && r.role === 'PAGEABLE' && isPageableFor(w, r.contactId)).length;
+  const everyone = cfg.steps.find((s) => s.targetType === 'ALL_RESPONDERS');
+  if (everyone && responders > MAX_ALL_RESPONDERS) return { code: 'RESPONDER_LIMIT_EXCEEDED', stepIndex: everyone.index, responders, limit: MAX_ALL_RESPONDERS };
+  const sends = estimateSends([...cfg.steps].sort((a, b) => a.index - b.index), cfg.repeatCount, responders);
+  if (sends.perCycle > MAX_SENDS_PER_CYCLE || sends.perHour > MAX_SENDS_PER_HOUR) {
+    return { code: 'SEND_CAP_EXCEEDED', perCycle: sends.perCycle, perHour: sends.perHour, limits: { perCycle: MAX_SENDS_PER_CYCLE, perHour: MAX_SENDS_PER_HOUR } };
+  }
+  return null;
+}
+
+/**
+ * Re-validation when responders change (R-12): every call order of the customer that the new responder list would
+ * push over a cap. The Responder write path must call this with the world AS IT WOULD BE and refuse the change
+ * (422, same codes as the paging PUT) when the list is not empty. Until then the engine clamps (clampSnapshot).
+ */
+export function sendCapViolations(configs: PagingConfig[], w: PagingWorld): Array<{ pagingConfigId: string; scopeType: ScopeLevel; scopeId: string; violation: SendCapViolation }> {
+  return configs.filter((c) => c.customerId === w.customerId)
+    .map((c) => ({ pagingConfigId: c.id, scopeType: c.scopeType, scopeId: c.scopeId, violation: sendCapViolation(c, w) }))
+    .filter((x): x is typeof x & { violation: SendCapViolation } => x.violation !== null);
 }
 
 /** "Haeun Kim → Yuna Seo → everyone in Responders (5)" — the timeline line written at open. */

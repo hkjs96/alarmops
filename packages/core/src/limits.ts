@@ -41,3 +41,25 @@ export const NOTIFY_RESERVE_MS = 10_000;
 
 // ── manual escalate (PROPOSED, R-7) ──
 export const MANUAL_ESCALATE_MIN_GAP_SEC = 60;
+
+// ── outbox lanes (PROPOSED, security review 2: R-11, N-11, N-12, N-17) ──
+/** Provider calls in flight per lane (SLACK / SMS / VOICE / EMAIL). Lanes run side by side and never wait for each other. */
+export const LANE_CONCURRENCY = 5;
+/** Consecutive timeouts after which a lane's circuit breaker opens; the rest of its claimed jobs go back untouched. */
+export const BREAKER_TIMEOUTS = 3;
+/** How long an open breaker waits before one probe job is sent (half-open). Below one tick, so the next tick probes. */
+export const BREAKER_OPEN_SEC = 45;
+/** The wait doubles after every failed probe, up to this. */
+export const BREAKER_MAX_OPEN_SEC = 300;
+/** Share of each claim kept for non-SEV-1 jobs, oldest first, so a wall of SEV-1 tenants cannot starve them (N-17). */
+export const NON_SEV1_RESERVE_PCT = 20;
+/** A page held by a maintenance window is looked at again at least this often (a window may be revoked early) — N-13. */
+export const MAINTENANCE_RECHECK_SEC = 300;
+
+// ── provider text (R-13) ──
+/** Provider error text is cut to this BEFORE any pattern runs. */
+export const PROVIDER_ERROR_MAX_CHARS = 300;
+
+// ── idempotency store (N-19) ──
+/** Live Idempotency-Key entries one user may hold; the oldest is dropped when a new one is stored. */
+export const IDEMPOTENCY_MAX_PER_USER = 200;

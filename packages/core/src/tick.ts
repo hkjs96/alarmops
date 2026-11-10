@@ -3,7 +3,7 @@
  * caller (TICK_SECRET) and calls `runTick` with a repository and senders.
  *
  * One tick = ① close due groups → collect → open/merge incidents ② auto-resolve ③ escalation steps + re-notify
- * ④ drain the notification outbox ⑤ heartbeats.
+ * ④ drain the notification outbox, one lane per provider (R-11) ⑤ heartbeats.
  *
  * Properties (tested in test/tick.test.ts):
  * - Safe to run twice: same minute → `{ skipped: 'duplicate' }`; even without that guard a second run finds nothing
@@ -12,12 +12,16 @@
  * - Bounded: each phase takes at most `batch` rows and stops at the time budget; the rest waits for the next tick.
  * - One incident/group/job failing never stops the others (I-6 "한 인시던트의 오류가 틱 전체를 막지 않는다").
  */
-import { buildSnapshot, incidentMute, planEscalation, scheduleNext, snapshotSummary, unownedInitialIntent, type NotificationIntent } from './escalation.js';
+import { buildSnapshot, clampMessage, incidentMute, planEscalation, scheduleNext, snapshotSummary, unownedInitialIntent, type NotificationIntent } from './escalation.js';
 import { GROUP_GRACE_SEC, representative, type GroupRow } from './grouping.js';
 import { addMember, mergeOrOpen, newIncident, incidentId, resolve, type IncidentRow } from './incident.js';
-import { NOTIFY_RESERVE_MS, SMS_VOICE_REQUIRE_VERIFIED } from './limits.js';
+import { protectUnlessFalse } from './config.js';
+import { BREAKER_TIMEOUTS, LANE_CONCURRENCY, NOTIFY_RESERVE_MS } from './limits.js';
 import type { MaintenanceWindow } from './maintenance.js';
-import { dispatchJob, NOTIFY_BATCH, type DeliveryLog, type DeliveryReason, type NotificationJob, type Senders } from './notify.js';
+import {
+  closedBreaker, dispatchJob, LANES, MAX_ATTEMPTS, NOTIFY_BATCH, sanitizeProviderError, senderKind, tripBreaker,
+  type DeliveryLog, type DeliveryReason, type NotificationJob, type ProviderBreaker, type SenderKind, type Senders,
+} from './notify.js';
 import type { Contact, PagingConfig, PagingWorld } from './paging.js';
 import type { SuppressionPolicy } from './policy.js';
 import type { Severity, Source } from './types.js';
@@ -120,7 +124,8 @@ export interface HeartbeatRow {
   name: TickJob;
   lastStartedAt: Date | null;
   lastFinishedAt: Date | null;
-  lastStatus: 'OK' | 'ERROR';
+  /** DEGRADED (notify only, N-12): the phase ran without an error but SEV-1 pages that were due were not attempted. */
+  lastStatus: 'OK' | 'ERROR' | 'DEGRADED';
   lastDurationMs: number;
   lastStats: Record<string, unknown>;
   consecutiveFailures: number;
@@ -166,20 +171,40 @@ export interface TickRepository {
   commitIncident(c: IncidentCommit): Promise<IncidentRow | 'CONFLICT'>;
 
   // ④ outbox
+  //
+  // CLOCK RULE (R-14): the outbox methods take no time from the caller. "Is it due", "has the lease run out", the
+  // new lease and the retry time are all computed from the STORE's clock — in SQL, `now()` inside the statement —
+  // so two runners whose clocks disagree cannot both hold a job. The in-memory store has its own `clock`.
+  // The runner's clock (`TickDeps.now`) is used for the tick budget and for timestamps in logs and events only.
   /**
-   * Claim due jobs (QUEUED, or SENDING whose lease ran out) with nextAttemptAt ≤ now, in `fairOrder` (round-robin
-   * by customer, SEV-1 first — R-1): status SENDING, claimSeq+1, nextAttemptAt = now + CLAIM_LEASE_SEC, all in the
-   * claiming UPDATE. `attempts` is NOT touched (R-3). A due job that already used MAX_ATTEMPTS sends (the process
-   * died during the last one) becomes FAILED with a NotificationLog row (errorCode GAVE_UP) and is not returned.
+   * Claim due jobs (QUEUED, or SENDING whose lease ran out, with nextAttemptAt ≤ store now) of the given provider
+   * kinds, chosen by `selectForClaim` (fair order by customer, SEV-1 first, never-attempted before retries, a
+   * reserved share for the oldest non-SEV-1 — R-1, R-11, N-17): status SENDING, claimSeq+1,
+   * nextAttemptAt = store now + CLAIM_LEASE_SEC, all in the claiming UPDATE. `attempts` and `dueAt` are NOT touched
+   * (R-3, R-11). A due job that already used MAX_ATTEMPTS sends (the process died during the last one) becomes
+   * FAILED with a NotificationLog row (errorCode GAVE_UP) and is not returned.
    */
-  claimDueJobs(now: Date, limit: number): Promise<NotificationJob[]>;
+  claimDueJobs(limit: number, opts?: { kinds?: readonly SenderKind[] }): Promise<NotificationJob[]>;
   /**
-   * Right before the provider call: `attempts+1, nextAttemptAt = retryAt(attempts) WHERE status='SENDING' AND claimSeq=?`.
+   * Right before the provider call: `attempts+1, nextAttemptAt = dueAt = retryAt(attempts, store now) WHERE status='SENDING' AND claimSeq=?`.
    * Returns the new attempt number, or null when the claim is no longer ours (then the caller must not send).
    */
-  beginSend(jobId: string, claimSeq: number, now: Date): Promise<number | null>;
-  /** Give back a claimed job that was not reached (budget): QUEUED, due now. Guarded by the claim token. */
-  releaseJob(jobId: string, claimSeq: number, now: Date): Promise<boolean>;
+  beginSend(jobId: string, claimSeq: number): Promise<number | null>;
+  /**
+   * Give back a claimed job that was not sent. Guarded by the claim token. Status QUEUED, `attempts` unchanged.
+   * - plain (budget ran out, breaker opened): `nextAttemptAt = dueAt` — the ORIGINAL due time, never "now" (R-11);
+   * - `notBefore` (held by a maintenance window, N-13): `nextAttemptAt = dueAt = notBefore`, `lastError = note`,
+   *   and `event` (if any) is written in the same transaction.
+   */
+  releaseJob(jobId: string, claimSeq: number, opts?: { notBefore?: Date; note?: string; event?: IncidentEventInput }): Promise<boolean>;
+  /**
+   * Due jobs nobody has tried yet (attempts = 0, QUEUED or lease expired, dueAt ≤ store now), read AFTER the drain.
+   * `dueSev1Unattempted > 0` turns the notify heartbeat DEGRADED (N-12).
+   */
+  outboxBacklog(): Promise<{ dueUnattempted: number; dueSev1Unattempted: number; oldestDueAt: Date | null }>;
+  /** Circuit breakers of the provider lanes (one row per SenderKind; a missing row is CLOSED). */
+  loadBreakers(): Promise<ProviderBreaker[]>;
+  saveBreaker(b: ProviderBreaker): Promise<void>;
   /** The incident a job belongs to (status for the ack check, org position and severity for the maintenance check). */
   findIncidentById(incidentId: string): Promise<IncidentRow | null>;
   getContact(contactId: string): Promise<Contact | null>;
@@ -220,8 +245,10 @@ export interface TickDeps {
   budgetMs?: number;
   /** Per provider call (default SEND_TIMEOUT_MS). */
   sendTimeoutMs?: number;
-  /** Q-DM-16 switch (default SMS_VOICE_REQUIRE_VERIFIED). */
+  /** Q-DM-16 / D-37 switch (default SMS_VOICE_REQUIRE_VERIFIED). Only the boolean `false` switches it off (R-15). */
   smsVoiceRequireVerified?: boolean;
+  /** Provider calls in flight per lane (default LANE_CONCURRENCY). */
+  laneConcurrency?: number;
   log?: (level: 'info' | 'warn' | 'error', msg: string, data?: Record<string, unknown>) => void;
 }
 
@@ -231,7 +258,20 @@ export interface TickSummary {
   group: { closed: number; delivered: number; opened: number; merged: number; empty: number; paused: number; conflicts: number };
   reconcile: { checked: number; resolved: number };
   escalation: { checked: number; escalated: number; muted: number; renotified: number; done: number; conflicts: number };
-  notify: { sent: number; failed: number; retried: number; skipped: number };
+  notify: {
+    sent: number; failed: number; retried: number; skipped: number;
+    /** Held by a maintenance window (N-13). */
+    deferred: number;
+    /** Claimed but handed back unsent (budget, breaker). */
+    released: number;
+    /** Provider calls that timed out. */
+    timeouts: number;
+    /** Lanes whose breaker is open at the end of the phase. */
+    breakerOpen: SenderKind[];
+    /** Due and never attempted after the drain (N-12). SEV-1 > 0 → heartbeat DEGRADED. */
+    dueUnattempted: number;
+    dueSev1Unattempted: number;
+  };
   errors: TickError[];
   /** A phase hit its batch limit or the time budget; the remainder runs next tick. */
   truncated: boolean;
@@ -261,7 +301,7 @@ export async function runTick(input: TickInput, deps: TickDeps): Promise<TickRes
     group: { closed: 0, delivered: 0, opened: 0, merged: 0, empty: 0, paused: 0, conflicts: 0 },
     reconcile: { checked: 0, resolved: 0 },
     escalation: { checked: 0, escalated: 0, muted: 0, renotified: 0, done: 0, conflicts: 0 },
-    notify: { sent: 0, failed: 0, retried: 0, skipped: 0 },
+    notify: { sent: 0, failed: 0, retried: 0, skipped: 0, deferred: 0, released: 0, timeouts: 0, breakerOpen: [], dueUnattempted: 0, dueSev1Unattempted: 0 },
     errors: [], truncated: false, durationMs: 0,
   };
   const ctx: Ctx = { ...deps, clock, batch, deadline, softDeadline, sum, policy: await deps.repo.loadPolicy() };
@@ -272,21 +312,49 @@ export async function runTick(input: TickInput, deps: TickDeps): Promise<TickRes
     ['escalation', () => escalationPhase(ctx), () => sum.escalation],
     ['notify', () => notifyPhase(ctx), () => sum.notify],
   ];
+  const reserve = Math.min(NOTIFY_RESERVE_MS, Math.floor(budget / 4));
   for (const [name, run, stats] of phases) {
     if (!jobs.has(name)) continue;
     const t0 = clock();
     const errorsBefore = sum.errors.length;
+    let degraded = false;
     try {
-      await run();
+      if (name === 'notify') {
+        // N-12: the outbox always gets its reserved share, counted from when it starts — even when an earlier
+        // phase ran past the whole budget.
+        ctx.deadline = Math.max(deadline, t0.getTime() + reserve);
+        await run();
+      } else {
+        // N-12: an earlier phase that does not come back (one slow query) is left behind at the soft deadline so
+        // the outbox still runs. Its writes are version-guarded; what it did not finish is picked up next tick.
+        const left = softDeadline - t0.getTime();
+        if (left <= 0) sum.truncated = true;
+        else if ((await withinBudget(run(), left)) === 'TIMED_OUT') {
+          sum.truncated = true;
+          sum.errors.push({ phase: name, id: '*', message: 'phase did not finish within its share of the tick budget; left running, the outbox goes ahead' });
+        }
+      }
     } catch (err) {
       // A phase-level failure (e.g. the listing query) must not stop the later phases.
       sum.errors.push({ phase: name, id: '*', message: errMsg(err) });
+    }
+    if (name === 'notify') {
+      // N-12: "ran without an error" is not "paged". Count what is due and was never tried.
+      try {
+        const backlog = await deps.repo.outboxBacklog();
+        sum.notify.dueUnattempted = backlog.dueUnattempted;
+        sum.notify.dueSev1Unattempted = backlog.dueSev1Unattempted;
+        degraded = backlog.dueSev1Unattempted > 0;
+        if (backlog.dueUnattempted > 0) sum.truncated = true;
+      } catch (err) {
+        sum.errors.push({ phase: name, id: 'backlog', message: errMsg(err) });
+      }
     }
     const t1 = clock();
     const failed = sum.errors.length > errorsBefore;
     try {
       await deps.repo.writeHeartbeat({
-        name, lastStartedAt: t0, lastFinishedAt: t1, lastStatus: failed ? 'ERROR' : 'OK',
+        name, lastStartedAt: t0, lastFinishedAt: t1, lastStatus: failed ? 'ERROR' : degraded ? 'DEGRADED' : 'OK',
         lastDurationMs: Math.max(0, t1.getTime() - t0.getTime()), lastStats: { ...stats(), errors: sum.errors.length - errorsBefore },
       });
     } catch (err) {
@@ -296,6 +364,15 @@ export async function runTick(input: TickInput, deps: TickDeps): Promise<TickRes
   for (const e of sum.errors) deps.log?.('error', 'tick_item_failed', { ...e });
   sum.durationMs = Math.max(0, clock().getTime() - started.getTime());
   return sum;
+}
+
+/** Real-time guard (not the injectable clock): resolves 'TIMED_OUT' when `p` is still pending after `ms`. */
+function withinBudget(p: Promise<void>, ms: number): Promise<'DONE' | 'TIMED_OUT'> {
+  return new Promise((done, fail) => {
+    const timer = setTimeout(() => done('TIMED_OUT'), ms);
+    (timer as { unref?: () => void }).unref?.();
+    p.then(() => { clearTimeout(timer); done('DONE'); }, (err) => { clearTimeout(timer); fail(err); });
+  });
 }
 
 interface Ctx extends TickDeps {
@@ -433,6 +510,12 @@ async function openIncident(c: Ctx, g: GroupRow, firing: GroupMember[], now: Dat
     if (snapshot) {
       events.push({ incidentId: inc.id, customerId: inc.customerId, at: inc.triggeredAt, kind: 'NOTE', actorType: 'SYSTEM', actorId: null,
         message: `Paging steps at open: ${snapshotSummary(snapshot)}`, data: { note: 'PAGING_ORDER', pagingConfigId: snapshot.pagingConfigId, level: snapshot.level } });
+      // R-12: the engine cut the order down to the send caps — say so where the operator looks.
+      if (snapshot.clamped) {
+        events.push({ incidentId: inc.id, customerId: inc.customerId, at: inc.triggeredAt, kind: 'NOTE', actorType: 'SYSTEM', actorId: null,
+          message: clampMessage(snapshot.clamped), data: { note: 'SEND_CAP_CLAMPED', ...snapshot.clamped } });
+        c.log?.('warn', 'send_cap_clamped', { incidentId: inc.id, customerId: inc.customerId, pagingConfigId: snapshot.pagingConfigId, ...snapshot.clamped });
+      }
     }
   }
   if (!inc.assignmentSnapshot) {
@@ -529,59 +612,161 @@ async function escalateOne(c: Ctx, inc: IncidentRow): Promise<void> {
 
 // ───────────────────────────── ④ outbox ─────────────────────────────
 
+/**
+ * Drain the outbox in LANES (R-11): one lane per provider kind (voice, SMS, Slack, e-mail), all running side by
+ * side, each with at most `laneConcurrency` provider calls in flight and its own circuit breaker. A provider that
+ * hangs costs its own lane one wave of timeouts (≈ SEND_TIMEOUT_MS) and nothing else: the other lanes never wait
+ * for it, and its remaining jobs go back with their original due time and no attempt used.
+ */
 async function notifyPhase(c: Ctx): Promise<void> {
   const limit = c.notifyBatch ?? NOTIFY_BATCH;
   // R-3: look at the budget BEFORE claiming — a tick that cannot send must not touch the jobs at all.
   if (overBudget(c, 'notify')) return;
-  const jobs = await c.repo.claimDueJobs(c.clock(), limit);
-  if (jobs.length >= limit) c.sum.truncated = true;
-  const windows = new Map<string, MaintenanceWindow[]>();
-  for (let i = 0; i < jobs.length; i++) {
-    const job = jobs[i]!;
-    if (overBudget(c, 'notify')) {
-      // Not reached: hand the claims back untouched (no attempt counted, due at once for the next tick).
-      for (const rest of jobs.slice(i)) {
-        try { await c.repo.releaseJob(rest.id, rest.claimSeq, c.clock()); } catch (err) { c.sum.errors.push({ phase: 'notify', id: rest.id, message: errMsg(err) }); }
-      }
-      return;
-    }
+  const breakers = new Map((await c.repo.loadBreakers()).map((b) => [b.kind, b]));
+  const windows = new Map<string, Promise<MaintenanceWindow[]>>();
+  await Promise.all(LANES.map(async (kind) => {
     try {
-      const now = c.clock();
-      const inc = await c.repo.findIncidentById(job.incidentId);
-      const person = job.contactId ? await c.repo.getContact(job.contactId) : null;
-      const slack = job.channel === 'SLACK_BOT' || job.channel === 'SLACK_WEBHOOK' ? await c.repo.slackDestinations(job) : { channels: [], owner: 'MSP' as const };
-      let muted = false;
-      if (inc && inc.status !== 'RESOLVED' && inc.severity !== 'SEV_1') {
-        const k = inc.customerId ?? '';
-        if (!windows.has(k)) windows.set(k, await c.repo.maintenanceWindows(inc.customerId, now));
-        muted = !!incidentMute({ customerId: inc.customerId, projectId: inc.projectId, serviceId: inc.serviceId, accountIds: inc.accountIds, resourceTypes: inc.resourceTypes, severity: inc.severity }, windows.get(k)!, now);
-      }
-      const out = await dispatchJob(job, {
-        now, senders: c.senders, incidentStatus: inc?.status ?? null, contact: person, slackChannels: slack.channels, slackOwner: slack.owner, muted,
-        requireVerifiedPhone: c.smsVoiceRequireVerified ?? SMS_VOICE_REQUIRE_VERIFIED, sendTimeoutMs: c.sendTimeoutMs,
-        beginSend: () => c.repo.beginSend(job.id, job.claimSeq, c.clock()),
-      });
-      if (out.status === 'LOST') continue;
-      let written: boolean;
-      if (out.status === 'SENT') {
-        written = await c.repo.completeJob(job.id, job.claimSeq, { status: 'SENT', providerMessageId: out.providerMessageId }, out.log);
-        if (written) c.sum.notify.sent++;
-      } else if (out.status === 'FAILED') {
-        written = await c.repo.completeJob(job.id, job.claimSeq, { status: 'FAILED', error: out.error, errorCode: out.errorCode }, out.log);
-        if (written) c.sum.notify.failed++;
-      } else if (out.status === 'RETRY') {
-        written = await c.repo.completeJob(job.id, job.claimSeq, { status: 'QUEUED', error: out.error, errorCode: out.errorCode });
-        if (written) c.sum.notify.retried++;
-      } else {
-        written = await c.repo.completeJob(job.id, job.claimSeq, { status: 'SKIPPED', error: out.reason }, undefined, inc ? skipEvent(job, out.reason, now) : undefined);
-        if (written) c.sum.notify.skipped++;
-        // R-9: a recipient outside the job's tenant means a broken snapshot or job row — never silent.
-        if (out.reason === 'tenant_mismatch') c.sum.errors.push({ phase: 'notify', id: job.id, message: 'recipient does not belong to the incident customer; not sent' });
-      }
-      if (!written) c.log?.('warn', 'notify_result_discarded', { jobId: job.id, claimSeq: job.claimSeq, outcome: out.status });
+      await drainLane(c, kind, limit, breakers.get(kind) ?? closedBreaker(kind), windows);
     } catch (err) {
-      c.sum.errors.push({ phase: 'notify', id: job.id, message: errMsg(err) });
+      c.sum.errors.push({ phase: 'notify', id: `lane:${kind}`, message: errMsg(err) });
     }
+  }));
+}
+
+type SendSignal = 'ANSWERED' | 'TIMEOUT' | 'NONE';
+
+async function drainLane(c: Ctx, kind: SenderKind, limit: number, breaker: ProviderBreaker, windows: Map<string, Promise<MaintenanceWindow[]>>): Promise<void> {
+  const release = async (rest: NotificationJob[]) => {
+    for (const j of rest) {
+      try { if (await c.repo.releaseJob(j.id, j.claimSeq)) c.sum.notify.released++; } catch (err) { c.sum.errors.push({ phase: 'notify', id: j.id, message: errMsg(err) }); }
+    }
+  };
+  let b = breaker;
+  if (b.state === 'OPEN') {
+    if (!b.nextProbeAt || c.clock().getTime() < b.nextProbeAt.getTime()) { c.sum.notify.breakerOpen.push(kind); return; }
+    // Half-open: one job at a time until one of them actually reaches the provider.
+    let verdict: SendSignal = 'NONE';
+    for (let i = 0; i < MAX_PROBE_JOBS && verdict === 'NONE'; i++) {
+      if (overBudget(c, 'notify')) break;
+      const [probe] = await c.repo.claimDueJobs(1, { kinds: [kind] });
+      if (!probe) break;
+      verdict = await sendOne(c, probe, windows);
+    }
+    if (verdict === 'TIMEOUT') {
+      b = tripBreaker(b, c.clock());
+      await c.repo.saveBreaker(b);
+      c.log?.('warn', 'notify_breaker_still_open', { kind, trips: b.trips, nextProbeAt: b.nextProbeAt?.toISOString() });
+    }
+    if (verdict !== 'ANSWERED') { c.sum.notify.breakerOpen.push(kind); return; }
+    b = closedBreaker(kind);
+    await c.repo.saveBreaker(b);
+    c.log?.('info', 'notify_breaker_closed', { kind });
+  }
+
+  if (overBudget(c, 'notify')) return;
+  const jobs = await c.repo.claimDueJobs(limit, { kinds: [kind] });
+  if (jobs.length >= limit) c.sum.truncated = true;
+  let next = 0;
+  let consecutiveTimeouts = 0;
+  let tripped = false;
+  const width = Math.max(1, Math.min(c.laneConcurrency ?? LANE_CONCURRENCY, jobs.length));
+  let live = width;
+  const worker = async () => {
+    while (next < jobs.length && !tripped) {
+      if (overBudget(c, 'notify')) break;
+      const job = jobs[next++]!;
+      const signal = await sendOne(c, job, windows);
+      if (signal === 'TIMEOUT') {
+        if (++consecutiveTimeouts >= BREAKER_TIMEOUTS) tripped = true;
+        // A worker that hit a timeout steps aside (unless it is the last one): calls that hang together time out
+        // together, and none of them may start a second wave before the breaker has counted the first.
+        else if (live > 1) break;
+      } else if (signal === 'ANSWERED') consecutiveTimeouts = 0;
+    }
+    live--;
+  };
+  await Promise.all(Array.from({ length: width }, worker));
+  // Not reached (budget, or the breaker opened): hand the claims back untouched — no attempt counted, due time kept.
+  await release(jobs.slice(next));
+  if (tripped) {
+    b = tripBreaker(b, c.clock());
+    await c.repo.saveBreaker(b);
+    c.sum.notify.breakerOpen.push(kind);
+    c.log?.('warn', 'notify_breaker_opened', { kind, nextProbeAt: b.nextProbeAt?.toISOString() });
+  }
+}
+const MAX_PROBE_JOBS = 5;
+
+/** Send one claimed job and write its result. Returns what the provider did, for the lane's breaker. */
+async function sendOne(c: Ctx, job: NotificationJob, windows: Map<string, Promise<MaintenanceWindow[]>>): Promise<SendSignal> {
+  let attempt: number | null | undefined;
+  try {
+    const now = c.clock();
+    const inc = await c.repo.findIncidentById(job.incidentId);
+    const person = job.contactId ? await c.repo.getContact(job.contactId) : null;
+    const slack = job.channel === 'SLACK_BOT' || job.channel === 'SLACK_WEBHOOK' ? await c.repo.slackDestinations(job) : { channels: [], owner: 'MSP' as const };
+    let mutedUntil: Date | null = null;
+    if (inc && inc.status !== 'RESOLVED' && inc.severity !== 'SEV_1') {
+      const k = inc.customerId ?? '';
+      if (!windows.has(k)) windows.set(k, c.repo.maintenanceWindows(inc.customerId, now));
+      mutedUntil = incidentMute({ customerId: inc.customerId, projectId: inc.projectId, serviceId: inc.serviceId, accountIds: inc.accountIds, resourceTypes: inc.resourceTypes, severity: inc.severity }, await windows.get(k)!, now)?.endsAt ?? null;
+    }
+    const out = await dispatchJob(job, {
+      now, senders: c.senders, incidentStatus: inc?.status ?? null, contact: person, slackChannels: slack.channels, slackOwner: slack.owner, mutedUntil,
+      requireVerifiedPhone: protectUnlessFalse(c.smsVoiceRequireVerified), sendTimeoutMs: c.sendTimeoutMs,
+      beginSend: async () => (attempt = await c.repo.beginSend(job.id, job.claimSeq)),
+    });
+    if (out.status === 'LOST') return 'NONE';
+    if (out.status === 'DEFERRED') {
+      // N-13: held, not dropped. One timeline line the first time; the re-checks are silent.
+      const first = job.lastError !== out.reason;
+      const ok = await c.repo.releaseJob(job.id, job.claimSeq, { notBefore: out.until, note: out.reason, event: first ? deferEvent(job, mutedUntil!, now) : undefined });
+      if (ok) c.sum.notify.deferred++;
+      return 'NONE';
+    }
+    let written: boolean;
+    let signal: SendSignal = 'NONE';
+    if (out.status === 'SENT') {
+      signal = 'ANSWERED';
+      written = await c.repo.completeJob(job.id, job.claimSeq, { status: 'SENT', providerMessageId: out.providerMessageId }, out.log);
+      if (written) c.sum.notify.sent++;
+    } else if (out.status === 'FAILED') {
+      signal = out.errorCode === 'TIMEOUT' ? 'TIMEOUT' : out.errorCode === 'NOT_CONFIGURED' ? 'NONE' : 'ANSWERED';
+      written = await c.repo.completeJob(job.id, job.claimSeq, { status: 'FAILED', error: out.error, errorCode: out.errorCode }, out.log);
+      if (written) c.sum.notify.failed++;
+    } else if (out.status === 'RETRY') {
+      signal = out.errorCode === 'TIMEOUT' ? 'TIMEOUT' : 'ANSWERED';
+      written = await c.repo.completeJob(job.id, job.claimSeq, { status: 'QUEUED', error: out.error, errorCode: out.errorCode });
+      if (written) c.sum.notify.retried++;
+    } else {
+      written = await c.repo.completeJob(job.id, job.claimSeq, { status: 'SKIPPED', error: out.reason }, undefined, inc ? skipEvent(job, out.reason, now) : undefined);
+      if (written) c.sum.notify.skipped++;
+      // R-9: a recipient outside the job's tenant means a broken snapshot or job row — never silent.
+      if (out.reason === 'tenant_mismatch') c.sum.errors.push({ phase: 'notify', id: job.id, message: 'recipient does not belong to the incident customer; not sent' });
+    }
+    if (signal === 'TIMEOUT') c.sum.notify.timeouts++;
+    if (!written) c.log?.('warn', 'notify_result_discarded', { jobId: job.id, claimSeq: job.claimSeq, outcome: out.status });
+    return signal;
+  } catch (err) {
+    c.sum.errors.push({ phase: 'notify', id: job.id, message: errMsg(err) });
+    // N-18: a job whose lookups (or result write) keep throwing must not circle forever with attempts 0. The
+    // failure uses an attempt like a failed send does; after MAX_ATTEMPTS it is FAILED on the record.
+    try {
+      if (attempt === undefined) attempt = await c.repo.beginSend(job.id, job.claimSeq);
+      if (attempt != null) {
+        const error = sanitizeProviderError(`internal error before or after the send: ${errMsg(err)}`);
+        if (attempt >= MAX_ATTEMPTS) {
+          const channel = job.channel === 'SLACK_BOT' || job.channel === 'SLACK_WEBHOOK';
+          const ok = await c.repo.completeJob(job.id, job.claimSeq, { status: 'FAILED', error, errorCode: 'GAVE_UP' }, {
+            at: c.clock(), customerId: job.customerId, incidentId: job.incidentId, jobId: job.id, channel: job.channel, status: 'FAILED',
+            targetSummary: channel ? 'Slack channel' : job.contactName ?? 'Unknown person', targetKind: channel ? 'MSP_CHANNEL' : 'STAFF', contactId: channel ? null : job.contactId,
+            escalationStep: job.stepIndex, attempt, providerMessageId: null, error, errorCode: 'GAVE_UP', warnings: [],
+          });
+          if (ok) c.sum.notify.failed++;
+        } else if (await c.repo.completeJob(job.id, job.claimSeq, { status: 'QUEUED', error, errorCode: 'PROVIDER_ERROR' })) c.sum.notify.retried++;
+      }
+    } catch { /* the store is down: the lease runs out and the next claim counts or gives up (claimDueJobs) */ }
+    return 'NONE';
   }
 }
 
@@ -597,26 +782,41 @@ function skipEvent(job: NotificationJob, reason: string, now: Date): IncidentEve
   };
 }
 
+function deferEvent(job: NotificationJob, until: Date, now: Date): IncidentEventInput {
+  return {
+    incidentId: job.incidentId, customerId: job.customerId, at: now, kind: 'NOTE', actorType: 'SYSTEM', actorId: null,
+    message: `${job.payload.stepLabel}: ${CHANNEL_WORD[job.channel] ?? job.channel} to ${job.contactName ?? 'the channel'} is held by a maintenance window until ${until.toISOString().slice(0, 16)}Z. It is sent then if the incident is still unacknowledged.`,
+    data: { note: 'DEFERRED_MAINTENANCE', stepIndex: job.stepIndex, repeat: job.repeat, channel: job.channel, contactId: job.contactId, until: until.toISOString() },
+  };
+}
+
 // ───────────────────────────── heartbeat staleness (D-10) ─────────────────────────────
 
 export const HEARTBEAT_STALE_SEC = 180;
 
 export interface HeartbeatHealth {
+  /** A job has not finished within `maxAgeSec`. */
   stale: boolean;
-  jobs: Array<{ name: TickJob; ageSec: number | null; stale: boolean; lastStatus: 'OK' | 'ERROR' | null; consecutiveFailures: number }>;
+  /** A job finished but reported DEGRADED (notify: due SEV-1 pages were not attempted, N-12). */
+  degraded: boolean;
+  /** Neither stale nor degraded. This — not `!stale` — is what a health endpoint reports as healthy. */
+  ok: boolean;
+  jobs: Array<{ name: TickJob; ageSec: number | null; stale: boolean; degraded: boolean; lastStatus: 'OK' | 'ERROR' | 'DEGRADED' | null; consecutiveFailures: number }>;
 }
 
 /**
- * Has the tick stopped? A job is stale when it never finished or its last finish is older than `maxAgeSec`
- * (default 3 minutes, D-10). The caller (GET /health, an external probe — Q-DM-17) raises the alarm: the tick
- * cannot report its own death.
+ * Has the tick stopped, or is it running without paging? A job is stale when it never finished or its last finish
+ * is older than `maxAgeSec` (default 3 minutes, D-10); degraded when its last run said so. The caller
+ * (GET /health, an external probe — Q-DM-17) raises the alarm: the tick cannot report its own death.
  */
 export function heartbeatHealth(rows: HeartbeatRow[], now: Date, opts: { maxAgeSec?: number; jobs?: readonly TickJob[] } = {}): HeartbeatHealth {
   const max = opts.maxAgeSec ?? HEARTBEAT_STALE_SEC;
   const jobs = (opts.jobs ?? TICK_JOBS).map((name) => {
     const hb = rows.find((r) => r.name === name);
     const ageSec = hb?.lastFinishedAt ? Math.max(0, Math.floor((now.getTime() - hb.lastFinishedAt.getTime()) / 1000)) : null;
-    return { name, ageSec, stale: ageSec == null || ageSec > max, lastStatus: hb?.lastStatus ?? null, consecutiveFailures: hb?.consecutiveFailures ?? 0 };
+    return { name, ageSec, stale: ageSec == null || ageSec > max, degraded: hb?.lastStatus === 'DEGRADED', lastStatus: hb?.lastStatus ?? null, consecutiveFailures: hb?.consecutiveFailures ?? 0 };
   });
-  return { stale: jobs.some((j) => j.stale), jobs };
+  const stale = jobs.some((j) => j.stale);
+  const degraded = jobs.some((j) => j.degraded);
+  return { stale, degraded, ok: !stale && !degraded, jobs };
 }

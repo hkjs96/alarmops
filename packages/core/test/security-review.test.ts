@@ -8,7 +8,7 @@ import {
   ack, buildSnapshot, estimateSends, fairOrder, pagingHealth, planEscalation, runTick, sanitizeProviderError, scheduleNext,
   type MemoryTickStore, type NotificationJob, type OutboundMessage, type SendResult, type StepChannel, type TickSummary,
 } from '../src/index.js';
-import { PATTERNS, Sim, T0, at, closedGroup, config, seedWorld, step } from './world.js';
+import { PATTERNS, Sim, T0, at, closedGroup, config, on, seedWorld, step } from './world.js';
 
 const V = new Date('2026-10-01T00:00:00Z');
 const addStaff = (s: MemoryTickStore, customerId: string, n: number) => {
@@ -35,8 +35,13 @@ describe('R-1: one customer’s call order cannot delay another customer’s pag
     await sim.run(40);
     const hanbit = [...sim.store.incidents.values()].find((i) => i.customerId === 'cus_hanbit')!;
     const mirae = [...sim.store.incidents.values()].find((i) => i.customerId === 'cus_mirae')!;
-    // the flood is real: more is queued per minute than a tick drains, so a backlog exists the whole time
-    expect(sim.store.jobList(mirae.id).filter((j) => j.status === 'QUEUED').length).toBeGreaterThan(50);
+    // Review 2 (R-12): the engine now cuts this order to the caps when the incident opens, so the flood itself is gone:
+    // one pass ≤ MAX_SENDS_PER_CYCLE, and the timeline says the limit was applied.
+    expect(mirae.assignmentSnapshot!.clamped).toMatchObject({ perCycle: 12 * 81 });
+    expect(sim.store.eventsOf(mirae.id).filter((e) => e.data?.note === 'SEND_CAP_CLAMPED')).toHaveLength(1);
+    const perMinute = new Map<number, number>();
+    for (const j of sim.store.jobList(mirae.id)) perMinute.set(minutes(j.createdAt), (perMinute.get(minutes(j.createdAt)) ?? 0) + 1);
+    expect(Math.max(...perMinute.values())).toBeLessThanOrEqual(MAX_SENDS_PER_CYCLE);
     const jobs = sim.store.jobList(hanbit.id);
     expect(jobs.length).toBeGreaterThanOrEqual(4);
     const delays = jobs.map((j) => {
@@ -72,13 +77,16 @@ describe('R-1: one customer’s call order cannot delay another customer’s pag
     addStaff(s, 'cus_mirae', 30);
     const cfg = config('cus_mirae', [step(0, 0, 'ALL_RESPONDERS', null, ALL_CH)], { repeatCount: 999 });
     const snap = buildSnapshot([cfg], { customerId: 'cus_mirae' }, s.worldOf('cus_mirae'), T0)!;
-    expect(snap.repeatCount).toBe(MAX_REPEAT);
-    expect(snap.steps[0]!.resolved).toHaveLength(MAX_ALL_RESPONDERS);
+    // 999 → MAX_REPEAT → 1: six passes of 57 five minutes apart would be 342 in an hour (cap 120) — R-12
+    expect(snap.repeatCount).toBe(1);
+    expect(snap.clamped).toEqual({ perCycle: 1 + MAX_ALL_RESPONDERS * 4, perHour: 6 * (1 + MAX_ALL_RESPONDERS * 4), repeatCountBefore: MAX_REPEAT, repeatCountAfter: 1, removedPeople: 6, removedSteps: 0 });
+    expect(snap.steps[0]!.resolved).toHaveLength(14); // 30 + 3 responders → 20 (MAX_ALL_RESPONDERS) → 14 so that 1 + 14 × 4 ≤ 60
     const sim = new Sim(s);
     s.configs.push(cfg);
     closedGroup(s, { customerId: 'cus_mirae', at: T0, alerts: [{ id: 'a' }] });
     return sim.tick(['group', 'escalation']).then(() => {
-      expect(s.jobList()).toHaveLength(MAX_SENDS_PER_CYCLE); // 1 + 20 × 4 = 81 without the cut
+      expect(s.jobList()).toHaveLength(57); // 1 + 14 × 4; 1 + 20 × 4 = 81 without the cut
+      expect(s.jobList().length).toBeLessThanOrEqual(MAX_SENDS_PER_CYCLE);
       // a snapshot row edited by hand is clamped when it is read
       const inc = sim.incident();
       const raw = { ...inc, escalationStep: 1, escalationRepeat: MAX_REPEAT, assignmentSnapshot: { ...inc.assignmentSnapshot!, repeatCount: 1000 } };
@@ -117,12 +125,12 @@ describe('R-2: overlapping ticks send a page once', () => {
     const store = one();
     const p = slowFirst();
     let now = T0;
-    const deps = { repo: store, senders: { SMS: p.sender }, now: () => now };
+    const deps = on({ repo: store, senders: { SMS: p.sender }, now: () => now });
     const tickA = runTick({ scheduledAt: T0 }, deps); // stays inside the provider call
     await pause();
     now = at(0, 9); // the next run starts while A's call is in flight (a call cannot be in flight longer than the timeout)
     const b = (await runTick({ scheduledAt: at(1) }, deps)) as TickSummary;
-    expect(b.notify).toEqual({ sent: 0, failed: 0, retried: 0, skipped: 0 });
+    expect(b.notify).toMatchObject({ sent: 0, failed: 0, retried: 0, skipped: 0 });
     p.settle({ ok: true, providerMessageId: 'sms-A' });
     const a = (await tickA) as TickSummary;
     expect(a.notify.sent).toBe(1);
@@ -137,7 +145,7 @@ describe('R-2: overlapping ticks send a page once', () => {
     const p = slowFirst();
     let now = T0;
     // sendTimeoutMs is far away: run A is frozen inside the call (the review's reproduction)
-    const deps = { repo: store, senders: { SMS: p.sender }, now: () => now, sendTimeoutMs: 60_000 };
+    const deps = on({ repo: store, senders: { SMS: p.sender }, now: () => now, sendTimeoutMs: 60_000 });
     const tickA = runTick({ scheduledAt: T0 }, deps);
     await pause();
     now = at(1); // past the retry time written by A's beginSend → B may take the job over
@@ -147,7 +155,7 @@ describe('R-2: overlapping ticks send a page once', () => {
     // A's call finally comes back as a failure: before the fix this wrote QUEUED over SENT and the SMS went out again
     p.settle({ ok: false, error: 'timeout', retryable: true });
     const a = (await tickA) as TickSummary;
-    expect(a.notify).toEqual({ sent: 0, failed: 0, retried: 0, skipped: 0 });
+    expect(a.notify).toMatchObject({ sent: 0, failed: 0, retried: 0, skipped: 0 });
     expect(store.jobList()[0]).toMatchObject({ status: 'SENT', providerMessageId: 'sms-2' });
     for (const m of [3, 4, 5, 30]) { now = at(m); await runTick({ scheduledAt: now }, deps); }
     expect(p.calls).toHaveLength(2); // the frozen call and its takeover — both carry the same provider idempotency key
@@ -160,7 +168,7 @@ describe('R-2: overlapping ticks send a page once', () => {
     const store = one();
     const p = slowFirst();
     let now = T0;
-    const deps = { repo: store, senders: { SMS: p.sender }, now: () => now, sendTimeoutMs: 60_000 };
+    const deps = on({ repo: store, senders: { SMS: p.sender }, now: () => now, sendTimeoutMs: 60_000 });
     const tickA = runTick({ scheduledAt: T0 }, deps);
     await pause();
     now = at(1);
@@ -175,25 +183,28 @@ describe('R-2: overlapping ticks send a page once', () => {
     const store = one();
     const calls: OutboundMessage[] = [];
     const hang = { send: (m: OutboundMessage) => { calls.push(m); return new Promise<SendResult>(() => undefined); } };
-    const r = (await runTick({ scheduledAt: T0 }, { repo: store, senders: { SMS: hang }, now: () => T0, sendTimeoutMs: 20 })) as TickSummary;
-    expect(r.notify).toEqual({ sent: 0, failed: 0, retried: 1, skipped: 0 });
+    const r = (await runTick({ scheduledAt: T0 }, on({ repo: store, senders: { SMS: hang }, now: () => T0, sendTimeoutMs: 20 }))) as TickSummary;
+    expect(r.notify).toMatchObject({ sent: 0, failed: 0, retried: 1, skipped: 0 });
     expect(store.jobList()[0]).toMatchObject({ status: 'QUEUED', attempts: 1, nextAttemptAt: at(0, 30), lastError: 'no answer from the provider within 20 ms' });
     const sms = new FakeSender('sms');
-    await runTick({ scheduledAt: at(1) }, { repo: store, senders: { SMS: sms }, now: () => at(1) });
+    await runTick({ scheduledAt: at(1) }, on({ repo: store, senders: { SMS: sms }, now: () => at(1) }));
     expect(sms.sent).toHaveLength(1);
     expect(sms.sent[0]!.idempotencyKey).toBe(calls[0]!.idempotencyKey);
   });
 
   it('completeJob / beginSend / releaseJob act only for the current claim', async () => {
     const store = one();
-    await runTick({ scheduledAt: T0, jobs: ['group', 'escalation'] }, { repo: store, senders: {}, now: () => T0 });
-    const [first] = await store.claimDueJobs(T0, 10);
-    const [second] = await store.claimDueJobs(at(0, CLAIM_LEASE_SEC), 10); // lease ran out → taken over
+    await runTick({ scheduledAt: T0, jobs: ['group', 'escalation'] }, on({ repo: store, senders: {}, now: () => T0 }));
+    store.clock = () => T0;
+    const [first] = await store.claimDueJobs(10);
+    store.clock = () => at(0, CLAIM_LEASE_SEC);
+    const [second] = await store.claimDueJobs(10); // lease ran out → taken over
+    store.clock = () => at(2);
     expect([first!.claimSeq, second!.claimSeq]).toEqual([1, 2]);
-    expect(await store.beginSend(first!.id, first!.claimSeq, at(2))).toBeNull();
-    expect(await store.releaseJob(first!.id, first!.claimSeq, at(2))).toBe(false);
+    expect(await store.beginSend(first!.id, first!.claimSeq)).toBeNull();
+    expect(await store.releaseJob(first!.id, first!.claimSeq)).toBe(false);
     expect(await store.completeJob(first!.id, first!.claimSeq, { status: 'QUEUED', error: 'late' })).toBe(false);
-    expect(await store.beginSend(second!.id, second!.claimSeq, at(2))).toBe(1);
+    expect(await store.beginSend(second!.id, second!.claimSeq)).toBe(1);
     expect(await store.completeJob(second!.id, second!.claimSeq, { status: 'SENT', providerMessageId: 'p1' })).toBe(true);
     expect(await store.completeJob(second!.id, second!.claimSeq, { status: 'QUEUED' })).toBe(false); // already written
     expect(store.jobList()[0]).toMatchObject({ status: 'SENT', attempts: 1, lastError: null });
@@ -206,7 +217,7 @@ describe('R-3: a tick without budget does not burn attempts', () => {
     store.configs.push(PATTERNS.allAtOnce());
     const sim = new Sim(store);
     closedGroup(store, { customerId: 'cus_mirae', at: T0, alerts: [{ id: 'a1' }] });
-    await runTick({ scheduledAt: T0, jobs: ['group', 'escalation'] }, { repo: store, senders: sim.senders, now: () => T0 });
+    await runTick({ scheduledAt: T0, jobs: ['group', 'escalation'] }, on({ repo: store, senders: sim.senders, now: () => T0 }));
     expect(store.jobList()).toHaveLength(3);
     return sim;
   };
@@ -214,12 +225,12 @@ describe('R-3: a tick without budget does not burn attempts', () => {
   it('25 minutes of ticks whose budget is gone before the outbox: nothing is claimed, nothing FAILED; the first healthy tick sends all', async () => {
     const sim = await queued();
     for (let m = 1; m <= 25; m++) {
-      const r = (await runTick({ scheduledAt: at(m), jobs: ['notify'] }, { repo: sim.store, senders: sim.senders, budgetMs: 0, now: () => at(m) })) as TickSummary;
+      const r = (await runTick({ scheduledAt: at(m), jobs: ['notify'] }, on({ repo: sim.store, senders: sim.senders, budgetMs: 0, now: () => at(m) }))) as TickSummary;
       expect(r).toMatchObject({ truncated: true, notify: { sent: 0, failed: 0, retried: 0, skipped: 0 } });
     }
     expect(sim.store.jobList().map((j) => [j.status, j.attempts, j.claimSeq])).toEqual([['QUEUED', 0, 0], ['QUEUED', 0, 0], ['QUEUED', 0, 0]]);
     expect(sim.store.logs).toHaveLength(0);
-    const r = (await runTick({ scheduledAt: at(26), jobs: ['notify'] }, { repo: sim.store, senders: sim.senders, now: () => at(26) })) as TickSummary;
+    const r = (await runTick({ scheduledAt: at(26), jobs: ['notify'] }, on({ repo: sim.store, senders: sim.senders, now: () => at(26) }))) as TickSummary;
     expect(r.notify.sent).toBe(3);
     expect(sim.sms.sent).toHaveLength(3);
   });
@@ -228,11 +239,13 @@ describe('R-3: a tick without budget does not burn attempts', () => {
     const sim = await queued();
     let late = false;
     const sms = { async send(m: OutboundMessage): Promise<SendResult> { late = true; return sim.sms.send(m); } };
-    const r = (await runTick({ scheduledAt: at(1), jobs: ['notify'] }, { repo: sim.store, senders: { SMS: sms }, now: () => (late ? at(1, 50) : at(1)) })) as TickSummary;
-    expect(r).toMatchObject({ truncated: true, notify: { sent: 1 } });
+    // one call at a time in the lane, so "the middle of the batch" is a definite place
+    const r = (await runTick({ scheduledAt: at(1), jobs: ['notify'] }, on({ repo: sim.store, senders: { SMS: sms }, laneConcurrency: 1, now: () => (late ? at(1, 50) : at(1)) }))) as TickSummary;
+    expect(r).toMatchObject({ truncated: true, notify: { sent: 1, released: 2 } });
     const rest = sim.store.jobList().filter((j) => j.status !== 'SENT');
-    expect(rest.map((j) => [j.status, j.attempts, j.nextAttemptAt])).toEqual([['QUEUED', 0, at(1, 50)], ['QUEUED', 0, at(1, 50)]]);
-    await runTick({ scheduledAt: at(2), jobs: ['notify'] }, { repo: sim.store, senders: sim.senders, now: () => at(2) });
+    // R-11: handed back with the ORIGINAL due time (T0), not re-stamped with the time of the release
+    expect(rest.map((j) => [j.status, j.attempts, j.nextAttemptAt, j.dueAt])).toEqual([['QUEUED', 0, T0, T0], ['QUEUED', 0, T0, T0]]);
+    await runTick({ scheduledAt: at(2), jobs: ['notify'] }, on({ repo: sim.store, senders: sim.senders, now: () => at(2) }));
     expect(sim.sms.sent).toHaveLength(3);
     expect(sim.store.jobList().every((j) => j.status === 'SENT' && j.attempts === 1)).toBe(true);
   });
@@ -242,7 +255,7 @@ describe('R-3: a tick without budget does not burn attempts', () => {
     closedGroup(sim.store, { customerId: 'cus_hanbit', at: at(1), alerts: [{ id: 'a2' }] });
     let n = 0;
     // 40 s into a 45 s budget: past the soft deadline (35 s) of the group/escalation phases, inside the hard one
-    const r = (await runTick({ scheduledAt: at(1) }, { repo: sim.store, senders: sim.senders, now: () => (n++ === 0 ? at(1) : at(1, 40)) })) as TickSummary;
+    const r = (await runTick({ scheduledAt: at(1) }, on({ repo: sim.store, senders: sim.senders, now: () => (n++ === 0 ? at(1) : at(1, 40)) }))) as TickSummary;
     expect(r.group.delivered).toBe(0);
     expect(r.truncated).toBe(true);
     expect(r.notify.sent).toBe(3);
@@ -296,7 +309,7 @@ describe('R-4: provider words are sanitised and classified; no channel id in the
     const sim = new Sim();
     sim.store.configs.push(config('cus_mirae', [step(0, 0, 'PERSON', 'ct_haeun', ['EMAIL'])], { repeatCount: 0 }));
     closedGroup(sim.store, { customerId: 'cus_mirae', at: T0, alerts: [{ id: 'a1' }] });
-    await runTick({ scheduledAt: T0 }, { repo: sim.store, senders: {}, now: () => T0 });
+    await runTick({ scheduledAt: T0 }, on({ repo: sim.store, senders: {}, now: () => T0 }));
     expect(sim.store.logs[0]).toMatchObject({ status: 'FAILED', errorCode: 'NOT_CONFIGURED', attempt: 1 });
     expect(sim.store.jobList()[0]).toMatchObject({ status: 'FAILED', attempts: 1 });
   });
@@ -312,7 +325,7 @@ describe('R-9: the recipient’s tenant is checked again at send time', () => {
     const job = sim.store.jobList()[0]!;
     Object.assign(sim.store.jobs.get(job.idempotencyKey)!, { contactId: 'ct_dohyun', contactName: 'Dohyun Han' }); // corrupted row: Hanbit's person on a Mirae job
     const r = await sim.tick(['notify']);
-    expect(r.notify).toEqual({ sent: 0, failed: 0, retried: 0, skipped: 1 });
+    expect(r.notify).toMatchObject({ sent: 0, failed: 0, retried: 0, skipped: 1 });
     expect(r.errors).toEqual([{ phase: 'notify', id: job.id, message: expect.stringContaining('does not belong to the incident customer') }]);
     expect(sim.allSent()).toHaveLength(0);
     expect(sim.store.jobList()[0]).toMatchObject({ status: 'SKIPPED', lastError: 'tenant_mismatch', attempts: 0 });
@@ -332,10 +345,10 @@ describe('R-10: a page queued before a maintenance window is not sent inside it 
     await sim.run(8);
     return sim;
   };
-  it('SEV-2: the retry is dropped as muted and the step counter stays', async () => {
+  it('SEV-2: the retry is held (not sent, not dropped — N-13) and the step counter stays', async () => {
     const sim = await setup('SEV_2');
     expect(sim.sms.sent).toHaveLength(0);
-    expect(sim.store.jobList().find((j) => j.channel === 'SMS')).toMatchObject({ status: 'SKIPPED', lastError: 'muted_by_maintenance' });
+    expect(sim.store.jobList().find((j) => j.channel === 'SMS')).toMatchObject({ status: 'QUEUED', lastError: 'deferred_by_maintenance', attempts: 1 });
     expect(sim.incident().escalationStep).toBe(2);
     expect(sim.voice.sent).toHaveLength(0);
   });
@@ -359,15 +372,16 @@ describe('Q-2 switch SMS_VOICE_REQUIRE_VERIFIED (default: verified numbers only)
   it('true (default): SMS and call are skipped, each with a timeline line; Slack DM still goes; paging health says so', async () => {
     const sim = setup();
     const r = await sim.tick();
-    expect(r.notify).toEqual({ sent: 1, failed: 0, retried: 0, skipped: 2 });
+    expect(r.notify).toMatchObject({ sent: 1, failed: 0, retried: 0, skipped: 2 });
     expect(sim.allSent().map((m) => m.channel)).toEqual(['SLACK_DM']);
-    expect(sim.store.jobList().filter((j) => j.status === 'SKIPPED').map((j) => [j.channel, j.lastError, j.attempts])).toEqual([['SMS', 'unverified', 0], ['VOICE', 'unverified', 0]]);
+    expect(sim.store.jobList().filter((j) => j.status === 'SKIPPED').map((j) => [j.channel, j.lastError, j.attempts]).sort()).toEqual([['SMS', 'unverified', 0], ['VOICE', 'unverified', 0]]);
     const notes = sim.store.eventsOf(sim.incident().id).filter((e) => e.data?.note === 'SKIPPED_UNVERIFIED');
-    expect(notes.map((e) => [e.kind, e.actorType, e.message])).toEqual([
+    // the SMS and the voice lane run side by side: the two lines can land in either order
+    expect(notes.map((e) => [e.kind, e.actorType, e.message]).sort((a, b) => b[2]!.localeCompare(a[2]!))).toEqual([
       ['NOTE', 'SYSTEM', 'Step 1/1: SMS to Yuna Seo was not sent — the phone number is not verified.'],
       ['NOTE', 'SYSTEM', 'Step 1/1: Call to Yuna Seo was not sent — the phone number is not verified.'],
     ]);
-    expect(notes[0]!.data).toMatchObject({ stepIndex: 0, channel: 'SMS', contactId: 'ct_yuna' });
+    expect(notes.find((e) => e.data?.channel === 'SMS')!.data).toMatchObject({ stepIndex: 0, channel: 'SMS', contactId: 'ct_yuna' });
     // skips are not delivery-log rows (R1-3)
     expect(sim.store.logs.map((l) => l.channel)).toEqual(['SLACK_DM']);
     const health = pagingHealth(sim.store.configs[0]!, sim.store.worldOf('cus_mirae'), T0);
@@ -377,8 +391,8 @@ describe('Q-2 switch SMS_VOICE_REQUIRE_VERIFIED (default: verified numbers only)
 
   it('false: sent to the unverified number with a warning, no timeline line; health keeps the old wording', async () => {
     const sim = setup();
-    const r = (await runTick({ scheduledAt: T0 }, { repo: sim.store, senders: sim.senders, now: () => T0, smsVoiceRequireVerified: false })) as TickSummary;
-    expect(r.notify).toEqual({ sent: 3, failed: 0, retried: 0, skipped: 0 });
+    const r = (await runTick({ scheduledAt: T0 }, on({ repo: sim.store, senders: sim.senders, now: () => T0, smsVoiceRequireVerified: false }))) as TickSummary;
+    expect(r.notify).toMatchObject({ sent: 3, failed: 0, retried: 0, skipped: 0 });
     expect(sim.store.logs.filter((l) => l.channel !== 'SLACK_DM').map((l) => l.warnings)).toEqual([['UNVERIFIED_ADDRESS'], ['UNVERIFIED_ADDRESS']]);
     expect(sim.store.eventsOf(sim.incident().id).some((e) => e.data?.note === 'SKIPPED_UNVERIFIED')).toBe(false);
     const p = pagingHealth(sim.store.configs[0]!, sim.store.worldOf('cus_mirae'), T0, { smsVoiceRequireVerified: false }).problems.find((x) => x.code === 'NO_VERIFIED_PHONE')!;
@@ -424,7 +438,7 @@ describe('N-8: incidents that fail every tick do not starve the batch', () => {
     // the broken ones are due earlier, so they head every listing
     for (const b of [b1!, b2!]) { sim.store.incidents.get(b.id)!.nextEscalationAt = at(4); sim.store.failIncidents.add(b.id); }
     sim.now = at(5);
-    const r = (await runTick({ scheduledAt: at(5) }, { repo: sim.store, senders: sim.senders, now: () => at(5), batch: 2 })) as TickSummary;
+    const r = (await runTick({ scheduledAt: at(5) }, on({ repo: sim.store, senders: sim.senders, now: () => at(5), batch: 2 }))) as TickSummary;
     expect(r.errors.map((e) => e.id).sort()).toEqual([b1!.id, b2!.id].sort());
     expect(r.escalation.escalated).toBe(1);
     expect(sim.store.incidents.get(ok!.id)!.escalationStep).toBe(2);

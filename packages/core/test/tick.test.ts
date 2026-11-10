@@ -3,7 +3,7 @@ import {
   CLAIM_LEASE_SEC, FakeSender, MAX_ATTEMPTS, RETRY_DELAYS_SEC, SMS_VOICE_REQUIRE_VERIFIED, ack, dispatchJob, heartbeatHealth, minuteKey, resolveDestination, retryAt, runTick, scheduleNext, unack,
   type Contact, type NotificationJob, type TickSummary,
 } from '../src/index.js';
-import { PATTERNS, Sim, T0, at, closedGroup, config, seedWorld, step } from './world.js';
+import { PATTERNS, Sim, T0, at, closedGroup, config, on, seedWorld, step } from './world.js';
 
 const POLICY = { renotifyAfterSec: 3600 };
 
@@ -157,7 +157,7 @@ describe('tick: idempotency, skipped minutes, bounds, isolation', () => {
     sim.store.configs.push(PATTERNS.allAtOnce());
     closedGroup(sim.store, { customerId: 'cus_mirae', at: T0, alerts: [{ id: 'al_1' }] });
     await sim.tick();
-    const again = await runTick({ scheduledAt: at(0, 40) }, { repo: sim.store, senders: sim.senders, now: () => at(0, 40) });
+    const again = await runTick({ scheduledAt: at(0, 40) }, on({ repo: sim.store, senders: sim.senders, now: () => at(0, 40) }));
     expect(again).toEqual({ skipped: 'duplicate', scheduledAt: minuteKey(T0) });
     expect(sim.sms.sent).toHaveLength(3);
   });
@@ -173,7 +173,7 @@ describe('tick: idempotency, skipped minutes, bounds, isolation', () => {
       const snap = JSON.stringify([[...sim.store.incidents.values()], sim.store.events.length, sim.store.jobList().map((j) => [j.idempotencyKey, j.status, j.attempts])]);
       const second = await sim.tick();
       expect(second.escalation).toMatchObject({ escalated: 0, renotified: 0 });
-      expect(second.notify).toEqual({ sent: 0, failed: 0, retried: 0, skipped: 0 });
+      expect(second.notify).toMatchObject({ sent: 0, failed: 0, retried: 0, skipped: 0 });
       expect(JSON.stringify([[...sim.store.incidents.values()], sim.store.events.length, sim.store.jobList().map((j) => [j.idempotencyKey, j.status, j.attempts])])).toBe(snap);
     }
     expect(sim.timeline()).toHaveLength(12);
@@ -230,7 +230,7 @@ describe('tick: idempotency, skipped minutes, bounds, isolation', () => {
     for (let i = 0; i < 7; i++) closedGroup(sim.store, { customerId: 'cus_mirae', severity: (['SEV_1', 'SEV_2', 'SEV_3', 'SEV_4', 'SEV_5'] as const)[i % 5], awsAccountId: `11111111111${i}`, at: T0, alerts: [{ id: `al_${i}` }] });
     // 5 axes for one customer (customer#severity): groups 5 and 6 merge into the incidents of 0 and 1.
     const deps = { repo: sim.store, senders: sim.senders, batch: 2, notifyBatch: 4 };
-    const run = async (m: number) => (await runTick({ scheduledAt: at(m) }, { ...deps, now: () => at(m) })) as TickSummary;
+    const run = async (m: number) => (await runTick({ scheduledAt: at(m) }, on({ ...deps, now: () => at(m) }))) as TickSummary;
     const r0 = await run(0);
     expect(r0.truncated).toBe(true);
     expect(r0.group.delivered).toBe(2);
@@ -250,7 +250,7 @@ describe('tick: idempotency, skipped minutes, bounds, isolation', () => {
     sim.store.configs.push(PATTERNS.allAtOnce());
     for (const c of ['cus_mirae', 'cus_hanbit']) closedGroup(sim.store, { customerId: c, at: T0, alerts: [{ id: `al_${c}` }] });
     let calls = 0;
-    const r = (await runTick({ scheduledAt: T0 }, { repo: sim.store, senders: sim.senders, budgetMs: 1000, now: () => new Date(T0.getTime() + (calls++ > 3 ? 5000 : 0)) })) as TickSummary;
+    const r = (await runTick({ scheduledAt: T0 }, on({ repo: sim.store, senders: sim.senders, budgetMs: 1000, now: () => new Date(T0.getTime() + (calls++ > 3 ? 5000 : 0)) }))) as TickSummary;
     expect(r.truncated).toBe(true);
     expect(r.group.delivered).toBeLessThan(2);
   });
@@ -313,7 +313,7 @@ describe('notification dispatch port', () => {
   const job = (o: Partial<NotificationJob> = {}): NotificationJob => ({
     id: 'job_1', idempotencyKey: 'inc:ESCALATION:1:0:SMS:ct_haeun', incidentId: 'inc', customerId: 'cus_mirae', purpose: 'ESCALATION', channel: 'SMS',
     targetRef: 'ct_haeun', contactId: 'ct_haeun', contactName: 'Haeun Kim', stepIndex: 1, repeat: 0, payload: { title: 't', severity: 'SEV_2', text: 'x', stepLabel: 'Step 2/4' },
-    status: 'SENDING', attempts: 1, claimSeq: 1, nextAttemptAt: T0, lastError: null, providerMessageId: null, createdAt: T0, ...o,
+    status: 'SENDING', attempts: 1, claimSeq: 1, nextAttemptAt: T0, dueAt: T0, lastError: null, providerMessageId: null, createdAt: T0, ...o,
   });
   const ctx = (o: object = {}) => ({ now: T0, senders: { SMS: new FakeSender('sms') }, incidentStatus: 'TRIGGERED' as const, contact: contact(), slackChannels: [], ...o });
 
@@ -347,7 +347,7 @@ describe('notification dispatch port', () => {
     closedGroup(sim.store, { customerId: 'cus_mirae', at: T0, alerts: [{ id: 'al_1' }] });
     sim.sms.failNext(1);
     const r = await sim.tick();
-    expect(r.notify).toEqual({ sent: 1, failed: 0, retried: 1, skipped: 0 });
+    expect(r.notify).toMatchObject({ sent: 1, failed: 0, retried: 1, skipped: 0 });
     sim.now = at(1);
     await sim.tick();
     expect(sim.store.jobList().map((j) => [j.channel, j.status, j.attempts, j.providerMessageId])).toEqual([['SMS', 'SENT', 2, 'sms-1'], ['EMAIL', 'SENT', 1, 'email-1']]);
@@ -361,7 +361,7 @@ describe('notification dispatch port', () => {
     closedGroup(sim.store, { customerId: 'cus_mirae', at: T0, alerts: [{ id: 'al_1' }] });
     sim.store.dedupeTicks = false;
     await sim.tick(['group', 'escalation']);
-    const claimed = await sim.store.claimDueJobs(T0, 10); // claimed, then the process dies
+    const claimed = await sim.store.claimDueJobs(10); // claimed, then the process dies
     // a claim is a lease, not an attempt (R-3)
     expect(claimed[0]).toMatchObject({ status: 'SENDING', attempts: 0, claimSeq: 1, nextAttemptAt: at(0, CLAIM_LEASE_SEC) });
     sim.now = at(0, 20);

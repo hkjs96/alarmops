@@ -7,7 +7,7 @@ import type { GroupRow } from './grouping.js';
 import type { IncidentRow } from './incident.js';
 import type { MaintenanceWindow } from './maintenance.js';
 import { CLAIM_LEASE_SEC } from './limits.js';
-import { MAX_ATTEMPTS, fairOrder, retryAt, sanitizeProviderError, type DeliveryLog, type DeliveryReason, type NotificationJob } from './notify.js';
+import { LANE_CHANNELS, MAX_ATTEMPTS, retryAt, sanitizeProviderError, selectForClaim, type DeliveryLog, type DeliveryReason, type NotificationJob, type ProviderBreaker, type SenderKind } from './notify.js';
 import type { Contact, Leave, Override, PagingConfig, PagingWorld, Responder, Rotation } from './paging.js';
 import { DEFAULT_POLICY, type SuppressionPolicy } from './policy.js';
 import type {
@@ -52,6 +52,12 @@ export class MemoryTickStore implements TickRepository {
   audits: AuditInput[] = [];
   heartbeats = new Map<string, HeartbeatRow>();
   ticks = new Set<string>();
+  breakers = new Map<SenderKind, ProviderBreaker>();
+  /**
+   * The store's OWN clock (R-14) — what `now()` is for the SQL adapter. Every outbox decision (due, lease, retry
+   * time) reads it; the runner's clock is never asked. Tests and simulations point it at their simulated time.
+   */
+  clock: () => Date = () => new Date();
   /** Test hooks. */
   dedupeTicks = true;
   failIncidents = new Set<string>();
@@ -182,7 +188,7 @@ export class MemoryTickStore implements TickRepository {
       const r = c.restoreAckSkipped;
       for (const j of this.jobs.values()) {
         if (j.incidentId === next.id && j.status === 'SKIPPED' && j.lastError === 'acknowledged' && j.purpose !== 'RENOTIFY' && j.stepIndex === r.stepIndex && j.repeat === r.repeat) {
-          j.status = 'QUEUED'; j.lastError = null; j.nextAttemptAt = r.at;
+          j.status = 'QUEUED'; j.lastError = null; j.nextAttemptAt = r.at; j.dueAt = r.at;
         }
       }
     }
@@ -198,15 +204,19 @@ export class MemoryTickStore implements TickRepository {
   protected insertJobs(intents: NotificationIntent[], at: Date) {
     for (const i of intents) {
       if (this.jobs.has(i.idempotencyKey)) continue;
-      this.jobs.set(i.idempotencyKey, { ...structuredClone(i), id: this.nextId('job'), status: 'QUEUED', attempts: 0, claimSeq: 0, nextAttemptAt: at, lastError: null, providerMessageId: null, createdAt: at });
+      this.jobs.set(i.idempotencyKey, { ...structuredClone(i), id: this.nextId('job'), status: 'QUEUED', attempts: 0, claimSeq: 0, nextAttemptAt: at, dueAt: at, lastError: null, providerMessageId: null, createdAt: at });
     }
   }
 
-  async claimDueJobs(now: Date, limit: number) {
-    const due = fairOrder([...this.jobs.values()].filter((j) => (j.status === 'QUEUED' || j.status === 'SENDING') && j.nextAttemptAt.getTime() <= now.getTime()));
-    const out: NotificationJob[] = [];
-    for (const j of due) {
-      if (out.length >= limit) break;
+  private isDue(j: NotificationJob, now: Date): boolean {
+    return (j.status === 'QUEUED' || j.status === 'SENDING') && j.nextAttemptAt.getTime() <= now.getTime();
+  }
+  async claimDueJobs(limit: number, opts: { kinds?: readonly SenderKind[] } = {}) {
+    const now = this.clock();
+    const channels = opts.kinds ? new Set(opts.kinds.flatMap((k) => LANE_CHANNELS[k])) : null;
+    const due: NotificationJob[] = [];
+    for (const j of this.jobs.values()) {
+      if (!this.isDue(j, now) || (channels && !channels.has(j.channel))) continue;
       if (j.attempts >= MAX_ATTEMPTS) {
         // Every allowed send was started and the last one never reported back: give up, on the record (R-3).
         j.status = 'FAILED'; j.lastError = j.lastError ?? 'gave up after a send that never finished';
@@ -218,27 +228,43 @@ export class MemoryTickStore implements TickRepository {
         });
         continue;
       }
-      j.status = 'SENDING'; j.claimSeq++; j.nextAttemptAt = new Date(now.getTime() + CLAIM_LEASE_SEC * 1000);
-      out.push(structuredClone(j));
+      due.push(j);
     }
-    return out;
+    return selectForClaim(due, limit).map((j) => {
+      // dueAt is not touched: the lease lives in nextAttemptAt only (R-11).
+      j.status = 'SENDING'; j.claimSeq++; j.nextAttemptAt = new Date(now.getTime() + CLAIM_LEASE_SEC * 1000);
+      return structuredClone(j);
+    });
   }
   private jobById(jobId: string, claimSeq: number): NotificationJob | null {
     const j = [...this.jobs.values()].find((x) => x.id === jobId);
     return j && j.status === 'SENDING' && j.claimSeq === claimSeq ? j : null;
   }
-  async beginSend(jobId: string, claimSeq: number, now: Date) {
+  async beginSend(jobId: string, claimSeq: number) {
     const j = this.jobById(jobId, claimSeq);
     if (!j) return null;
-    j.attempts++; j.nextAttemptAt = retryAt(j.attempts, now);
+    j.attempts++; j.nextAttemptAt = retryAt(j.attempts, this.clock()); j.dueAt = j.nextAttemptAt;
     return j.attempts;
   }
-  async releaseJob(jobId: string, claimSeq: number, now: Date) {
+  async releaseJob(jobId: string, claimSeq: number, opts: { notBefore?: Date; note?: string; event?: IncidentEventInput } = {}) {
     const j = this.jobById(jobId, claimSeq);
     if (!j) return false;
-    j.status = 'QUEUED'; j.nextAttemptAt = now;
+    j.status = 'QUEUED';
+    if (opts.notBefore) { j.dueAt = opts.notBefore; j.nextAttemptAt = opts.notBefore; } else j.nextAttemptAt = j.dueAt; // original due time, never "now" (R-11)
+    if (opts.note !== undefined) j.lastError = opts.note;
+    if (opts.event) this.insertEvents([opts.event]);
     return true;
   }
+  async outboxBacklog() {
+    const now = this.clock();
+    const due = [...this.jobs.values()].filter((j) => this.isDue(j, now) && j.attempts === 0);
+    return {
+      dueUnattempted: due.length, dueSev1Unattempted: due.filter((j) => j.payload.severity === 'SEV_1').length,
+      oldestDueAt: due.length ? new Date(Math.min(...due.map((j) => j.dueAt.getTime()))) : null,
+    };
+  }
+  async loadBreakers() { return [...this.breakers.values()].map((b) => ({ ...b })); }
+  async saveBreaker(b: ProviderBreaker) { this.breakers.set(b.kind, { ...b }); }
   async findIncidentById(id: string) { const i = this.incidents.get(id); return i ? structuredClone(i) : null; }
   async getContact(id: string) { const c = this.contacts.get(id); return c ? { ...c } : null; }
   async slackDestinations(job: NotificationJob) {
@@ -264,7 +290,7 @@ export class MemoryTickStore implements TickRepository {
 
   async writeHeartbeat(hb: HeartbeatWrite) {
     const prev = this.heartbeats.get(hb.name);
-    this.heartbeats.set(hb.name, { ...hb, consecutiveFailures: hb.lastStatus === 'ERROR' ? (prev?.consecutiveFailures ?? 0) + 1 : 0 });
+    this.heartbeats.set(hb.name, { ...hb, consecutiveFailures: hb.lastStatus !== 'OK' ? (prev?.consecutiveFailures ?? 0) + 1 : 0 });
   }
   async readHeartbeats() { return [...this.heartbeats.values()]; }
 

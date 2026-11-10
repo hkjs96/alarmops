@@ -50,6 +50,12 @@ export function seedWorld(s: MemoryTickStore = new MemoryTickStore()): MemoryTic
   return s;
 }
 
+/** runTick deps whose store clock (R-14) follows the same simulated time as the runner's clock. */
+export function on<T extends { repo: MemoryTickStore; now: () => Date }>(deps: T): T {
+  deps.repo.clock = deps.now;
+  return deps;
+}
+
 export const step = (index: number, atMin: number, targetType: EscalationStep['targetType'], targetId: string | null, channels: EscalationStep['channels'], extra: Partial<EscalationStep> = {}): EscalationStep =>
   ({ index, atMin, targetType, targetId, channels, ...extra });
 
@@ -96,9 +102,10 @@ export class Sim {
   email = new FakeSender('email');
   results: TickResult[] = [];
   private ticked = new Set<number>();
-  constructor(store: MemoryTickStore = seedWorld()) { this.store = store; }
+  constructor(store: MemoryTickStore = seedWorld()) { this.store = store; store.clock = () => this.now; }
   get senders() { return { SLACK: this.slack, SMS: this.sms, VOICE: this.voice, EMAIL: this.email }; }
   async tick(jobs?: TickJob[]): Promise<TickSummary> {
+    this.store.clock = () => this.now;
     const r = await runTick({ scheduledAt: this.now, jobs }, { repo: this.store, senders: this.senders, now: () => this.now });
     this.results.push(r);
     this.ticked.add(this.now.getTime());
