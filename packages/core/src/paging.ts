@@ -21,7 +21,7 @@ export interface Contact {
   slackVerifiedAt?: Date | null;
 }
 export interface Responder { customerId: string; contactId: string; role: 'PAGEABLE' | 'NOTIFY_ONLY' }
-export interface EscalationStep { index: number; atMin: number; targetType: TargetType; targetId: string | null; channels: StepChannel[] }
+export interface EscalationStep { index: number; atMin: number; targetType: TargetType; targetId: string | null; channels: StepChannel[]; advanceOnAllFail?: boolean }
 export interface PagingConfig {
   id: string;
   customerId: string;
@@ -31,6 +31,8 @@ export interface PagingConfig {
   plan: 'STANDARD' | 'URGENT' | 'QUIET';
   edited: boolean;
   repeatCount: number;
+  /** Re-notify after ack (seconds). null/undefined → SuppressionPolicy.renotifyAfterSec. 0 = off. */
+  renotifyAfterAckSec?: number | null;
   version: number;
   steps: EscalationStep[];
 }

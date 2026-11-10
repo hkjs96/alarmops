@@ -77,10 +77,11 @@ export class MemoryStore implements AlertRepository, SourceRepository {
     this.groups.set(g.id, structuredClone(g));
     return structuredClone(g);
   }
-  async closeGroup(id: string) {
+  async closeGroup(id: string, at: Date) {
     const g = this.groups.get(id);
     if (!g || g.status !== 'OPEN') return false;
     g.status = 'CLOSED';
+    g.closedAt = at;
     g.version++;
     return true;
   }
