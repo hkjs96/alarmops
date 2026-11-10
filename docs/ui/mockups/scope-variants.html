@@ -923,6 +923,72 @@ body.e-rsz{cursor:col-resize;user-select:none}
   .e-drw .e-tn.d1{padding-left:20px}.e-drw .e-tn.d2{padding-left:40px}
   .e-leg{padding:8px 12px 10px}
 }
+/* E-2+ (default picker): tree on desktop that tucks into a rail, stepped sheet on phone */
+.e-tree.plus .e-tr{display:flex;flex-direction:column;overflow:hidden;padding:0}
+.e-trr{flex:none;border-bottom:1px solid var(--rule)}
+.e-trs{flex:1;min-height:0;overflow-y:auto;padding-bottom:8px}
+.e-tn.root{min-height:34px;padding-left:4px}
+.e-tn.hdr{position:sticky;top:0;z-index:1;background:var(--soft);border-bottom:1px solid var(--rule);border-top:1px solid var(--rule);margin-top:-1px;min-height:28px;font:700 10.5px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--ink2)}
+.e-tn.hdr .x,.e-tn.hdr.on .x{font-weight:700}
+.e-tn.hdr:hover{background:var(--hair)}
+.e-tn.hdr.on{background:var(--soft);box-shadow:inset 3px 0 0 var(--accent);color:var(--accent)}
+.e-tn.hdr .mut{font-weight:400}
+.e-tree.plus .e-tn mark,.e-trov .e-tn mark{background:var(--amber-t);color:inherit;font-weight:700;box-shadow:inset 0 -2px 0 var(--amber)}
+.e-tree.plus .e-tn.d1 .x,.e-tree.plus .e-tn.d2 .x{font-weight:400}
+.e-tree.plus .e-tn.on .x{font-weight:700}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+.e-hl{display:inline-flex;align-items:center;justify-content:center;width:12px}
+.e-hl.unr{color:var(--red)}.e-hl.ar{color:var(--amber)}
+.e-hl .mk{width:9px;height:9px}
+.e-ic{font:700 10px var(--mono);background:var(--red);color:#fff;padding:1px 4px;min-width:17px;text-align:center}
+.e-tqw{position:relative;flex:1;min-width:0;display:flex}
+.e-tqw .inp{width:100%;padding-right:28px}
+.e-tqx{position:absolute;right:1px;top:1px;bottom:1px;width:28px;border:0;background:none;color:var(--ink2);font:700 15px/1 var(--mono);padding:0}
+.e-tqx:hover{color:var(--ink)}
+.e-tqx[hidden]{display:none}
+.e-trp{display:flex;align-items:center;gap:8px;width:100%;min-height:32px;padding:0 10px;border:0;border-bottom:1px solid var(--rule);background:none;font-size:12.5px;color:var(--ink2);text-align:left;cursor:pointer;flex:none}
+.e-trp:hover{background:var(--soft)}
+.e-trp:focus-visible,.e-rail:focus-visible,.e-px:focus-visible,.e-tqx:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.e-trp .sw{width:14px;height:14px;border:1px solid var(--ink2);background:var(--surface);flex:none;display:inline-flex;align-items:center;justify-content:center;color:var(--inv)}
+.e-trp .sw .mk{display:none}
+.e-trp[aria-checked="true"]{color:var(--ink);font-weight:600}
+.e-trp[aria-checked="true"] .sw{background:var(--ink);border-color:var(--ink)}
+.e-trp[aria-checked="true"] .sw .mk{display:inline-block;width:8px;height:5px}
+.e-trp .n{margin-left:auto;font:700 11px var(--mono);color:var(--mut)}
+.e-trq{flex:none;padding:5px 10px;font-size:12px;line-height:1.35;color:var(--ink2);background:var(--soft);border-bottom:1px solid var(--rule)}
+.e-trq:empty{display:none}
+.e-trq b{color:var(--ink)}
+.e-tree.plus.rail{width:44px;overflow:visible;border-right:1px solid var(--rule)}
+.e-tree.plus.rail.ovo{z-index:43}
+.e-rail{width:43px;height:100%;border:0;background:var(--surface);display:flex;flex-direction:column;align-items:center;gap:10px;padding:8px 0;color:var(--ink2);cursor:pointer;min-height:0}
+.e-rail:hover{background:var(--soft)}
+.e-rail[aria-expanded="true"]{background:var(--accent-t)}
+.e-rail .ico{width:28px;height:28px;border:1px solid var(--ink2);background:var(--surface);display:inline-flex;align-items:center;justify-content:center;color:var(--ink);flex:none}
+.e-rail .vt{writing-mode:vertical-rl;font-size:12.5px;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-height:0;flex:0 1 auto;color:var(--ink2)}
+.e-rail .vt b{color:var(--ink)}
+.e-rail .vt .chain{color:var(--mut);margin:6px 0;display:inline-block}
+.e-rail .vl{font:700 9.5px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--mut);writing-mode:vertical-rl;flex:none}
+.e-trov{position:absolute;left:43px;top:0;bottom:0;background:var(--surface);border:1px solid var(--ink);border-top:0;box-shadow:var(--pop);display:flex;flex-direction:column}
+.e-trov .e-tr{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden;padding:0;outline:0}
+.e-trov .e-trn{flex:none;padding:5px 10px;font-size:12px;color:var(--mut);border-bottom:1px solid var(--rule)}
+.e-pth{display:inline-flex;align-items:center;min-width:0;font-size:14px;color:var(--ink2);white-space:nowrap;overflow:hidden;flex:0 1 auto}
+.e-pth .sg{display:inline-flex;align-items:center;gap:6px;min-width:0;flex:0 1 auto}
+.e-pth .sg .t{overflow:hidden;text-overflow:ellipsis}
+.e-pth .sg b{color:var(--ink)}
+.e-pth .chain{color:var(--mut);margin:0 8px;flex:none}
+.e-px{width:22px;height:22px;border:1px solid var(--rule);background:var(--surface);color:var(--ink2);font:700 13px/1 var(--mono);padding:0;display:inline-flex;align-items:center;justify-content:center;flex:none}
+.e-px:hover{border-color:var(--ink);color:var(--ink)}
+.e-shf{flex:none;padding:8px 12px 10px;border-top:1px solid var(--ink);background:var(--surface)}
+.e-shf .btn{width:100%;justify-content:center;min-height:48px;font-size:15px}
+.e-shf small{display:block;text-align:center;font-size:12px;color:var(--mut);margin-top:4px}
+@media (min-width:1101px){
+  body.e-plus.e-has-panel .page{padding-left:16px;padding-right:612px}
+}
+@media (max-width:760px){
+  .e-pkm .e-pks{flex-wrap:wrap}
+  .e-sheet .e-ic{font-size:12px;padding:2px 6px}
+  .e-sheet .e-own{font-size:10.5px}
+}
 /*E-CSS-END*/
 </style>
 </head>
@@ -1614,6 +1680,7 @@ function eBar(){var x=sc(),pt=ePt(),c=x&&C(x.c),h='<div class="e-bar" role="regi
     h+=(pt?'<span class="e-lock" title="Your organisation. This cannot be changed.">'+idc+esc(c.n)+'</span>':eSeg('c','Customer',idc+'<span class="x">'+cl+'</span>',false,!!x||S.m==='1'))+ch+
       eSeg('p','Project','<span class="x">'+esc(x&&x.p||'All projects')+'</span>',!x,!!(x&&x.p))+ch+eSeg('s','Service','<span class="x">'+esc(x&&x.s||'All services')+'</span>',!(x&&x.p),!!(x&&x.s));
     if(!pt&&!x)h+=eMyChip();}
+  else if(pk==='x'){h+=eXBarPath(x,pt);}   // E-2+: one line of text; the tree is the control
   else if(pk==='t'){   // E-2: the bar states the filter; the tree on the left is the picker
     if(!pt)h+='<span class="e-lock e-cur2">'+idc+'<span>'+(x?ePath(x):cl)+'</span></span>'+(x?'<button class="btn ghost sm" data-e="filt" data-a="">Show all customers</button>':eMyChip());
     else if(x.p)h+=ch+'<span class="e-lock e-cur2"><span>'+ePath(x,1)+'</span></span><button class="btn ghost sm" data-e="ddclr" data-a="p">Show all of '+esc(c.n)+'</button>';}
@@ -1626,12 +1693,13 @@ function eBar(){var x=sc(),pt=ePt(),c=x&&C(x.c),h='<div class="e-bar" role="regi
   h+=def+'</div><div class="e-barm" role="region" aria-label="Filter"><div class="r1">';
   var nxt=pk!=='s'&&x&&!x.s?'<span class="chain">›</span><span class="nw mut">'+(x.p?'All services':'All projects')+'</span>':'';
   var tx='<span class="tx"><small>Showing</small>'+(x?ePath(x)+nxt:S.m==='1'?'<b>My customers</b> · '+mine().length:'<b>All customers</b> · '+CUS().length)+'</span>';
-  if(pk!=='s')h+='<button class="sb" data-e="'+(pk==='c'?'sheet':'drawer')+'" aria-haspopup="dialog">'+idc+tx+'<span class="car">▼</span></button>'+(pt?'':x?'<button class="btn e-clr" data-e="ddclr" data-a="c" aria-label="Clear the filter, show all customers">×</button>':eMyChip());
+  if(pk==='x')tx='<span class="tx"><small>Showing</small>'+eXPathM()+'</span>';
+  if(pk!=='s')h+='<button class="sb" data-e="'+(pk==='t'?'drawer':'sheet')+'" aria-haspopup="dialog">'+idc+tx+'<span class="car">▼</span></button>'+(pt?'':x||(pk==='x'&&S.m==='1')?'<button class="btn e-clr" data-e="ddclr" data-a="c" aria-label="Clear the filter, show all customers">×</button>':pk==='x'?'':eMyChip());
   else if(pt)h+='<button class="sb" data-pop="ps">'+idc+tx+'<span class="car">▼</span></button>';
   else h+='<button class="sb" data-e="sw">'+idc+tx+'<span class="car">▼</span></button>'+(x?'<button class="btn sm" data-pop="ps">Narrow</button>':eMyChip());
   return h+'</div>'+(pt?'':eOutLine())+def+'</div>';}
-function eShell(){var tl=$('.e-tree .e-tr');if(tl)TR.sy=tl.scrollTop;var tree=ePk()==='t'&&S.s!=='settings';
-  return eTop()+eBar()+(tree?'<div class="e-lay">'+eTreeAside():'')+'<main class="page">'+eScreen()+(ePt()?'<div class="sm mut" style="margin-top:24px">Signed in as '+P_USER.n+' · '+esc(C(P_CUST).n)+'. This portal only ever shows '+esc(C(P_CUST).n)+'.</div>':'')+'<div class="e-pkm only-m"><span>Mockup only · scope picker style</span>'+ePkSw()+'</div></main>'+(tree?'</div>':'')+eBottom();}
+function eShell(){var tl=$('.e-tree .e-tr');if(tl)TR.sy=tl.scrollTop;var ts=$('.e-tree.plus .e-trs');if(ts)TX.sy=ts.scrollTop;var tree=(ePk()==='t'||ePk()==='x')&&S.s!=='settings';
+  return eTop()+eBar()+(tree?'<div class="e-lay">'+(ePk()==='x'?eXAside():eTreeAside()):'')+'<main class="page">'+eScreen()+(ePt()?'<div class="sm mut" style="margin-top:24px">Signed in as '+P_USER.n+' · '+esc(C(P_CUST).n)+'. This portal only ever shows '+esc(C(P_CUST).n)+'.</div>':'')+'<div class="e-pkm only-m"><span>Mockup only · scope picker style</span>'+ePkSw()+'</div></main>'+(tree?'</div>':'')+eBottom();}
 function eScreen(){return ({incidents:eInc,monitoring:eMon,paging:ePaging,people:ePeople,maintenance:eMaint,settings:eSettings})[S.s]();}
 function eAllN(){return 'all '+CUS().length+' customers';}
 function eViewT(){var x=sc();if(ePt())return x.p?ePath(x,1)+' of '+esc(C(x.c).n):'all of '+esc(C(x.c).n);
@@ -2031,18 +2099,19 @@ function eLive(){var o=S.o,ty=eTy(o),p=$('#eprev'),s=$('#esent'),w=$('#ewarn');
   else if(ty==='alarm'){var a=ALARMS[+eArg(o)],nv=d.val!=null?String(d.val).trim():'';if(p)p.innerHTML=nv!==''&&a.th.replace(/[^0-9.]/g,'')!==nv?'<span class="mono">'+esc(a.th)+'</span> → <span class="mono b">'+esc(a.th.replace(/[0-9.]+/,nv))+'</span> · this resource only':'';}
   else if(ty==='mwnew'){var e=$('#ewhen');if(e)e.innerHTML=eWhen(d);if(w&&(d.why||'').trim())w.textContent='';}
   else if(ty==='personnew'){if(w&&(d.name||'').trim())w.textContent='';}}
-function eAfter(){document.body.classList.toggle('e-has-panel',S.v==='E'&&!!S.o);window.ERH=S.v==='E'?location.hash:null;if(S.v!=='E'){EFOC=null;return;}
-  eLive();if(DLG)eDlgFocus();var tl=$('.e-tree .e-tr');if(tl&&TR.sy)tl.scrollTop=TR.sy;
+function eAfter(){document.body.classList.toggle('e-has-panel',S.v==='E'&&!!S.o);document.body.classList.toggle('e-plus',S.v==='E'&&ePk()==='x');window.ERH=S.v==='E'?location.hash:null;if(S.v!=='E'){EFOC=null;return;}
+  eLive();if(DLG)eDlgFocus();var tl=$('.e-tree .e-tr');if(tl&&TR.sy)tl.scrollTop=TR.sy;var ts=$('.e-tree.plus .e-trs');if(ts){ts.scrollTop=TX.sy||0;if(TX.rev){TX.rev=false;eXSee('.e-tn.on');}}
   var h1=$('.page h1');if(h1)h1.setAttribute('tabindex','-1');
   var f=EFOC;EFOC=null;if(!f||DLG)return;var el=null,pn_=$('.e-panel');
   if(f==='load')el=pn_?pn_.querySelector('.e-path'):h1;
   else if(f==='h1')el=h1;else if(f==='panel'){if(pn_){el=(!ePhone()&&pn_.querySelector('.e-main input:not([disabled])'))||pn_.querySelector('.e-path');pn_.scrollTop=0;}}
   else if(f.indexOf('seg:')===0)el=$('.e-bar [data-e="dd"][data-a="'+f.slice(4)+'"]:not([disabled])')||$('.e-bar [data-e="dd"]');
-  else if(f==='tree')el=$('.e-tree .e-tr');
+  else if(f==='tree')el=$('.e-tree .e-tr')||$('.e-rail');
   else if(f.indexOf('row:')===0)el=$$('.page [data-e="open"]').filter(function(r){return r.getAttribute('data-a')===f.slice(4);})[0]||h1;
   if(el){try{el.focus({preventScroll:f!=='h1'&&f!=='load'});}catch(_){el.focus();}if(f==='h1')scrollTo(0,0);}}
 function eNavTo(s){if(s===S.s&&!S.o){return;}eGuard(function(){eToastClear();OUTI=false;EFOC='h1';ego({s:s,o:'',q:''});scrollTo(0,0);});}
 function eClick(e){var t=e.target,el,a,arg;
+  if(TX.ov&&!closest(t,'.e-tree')&&!closest(t,'.mk-wrap')){TX.ov=false;eXSync();}   // a click outside the rail overlay closes it and still does what it was aimed at
   if(DLG){if((el=closest(t,'[data-e="dlg"]'))){var act=DLG.a[+el.getAttribute('data-a')];DLG=null;renderOv();act[2]();}e.stopPropagation();return true;}
   if((el=closest(t,'[data-e]'))){a=el.getAttribute('data-e');arg=el.getAttribute('data-a')||'';e.stopPropagation();
     if(a==='sw')eSwOpen();else if(a==='swclose'){SW.open=false;renderOv();}
@@ -2070,6 +2139,7 @@ function eClick(e){var t=e.target,el,a,arg;
   return false;}
 function eInput(e){var t=e.target;
   if(t.id==='ddq'&&DD){DD.q=t.value;DD.i=0;$('#ddl').innerHTML=eDdList();return true;}
+  if(t.classList&&t.classList.contains('e-tq')&&closest(t,'.plus')){TX.q=t.value;TX.oq={};TX.cur=null;eXRe();return true;}
   if(t.classList&&t.classList.contains('e-tq')){TR.q=t.value;TR.qo={};TR.cur=null;eTrRe();return true;}
   if(t.id==='eq'){SW.q=t.value;SW.i=0;SW.moved=false;$('#el').innerHTML=eSwList();return true;}
   if(t.id==='egq'){var q=t.value.trim().toLowerCase();$$('.e-gc').forEach(function(b){b.classList.toggle('hide',!!q&&b.getAttribute('data-q').split(' ').every(function(w){return w.indexOf(q)!==0;})&&b.getAttribute('data-q').indexOf(q)!==0);});$$('.e-panel details').forEach(function(d){if(q)d.open=true;});return true;}
@@ -2096,11 +2166,12 @@ function eKey(e){var t=e.target,save=(e.ctrlKey||e.metaKey)&&e.key==='Enter';
   if((e.key==='Enter'||e.key===' ')&&t.matches&&t.matches('[data-e][tabindex]')){e.preventDefault();t.click();return;}}
 
 /* ===== E scope picker styles. One filter state (S.c / S.p / S.svc / S.m) and one URL; three ways to set it:
-   E-1 cascade (default): three linked selectors in the filter bar. E-2 tree: collapsible tree on the left. E-3 search: the Ctrl/⌘K search only.
+   E-2+ (default, chosen): the improved tree on desktop, E-1's stepped sheet on phone. Kept for comparison:
+   E-1 cascade: three linked selectors in the filter bar. E-2 tree: the first tree. E-3 search: the Ctrl/⌘K search only.
    Ctrl/⌘K works in all three. The switch (S.pk) is a mockup control, not a product setting. ===== */
 var DD=null,TR={q:'',open:{},qo:{},col:false,w:272,drawer:false,cur:null,ta:'',tat:0,sy:0,list:[]};
-var PKN=[['','E-1 Cascade'],['t','E-2 Tree'],['s','E-3 Search']],LVN={c:'customer',p:'project',s:'service'};
-function ePk(){return S.pk==='t'?'t':S.pk==='s'?'s':'c';}
+var PKN=[['','E-2+ Tree · sheet'],['c','E-1 Cascade'],['t','E-2 Tree'],['s','E-3 Search']],LVN={c:'customer',p:'project',s:'service'};
+function ePk(){return S.pk==='t'?'t':S.pk==='s'?'s':S.pk==='c'?'c':'x';}
 function eSL(x){return x[0]==='paging'?'Call order':x[1];}
 function eScrN(){var x=SCREENS.filter(function(s){return s[0]===S.s;})[0];return x?eSL(x):'Settings';}
 function ePkSw(){return '<span class="e-pks" role="group" aria-label="Scope picker style (mockup)"><b>PICKER</b>'+PKN.map(function(p){return '<button data-e="pk" data-a="'+p[0]+'" aria-pressed="'+((S.pk||'')===p[0])+'">'+p[1]+'</button>';}).join('')+'</span>';}
@@ -2141,15 +2212,16 @@ function eDdList(){var q=DD.q.trim().toLowerCase(),os=eOpts(DD.lv).filter(functi
   DD.i=Math.max(0,Math.min(os.length-1,DD.i));
   os.forEach(function(o,n){if(o.g&&o.g!==g){g=o.g;h+='<div class="v-sw-g">'+g+'</div>';}
     h+='<div class="e-opt'+(n===DD.i&&!DD.sheet?' cur':'')+(o.on?' on':'')+'" role="option" aria-selected="'+!!o.on+'" data-e="ddpick" data-a="'+esc(o.k)+'"><span class="ck">'+(o.on?'<span class="mk chk"></span>':'')+'</span><span class="x"><b>'+esc(o.t)+'</b>'+(o.sub?'<small>'+esc(o.sub)+'</small>':'')+'</span>'+
-      (o.st?eStatH(o.st):'')+(DD.sheet&&o.more?'<span class="go">›</span>':'')+'</div>';});
+      (o.st?(ePk()==='x'?eXStH(eXSt(parseKey(o.k))):eStatH(o.st)):'')+(DD.sheet&&o.more?'<span class="go">›</span>':'')+'</div>';});
   return h;}
 function eDdHtml(){if(!DD)return '';var x=sc(),nm=LVN[DD.lv],ph='Search '+nm+'s'+(DD.lv==='p'?' of '+C(x.c).n:DD.lv==='s'?' of '+x.p:'')+'…';
-  var body='<input id="ddq" class="q" placeholder="'+esc(ph)+'" aria-label="'+esc(ph)+'" autocomplete="off" value="'+esc(DD.q)+'"><div class="e-ddl" id="ddl" role="listbox" aria-label="'+nm+'s">'+eDdList()+'</div>'+ELEG;
+  var body='<input id="ddq" class="q" placeholder="'+esc(ph)+'" aria-label="'+esc(ph)+'" autocomplete="off" value="'+esc(DD.q)+'"><div class="e-ddl" id="ddl" role="listbox" aria-label="'+nm+'s">'+eDdList()+'</div>'+(ePk()==='x'?XLEG:ELEG);
   if(!DD.sheet)return '<div class="v-scrim" style="background:none" data-e="ddclose"></div><div class="e-dd" role="dialog" aria-label="Choose a '+nm+'" style="left:'+DD.x+'px;top:'+DD.y+'px;max-height:calc(100vh - '+(DD.y+12)+'px)">'+body+
     '<div class="v-sw-f"><span><span class="kbd">↑↓</span> move</span><span><span class="kbd">Enter</span> choose</span><span>type to search</span><span><span class="kbd">Esc</span> close</span></div></div>';
   var pt=ePt(),up=DD.lv==='s'?'p':DD.lv==='p'&&!pt?'c':'',val={c:x?C(x.c).n:S.m==='1'?'My customers':'All',p:x&&x.p||'All',s:x&&x.s||'All'},dis={c:pt,p:!x,s:!(x&&x.p)};
-  return '<div class="e-sheet" role="dialog" aria-modal="true" aria-label="Filter '+eScrN()+'"><div class="e-shh">'+(up?'<button class="btn" data-e="ddlv" data-a="'+up+'" aria-label="Back to '+LVN[up]+'">← Back</button>':'')+'<b>Filter '+eScrN()+'</b><button class="btn" data-e="ddclose">Done</button></div>'+
-    '<div class="e-shs">'+['c','p','s'].map(function(l,i){return '<button class="'+(DD.lv===l?'on':'')+'" data-e="ddlv" data-a="'+l+'"'+(dis[l]?' disabled':'')+(DD.lv===l?' aria-current="step"':'')+'><small>'+(i+1)+' · '+LVN[l]+'</small><span>'+esc(val[l])+'</span></button>';}).join('')+'</div>'+body+'</div>';}
+  return '<div class="e-sheet" role="dialog" aria-modal="true" aria-label="Filter '+eScrN()+'"><div class="e-shh">'+(up?'<button class="btn" data-e="ddlv" data-a="'+up+'" aria-label="Back to '+LVN[up]+'">← Back</button>':'')+'<b>Filter '+eScrN()+'</b><button class="btn" data-e="ddclose">'+(ePk()==='x'?'Close':'Done')+'</button></div>'+
+    '<div class="e-shs">'+['c','p','s'].map(function(l,i){return '<button class="'+(DD.lv===l?'on':'')+'" data-e="ddlv" data-a="'+l+'"'+(dis[l]?' disabled':'')+(DD.lv===l?' aria-current="step"':'')+'><small>'+(i+1)+' · '+LVN[l]+'</small><span>'+esc(val[l])+'</span></button>';}).join('')+'</div>'+body+
+    (ePk()==='x'&&x&&DD.lv!=='c'?'<div class="e-shf"><button class="btn pri" data-e="ddclose">Use '+esc(DD.lv==='s'&&x.p?C(x.c).n+' › '+x.p:C(x.c).n)+' only</button><small>'+(DD.lv==='s'&&x.p?'All services of '+esc(x.p):'All projects and services of '+esc(C(x.c).n))+'</small></div>':'')+'</div>';}
 function eDdMark(){$$('.e-bar [data-e="dd"]').forEach(function(b){b.setAttribute('aria-expanded',String(!!DD&&b.getAttribute('data-a')===DD.lv));});}
 function eDdOpen(lv,q,sheet){if(DLG)return;var x=sc();if((lv==='p'&&!x)||(lv==='s'&&!(x&&x.p))||(lv==='c'&&ePt()))return;
   SW.open=false;POP=null;TR.drawer=false;eToastClear();DD={lv:lv,q:q||'',i:q?0:null,sheet:!!sheet};
@@ -2203,17 +2275,140 @@ function eTrKey(e){var ns=TR.list,i=-1,j,k=e.key;ns.forEach(function(n,q){if(n.k
   else return false;
   e.preventDefault();TR.cur=ns[i].k;eTrRe();return true;}
 
+/* ---- E-2+ (default): tree on desktop (docked, or tucked into a rail), stepped sheet on phone ---- */
+var TX={q:'',o:{},op:{},oq:{},col:null,w:272,prob:false,ov:false,cur:null,ta:'',tat:0,sy:0,list:[],last:null,rev:true,hits:0,hitc:0,hit1:null,probN:0};
+try{var _tx=JSON.parse(sessionStorage.getItem('e-tree')||'null');if(_tx){TX.o=_tx.o||{};TX.op=_tx.op||{};TX.col=_tx.col==null?null:!!_tx.col;TX.w=_tx.w||272;TX.prob=!!_tx.prob;}}catch(_){}
+function eXStore(){try{sessionStorage.setItem('e-tree',JSON.stringify({o:TX.o,op:TX.op,col:TX.col,w:TX.w,prob:TX.prob}));}catch(_){}}
+/* rail when a panel is open (always), when the user collapsed it, or by default below 1101px */
+function eXRail(){return !!S.o||(TX.col!=null?TX.col:matchMedia('(max-width:1100px)').matches);}
+function eXM(){return TX.q.trim()?TX.oq:TX.prob?TX.op:TX.o;}
+function eXSt(x){var st=eStat(x),h=!x.p?health(C(x.c)):'ok';return {inc:st.inc,hl:h==='ok'?'':h,own:st.own.indexOf('own call-order steps')>=0,prob:st.inc>0||h!=='ok'};}
+var XHN={unr:'Unreachable',ar:'At risk'};
+function eXStH(st){var h='<span class="e-stt">';
+  if(st.own)h+='<span class="e-own" title="Own call order: set here, not inherited from the level above">own</span>';
+  if(st.hl)h+='<span class="e-hl '+st.hl+'" role="img" aria-label="'+XHN[st.hl]+'" title="'+XHN[st.hl]+': '+HD[st.hl]+'"><span class="mk '+(st.hl==='unr'?'dot':'tri')+'"></span></span>';
+  if(st.inc)h+='<span class="e-ic" title="'+pl(st.inc,'open incident')+'"><span class="sr">open incidents: </span>'+st.inc+'</span>';
+  return h+'</span>';}
+var XLEG='<div class="e-leg"><span class="it" title="Incidents nobody has acknowledged yet, in that customer, project or service"><span class="e-ic">n</span> open incidents</span><span class="it" title="'+HD.unr+'"><span class="e-hl unr"><span class="mk dot"></span></span> nobody can be called</span><span class="it" title="'+HD.ar+'"><span class="e-hl ar"><span class="mk tri"></span></span> call order at risk</span><span class="it" title="Has its own call order instead of the one from the level above"><span class="e-own">own</span> own call order</span></div>';
+function eXHi(t){var tk=TX.q.trim().toLowerCase().split(/\s+/).filter(Boolean);if(!tk.length)return esc(t);
+  return t.split(/(\s+)/).map(function(w){var lw=w.toLowerCase(),m=tk.filter(function(k){return lw.indexOf(k)===0;}).sort(function(a,b){return b.length-a.length;})[0];return m?'<mark>'+esc(w.slice(0,m.length))+'</mark>'+esc(w.slice(m.length)):esc(w);}).join('');}
+function eXNodes(){var q=TX.q.trim().toLowerCase(),x=sc(),o=[],pt=ePt(),pr=TX.prob&&!q,M=eXM(),hits=0,hitc=0,hit1=null;
+  function ex(k,def){return M[k]!=null?M[k]:def;}
+  function cu(c,arr){var cm=!!q&&eWp(c.n,q),sel=!!x&&x.c===c.id,st=eXSt({c:c.id}),ck=key({c:c.id});
+    var ps=c.tree.map(function(p){return {p:p,pm:!!q&&eWp(p.n,q),ss:q?p.s.filter(function(s){return eWp(s.n,q);}):[],st:eXSt({c:c.id,p:p.n})};});
+    var sub=ps.some(function(z){return z.pm||z.ss.length;});
+    if(q&&!cm&&!sub)return;if(pr&&!st.prob&&!sel)return;
+    if(q){var h0=hits;if(cm){hits++;hit1=ck;}ps.forEach(function(z){if(z.pm){hits++;hit1=key({c:c.id,p:z.p.n});}z.ss.forEach(function(s){hits++;hit1=key({c:c.id,p:z.p.n,s:s.n});});});if(hits>h0)hitc++;}
+    var e=ex(ck,q?sub:sel);arr.push({k:ck,t:c.n,d:0,kids:1,exp:e,st:st,on:sel&&!x.p,hit:cm});if(!e)return;
+    ps.forEach(function(z){var psel=sel&&x.p===z.p.n;if(q&&sub&&!z.pm&&!z.ss.length)return;if(pr&&!z.st.prob&&!psel)return;
+      var pk=key({c:c.id,p:z.p.n}),pe=ex(pk,q?z.ss.length>0:psel);arr.push({k:pk,t:z.p.n,d:1,kids:1,exp:pe,st:z.st,on:psel&&!x.s,hit:z.pm});if(!pe)return;
+      (z.ss.length?z.ss:z.p.s).forEach(function(s){var ssel=psel&&x.s===s.n,ss_=eXSt({c:c.id,p:z.p.n,s:s.n});if(pr&&!ss_.prob&&!ssel)return;
+        arr.push({k:key({c:c.id,p:z.p.n,s:s.n}),t:s.n,d:2,st:ss_,on:ssel,hit:!!q&&z.ss.length>0});});});}
+  if(pt){cu(C(P_CUST),o);TX.hits=hits;TX.hitc=hitc;TX.hit1=hit1;return o;}
+  var my=mine(),ot=CUS().filter(function(c){return !eMyC(c);}),all=CUS().map(function(c){return eXSt({c:c.id});});
+  TX.probN=all.filter(function(s){return s.prob;}).length;
+  o.push({k:'',t:'All customers',n:CUS().length,d:0,root:1,on:!x&&S.m!=='1'});
+  [['~my','My customers',my],['~ot',my.length?'Other customers':'Customers',ot]].forEach(function(g){if(!g[2].length)return;var arr=[];g[2].forEach(function(c){cu(c,arr);});
+    var shown=arr.filter(function(n){return n.d===0;}).length;if((q||pr)&&!shown)return;
+    var has=!!x&&g[2].some(function(c){return c.id===x.c;}),e=ex(g[0],g[0]==='~my'||!my.length||!!q||pr||has),ag={inc:0,hl:'',own:false};
+    g[2].forEach(function(c){var s=eXSt({c:c.id});ag.inc+=s.inc;if(s.hl==='unr'||(s.hl&&!ag.hl))ag.hl=s.hl;});
+    o.push({k:g[0],t:g[1],n:g[2].length,shown:(q||pr)?shown:null,hdr:1,d:0,kids:1,exp:e,on:g[0]==='~my'&&!x&&S.m==='1',agg:ag});
+    if(e)o=o.concat(arr);});
+  TX.hits=hits;TX.hitc=hitc;TX.hit1=hit1;return o;}
+function eXRow(n,i){var me=eMe().split(' ')[0],lab=n.hdr?esc(n.t)+' <span class="mut">· '+(n.shown!=null&&n.shown!==n.n?n.shown+' of '+n.n:n.n)+'</span>':(n.hit?eXHi(n.t):esc(n.t))+(n.root?' <span class="mut">· '+n.n+'</span>':'');
+  var tip=n.k==='~my'?'Click to show only the '+n.n+' customers '+esc(me)+' covers':n.k==='~ot'?'Customers '+esc(me)+' does not cover':esc(n.t);
+  return '<div class="e-tn d'+n.d+(n.hdr?' hdr':'')+(n.root?' root':'')+(n.on?' on':'')+(n.k===TX.cur?' cur':'')+'" id="xn'+i+'" role="treeitem" aria-level="'+(n.hdr||n.root?1:n.d+2)+'" aria-selected="'+!!n.on+'"'+(n.kids?' aria-expanded="'+!!n.exp+'"':'')+' data-e="xpick" data-a="'+esc(n.k)+'">'+
+    (n.kids?'<button class="tw" tabindex="-1" data-e="xtog" data-a="'+esc(n.k)+'" aria-label="'+(n.exp?'Collapse ':'Expand ')+esc(n.t)+'" title="'+(n.exp?'Collapse':'Expand')+' (does not change what is shown)">'+(n.exp?'▾':'▸')+'</button>':n.root?'':'<span class="tw"></span>')+
+    '<span class="x" title="'+tip+'">'+lab+'</span>'+(n.st?eXStH(n.st):n.agg&&!n.exp?eXStH(n.agg):'')+'</div>';}
+function eXBody(){var ns=eXNodes(),q=TX.q.trim(),root='',rows='',hint='';TX.list=ns;
+  if(!ns.some(function(n){return n.k===TX.cur;})){var c0=(q&&ns.filter(function(n){return n.hit;})[0])||ns.filter(function(n){return n.on;})[0]||ns[0];TX.cur=c0?c0.k:null;}
+  ns.forEach(function(n,i){if(n.root)root+=eXRow(n,i);else rows+=eXRow(n,i);});
+  var real=ns.filter(function(n){return !n.root&&!n.hdr;}).length;
+  if(!real)rows='<div class="v-sw-g" style="white-space:normal;line-height:1.4">'+(q?'No customer, project or service starts with “'+esc(TX.q)+'”':TX.prob?'No customer has an open incident or a call-order problem.':'')+'</div>';
+  if(q&&TX.hits)hint=TX.hits===1?'<b>1 match</b> · Enter selects it':'<b>'+TX.hits+' matches</b> in '+pl(TX.hitc,'customer')+' · nothing is selected until you choose one';
+  return {root:root,rows:rows,hint:hint};}
+function eXBox(ov){var b=eXBody(),pt=ePt();
+  return '<div class="e-trh"><span class="e-tqw"><input class="inp e-tq" placeholder="Find by name…" aria-label="Filter the tree by customer, project or service name" autocomplete="off" value="'+esc(TX.q)+'"><button class="e-tqx" data-e="xclrq" aria-label="Clear the search" title="Clear"'+(TX.q?'':' hidden')+'>×</button></span>'+
+    (ov?(S.o?'':'<button class="btn sm" data-e="xpin" title="Keep the tree open beside the list">Pin</button>')+'<button class="btn sm" data-e="xov" aria-label="Close the tree" title="Close (Esc)">×</button>':'<button class="btn sm" data-e="xcol" title="Collapse the tree to a narrow rail" aria-label="Collapse the tree to a narrow rail">«</button>')+'</div>'+
+    (pt?'':'<button class="e-trp" role="switch" aria-checked="'+TX.prob+'" data-e="xprob" title="Show only customers that have an open incident or a call-order health problem"><span class="sw"><span class="mk chk"></span></span><span>Only with problems</span><span class="n">'+TX.probN+'</span></button>')+
+    '<div class="e-trq" role="status">'+b.hint+'</div>'+
+    '<div class="e-tr" role="tree" tabindex="0" aria-label="Customers, projects and services"><div class="e-trr">'+b.root+'</div><div class="e-trs">'+b.rows+'</div></div>'+XLEG;}
+var XICO='<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M3 2.5v9.5h4M3 6.5h4"/><rect x="8.5" y="4.5" width="5" height="4" fill="currentColor" stroke="none"/><rect x="8.5" y="10" width="5" height="4" fill="currentColor" stroke="none"/></svg>';
+function eXAside(){var x=sc(),k=x?key(x):S.m==='1'?'~my':'';
+  if(TX.last!==k){var first=TX.last===null;TX.last=k;TX.rev=true;if(x&&!first){[TX.o,TX.op].forEach(function(m){delete m[key({c:x.c})];if(x.p)delete m[key({c:x.c,p:x.p})];delete m[eMyC(C(x.c))?'~my':'~ot'];});eXStore();}}
+  if(!eXRail()){TX.ov=false;return '<aside class="e-tree plus" style="width:'+TX.w+'px" aria-label="Customer tree">'+eXBox()+'<div class="e-trz" role="separator" aria-orientation="vertical" tabindex="0" aria-label="Resize the tree (arrow keys, 200 to 360 px)" title="Drag to resize"></div></aside>';}
+  var ch='<span class="chain">›</span>',vt=x?'<b>'+esc(C(x.c).n)+'</b>'+(x.p?ch+esc(x.p):'')+(x.s?ch+esc(x.s):''):'<b>'+(S.m==='1'?'My customers':'All customers')+'</b>';
+  return '<aside class="e-tree plus rail'+(TX.ov?' ovo':'')+'" aria-label="Customer tree, collapsed">'+
+    '<button class="e-rail" data-e="xov" aria-expanded="'+TX.ov+'" aria-label="Open the customer tree. Showing: '+esc(x?lbl(x):S.m==='1'?'My customers':'All customers')+'" title="Open the customer tree'+(S.o?' (tucked away while the panel is open)':'')+'"><span class="ico">'+XICO+'</span><span class="vt">'+vt+'</span></button>'+
+    (TX.ov?'<div class="e-trov" style="width:'+TX.w+'px" role="dialog" aria-label="Customer tree">'+eXBox(1)+'</div>':'')+'</aside>';}
+function eXSync(){var a=$('.e-tree.plus');if(!a)return;var s=$('.e-trs',a),y=s?s.scrollTop:TX.sy,d=document.createElement('div');d.innerHTML=eXAside();a.parentNode.replaceChild(d.firstChild,a);s=$('.e-tree.plus .e-trs');if(s)s.scrollTop=y;eXSee();}
+function eXSee(sel){var s=$('.e-tree.plus .e-trs');if(!s)return;var c=$(sel||'.e-tn.cur',s);if(!c)return;var hd=$$('.e-tn.hdr',s)[0],hh=hd?hd.offsetHeight:0,top=c.offsetTop-s.offsetTop;
+  if(c.classList.contains('hdr'))return;if(top<s.scrollTop+hh)s.scrollTop=Math.max(0,top-hh);else if(top+c.offsetHeight>s.scrollTop+s.clientHeight)s.scrollTop=top+c.offsetHeight-s.clientHeight;}
+function eXRe(){var a=$('.e-tree.plus');if(!a)return;var s=$('.e-trs',a);if(!s){eXSync();return;}var y=s.scrollTop,b=eXBody();$('.e-trr',a).innerHTML=b.root;s.innerHTML=b.rows;s.scrollTop=y;$('.e-trq',a).innerHTML=b.hint;
+  var xb=$('.e-tqx',a);if(xb)xb.hidden=!TX.q;var i=-1;TX.list.forEach(function(n,j){if(n.k===TX.cur)i=j;});$('.e-tr',a).setAttribute('aria-activedescendant',i<0?'':'xn'+i);eXSee();}
+function eXNode(k){return TX.list.filter(function(n){return n.k===k;})[0];}
+function eXTog(k){var n=eXNode(k);if(!n||!n.kids)return;eXM()[k]=!n.exp;TX.cur=k;eXStore();eXRe();}
+function eXPick(k){var n=eXNode(k);TX.cur=k;if(k==='~ot'){eXTog(k);return;}
+  if(k&&k[0]!=='~'){if(TX.q.trim())TX.oq[k]=true;else delete eXM()[k];}
+  if(!n||!n.kids||k==='~my')TX.ov=false;
+  eXStore();eSetF(k,'tree');}
+function eXKey(e){var ns=TX.list,i=-1,j,k=e.key;ns.forEach(function(n,q){if(n.k===TX.cur)i=q;});if(i<0)return false;var n=ns[i];
+  if(k==='ArrowDown')i=Math.min(ns.length-1,i+1);else if(k==='ArrowUp')i=Math.max(0,i-1);else if(k==='Home')i=0;else if(k==='End')i=ns.length-1;
+  else if(k==='ArrowRight'){if(n.kids&&!n.exp){e.preventDefault();eXTog(n.k);return true;}if(n.kids&&ns[i+1]&&(ns[i+1].d>n.d||(n.hdr&&!ns[i+1].hdr)))i++;}
+  else if(k==='ArrowLeft'){if(n.kids&&n.exp){e.preventDefault();eXTog(n.k);return true;}for(j=i-1;j>=0;j--)if(ns[j].d<n.d||(n.d===0&&!n.hdr&&!n.root&&ns[j].hdr)){i=j;break;}}
+  else if(k==='Enter'||k===' '){e.preventDefault();eXPick(n.k);return true;}
+  else if(k.length===1&&!e.ctrlKey&&!e.metaKey&&!e.altKey){var now=Date.now(),f=-1;TX.ta=(now-TX.tat<700?TX.ta:'')+k.toLowerCase();TX.tat=now;
+    for(j=0;j<ns.length;j++){var q=(i+(TX.ta.length>1?0:1)+j)%ns.length;if(!ns[q].hdr&&!ns[q].root&&ns[q].t.toLowerCase().indexOf(TX.ta)===0){f=q;break;}}
+    if(f<0&&!ePt()){var hc=CUS().filter(function(c){return c.n.toLowerCase().indexOf(TX.ta)===0;})[0];   // a customer in a collapsed group: open the group and jump
+      if(hc){e.preventDefault();eXM()[eMyC(hc)?'~my':'~ot']=true;TX.cur=key({c:hc.id});eXStore();eXRe();return true;}}
+    if(f>=0)i=f;}
+  else return false;
+  e.preventDefault();TX.cur=ns[i].k;eXRe();return true;}
+function eXFocusTree(){var l=$('.e-tree.plus .e-tr');if(l)l.focus();}
+function eXClick(a,arg){
+  if(a==='xpick')eXPick(arg);else if(a==='xtog')eXTog(arg);
+  else if(a==='xprob'){TX.prob=!TX.prob;TX.cur=null;eXStore();eXSync();var b=$('.e-trp');if(b)b.focus();}
+  else if(a==='xcol'){TX.col=true;TX.ov=false;eXStore();eXSync();var r=$('.e-rail');if(r)r.focus();}
+  else if(a==='xpin'){TX.col=false;TX.ov=false;eXStore();eXSync();eXFocusTree();}
+  else if(a==='xov'){TX.ov=!TX.ov;TX.cur=null;eXSync();if(TX.ov)eXFocusTree();else{var r2=$('.e-rail');if(r2)r2.focus();}}
+  else if(a==='xclrq'){TX.q='';TX.oq={};TX.cur=null;var i=$('.e-tree.plus .e-tq');if(i){i.value='';i.focus();}eXRe();}
+  else return false;
+  return true;}
+function eXKeys(e){var t=e.target,k=e.key,is=function(sel){return t.matches&&t.matches(sel);};
+  if(k==='Escape'&&TX.ov){TX.ov=false;eXSync();var rb=$('.e-rail');if(rb)rb.focus();return true;}
+  if(is('.e-tree.plus .e-tr'))return eXKey(e);
+  if(is('.e-tree.plus .e-tq')){
+    if(k==='Escape'&&TX.q){eXClick('xclrq');return true;}
+    if(k==='ArrowDown'){e.preventDefault();eXFocusTree();return true;}
+    if(k==='Enter'&&TX.q.trim()){e.preventDefault();if(TX.hits===1)eXPick(TX.hit1);else eXFocusTree();return true;}
+    return false;}
+  if(is('.e-tree.plus .e-trz')&&(k==='ArrowLeft'||k==='ArrowRight')){e.preventDefault();TX.w=Math.max(200,Math.min(360,TX.w+(k==='ArrowRight'?16:-16)));t.parentNode.style.width=TX.w+'px';eXStore();return true;}
+  return false;}
+window.addEventListener('resize',function(){if(S.v!=='E'||ePk()!=='x')return;var a=$('.e-tree.plus');if(a&&a.classList.contains('rail')!==eXRail())eXSync();});
+/* bar and phone line for E-2+: text only. The tree (desktop) or the sheet (phone) is the one control. */
+function eXBarPath(x,pt){var ch='<span class="chain">›</span>',c=x&&C(x.c);
+  function xb(lv,what){return '<button class="e-px" data-e="ddclr" data-a="'+lv+'" aria-label="'+what+'" title="'+what+'">×</button>';}
+  function sg(t,b){return '<span class="sg"><span class="t">'+t+'</span>'+(b||'')+'</span>';}
+  if(!x)return '<span class="e-pth">'+sg('<b>'+(S.m==='1'?'My customers':'All customers')+'</b> · '+(S.m==='1'?mine().length:CUS().length),S.m==='1'?xb('c','Show all customers'):'')+'</span>';
+  var h=pt?'':'<span class="e-id">'+mono(c)+'</span>&nbsp;&nbsp;'+sg('<b>'+esc(c.n)+'</b>',xb('c','Clear '+esc(c.n)+' · show all customers'))+ch;
+  if(pt)h=ch;
+  h+=x.p?sg(esc(x.p),xb('p','Clear '+esc(x.p)+' · show all of '+esc(c.n)))+ch+(x.s?sg(esc(x.s),xb('s','Clear '+esc(x.s)+' · show all of '+esc(x.p))):sg('<span class="mut">All services</span>')):sg('<span class="mut">All projects</span>');
+  return '<span class="e-pth" title="Chosen in the customer tree on the left (or Ctrl K)">'+h+'</span>';}
+function eXPathM(){var x=sc(),ch='<span class="chain">›</span>';if(!x)return S.m==='1'?'<b>My customers</b> · '+mine().length:'<b>All customers</b> · '+CUS().length;
+  return '<span class="nw"><b>'+esc(C(x.c).n)+'</b></span> <span class="nw">'+ch+(x.p?esc(x.p):'<span class="mut">All projects</span>')+'</span>'+(x.p?' <span class="nw">'+ch+(x.s?esc(x.s):'<span class="mut">All services</span>')+'</span>':'');}
+
 /* ---- glue ---- */
 function ePkClick(a,arg,el){
   if(a==='dd'){if(DD&&DD.lv===arg&&!DD.sheet)eDdClose(1);else eDdOpen(arg);}
   else if(a==='ddclose')eDdClose(1);else if(a==='ddpick')eDdPick(arg);else if(a==='ddclr')eClr(arg);
   else if(a==='ddlv'){if(DD){DD.lv=arg;DD.q='';DD.i=null;renderOv();}}
-  else if(a==='sheet'){var x=sc();eDdOpen(ePt()?(x.p?'s':'p'):!x?'c':!x.p?'p':'s','',true);}
+  else if(a==='sheet'){var x=sc();eDdOpen(ePk()==='x'?(ePt()?(x.s?'s':'p'):!x?'c':x.s?'s':x.p?'p':'c'):ePt()?(x.p?'s':'p'):!x?'c':!x.p?'p':'s','',true);}   // E-2+: the sheet opens on the step that holds the current choice
   else if(a==='drawer'){DD=null;SW.open=false;POP=null;eToastClear();TR.drawer=true;TR.q='';TR.qo={};TR.cur=null;renderOv();}
   else if(a==='drwclose'){TR.drawer=false;renderOv();var b=$('.e-barm .sb');if(b)b.focus();}
   else if(a==='trpick')eTrPick(arg);else if(a==='trtog')eTrTog(arg);
   else if(a==='trcol'){TR.col=!TR.col;render();var tb=$('.e-tree [data-e="trcol"]');if(tb)tb.focus();}
-  else if(a==='pk'){DD=null;TR.drawer=false;SW.open=false;POP=null;ego({pk:arg});}
+  else if(a==='pk'){DD=null;TR.drawer=false;TX.ov=false;SW.open=false;POP=null;ego({pk:arg});}
+  else if(eXClick(a,arg)){}
   else return false;
   return true;}
 function ePkKey(e){var t=e.target,k=e.key,is=function(sel){return t.matches&&t.matches(sel);};
@@ -2226,6 +2421,7 @@ function ePkKey(e){var t=e.target,k=e.key,is=function(sel){return t.matches&&t.m
     return !is('button');}
   if(SW.open)return false;
   if(k==='Escape'&&TR.drawer){TR.drawer=false;renderOv();return true;}
+  if(ePk()==='x'){return eXKeys(e);}
   if(is('.e-tr'))return eTrKey(e);
   if(is('.e-tq')){if(k==='ArrowDown'||(k==='Enter'&&TR.q.trim())){e.preventDefault();var l=$(TR.drawer?'.e-drw .e-tr':'.e-tree .e-tr');if(k==='Enter'&&TR.list.length)eTrPick(TR.cur);else if(l)l.focus();return true;}return false;}
   if(is('.e-trz')&&(k==='ArrowLeft'||k==='ArrowRight')){e.preventDefault();TR.w=Math.max(200,Math.min(480,TR.w+(k==='ArrowRight'?16:-16)));t.parentNode.style.width=TR.w+'px';return true;}
@@ -2233,9 +2429,9 @@ function ePkKey(e){var t=e.target,k=e.key,is=function(sel){return t.matches&&t.m
     if(k==='ArrowDown'){e.preventDefault();eDdOpen(lv);return true;}
     if(k.length===1&&k!==' '&&!e.ctrlKey&&!e.metaKey&&!e.altKey){e.preventDefault();eDdOpen(lv,k);return true;}}   // type-ahead: a letter opens the list already searched
   return false;}
-document.addEventListener('mousedown',function(e){var z=e.target;if(!z.classList||!z.classList.contains('e-trz'))return;e.preventDefault();var a=z.parentNode,x0=e.clientX,w0=a.offsetWidth;
-  function mv(ev){TR.w=Math.max(200,Math.min(480,w0+ev.clientX-x0));a.style.width=TR.w+'px';}
-  function up(){document.removeEventListener('mousemove',mv);document.removeEventListener('mouseup',up);document.body.classList.remove('e-rsz');}
+document.addEventListener('mousedown',function(e){var z=e.target;if(!z.classList||!z.classList.contains('e-trz'))return;e.preventDefault();var a=z.parentNode,x0=e.clientX,w0=a.offsetWidth,plus=a.classList.contains('plus');
+  function mv(ev){var w=Math.max(200,Math.min(plus?360:480,w0+ev.clientX-x0));if(plus)TX.w=w;else TR.w=w;a.style.width=w+'px';}
+  function up(){if(plus)eXStore();document.removeEventListener('mousemove',mv);document.removeEventListener('mouseup',up);document.body.classList.remove('e-rsz');}
   document.body.classList.add('e-rsz');document.addEventListener('mousemove',mv);document.addEventListener('mouseup',up);});
 /*E-JS-END*/
 window.addEventListener('hashchange',function(){if(window.ERH===location.hash)return;render();});
