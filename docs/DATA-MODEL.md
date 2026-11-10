@@ -297,6 +297,7 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 | deliveredAt | timestamptz? | 발송 선점(claim)(notification R2-3) |
 | sweptReason | text? | |
 | version | int | |
+| closedAt | timestamptz? | **PROPOSED — needs migration.** 실제로 닫힌 시각. grace·auto-pause 계산의 기준(`closeAt`은 예정 시각) |
 
 - 부분 UQ(groupKey) where status = 'OPEN' — 축당 열린 그룹 하나(G-3). IX(status, closeAt) — 틱이 처리할 그룹 선택.
 - Step Functions 대신 1분 틱 + SQS 지연 메시지(grouping 새 구현 2). 틱 1분 단위라 group_wait 30초 정밀도 처리 방식은 API-CONTRACT 참조.
@@ -327,6 +328,12 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 | rcaPlaceholder | jsonb? | D-14 자리만 |
 | version | int | |
 | isMergeTarget | bool | AAM 포인터 `inc#{axis}` 대체. 새 구성원을 합칠 대상 |
+| nextEscalationAt | timestamptz? | **PROPOSED — needs migration.** 틱이 이 인시던트를 다시 볼 시각(다음 단계·재알림·점검 창 재확인). null = 볼 일 없음. IX(nextEscalationAt) where status ≠ RESOLVED |
+| lastMergedAt | timestamptz? | **PROPOSED — needs migration.** 마지막으로 알림이 합쳐진 시각. 같은 틱에서 합친 뒤 자동 해결하지 않기 위한 기준(I-5) |
+| renotifyCount | int default 0 | **PROPOSED — needs migration.** Ack 뒤 재알림 횟수(상한 12) |
+| projectId, serviceId | text? FK | **PROPOSED — needs migration.** 열릴 때의 조직 위치(계정 → 서비스 → 프로젝트). 범위 필터·점검 창·호출 순서 해석에 사용 |
+| source | enum `CLOUDWATCH, PROMETHEUS, GRAFANA`? | **PROPOSED — needs migration.** 대표 알림의 출처(목록 필터) |
+| lastManualEscalationAt | timestamptz? | **PROPOSED — needs migration.** 수동 Escalate 60초 제한의 기준 |
 
 - 부분 UQ(axis) where isMergeTarget — 축당 병합 대상 하나. 6시간 지난 인시던트는 열린 채 두되 isMergeTarget=false로 내리고 새 인시던트를 연다(I-3).
 - IX(customerId, status, triggeredAt desc), IX(status, escalationBaseAt) — 에스컬레이션 틱.
@@ -681,8 +688,15 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 | nextAttemptAt | timestamptz | 선점 시 미리 기록 |
 | lastError | text? | |
 | payload | jsonb | |
+| stepIndex | int | **PROPOSED — needs migration.** 어느 단계의 호출인지(0부터). 단계 전체 실패 판정, Undo 복원 범위 |
+| repeat | int | **PROPOSED — needs migration.** 몇 번째 반복인지(RENOTIFY는 재알림 번호) |
+| contactId | text? FK Contact | **PROPOSED — needs migration.** 사람에게 가는 잡의 수신자(채널 잡은 null). 발송 직전 고객 일치·확인 여부 재확인 |
+| contactName | text? | **PROPOSED — needs migration.** 열릴 때의 이름(기록 표시용) |
+| claimSeq | int default 0 | **PROPOSED — needs migration.** 선점 토큰. 선점마다 +1, `beginSend`·`release`·`complete`는 `WHERE status='SENDING' AND claimSeq=?`로만 쓴다(겹친 틱의 중복 발송 방지) |
+| dueAt | timestamptz | **PROPOSED — needs migration.** 원래 만기(정렬 기준). 선점·반환은 건드리지 않고, 실제 재시도·Undo·점검 창 미룸만 옮긴다. `nextAttemptAt`은 임대 시각으로만 쓴다 |
 
-- IX(status, nextAttemptAt).
+- IX(status, nextAttemptAt). 선점·만기·재시도 시각은 DB 시각(`now()`)으로 계산한다(실행기 시계 금지).
+- **PROPOSED — needs migration:** `ProviderBreaker`(kind PK `SLACK`·`SMS`·`VOICE`·`EMAIL`, state `CLOSED`·`OPEN`, trips, openedAt, nextProbeAt) — 업체별 차단기 상태(API-CONTRACT §5).
 
 ### NotificationLog (추가만)
 | 필드 | 비고 |
@@ -692,7 +706,12 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 | targetSummary | "1순위 이름 외 n명" |
 | escalationStep | |
 | providerMessageId | 문자·음성 업체 ID, Slack ts |
-| error | |
+| error | 가린 업체 문구(300자). 내부 OPERATOR·ADMIN만 봄 |
+| attempt | **PROPOSED — needs migration.** int. 몇 번째 시도의 결과인지 |
+| warnings | **PROPOSED — needs migration.** text[]. 예: `UNVERIFIED_ADDRESS`. 내부만 |
+| errorCode | **PROPOSED — needs migration.** enum `TIMEOUT, INVALID_DESTINATION, RATE_LIMITED, PROVIDER_REJECTED, PROVIDER_ERROR, NOT_CONFIGURED, GAVE_UP`?. API의 `reason` — 모든 사용자가 보는 값 |
+| targetKind | **PROPOSED — needs migration.** enum `STAFF, CUSTOMER_PERSON, CUSTOMER_CHANNEL, MSP_CHANNEL`. 포털에서 직원을 `MSP on-call`로, 채널을 `Slack channel`로 바꾸는 근거(D-36) |
+| contactId | **PROPOSED — needs migration.** text? FK Contact. 사람 대상일 때만. 포털 응답에는 나가지 않음 |
 
 - IX(incidentId, at). 고객 포털 "통지가 실제로 나갔는지"(P3-2)의 원천.
 
