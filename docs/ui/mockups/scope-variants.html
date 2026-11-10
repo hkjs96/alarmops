@@ -655,6 +655,7 @@ a[data-sc]{color:inherit}
 /*E-CSS-BEGIN*/
 /* ===== E: combined (prefix e-). Everything is scoped to body[data-v="E"] so A–D are untouched ===== */
 body[data-v="E"] .top{position:sticky;top:var(--mkh);z-index:42}
+@media (min-width:761px) and (max-width:960px){body[data-v="E"] .top{gap:12px;padding:0 16px}body[data-v="E"] .top .nav a{padding:0 8px}body[data-v="E"] .top .ib .kbd{display:none}}
 .e-pt{font:700 10px var(--mono);letter-spacing:.07em;text-transform:uppercase;color:var(--ink2);border:1px solid var(--rule);padding:2px 6px;margin-left:4px}
 .nav .cnt.zero{background:var(--hair);color:var(--ink2)}
 .e-bar{position:sticky;top:calc(var(--mkh) + 52px);z-index:41;background:var(--surface);border-bottom:1px solid var(--rule);box-shadow:inset 0 -2px 0 var(--ink);
@@ -848,9 +849,10 @@ body.e-rsz{cursor:col-resize;user-select:none}
 
 @media (min-width:1101px){
   body.e-has-panel .page{max-width:none;margin:0;padding-right:624px}
-  body.e-has-panel .hide-p{display:none}
-  body.e-has-panel .tiles.t4{grid-template-columns:1fr 1fr}
-  body.e-has-panel .v-lay{grid-template-columns:minmax(0,1fr)}
+  body.e-has-panel:not(.e-plus) .hide-p,body.e-has-panel:not(.e-plus) .hide-p2{display:none}
+  body.e-has-panel:not(.e-plus) .e-hlin{display:inline-flex}
+  body.e-has-panel:not(.e-plus) .tiles.t4{grid-template-columns:1fr 1fr}
+  body.e-has-panel:not(.e-plus) .v-lay{grid-template-columns:minmax(0,1fr)}
 }
 @media (max-width:760px){
   body[data-v="E"] .top{position:relative;top:auto}
@@ -933,7 +935,7 @@ body.e-rsz{cursor:col-resize;user-select:none}
 .e-tn.hdr:hover{background:var(--hair)}
 .e-tn.hdr.on{background:var(--soft);box-shadow:inset 3px 0 0 var(--accent);color:var(--accent)}
 .e-tn.hdr .mut{font-weight:400}
-.e-tree.plus .e-tn mark,.e-trov .e-tn mark{background:var(--amber-t);color:inherit;font-weight:700;box-shadow:inset 0 -2px 0 var(--amber)}
+.e-tree.plus .e-tn mark{background:var(--amber-t);color:inherit;font-weight:700;box-shadow:inset 0 -2px 0 var(--amber)}
 .e-tree.plus .e-tn.d1 .x,.e-tree.plus .e-tn.d2 .x{font-weight:400}
 .e-tree.plus .e-tn.on .x{font-weight:700}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
@@ -978,19 +980,17 @@ body.e-rsz{cursor:col-resize;user-select:none}
 .e-trq{flex:none;padding:5px 10px;font-size:12px;line-height:1.35;color:var(--ink2);background:var(--soft);border-bottom:1px solid var(--rule)}
 .e-trq:empty{display:none}
 .e-trq b{color:var(--ink)}
-.e-tree.plus.rail{width:44px;overflow:visible;border-right:1px solid var(--rule)}
-.e-tree.plus.rail.ovo{z-index:43}
-.e-rail{width:43px;height:100%;border:0;background:var(--surface);display:flex;flex-direction:column;align-items:center;gap:10px;padding:8px 0;color:var(--ink2);cursor:pointer;min-height:0}
+.e-tree.plus.rail{width:45px}
+.e-tree.plus.anim{overflow:hidden}
+.e-tree.plus.anim:not(.rail)>*{min-width:var(--e-tw)}
+.e-rail{width:44px;height:100%;border:0;background:var(--surface);display:flex;flex-direction:column;align-items:center;gap:10px;padding:8px 0;color:var(--ink2);cursor:pointer;min-height:0}
 .e-rail:hover{background:var(--soft)}
-.e-rail[aria-expanded="true"]{background:var(--accent-t)}
+.e-rail:hover .ico{border-color:var(--ink)}
+.e-rail .chv{font:700 14px/1 var(--mono);color:var(--ink2);flex:none;height:18px;display:inline-flex;align-items:center}
 .e-rail .ico{width:28px;height:28px;border:1px solid var(--ink2);background:var(--surface);display:inline-flex;align-items:center;justify-content:center;color:var(--ink);flex:none}
 .e-rail .vt{writing-mode:vertical-rl;font-size:12.5px;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-height:0;flex:0 1 auto;color:var(--ink2)}
 .e-rail .vt b{color:var(--ink)}
 .e-rail .vt .chain{color:var(--mut);margin:6px 0;display:inline-block}
-.e-rail .vl{font:700 9.5px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--mut);writing-mode:vertical-rl;flex:none}
-.e-trov{position:absolute;left:43px;top:0;bottom:0;background:var(--surface);border:1px solid var(--ink);border-top:0;box-shadow:var(--pop);display:flex;flex-direction:column}
-.e-trov .e-tr{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden;padding:0;outline:0}
-.e-trov .e-trn{flex:none;padding:5px 10px;font-size:12px;color:var(--mut);border-bottom:1px solid var(--rule)}
 .e-pth{display:inline-flex;align-items:center;min-width:0;font-size:14px;color:var(--ink2);white-space:nowrap;overflow:hidden;flex:0 1 auto}
 .e-pth .sg{display:inline-flex;align-items:center;gap:6px;min-width:0;flex:0 1 auto}
 .e-pth .sg .t{overflow:hidden;text-overflow:ellipsis}
@@ -1001,33 +1001,63 @@ body.e-rsz{cursor:col-resize;user-select:none}
 .e-shf{flex:none;padding:8px 12px 10px;border-top:1px solid var(--ink);background:var(--surface)}
 .e-shf .btn{width:100%;justify-content:center;min-height:48px;font-size:15px}
 .e-shf small{display:block;text-align:center;font-size:12px;color:var(--mut);margin-top:4px}
-@media (min-width:1101px){
-  /* the list keeps its left edge when a panel opens: same left padding, never centred, the panel takes room from the right */
+/* E-2+ desktop layout (761px and up). The tree is always docked, as a 45px rail or expanded, and the page reflows in the room that is left: nothing floats over the list.
+   eXLayout() measures that room and sets --e-tw / --e-pw plus one of: e-c1 (first set of columns dropped), e-c1 e-c2 (second set dropped), e-cards (single-column cards),
+   e-pfull (the panel is the view; the tree still docks beside it). Order when a panel is open: columns drop, then the panel narrows to 440px, then cards, then e-pfull. */
+@media (min-width:761px){
   body.e-plus .e-lay>.page{margin-left:0}
-  body.e-plus.e-has-panel .page{padding-right:612px}
-  body.e-plus.e-has-panel.e-docked .hide-p2{display:none}
-  body.e-has-panel .e-hlin{display:inline-flex}
-  body.e-plus.e-docked:not(.e-has-panel) .v-lay{grid-template-columns:minmax(0,1fr) 300px}
-  body.e-plus.e-has-panel.e-docked .t th,body.e-plus.e-has-panel.e-docked .t td{padding-left:10px;padding-right:10px}
-  body.e-plus.e-has-panel.e-docked .t .ttl{overflow-wrap:anywhere}
-  body.e-plus.e-has-panel.e-docked .t .who{white-space:normal}
+  body.e-plus.e-has-panel .page{max-width:none;margin:0;padding-right:calc(var(--e-pw,600px) + 12px)}
+  body.e-plus .e-panel{width:var(--e-pw,600px)}
+  body.e-plus.e-c1 .hide-p,body.e-plus.e-c2 .hide-p2,body.e-plus.e-cards .hide-p{display:none}
+  body.e-plus.e-c2 .e-hlin{display:inline-flex}
+  body.e-plus .v-lay{grid-template-columns:minmax(0,1fr) 300px}
+  body.e-plus.e-c1 .v-lay,body.e-plus.e-cards .v-lay{grid-template-columns:minmax(0,1fr)}
+  body.e-plus.e-c2 .tiles.t4,body.e-plus.e-cards .tiles.t4{grid-template-columns:1fr 1fr}
+  body.e-plus.e-c2 .t th,body.e-plus.e-c2 .t td{padding-left:10px;padding-right:10px}
+  body.e-plus.e-c1 .t .ttl{overflow-wrap:anywhere}
+  body.e-plus.e-c1 .t .who{white-space:normal}
+  body.e-anim .tw{overflow:hidden}
+  /* card list: same cards as the phone list, without the first set of secondary fields */
+  body.e-cards .t.ccards thead{display:none}
+  body.e-cards .t.ccards,body.e-cards .t.ccards tbody{display:block}
+  body.e-cards .t.ccards tbody tr{display:block;padding:10px 14px;border-bottom:1px solid var(--grid);cursor:pointer}
+  body.e-cards .t.ccards tbody tr:last-child{border-bottom:0}
+  body.e-cards .t.ccards td{display:flex;gap:10px;padding:3px 0;border:0;text-align:left !important}
+  body.e-cards .t.ccards td.hide-p{display:none}
+  body.e-cards .t.ccards td:first-child{box-shadow:none !important}
+  body.e-cards .t.ccards td[data-l]:not([data-l=""]):before{content:attr(data-l);flex:0 0 84px;font:700 10.5px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--mut);padding-top:3px}
+  body.e-cards .t.ccards tr.hot{box-shadow:inset 3px 0 0 var(--red)}
+  body.e-cards .t.ccards tr.esc{box-shadow:inset 3px 0 0 var(--orange)}
+  body.e-cards .t.ccards tr.rev,body.e-cards .t.ccards tr.amb{box-shadow:inset 3px 0 0 var(--amber)}
+  body.e-cards .t.ccards tr.e-org{box-shadow:inset 3px 0 0 var(--deco)}
+  body.e-cards .t.ccards tr.e-cur{background:var(--accent-t);box-shadow:inset 3px 0 0 var(--accent)}
+  body.e-cards .t.ccards tr.e-cur td{background:none}
+  body.e-cards .t.ccards .pill{white-space:normal;height:auto;min-height:20px}
+  body.e-cards .t.ccards td>div{min-width:0;flex:1}
+  body.e-cards .t.ccards .ttl{white-space:normal;overflow-wrap:anywhere}
+  body.e-cards .t.ccards .who{white-space:normal}
+  body.e-cards .t.ccards td.e-empty{display:block;width:auto}
+  body.e-cards .t.ccards td.e-sctd{padding:4px 0 2px}
+  body.e-cards .t.ccards .e-sc{font-size:14px;color:var(--ink)}
+  body.e-cards .t.ccards td.e-acts{padding-top:6px}
+  body.e-cards .t.ccards td.e-acts:empty{display:none}
+  body.e-pnar .e-panel .v-step{grid-template-columns:28px auto minmax(0,1fr);gap:8px 10px}
+  body.e-pnar .e-panel .v-step>.hw{grid-column:2 / -1}
+  /* no room for list + panel (old pickers: 761-1100; default picker: when even a 320px card list does not fit beside a 440px panel). The panel is the view and says how to get back. */
+  body.e-pfull .e-panel{left:var(--e-tw,0px);width:auto;border-left:0;box-shadow:none}
+  body.e-pfull .e-band{flex-wrap:wrap;gap:6px 12px;padding-top:8px}
+  body.e-pfull .e-bx{order:-1;flex:0 0 100%}body.e-pfull .e-bx .e-x{order:-1}body.e-pfull .e-bx>:not(.e-x){margin-left:auto}
+  body.e-pfull .e-band .e-x{font-weight:600;height:32px}
+  body.e-pfull .e-band .e-x .hide-m{display:none}body.e-pfull .e-band .e-x .e-xt{display:inline}
+  body.e-pfull .e-pb{max-width:760px}
+  body.e-pfull.e-pwide .e-pb:has(>.e-ref){max-width:none;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,360px);column-gap:24px;align-content:start}
+  body.e-pfull.e-pwide .e-pb:has(>.e-ref)>.e-main{grid-column:1;grid-row:1}
+  body.e-pfull.e-pwide .e-pb:has(>.e-ref)>.e-ref{grid-column:2;grid-row:1 / span 2;margin-top:0}
+  body.e-pfull.e-pwide .e-pb:has(>.e-ref)>.e-foot{grid-column:1;grid-row:2;position:static;margin:16px 0 0;border:1px solid var(--rule);border-top-color:var(--ink)}
 }
-/* 761–1100: no room for list + panel. The panel covers the list (full width) and says how to get back. A pinned tree drops the secondary columns. */
-@media (min-width:761px) and (max-width:1100px){
-  .e-panel{left:0;width:auto;border-left:0;box-shadow:none}
-  .e-band{flex-wrap:wrap;gap:6px 12px;padding-top:8px}
-  .e-bx{order:-1;flex:0 0 100%}.e-bx .e-x{order:-1}.e-bx>:not(.e-x){margin-left:auto}
-  .e-band .e-x{font-weight:600;height:32px}
-  .e-band .e-x .hide-m{display:none}.e-band .e-x .e-xt{display:inline}
-  .e-pb{max-width:760px}
-  .e-pb:has(>.e-ref){max-width:none;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,360px);column-gap:24px;align-content:start}
-  .e-pb:has(>.e-ref)>.e-main{grid-column:1;grid-row:1}
-  .e-pb:has(>.e-ref)>.e-ref{grid-column:2;grid-row:1 / span 2;margin-top:0}
-  .e-pb:has(>.e-ref)>.e-foot{grid-column:1;grid-row:2;position:static;margin:16px 0 0;border:1px solid var(--rule);border-top-color:var(--ink)}
-  body.e-docked .hide-p{display:none}
-  body.e-docked .e-hlin{display:inline-flex}
-  body.e-docked .t .ttl{overflow-wrap:anywhere}
-  body.e-docked .t .who{white-space:normal}
+@media (min-width:761px) and (prefers-reduced-motion:no-preference){
+  body.e-plus .e-panel{transition:width .18s cubic-bezier(.2,0,0,1),left .18s cubic-bezier(.2,0,0,1)}
+  body.e-plus.e-anim .page{transition:padding-right .18s cubic-bezier(.2,0,0,1)}
 }
 @media (max-width:760px){
   .e-pkm .e-pks{flex-wrap:wrap}
@@ -1770,12 +1800,12 @@ function eAckBtn(i,big){if(!i.c)return '';if(eOpenSt(i))return '<button class="b
 function eInc(){var x=sc(),rows=INC.filter(eInView),n=function(st){return rows.filter(function(i){return i.st===st;}).length;};
   var h=head('Incidents','Mon Nov 9 · 03:16 KST · '+pl(rows.length,'incident')+', '+rows.filter(eOpenSt).length+' open')+eNotes();
   h+='<div class="tiles t4">'+tile('Triggered',n('trig'),rows.filter(function(i){return i.sev===1&&eOpenSt(i);}).length+' SEV-1','red')+tile('Escalated',n('esc'),'','orange')+tile('Acknowledged',n('ack'))+tile('Listed',rows.length,'incidents')+'</div>';
-  h+='<div class="tw"><table class="t ccards"><thead><tr><th>Sev</th><th>Status</th><th>'+(ePt()?'Project › service':'Customer › project › service')+'</th><th>Incident</th><th class="hide-p">Paged</th><th class="r hide-p2">Age</th><th class="hide-p2"></th></tr></thead><tbody>';
+  h+='<div class="tw"><table class="t ccards"><thead><tr><th>Sev</th><th>Status</th><th>'+(ePt()?'Project › service':'Customer › project › service')+'</th><th>Incident</th><th class="hide-p">Paged</th><th class="r hide-p2">Age</th><th></th></tr></thead><tbody>';
   if(!rows.length)h+='<tr><td colspan="7" class="e-empty"><div class="e-big">No incidents in '+eViewT()+'.</div>'+(ePt()?'':'<div class="row" style="margin-top:12px">'+(x?'<button class="btn" data-e="open" data-a="paging:'+esc(key(x))+'">Call order for '+esc(lbl(x))+'</button>':'')+eBackAll()+'</div>')+'</td></tr>';
   rows.forEach(function(i){h+='<tr '+eRowCls('inc:'+i.id,i.st==='trig'?'hot':i.st==='esc'?'esc':'')+'><td data-l="">'+sev(i.sev,i.sev===1)+'</td><td data-l="">'+stt(i.st)+'</td><td data-l="" class="e-sctd">'+eSc(i)+'</td>'+
     '<td data-l=""><div><span class="ttl">'+esc(i.t)+'</span><div class="org">'+esc(i.k)+'</div></div></td>'+
     '<td data-l="Paged" class="hide-p">'+(i.who?'<div><span class="who"><span class="av">'+i.wi+'</span>'+esc(i.who)+'</span><div class="org">'+esc(i.sub)+'</div></div>':'<span class="mut sm">No owner · not escalating</span>')+'</td>'+
-    '<td data-l="Age" class="r mono sm hide-p2">'+i.age+'</td><td data-l="" class="r e-acts hide-p2">'+eAckBtn(i)+'</td></tr>';});
+    '<td data-l="Age" class="r mono sm hide-p2">'+i.age+'</td><td data-l="" class="r e-acts">'+eAckBtn(i)+'</td></tr>';});
   return h+'</tbody></table></div><div class="sm mut" style="margin-top:10px">Open a row for its call order. Opening a row never changes what this list shows.</div>';}
 
 /* ---- Monitoring: list is read-only; defaults exist at customer level only ---- */
@@ -1797,10 +1827,10 @@ function eMon(){var x=sc(),pt=ePt(),all=ALARMS.filter(function(a){return eVis(a.
   var F={alarm:function(a){return a.state==='ALARM';},review:function(a){return a.review;},own:eOwnV},rows=F[S.q]?all.filter(F[S.q]):all;
   var h=head('Monitoring',pl(rows.length,'alarm'))+eNotes();
   h+='<div class="chips" style="margin-bottom:12px">'+eChip('','All',all.length)+eChip('alarm','In alarm',all.filter(F.alarm).length)+eChip('review','Needs review',all.filter(F.review).length)+eChip('own','Own value (tag or console)',all.filter(eOwnV).length)+eMonOut(all)+'</div>';
-  var tbl='<div class="tw"><table class="t ccards"><thead><tr><th>Resource · metric</th><th>'+(pt?'Project › service':'Customer › project › service')+'</th><th class="hide-p2">Threshold</th><th class="hide-p">Sev</th><th>State</th></tr></thead><tbody>'+
+  var tbl='<div class="tw"><table class="t ccards"><thead><tr><th>Resource · metric</th><th>'+(pt?'Project › service':'Customer › project › service')+'</th><th class="hide-p2">Threshold</th><th>Sev</th><th>State</th></tr></thead><tbody>'+
     (rows.length?'':'<tr><td colspan="5" class="e-empty mut">No alarms match in '+eViewT()+'.</td></tr>')+rows.map(function(a){
     return '<tr '+eRowCls('alarm:'+ALARMS.indexOf(a),a.state==='ALARM'?'hot':a.review?'rev':'')+'><td data-l=""><div><span class="ttl mono" style="font-size:12.5px">'+a.r+'</span> <span class="sm mut">'+a.ty+'</span><div class="org">'+a.m+'</div></div></td>'+
-      '<td data-l="" class="e-sctd">'+eSc(a)+'</td><td data-l="Threshold" class="nowrap hide-p2"><span class="mono sm">'+esc(a.th)+'</span> '+src(a.src)+'</td><td data-l="Sev" class="hide-p">'+sev(a.sev)+'</td>'+
+      '<td data-l="" class="e-sctd">'+eSc(a)+'</td><td data-l="Threshold" class="nowrap hide-p2"><span class="mono sm">'+esc(a.th)+'</span> '+src(a.src)+'</td><td data-l="Sev">'+sev(a.sev)+'</td>'+
       '<td data-l="State">'+(a.state==='ALARM'?'<span class="st trig"><span class="mk dot"></span>Alarm</span>':a.review?'<span class="st warn"><span class="mk tri"></span>Needs review</span>':'<span class="st res"><span class="mk chk"></span>OK</span>')+'</td></tr>';}).join('')+'</tbody></table></div>';
   var side;
   if(x){var c=C(x.c),r=eThrReach(x.c);   // one neutral line here; the "all of the customer, not Core" warning lives in the panel only
@@ -1858,10 +1888,10 @@ function ePaging(){var x=sc(),pt=ePt(),rows=[];
   cl.forEach(function(c){rows.push({c:c,y:{c:c.id,p:null,s:null}});overrides(c).forEach(function(o){if(!x||overlap(o,x))rows.push({c:c,y:{c:o.c,p:o.p,s:o.s||null}});});
     if(x&&x.p&&!rows.some(function(r){return key(r.y)===key(x);}))rows.push({c:c,y:x});});
   var h=head('Call order','Who gets called, in what order')+eNotes();
-  h+='<div class="tw"><table class="t ccards"><thead><tr><th>'+(pt?'Scope':'Customer › project › service')+'</th><th class="hide-p">Reach</th><th>Paged first</th><th class="hide-p">Then</th><th>Steps</th></tr></thead><tbody>';
+  h+='<div class="tw"><table class="t ccards"><thead><tr><th>'+(pt?'Scope':'Customer › project › service')+'</th><th class="hide-p2">Reach</th><th>Paged first</th><th class="hide-p">Then</th><th>Steps</th></tr></thead><tbody>';
   rows.forEach(function(w){var c=w.c,y=w.y,r=resolve(y),hl=health(c),f=x&&key(x)===key(y)&&x.p;
     h+='<tr '+eRowCls('paging:'+key(y),hl==='unr'?'hot':hl==='ar'?'amb':'')+'><td data-l="" class="e-sctd"><span class="e-sc">'+ePath(y)+'</span>'+(hl!=='ok'&&!y.p?'<span class="e-hlin">'+eHLt(hl)+'</span>':'')+(f?' <span class="e-lv f">your filter</span>':'')+'</td>'+
-      '<td data-l="Reach" class="hide-p"><div>'+(hl==='ok'?HL.ok:eHLt(hl))+(HD[hl]?'<div class="org">'+HD[hl]+'</div>':'')+'</div></td><td data-l="Paged first"><div>'+(respN(c)?eTgtN(c,r.steps[0].to):'<span class="mut">nobody</span>')+'</div></td>'+
+      '<td data-l="Reach" class="hide-p2"><div>'+(hl==='ok'?HL.ok:eHLt(hl))+(HD[hl]?'<div class="org">'+HD[hl]+'</div>':'')+'</div></td><td data-l="Paged first"><div>'+(respN(c)?eTgtN(c,r.steps[0].to):'<span class="mut">nobody</span>')+'</div></td>'+
       '<td data-l="Then" class="sm mut hide-p">'+r.steps.slice(1).map(function(s){return s.at+' min '+s.how.join('+').toLowerCase();}).join(' · ')+'</td>'+
       '<td data-l="Steps">'+(r.own?'<span class="pill'+(y.p?' cz':'')+'">'+(y.p?'Own steps':'Customer steps')+'</span>':'<span class="sm">Inherits from <b>'+esc(lbl(r.from))+'</b></span>')+'</td></tr>';});
   return h+'</tbody></table></div><div class="sm mut" style="margin-top:10px">'+(pt?'Open a row to see the full order.':'Projects and services with their own steps have their own row. Open a row to edit its steps. The panel edits exactly the row you opened. Editing something wider is a separate, explicit step inside the panel.')+'</div>';}
@@ -1879,13 +1909,13 @@ function ePeople(){var x=sc(),pt=ePt(),rows=[];
   var bad=function(r){return !(pt&&r.staff)&&Object.keys(r.p.ch).some(function(k){return r.p.ch[k]!=='ok';});},F={staff:function(r){return r.staff;},cust:function(r){return !r.staff;},act:bad},shown=F[S.q]?rows.filter(F[S.q]):rows;
   var h=head('People',pl(shown.length,'person').replace('persons','people')+(x?' · everyone paged or notified here, including through the customer or project':' · MSP staff and customer people in one list'),pt?'':'<button class="btn pri" data-e="open" data-a="personnew:">Add person</button>')+eNotes();
   h+='<div class="chips" style="margin-bottom:12px">'+eChip('','All',rows.length)+eChip('staff','MSP staff',rows.filter(F.staff).length)+eChip('cust','Customer people',rows.filter(F.cust).length)+eChip('act','Needs action',rows.filter(bad).length)+'</div>';
-  h+='<div class="tw"><table class="t ccards"><thead><tr><th>Person</th><th class="hide-p">Kind</th><th>'+(x?(pt?'Notified for · reached how':'Customer › notified for · reached how'):(pt?'Notified for':'Customer › notified for'))+'</th><th class="hide-p">Role</th><th class="hide-p">Contact</th><th>Channels needing action</th></tr></thead><tbody>'+
+  h+='<div class="tw"><table class="t ccards"><thead><tr><th>Person</th><th class="hide-p2">Kind</th><th>'+(x?(pt?'Notified for · reached how':'Customer › notified for · reached how'):(pt?'Notified for':'Customer › notified for'))+'</th><th class="hide-p">Role</th><th class="hide-p">Contact</th><th>Channels needing action</th></tr></thead><tbody>'+
    (shown.length?'':'<tr><td colspan="6" class="e-empty mut">Nobody matches in '+eViewT()+'.</td></tr>')+shown.map(function(r){var p=r.p,c=!r.staff&&C(p.c);
     var scope=r.staff?(pt?'<span class="e-sc">Your MSP team</span>':x?'<span class="e-sc">Responder for <b>'+esc(C(x.c).n)+'</b></span>':'<span class="e-sc">Covers <b>'+pl(r.cv.length,'customer')+'</b></span>')
       :'<span class="e-sc">'+(p.sc.length?ePath({c:p.c,p:p.sc[0],s:p.sc[1]},pt):(pt?'All projects':'<b>'+esc(c.n)+'</b><span class="chain">›</span>all projects'))+'</span>';
     if(x)scope+=eWhy(r,x);
     return '<tr '+eRowCls('person:'+r.id)+'><td data-l=""><span class="who"><span class="av">'+p.i+'</span><span><span class="b">'+p.n+'</span><span class="org" style="display:block">'+p.title+'</span></span></span></td>'+
-      '<td data-l="Kind" class="hide-p">'+(r.staff?'<span class="pill prd">MSP staff</span>':'<span class="pill cu">Customer</span>')+'</td><td data-l="" class="e-sctd"><div>'+scope+'</div></td>'+
+      '<td data-l="Kind" class="hide-p2">'+(r.staff?'<span class="pill prd">MSP staff</span>':'<span class="pill cu">Customer</span>')+'</td><td data-l="" class="e-sctd"><div>'+scope+'</div></td>'+
       '<td data-l="Role" class="hide-p">'+(r.staff?'<span class="sm mut">Responder</span>':roles(p))+'</td><td data-l="Contact" class="hide-p">'+eCtHtml(p,r.id)+'</td>'+
       '<td data-l="Channels"><span class="row" style="gap:5px">'+(pt&&r.staff?'<span class="mut sm">—</span>':cvs(p.ch,true)||'<span class="st res"><span class="mk chk"></span>Verified</span>')+'</span></td></tr>';}).join('')+'</tbody></table></div>';
   return h+'<div class="sm mut" style="margin-top:10px">Phone numbers and email addresses are masked in the console.</div>';}
@@ -2160,7 +2190,7 @@ function eLive(){var o=S.o,ty=eTy(o),p=$('#eprev'),s=$('#esent'),w=$('#ewarn');
   else if(ty==='alarm'){var a=ALARMS[+eArg(o)],nv=d.val!=null?String(d.val).trim():'';if(p)p.innerHTML=nv!==''&&a.th.replace(/[^0-9.]/g,'')!==nv?'<span class="mono">'+esc(a.th)+'</span> → <span class="mono b">'+esc(a.th.replace(/[0-9.]+/,nv))+'</span> · this resource only':'';}
   else if(ty==='mwnew'){var e=$('#ewhen');if(e)e.innerHTML=eWhen(d);if(w&&(d.why||'').trim())w.textContent='';}
   else if(ty==='personnew'){if(w&&(d.name||'').trim())w.textContent='';}}
-function eAfter(){document.body.classList.toggle('e-has-panel',S.v==='E'&&!!S.o);document.body.classList.toggle('e-plus',S.v==='E'&&ePk()==='x');eXDock();window.ERH=S.v==='E'?location.hash:null;if(S.v!=='E'){EFOC=null;return;}
+function eAfter(){document.body.classList.toggle('e-has-panel',S.v==='E'&&!!S.o);document.body.classList.toggle('e-plus',S.v==='E'&&ePk()==='x');eXLayout();eXAnim();window.ERH=S.v==='E'?location.hash:null;if(S.v!=='E'){EFOC=null;return;}
   eLive();if(DLG)eDlgFocus();var tl=$('.e-tree .e-tr');if(tl&&TR.sy)tl.scrollTop=TR.sy;var ts=$('.e-tree.plus .e-trs');if(ts){ts.scrollTop=TX.sy||0;if(TX.rev){TX.rev=false;eXSee('.e-tn.on');}}
   var h1=$('.page h1');if(h1)h1.setAttribute('tabindex','-1');
   var f=EFOC;EFOC=null;if(!f||DLG)return;var el=null,pn_=$('.e-panel');
@@ -2172,7 +2202,6 @@ function eAfter(){document.body.classList.toggle('e-has-panel',S.v==='E'&&!!S.o)
   if(el){try{el.focus({preventScroll:f!=='h1'&&f!=='load'});}catch(_){el.focus();}if(f==='h1')scrollTo(0,0);}}
 function eNavTo(s){if(s===S.s&&!S.o){return;}eGuard(function(){eToastClear();OUTI=false;EFOC='h1';ego({s:s,o:'',q:''});scrollTo(0,0);});}
 function eClick(e){var t=e.target,el,a,arg;
-  if(TX.ov&&!closest(t,'.e-tree')&&!closest(t,'.mk-wrap')){TX.ov=false;eXSync();}   // a click outside the rail overlay closes it and still does what it was aimed at
   if(DLG){if((el=closest(t,'[data-e="dlg"]'))){var act=DLG.a[+el.getAttribute('data-a')];DLG=null;renderOv();act[2]();
       if(!DLG&&(!document.activeElement||document.activeElement===document.body)){var bk=$('.e-panel .e-main input:not([disabled])')||$('.e-panel .e-path');if(bk)bk.focus();}}e.stopPropagation();return true;}
   if((el=closest(t,'[data-e]'))){a=el.getAttribute('data-e');arg=el.getAttribute('data-a')||'';e.stopPropagation();
@@ -2302,7 +2331,7 @@ function eSetF(k,foc){var x=k&&k[0]!=='~'?parseKey(k):null;if(x)REC=[k].concat(R
 function eFGo(patch,foc){var same=['c','p','svc','m'].every(function(k){return patch[k]==null||patch[k]===S[k];});
   if(!S.o||same){EFOC=foc||(S.o?null:'h1');ego(patch);return;}
   var L=eFound(S.o)?eOL(S.o):null,was=L&&L.x?lbl(L.x):'';
-  eGuard(function(){TX.ov=false;DD=null;patch.o='';EFOC='h1';ego(patch);var f=sc();
+  eGuard(function(){DD=null;patch.o='';EFOC='h1';ego(patch);var f=sc();
     if(!$('.e-toast'))eToast('Panel closed'+(was?' for <b>'+esc(was)+'</b>':'')+' · the list now shows <b>'+(f?esc(lbl(f)):S.m==='1'?'My customers':'all customers')+'</b>');},'Keep draft and change the filter');}
 function eDdPick(k){var lv=DD.lv,sh=DD.sheet,x=k&&k[0]!=='~'?parseKey(k):null,nx=lv==='c'&&x?'p':lv==='p'&&x&&x.p?'s':'';
   if(sh&&nx){DD.lv=nx;DD.q='';DD.i=null;eSetF(k,'none');return;}   // phone: the stepped sheet moves on to the next level
@@ -2349,26 +2378,45 @@ function eTrKey(e){var ns=TR.list,i=-1,j,k=e.key;ns.forEach(function(n,q){if(n.k
   e.preventDefault();TR.cur=ns[i].k;eTrRe();return true;}
 
 /* ---- E-2+ (default): tree on desktop (docked, or tucked into a rail), stepped sheet on phone ---- */
-var TX={q:'',o:{},op:{},oq:{},col:null,w:272,prob:false,ov:false,cur:null,ta:'',tat:0,sy:0,list:[],last:null,rev:true,hits:0,hitc:0,hit1:null,probN:0};
+var TX={q:'',o:{},op:{},oq:{},col:null,w:272,prob:false,pexp:false,lr:null,cur:null,ta:'',tat:0,sy:0,list:[],last:null,rev:true,hits:0,hitc:0,hit1:null,probN:0};
 try{var _tx=JSON.parse(sessionStorage.getItem('e-tree')||'null');if(_tx){TX.o=_tx.o||{};TX.op=_tx.op||{};TX.col=_tx.col==null?null:!!_tx.col;TX.w=_tx.w||272;TX.prob=!!_tx.prob;TX.leg=_tx.leg!==false;}}catch(_){}
 function eXStore(){try{sessionStorage.setItem('e-tree',JSON.stringify({o:TX.o,op:TX.op,col:TX.col,w:TX.w,prob:TX.prob,leg:TX.leg!==false}));}catch(_){}}
-/* rail when the user collapsed it, by default below 1101px, or when a panel is open and the list beside tree + panel would get under 500px.
-   At 1440 the tree stays where it is when a panel opens, so the list's left edge does not move: the panel takes its room from the right. */
-function eXTight(){return !!S.o&&innerWidth-TX.w-636<500;}
-function eXRail(){if(eXTight())return true;return TX.col!=null?TX.col:matchMedia('(max-width:1100px)').matches;}
-function eXDock(){document.body.classList.toggle('e-docked',S.v==='E'&&!!$('.e-tree.plus:not(.rail)'));}
-var XMX=-1,XMY=-1;
-document.addEventListener('mousemove',function(e){XMX=e.clientX;XMY=e.clientY;
-  if(!TX.ov||!TX.ovp)return;var inside=!!closest(e.target,'.e-tree');
-  if(inside){clearTimeout(XLT);XLT=null;}
-  else if(!XLT)XLT=setTimeout(function(){XLT=null;var el=document.elementFromPoint(XMX,XMY);if(TX.ov&&TX.ovp&&!(el&&closest(el,'.e-tree'))&&!DLG){TX.ov=false;TX.ovp=false;eXSync();}},450);});
+/* The tree is always docked: expanded (TX.w px) or a 45px rail. It never floats over the list; the page reflows beside it (eXLayout).
+   Rail when the user collapsed it, by default below 1101px, and automatically while a panel is open below 1408px. The user can expand it again beside the panel (TX.pexp, until the panel closes). */
+var XRAIL=45,XLAY={};
+function eXAuto(){return !!S.o&&innerWidth<1408&&!TX.pexp;}
+function eXRail(){if(!S.o)TX.pexp=false;if(eXAuto())return true;return TX.col!=null?TX.col:matchMedia('(max-width:1100px)').matches;}
+/* list width each screen needs: [all columns, first set dropped (.hide-p), second set dropped (.hide-p2) = narrowest table]. Under the last one the list is a card list (320px and up). */
+var XLW={incidents:[1000,800,690],monitoring:[1040,720,560],paging:[900,760,500],people:[1100,720,500],maintenance:[900,700,500]};
+function eXLayout(){var b=document.body,cl=b.classList,desk=S.v==='E'&&!ePhone(),plus=desk&&ePk()==='x',a=plus&&$('.e-tree.plus');
+  var vw=document.documentElement.clientWidth,tw=a?(a.classList.contains('rail')?XRAIL:TX.w):0,av=vw-tw,T=XLW[S.s]||[0,0,0],pw=600,L=Math.min(av,1360)-48,full=false,tier=0;
+  if(plus){
+    if(S.o){var Lp=av-pw-36;if(Lp<T[2]){pw=Math.max(440,Math.min(600,av-36-T[2]));Lp=av-pw-36;}   // columns drop first; then the panel narrows; then cards; then the panel is the view
+      if(Lp<320)full=true;else L=Lp;}
+    tier=L>=T[0]?0:L>=T[1]?1:L>=T[2]?2:3;}
+  else if(desk)full=!!S.o&&innerWidth<=1100;
+  function put(){cl.toggle('e-c1',plus&&(tier===1||tier===2));cl.toggle('e-c2',plus&&tier===2);cl.toggle('e-cards',plus&&tier===3);
+    cl.toggle('e-pfull',desk&&full);cl.toggle('e-pwide',desk&&full&&av>=984);cl.toggle('e-pnar',desk&&!!S.o&&(full?av<560:pw<520));   // two columns inside the full view only when the editing column keeps 560px; step rows stack when the panel is narrow
+    b.style.setProperty('--e-tw',tw+'px');b.style.setProperty('--e-pw',pw+'px');}
+  put();
+  /* the widths above are tuned for typical rows; if this data still does not fit, take the next step instead of clipping or scrolling sideways */
+  var ws=plus&&!full?$$('.page .tw'):[],g=0,ov;
+  function over(){return Math.max.apply(null,[0].concat(ws.map(function(w){return w.scrollWidth-w.clientWidth;})));}
+  while(tier<3&&g++<8&&(ov=over())>0){if(tier<2)tier++;else if(S.o&&pw>440)pw=Math.max(440,pw-ov-1);else tier=3;put();}
+  XLAY={tw:tw,pw:S.o?(full?av:pw):0,tier:tier,full:full,rail:!!a&&a.classList.contains('rail'),tree:!!a};}
+/* 180ms width change when the tree goes rail <-> expanded; the page follows because the tree is in the flow */
+function eXAnim(){var a=!ePhone()&&$('.e-tree.plus'),r0=TX.lr;if(!a){TX.lr=null;return;}var r=a.classList.contains('rail');TX.lr=r;
+  if(r0==null||r0===r||!a.animate||matchMedia('(prefers-reduced-motion:reduce)').matches)return;
+  a.classList.add('anim');document.body.classList.add('e-anim');
+  var an=a.animate([{width:(r0?XRAIL:TX.w)+'px'},{width:(r?XRAIL:TX.w)+'px'}],{duration:180,easing:'cubic-bezier(.2,0,0,1)'});
+  an.onfinish=an.oncancel=function(){a.classList.remove('anim');if(!$('.e-tree.plus.anim'))document.body.classList.remove('e-anim');};}
 function eXM(){return TX.q.trim()?TX.oq:TX.prob?TX.op:TX.o;}
 /* own = this node has its own call order in the sense of the Call order list ("Own steps": project or service level only; every customer has customer steps).
    inown = own steps somewhere below it. th = thresholds to review (Monitoring). */
 function eXSt(x){var st=eStat(x),h=!x.p?health(C(x.c)):'ok',th=ePt()?0:st.th;
   var inown=x.s?0:overrides(C(x.c)).filter(function(o){return !x.p||(o.p===x.p&&o.s);}).length;
   return {inc:st.inc,hl:h==='ok'?'':h,th:th,own:!!x.p&&st.own.indexOf('own call-order steps')>=0,inown:inown,prob:st.inc>0||h!=='ok'||th>0};}
-var XHN={unr:'Unreachable',ar:'At risk'},XLT=null;
+var XHN={unr:'Unreachable',ar:'At risk'};
 /* call health is a TEXT tag (same words as the Call order list), never a dot or triangle: those shapes mean incident status and severity in the lists */
 function eHLt(hl){return '<span class="e-hl e-tg '+hl+'" title="'+XHN[hl]+': '+HD[hl]+'">'+XHN[hl]+'</span>';}
 function eXStH(st,col){var h='<span class="e-stt">';
@@ -2426,21 +2474,20 @@ function eXBody(){var ns=eXNodes(),q=TX.q.trim(),root='',rows='',hint='';TX.list
   if(!real)rows='<div class="v-sw-g" style="white-space:normal;line-height:1.4">'+(q?'No customer, project or service starts with “'+esc(TX.q)+'”':TX.prob?'No customer has an open incident, a call-order problem or a threshold to review.':'')+'</div>';
   if(q&&TX.hits)hint=TX.hits===1?'<b>1 match</b> · Enter selects it':'<b>'+TX.hits+' matches</b> in '+pl(TX.hitc,'customer')+' · nothing is selected until you choose one';
   return {root:root,rows:rows,hint:hint};}
-function eXBox(ov){var b=eXBody(),pt=ePt();
+function eXBox(){var b=eXBody(),pt=ePt();
   return '<div class="e-trh"><span class="e-tqw"><input class="inp e-tq" placeholder="Find by name…" aria-label="Filter the tree by customer, project or service name" autocomplete="off" value="'+esc(TX.q)+'"><button class="e-tqx" data-e="xclrq" aria-label="Clear the search" title="Clear"'+(TX.q?'':' hidden')+'>×</button></span>'+
-    (ov?(eXTight()?'':'<button class="btn sm" data-e="xpin" title="Keep the tree open beside the list">Pin</button>')+'<button class="btn sm" data-e="xov" aria-label="Close the tree" title="Close (Esc)">×</button>':'<button class="btn sm" data-e="xcol" title="Collapse the tree to a narrow rail" aria-label="Collapse the tree to a narrow rail">«</button>')+'</div>'+
+    '<button class="btn sm" data-e="xcol" title="Collapse the tree to a narrow rail" aria-label="Collapse the tree to a narrow rail" aria-expanded="true">«</button>'+'</div>'+
     (pt?'':'<button class="e-trp" role="switch" aria-checked="'+TX.prob+'" data-e="xprob" title="Show only customers that have an open incident, a call-order health problem or a threshold to review"><span class="sw"><span class="mk chk"></span></span><span>Only with problems</span><span class="n">'+TX.probN+'</span></button>')+
     '<div class="e-trq" role="status">'+b.hint+'</div>'+
     '<div class="e-tr'+(TX.amb?' amb':'')+'" role="tree" tabindex="0" aria-label="Customers, projects and services"><div class="e-trr">'+b.root+'</div><div class="e-trs">'+b.rows+'</div></div>'+eXLeg();}
 var XICO='<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M3 2.5v9.5h4M3 6.5h4"/><rect x="8.5" y="4.5" width="5" height="4" fill="currentColor" stroke="none"/><rect x="8.5" y="10" width="5" height="4" fill="currentColor" stroke="none"/></svg>';
 function eXAside(){var x=sc(),k=x?key(x):S.m==='1'?'~my':'';
   if(TX.last!==k){var first=TX.last===null;TX.last=k;TX.rev=true;if(x&&!first){[TX.o,TX.op].forEach(function(m){delete m[key({c:x.c})];if(x.p)delete m[key({c:x.c,p:x.p})];delete m[eMyC(C(x.c))?'~my':'~ot'];});eXStore();}}
-  if(!eXRail()){TX.ov=false;return '<aside class="e-tree plus" style="width:'+TX.w+'px" aria-label="Customer tree">'+eXBox()+'<div class="e-trz" role="separator" aria-orientation="vertical" tabindex="0" aria-label="Resize the tree (arrow keys, 200 to 360 px)" title="Drag to resize"></div></aside>';}
+  if(!eXRail()){return '<aside class="e-tree plus" style="width:'+TX.w+'px" aria-label="Customer tree">'+eXBox()+'<div class="e-trz" role="separator" aria-orientation="vertical" tabindex="0" aria-label="Resize the tree (arrow keys, 200 to 360 px)" title="Drag to resize"></div></aside>';}
   var ch='<span class="chain">›</span>',vt=x?'<b>'+esc(C(x.c).n)+'</b>'+(x.p?ch+esc(x.p):'')+(x.s?ch+esc(x.s):''):'<b>'+(S.m==='1'?'My customers':'All customers')+'</b>';
-  return '<aside class="e-tree plus rail'+(TX.ov?' ovo':'')+'" aria-label="Customer tree, collapsed">'+
-    '<button class="e-rail" data-e="xov" aria-expanded="'+TX.ov+'" aria-label="Open the customer tree. Showing: '+esc(x?lbl(x):S.m==='1'?'My customers':'All customers')+'" title="Open the customer tree'+(eXTight()?' (tucked away while the panel is open: not enough room beside it)':'')+'"><span class="ico">'+XICO+'</span><span class="vt">'+vt+'</span></button>'+
-    (TX.ov?'<div class="e-trov" style="width:'+TX.w+'px" role="dialog" aria-label="Customer tree">'+eXBox(1)+'</div>':'')+'</aside>';}
-function eXSync(){var a=$('.e-tree.plus');if(!a)return;var s=$('.e-trs',a),y=s?s.scrollTop:TX.sy,d=document.createElement('div');d.innerHTML=eXAside();a.parentNode.replaceChild(d.firstChild,a);s=$('.e-tree.plus .e-trs');if(s)s.scrollTop=y;eXSee();eXDock();}
+  return '<aside class="e-tree plus rail" aria-label="Customer tree, collapsed">'+
+    '<button class="e-rail" data-e="xexp" aria-expanded="false" aria-label="Open the customer tree beside the '+(S.o?'panel':'list')+'. Showing: '+esc(x?lbl(x):S.m==='1'?'My customers':'All customers')+'" title="Open the customer tree'+(eXAuto()?' (collapsed while the panel is open; it opens beside the panel)':' beside the list')+'"><span class="chv" aria-hidden="true">»</span><span class="ico">'+XICO+'</span><span class="vt">'+vt+'</span></button></aside>';}
+function eXSync(){var a=$('.e-tree.plus');if(!a)return;var s=$('.e-trs',a),y=s?s.scrollTop:TX.sy,d=document.createElement('div');d.innerHTML=eXAside();a.parentNode.replaceChild(d.firstChild,a);s=$('.e-tree.plus .e-trs');if(s)s.scrollTop=y;eXSee();eXLayout();eXAnim();}
 function eXSee(sel){var s=$('.e-tree.plus .e-trs');if(!s)return;var c=$(sel||'.e-tn.cur',s);if(!c)return;var hd=$$('.e-tn.hdr',s)[0],hh=hd?hd.offsetHeight:0,top=c.offsetTop-s.offsetTop;
   if(c.classList.contains('hdr'))return;if(top<s.scrollTop+hh)s.scrollTop=Math.max(0,top-hh);else if(top+c.offsetHeight>s.scrollTop+s.clientHeight)s.scrollTop=top+c.offsetHeight-s.clientHeight;}
 function eXRe(){var a=$('.e-tree.plus');if(!a)return;var s=$('.e-trs',a);if(!s){eXSync();return;}var y=s.scrollTop,b=eXBody();$('.e-trr',a).innerHTML=b.root;s.innerHTML=b.rows;s.scrollTop=y;$('.e-trq',a).innerHTML=b.hint;
@@ -2451,7 +2498,6 @@ function eXPick(k){var n=eXNode(k);TX.cur=k;if(k==='~ot'){eXTog(k);return;}
   TX.amb=false;
   if(TX.q.trim()){TX.q='';TX.oq={};var qi=$('.e-tree.plus .e-tq');if(qi)qi.value='';if(k&&k[0]!=='~')delete eXM()[k];eXRe();}   // a pick ends the search: the full tree comes back with the picked branch open
   else if(k&&k[0]!=='~')delete eXM()[k];
-  if(!n||!n.kids||k==='~my')TX.ov=false;else if(TX.ov)TX.ovp=true;   // picked a customer or project in the overlay: it stays for the next level and closes when the pointer leaves it
   eXStore();eSetF(k,'tree');}
 function eXKey(e){var ns=TX.list,i=-1,j,k=e.key;ns.forEach(function(n,q){if(n.k===TX.cur)i=q;});if(i<0)return false;var n=ns[i];
   var sq=!!TX.q.trim()&&ns.some(function(z){return z.hit;}),amb=TX.amb;if(k.indexOf('Arrow')===0)TX.amb=false;
@@ -2474,24 +2520,22 @@ function eXFocusTree(){var l=$('.e-tree.plus .e-tr');if(l)l.focus();}
 function eXClick(a,arg){
   if(a==='xpick')eXPick(arg);else if(a==='xtog')eXTog(arg);
   else if(a==='xprob'){TX.prob=!TX.prob;TX.cur=null;eXStore();eXSync();var b=$('.e-trp');if(b)b.focus();}
-  else if(a==='xcol'){TX.col=true;TX.ov=false;eXStore();eXSync();var r=$('.e-rail');if(r)r.focus();}
-  else if(a==='xpin'){TX.col=false;TX.ov=false;eXStore();eXSync();eXFocusTree();}
-  else if(a==='xov'){TX.ov=!TX.ov;TX.ovp=false;TX.cur=null;eXSync();if(TX.ov)eXFocusTree();else{var r2=$('.e-rail');if(r2)r2.focus();}}
+  else if(a==='xcol'){if(S.o&&innerWidth<1408&&TX.pexp)TX.pexp=false;else TX.col=true;eXStore();eXSync();var r=$('.e-rail');if(r)r.focus();}   // beside a panel below 1408 the expansion was temporary: collapsing it does not change what is remembered
+  else if(a==='xexp'){TX.col=false;if(S.o&&innerWidth<1408)TX.pexp=true;TX.cur=null;eXStore();eXSync();eXFocusTree();}
   else if(a==='xleg'){TX.leg=TX.leg===false;eXStore();if(DD)renderOv();else eXSync();var lb=$('.e-legt');if(lb)lb.focus();}
   else if(a==='xclrq'){TX.q='';TX.oq={};TX.cur=null;TX.amb=false;var i=$('.e-tree.plus .e-tq');if(i){i.value='';i.focus();}eXRe();}
   else return false;
   return true;}
 function eXKeys(e){var t=e.target,k=e.key,is=function(sel){return t.matches&&t.matches(sel);};
-  if(k==='Escape'&&TX.ov){TX.ov=false;eXSync();var rb=$('.e-rail');if(rb)rb.focus();return true;}
   if(is('.e-tree.plus .e-tr'))return eXKey(e);
   if(is('.e-tree.plus .e-tq')){
     if(k==='Escape'&&TX.q){eXClick('xclrq');return true;}
     if(k==='ArrowDown'){e.preventDefault();eXFocusTree();return true;}
     if(k==='Enter'&&TX.q.trim()){e.preventDefault();if(TX.hits===1)eXPick(TX.hit1);else{TX.amb=TX.hits>1;eXRe();eXFocusTree();}return true;}
     return false;}
-  if(is('.e-tree.plus .e-trz')&&(k==='ArrowLeft'||k==='ArrowRight')){e.preventDefault();TX.w=Math.max(200,Math.min(360,TX.w+(k==='ArrowRight'?16:-16)));t.parentNode.style.width=TX.w+'px';eXStore();return true;}
+  if(is('.e-tree.plus .e-trz')&&(k==='ArrowLeft'||k==='ArrowRight')){e.preventDefault();TX.w=Math.max(200,Math.min(360,TX.w+(k==='ArrowRight'?16:-16)));t.parentNode.style.width=TX.w+'px';eXStore();eXLayout();return true;}
   return false;}
-window.addEventListener('resize',function(){if(S.v!=='E'||ePk()!=='x')return;var a=$('.e-tree.plus');if(a&&a.classList.contains('rail')!==eXRail())eXSync();});
+window.addEventListener('resize',function(){if(S.v!=='E')return;var a=ePk()==='x'&&$('.e-tree.plus');if(a&&a.classList.contains('rail')!==eXRail())eXSync();else eXLayout();});
 /* bar and phone line for E-2+: text only. The tree (desktop) or the sheet (phone) is the one control. */
 function eXBarPath(x,pt){var ch='<span class="chain">›</span>',c=x&&C(x.c);
   function xb(lv,what){return '<button class="e-px" data-e="ddclr" data-a="'+lv+'" aria-label="'+what+'" title="'+what+'">×</button>';}
@@ -2514,7 +2558,7 @@ function ePkClick(a,arg,el){
   else if(a==='drwclose'){TR.drawer=false;renderOv();var b=$('.e-barm .sb');if(b)b.focus();}
   else if(a==='trpick')eTrPick(arg);else if(a==='trtog')eTrTog(arg);
   else if(a==='trcol'){TR.col=!TR.col;render();var tb=$('.e-tree [data-e="trcol"]');if(tb)tb.focus();}
-  else if(a==='pk'){DD=null;TR.drawer=false;TX.ov=false;SW.open=false;POP=null;ego({pk:arg});}
+  else if(a==='pk'){DD=null;TR.drawer=false;SW.open=false;POP=null;ego({pk:arg});}
   else if(eXClick(a,arg)){}
   else return false;
   return true;}
@@ -2537,7 +2581,7 @@ function ePkKey(e){var t=e.target,k=e.key,is=function(sel){return t.matches&&t.m
     if(k.length===1&&k!==' '&&!e.ctrlKey&&!e.metaKey&&!e.altKey){e.preventDefault();eDdOpen(lv,k);return true;}}   // type-ahead: a letter opens the list already searched
   return false;}
 document.addEventListener('mousedown',function(e){var z=e.target;if(!z.classList||!z.classList.contains('e-trz'))return;e.preventDefault();var a=z.parentNode,x0=e.clientX,w0=a.offsetWidth,plus=a.classList.contains('plus');
-  function mv(ev){var w=Math.max(200,Math.min(plus?360:480,w0+ev.clientX-x0));if(plus)TX.w=w;else TR.w=w;a.style.width=w+'px';}
+  function mv(ev){var w=Math.max(200,Math.min(plus?360:480,w0+ev.clientX-x0));if(plus){TX.w=w;eXLayout();}else TR.w=w;a.style.width=w+'px';}
   function up(){if(plus)eXStore();document.removeEventListener('mousemove',mv);document.removeEventListener('mouseup',up);document.body.classList.remove('e-rsz');}
   document.body.classList.add('e-rsz');document.addEventListener('mousemove',mv);document.addEventListener('mouseup',up);});
 /*E-JS-END*/

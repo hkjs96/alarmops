@@ -4,6 +4,7 @@ Run:  python scope-e-check.py          (needs: pip install playwright && playwri
 Exit code 1 when a check fails. Written after evaluation E3 (docs/qa/scope-eval-E3.md).
 
 Part 1 is the P1-1 regression: a click or tap on an input or on an empty area inside ANY panel type must leave the panel open.
+Part 6b is the docked-tree layout (owner feedback after E3: the tree must push the content, never cover it): 7 widths x 5 screens x {list, panel} x {rail, tree}.
 """
 import os, sys
 from playwright.sync_api import sync_playwright
@@ -11,8 +12,8 @@ URL = 'file://' + os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 
 res, errs, info = [], [], []
 pw = sync_playwright().start(); br = pw.chromium.launch()
 def chk(n, c): res.append(('PASS ' if c else 'FAIL ') + n); print(res[-1], flush=True)
-def pg(w, h=900, touch=False):
-    ctx = br.new_context(viewport={'width': w, 'height': h}, is_mobile=w < 500, has_touch=touch)
+def pg(w, h=900, touch=False, motion=False):
+    ctx = br.new_context(viewport={'width': w, 'height': h}, is_mobile=w < 500, has_touch=touch, reduced_motion='no-preference' if motion else 'reduce')
     p = ctx.new_page(); p.set_default_timeout(5000)
     p.on('pageerror', lambda e: errs.append(str(e)))
     p.on('console', lambda m: errs.append(m.text) if m.type == 'error' and 'net::' not in m.text else None)
@@ -189,27 +190,135 @@ for w in (1440, 1920):
         go(q, 's=paging'); q.click('.page [data-e=open][data-a="paging:hanbit||"]'); q.wait_for_timeout(120)
         chk('P2-4 1440: tree stays docked beside the panel, no rail', q.locator('.e-tree.plus:not(.rail)').count() == 1 and q.locator('.e-rail').count() == 0)
     q.context.close()
-q = pg(1280, 800); go(q, 's=paging'); x0 = left(q); q.click('.page [data-e=open][data-a="paging:hanbit||"]'); q.wait_for_timeout(150)
-info.append('1280: no room for tree + list + panel, tree tucks into the rail: list left %g -> %g px, list width %g' % (x0, left(q), width(q)))
-chk('1280: tree becomes a rail while the panel is open (list >= 500px)', q.locator('.e-tree.plus.rail').count() == 1 and width(q) >= 500)
+# ---------------- 6b. docked tree: push, never overlay ----------------
+# GEO returns, for the current state: cover = main-content elements whose box intersects the tree (or list elements under a side panel), hov = page h-overflow,
+# clip = boxes that scroll sideways / stick out of the viewport, the panel or their table cell / overlapping cells, keep = always-visible list fields that are missing.
+GEO = r'''() => {
+  const q=(s,r)=>[...(r||document).querySelectorAll(s)], R=e=>e.getBoundingClientRect(), vis=e=>{const r=R(e);return r.width>0&&r.height>0&&getComputedStyle(e).visibility!=='hidden';};
+  const tree=document.querySelector('.e-tree.plus'), tr=tree?R(tree):null, panel=document.querySelector('.e-panel'), pr=panel?R(panel):null, page=document.querySelector('main.page');
+  const full=document.body.classList.contains('e-pfull'), vw=document.documentElement.clientWidth, o={cover:[],clip:[],keep:[]};
+  const name=e=>e.tagName.toLowerCase()+(typeof e.className==='string'&&e.className?'.'+e.className.trim().split(/\s+/).join('.'):'')+' "'+(e.innerText||'').trim().slice(0,20)+'"';
+  const hit=(a,b)=>a.left<b.right-0.5&&b.left<a.right-0.5&&a.top<b.bottom-0.5&&b.top<a.bottom-0.5;
+  const main=(full?[]:q('*',page)).concat(panel?[panel].concat(q('*',panel)):[]).filter(vis).filter(e=>!e.closest('.only-m,.sr'));
+  if(tr)main.forEach(e=>{if(hit(R(e),tr))o.cover.push('tree x '+name(e));});
+  if(pr&&!full)q('*',page).filter(vis).forEach(e=>{if(hit(R(e),pr))o.cover.push('panel x '+name(e));});
+  o.hov=document.documentElement.scrollWidth-vw;
+  main.forEach(e=>{const c=getComputedStyle(e);if(c.display==='inline')return;
+    if(e.scrollWidth-e.clientWidth>1&&c.overflowX!=='visible')o.clip.push('scrolls sideways '+(e.scrollWidth-e.clientWidth)+' '+name(e));
+    if(R(e).right>(pr&&panel.contains(e)?pr.right:vw)+0.5)o.clip.push('sticks out '+name(e));});
+  // no text over other text: children of any flex / grid box must not intersect each other
+  main.forEach(e=>{const d=getComputedStyle(e).display;if(!/flex|grid/.test(d))return;const ks=[...e.children].filter(vis).filter(k=>!/absolute|fixed|sticky/.test(getComputedStyle(k).position));
+    ks.forEach((k,i)=>ks.slice(i+1).forEach(k2=>{if(hit(R(k),R(k2)))o.clip.push('overlap '+name(k)+' / '+name(k2));}));});
+  const rows=full?[]:q('.page .t tbody tr').filter(vis);
+  rows.forEach(row=>{const tds=q('td',row).filter(vis);
+    tds.forEach((td,i)=>{const a=R(td);q('*',td).filter(vis).forEach(ch=>{const b=R(ch);if(!ch.closest('.mk')&&(b.right>a.right+1||b.left<a.left-1))o.clip.push('out of its cell '+name(ch));});
+      tds.slice(i+1).forEach(t2=>{if(hit(a,R(t2)))o.clip.push('cells overlap '+name(td));});});});
+  // always visible in every list row: the customer > project > service path, status / severity, and the primary action
+  const s=S.s, need={incidents:['td:nth-child(1)','td:nth-child(2)','.e-sc,.e-sctd'],monitoring:['.e-sc','td[data-l="Sev"]','td[data-l="State"]'],paging:['.e-sc','td[data-l="Steps"]'],
+    people:['td:nth-child(1)','.e-sctd','td[data-l^="Channels"],td:last-child'],maintenance:['td:nth-child(1)','.e-sc','td[data-l="Window"]']}[s]||[];
+  rows.forEach((row,i)=>{need.forEach(n=>{if(!q(n,row).some(vis))o.keep.push(s+' row '+i+' lost '+n);});
+    if(s==='incidents'&&q('[data-e=ack]',row).length&&!q('[data-e=ack]',row).some(vis))o.keep.push('row '+i+' lost Acknowledge');
+    if(s==='paging'&&q('.e-tg.unr,.e-tg.ar',row).length&&!q('.e-tg.unr,.e-tg.ar',row).some(vis))o.keep.push('row '+i+' lost its call-health tag');});
+  const t=document.querySelector('.page .t'), tb=t?R(t):{left:0,width:0}, rb=document.querySelector('.e-rail');
+  o.tree=tr?tr.width:0; o.listL=tb.left; o.listW=tb.width; o.panelW=pr?pr.width:0; o.panelL=pr?pr.left:0; o.vw=vw; o.full=full; o.tier=XLAY.tier; o.rail=rb?R(rb).width:0;
+  o.back=!!panel&&q('.e-x .e-xt',panel).some(vis); o.rowH=Math.max(0,...rows.map(r=>r.offsetHeight)); o.float=q('.e-trov,[data-e=xpin],[data-e=xov]').length;
+  return o;}'''
+ROW = {'paging': 'paging:hanbit||', 'incidents': 'inc:i1', 'monitoring': 'alarm:0', 'people': 'person:p:ys', 'maintenance': 'mw:0'}
+MODE = ['all columns', 'columns -1', 'columns -2', 'cards']
+def state(p, hs, panel, tree, row=None):
+    """load hs, open a panel or not, then put the tree in the wanted state by clicking the rail / the collapse button, as a user would"""
+    go(p, hs)
+    if panel: p.click('.page [data-e=open][data-a="%s"]' % row); p.wait_for_timeout(60)
+    is_rail = p.locator('.e-tree.plus.rail').count() == 1
+    if tree and is_rail: p.click('.e-rail')
+    if not tree and not is_rail: p.click('.e-tree.plus [data-e=xcol]')
+    p.wait_for_timeout(60); return p.evaluate(GEO)
+def bad_of(g, panel, tree):
+    b = []
+    if g['cover']: b.append('covered: %s' % g['cover'][:3])
+    if g['hov'] > 0: b.append('page scrolls sideways by %d' % g['hov'])
+    if g['clip']: b.append('clipped: %s' % g['clip'][:3])
+    if g['keep']: b.append('missing: %s' % g['keep'][:3])
+    if g['float']: b.append('floating tree / Pin still there')
+    if round(g['tree']) != (272 if tree else 45): b.append('tree is %g wide' % g['tree'])
+    if not tree and g['rail'] < 44: b.append('rail target %g < 44' % g['rail'])
+    if panel and g['full']:
+        if abs(g['panelL'] - g['tree']) > 0.5 or abs(g['panelL'] + g['panelW'] - g['vw']) > 0.5: b.append('full panel does not start at the tree edge')
+        if not g['back']: b.append('full panel without "Back to the list"')
+    elif panel:
+        if g['panelW'] < 440 or g['panelW'] > 600: b.append('panel %g wide' % g['panelW'])
+        if g['back']: b.append('side panel says "Back to the list"')
+        if g['listW'] < 320: b.append('list %g < 320' % g['listW'])
+        if g['tier'] != 3 and g['listW'] < 320 + 100: b.append('table in %g px' % g['listW'])
+    if not (panel and g['full']) and abs(g['listL'] - g['tree'] - 25) > 1: b.append('list starts at %g, tree ends at %g' % (g['listL'], g['tree']))
+    return b
+table = []
+for w in (1920, 1440, 1280, 1100, 1024, 900, 800):
+    q = pg(w, 900); geo = {}
+    for panel in (0, 1):
+        for tree in (0, 1):
+            bad = []; cell = None
+            for s_, row in ROW.items():
+                g = state(q, 's=' + s_, panel, tree, row); geo[(s_, panel, tree)] = g
+                bad += ['%s: %s' % (s_, x) for x in bad_of(g, panel, tree)]
+                if s_ == 'paging': cell = g
+            modes = sorted(set(('panel is the view' if g_['full'] else MODE[g_['tier']]) for (s2, p2, t2), g_ in geo.items() if p2 == panel and t2 == tree))
+            chk('DOCK %d %s + %s: tree covers nothing, no sideways scroll, nothing clipped, key fields stay (5 screens) %s' % (w, 'panel' if panel else 'list', 'tree' if tree else 'rail', bad or ''), not bad)
+            table.append((w, 'panel' if panel else 'list', 'tree' if tree else 'rail', cell, modes))
+    # list left edge: rail -> tree is a push by exactly the width the tree gained; the panel never moves it by itself at >= 1408
+    d = [geo[(s_, 0, 1)]['listL'] - geo[(s_, 0, 0)]['listL'] for s_ in ROW]
+    chk('DOCK %d: expanding the rail pushes the list right by %s px (= 272 - 45), on every screen' % (w, sorted(set(d))), all(abs(x - 227) <= 1 for x in d))
+    q.context.close()
+info.append('DOCK measured (Call order; list = table left edge / width, panel width):')
+for w, a, b_, g, modes in table:
+    info.append('  %4d %-5s %-4s | tree %3d | %-28s | panel %-15s | %s' % (w, a, b_, round(g['tree']), 'list under the panel' if g['full'] else 'list at %d, %d wide' % (round(g['listL']), round(g['listW'])),
+        ('%d, from x=%d' % (round(g['panelW']), round(g['panelL']))) if g['full'] else (str(round(g['panelW'])) if a == 'panel' else '-'), ' / '.join(modes)))
 
-t = pg(1024, 768)
-go(t, 's=paging'); k = K(t); k.c('.e-rail'); k.c(N('daon||')); t.wait_for_timeout(100)
-chk('J3 1024: rail -> overlay, customer pick filters and keeps the overlay for the next level', st(t) == 'daon///' and t.locator('.e-trov').count() == 1)
-t.mouse.move(700, 500); t.mouse.move(720, 520); t.wait_for_timeout(700)
-chk('P2-5 overlay closes by itself when the pointer leaves it after a pick (clicks so far: %d)' % k.n, t.locator('.e-trov').count() == 0)
-go(t, 's=paging'); t.click('.e-rail'); t.mouse.move(700, 500); t.wait_for_timeout(700); chk('P2-5 overlay stays while nothing was picked', t.locator('.e-trov').count() == 1)
-k = K(t); k.c(N('daon||')); k.c(N('daon|Commerce|')); k.c(N('daon|Commerce|Checkout')); chk('J3 1024: drill to a service in the overlay = %d clicks after opening, closes on the service' % k.n, st(t) == 'daon/Commerce/Checkout/' and t.locator('.e-trov').count() == 0)
-go(t, 's=paging'); t.click('.e-rail'); t.click('[data-e=xpin]'); t.wait_for_timeout(80)
-hs = t.evaluate('[...document.querySelectorAll(".page tbody tr")].map(r=>r.offsetHeight)')
-chk('P2-3 1024 pinned tree: Call order rows max %dpx (was 4 lines), secondary columns dropped, no overflow' % max(hs), max(hs) <= 66 and t.evaluate('document.documentElement.scrollWidth-innerWidth') <= 0)
-for s_ in ('incidents', 'monitoring', 'people', 'maintenance'):
-    t.click('.nav a[data-s=%s]' % s_); t.wait_for_timeout(80); ov = t.evaluate('(()=>{const t=document.querySelector(".page .tw");return t.scrollWidth-t.clientWidth})()')
-    chk('P2-3 1024 pinned %s: list not clipped (%g)' % (s_, ov), ov <= 0)
-go(t, 's=paging'); t.click('.page [data-e=open][data-a="paging:hanbit||"]'); t.wait_for_timeout(150)
-r = t.evaluate('(()=>{const r=document.querySelector(".e-panel").getBoundingClientRect();return [r.left,r.width]})()')
-chk('P2-3 1024 panel is a full-width overlay %s with "%s"' % (r, t.locator('.e-x .e-xt').inner_text()), r == [0, 1024] and t.locator('.e-x .e-xt').is_visible() and t.evaluate('document.documentElement.scrollWidth-innerWidth') <= 0)
-t.click('.e-x'); t.wait_for_timeout(120); chk('P2-3 back returns to the list, focus on the row', t.locator('.e-panel').count() == 0 and t.evaluate('document.activeElement.getAttribute("data-a")') == 'paging:hanbit||')
+q = pg(1024, 768); go(q, 's=paging')
+r = q.evaluate('(()=>{const b=document.querySelector(".e-rail"),r=b.getBoundingClientRect();return [r.width,r.height,b.getAttribute("aria-expanded")]})()')
+chk('DOCK 1024 starts as a rail; click target %gx%g px (>= 44 wide)' % (r[0], r[1]), r[0] >= 44 and r[1] >= 44 and r[2] == 'false')
+k = K(q); k.c('.e-rail'); x1 = left(q)
+chk('DOCK rail click docks the tree in place: no floating layer, no Pin, focus in the tree', q.locator('.e-tree.plus:not(.rail)').count() == 1 and q.locator('.e-trov,[data-e=xpin]').count() == 0 and q.evaluate('document.activeElement.classList.contains("e-tr")') and x1 == 297)
+k.c(N('daon||')); k.c(N('daon|Commerce|')); k.c(N('daon|Commerce|Checkout'))
+chk('J3 1024: rail -> tree 1 click, then service in 3 clicks; the tree stays docked the whole time (%d clicks)' % k.n, st(q) == 'daon/Commerce/Checkout/' and q.locator('.e-tree.plus:not(.rail)').count() == 1 and k.n == 4)
+q.mouse.move(700, 500); q.wait_for_timeout(600); chk('DOCK the tree does not close by itself when the pointer leaves', q.locator('.e-tree.plus:not(.rail)').count() == 1)
+q.reload(); q.wait_for_timeout(150); chk('DOCK expanded is remembered after reload (1024)', q.locator('.e-tree.plus:not(.rail)').count() == 1)
+q.click('.e-tree.plus [data-e=xcol]'); q.wait_for_timeout(60)
+chk('DOCK collapse returns to the rail, focus on the rail, list back at 70px', q.locator('.e-tree.plus.rail').count() == 1 and q.evaluate('document.activeElement.classList.contains("e-rail")') and left(q) == 70)
+q.reload(); q.wait_for_timeout(150); chk('DOCK collapsed is remembered after reload', q.locator('.e-tree.plus.rail').count() == 1)
+go(q, 's=paging'); q.click('.e-rail'); q.wait_for_timeout(60)
+hs = q.evaluate('[...document.querySelectorAll(".page tbody tr")].map(r=>r.offsetHeight)'); chk('P2-3 1024 tree expanded: Call order rows max %dpx' % max(hs), max(hs) <= 66)
+q.focus('.e-tree.plus .e-trz')
+for _ in range(6): q.keyboard.press('ArrowRight')
+g = q.evaluate(GEO); chk('DOCK 1024 tree widened to %g px with the keyboard: list follows (%s), nothing covered or clipped' % (g['tree'], MODE[g['tier']]), g['tree'] == 360 and not g['cover'] and not g['clip'] and g['hov'] <= 0 and abs(g['listL'] - 385) <= 1)
+q.click('.page [data-e=open][data-a="paging:hanbit||"]'); q.wait_for_timeout(100)
+chk('DOCK 1024: opening a panel tucks the tree into the rail (auto, below 1408)', q.locator('.e-tree.plus.rail').count() == 1 and q.locator('.e-panel').count() == 1)
+q.click('.e-rail'); q.wait_for_timeout(80); g = q.evaluate(GEO)
+chk('DOCK 1024: the user re-expands beside the panel: panel is the view from the tree edge (%g + %g = %g), still open' % (g['panelL'], g['panelW'], g['vw']), g['full'] and g['panelL'] == 360 and not g['cover'] and q.locator('.e-panel').count() == 1)
+q.click('.e-x'); q.wait_for_timeout(100); chk('P2-3 "Back to the list" returns to the list, focus on the row, tree back as remembered', q.locator('.e-panel').count() == 0 and q.evaluate('document.activeElement.getAttribute("data-a")') == 'paging:hanbit||' and q.locator('.e-tree.plus:not(.rail)').count() == 1)
+q.context.close()
+for w, want in ((1407, 1), (1408, 0)):
+    q = pg(w, 900); go(q, 's=paging'); x0 = left(q); q.click('.page [data-e=open][data-a="paging:hanbit||"]'); q.wait_for_timeout(100); x1 = left(q)
+    chk('DOCK %d: panel open -> tree %s (list left %g -> %g)' % (w, 'collapses to the rail' if want else 'stays', x0, x1), q.locator('.e-tree.plus.rail').count() == want)
+    if want:
+        q.click('#ep1 [data-e=close]'); q.wait_for_timeout(100)
+        chk('DOCK %d: panel closed -> tree comes back (auto-collapse is not remembered), list left %g' % (w, left(q)), q.locator('.e-tree.plus:not(.rail)').count() == 1 and left(q) == x0)
+    q.context.close()
+q = pg(1440, 900)
+for hs in ('s=people&c=mirae', 's=people&c=daon&p=Commerce', 's=incidents&c=mirae', 's=monitoring&c=mirae', 's=paging&n=34', 's=maintenance&c=daon&p=Commerce'):
+    go(q, hs); g = q.evaluate(GEO); chk('DOCK 1440 %s: filtered rows still fit (%s) %s' % (hs, MODE[g['tier']], g['clip'][:2] or ''), not g['clip'] and not g['cover'] and g['hov'] <= 0)
+q.context.close()
+q = pg(1024, 768, motion=True); go(q, 's=paging'); q.click('.e-rail')
+an = q.evaluate('(()=>{const a=document.querySelector(".e-tree.plus").getAnimations();return a.length?[a[0].effect.getTiming().duration,document.querySelector(".e-tree.plus").getBoundingClientRect().width]:null})()')
+q.wait_for_timeout(350); w1 = q.evaluate('document.querySelector(".e-tree.plus").getBoundingClientRect().width')
+chk('DOCK width transition: %s ms, mid-way width %s, ends at %g' % (an and an[0], an and round(an[1]), w1), bool(an) and 150 <= an[0] <= 200 and 45 <= an[1] < 272 and w1 == 272 and q.evaluate('!document.body.classList.contains("e-anim")'))
+q.context.close()
+q = pg(1024, 768); go(q, 's=paging'); q.click('.e-rail')
+chk('DOCK prefers-reduced-motion: no animation', q.evaluate('document.querySelector(".e-tree.plus").getAnimations().length') == 0 and q.evaluate('document.querySelector(".e-tree.plus").getBoundingClientRect().width') == 272)
+go(q, 'pk=c&s=paging&o=paging:hanbit||'); r = q.evaluate('(()=>{const r=document.querySelector(".e-panel").getBoundingClientRect();return [r.left,r.width]})()')
+chk('comparison picker E-1 at 1024 keeps its full-width panel %s' % r, r == [0, 1024] and q.locator('.e-x .e-xt').is_visible())
+q.context.close()
+chk('phone: no desktop layout classes at 390', ph.evaluate('!/e-c1|e-c2|e-cards|e-pfull|e-pnar/.test(document.body.className)') and not ph.locator('.e-tree').first.is_visible())
 
 go(ph, 's=paging&c=daon')
 chk('P2-6 phone Call order card names who is called: ' + ph.locator('tr[data-a="paging:daon||"] td[data-l="Paged first"]').inner_text().replace('\n', ' / '), 'Junho, Minjae, Soyeon' in ph.locator('tr[data-a="paging:daon||"]').inner_text())
