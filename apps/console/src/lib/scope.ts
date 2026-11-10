@@ -5,14 +5,13 @@
  * A panel link without the query is complete; the query only carries the reader's list filter.
  */
 import { normalizeSel, type ScopeSel } from "@alarmops/design-system";
+import { isId, isSlug } from "./validate";
 
 export type { ScopeSel };
 export const SCOPE_PARAMS = ["customer", "project", "service", "mine"] as const;
-const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
-const ID_RE = /^[A-Za-z0-9._:-]{1,128}$/;
 export const NO_CUSTOMER = "-";
 
-export const isSlug = (v: unknown): v is string => typeof v === "string" && SLUG_RE.test(v);
+export { isSlug };
 
 export function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 64);
@@ -88,7 +87,7 @@ export function parsePanelRoute(customer: string, path: string[] | undefined): P
   const p = path ?? [];
   if (p.length < 2 || p.length > 4) return null;
   const [kind, id] = p.slice(-2) as [string, string];
-  if (kind !== "incident" || !ID_RE.test(id)) return null;
+  if (kind !== "incident" || !isId(id)) return null;
   const scope = p.slice(0, -2);
   if (customer === NO_CUSTOMER) return scope.length ? null : { customer: null, kind: "incident", id };
   if (!isSlug(customer) || !scope.every(isSlug)) return null;

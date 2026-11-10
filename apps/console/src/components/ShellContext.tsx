@@ -12,6 +12,11 @@ export interface ShellApi {
   filtered: boolean;
   totalCustomers: number;
   toast: (text: string, action?: ToastAction) => void;
+  /** takes the toast away (a sheet or a confirmation is opening: nothing may lie over its buttons) */
+  clearToast: () => void;
+  /** incidents acknowledged in this visit, id → undo token. The row, the card and the panel share it, so Undo is offered wherever the incident shows. */
+  acks: Readonly<Record<string, string>>;
+  setAck: (id: string, undoToken: string | null) => void;
   setOutside: (o: OutsideCounts | null) => void;
 }
 

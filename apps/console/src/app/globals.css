@@ -54,8 +54,18 @@ body { overflow-x: hidden; }
 @media (prefers-reduced-motion: reduce) {
   .shell.ready .stree { transition: none; }
 }
+/* Before the shell has mounted, the tree column takes the size the head script worked out (lib/shell-prefs.ts):
+   a remembered or automatic rail is 45px from the first paint, so the list does not jump sideways after a reload. */
+@media (min-width: 761px) {
+  .shell:not(.mounted) .stree:not(.rail) { width: var(--pre-stree-w, 272px) !important; }
+  html[data-pre-rail="1"] .shell:not(.mounted) .stree:not(.rail) { width: 45px !important; }
+  html[data-pre-rail="1"] .shell:not(.mounted) .stree > * { visibility: hidden; }
+}
+.finder-btn { color: var(--ink2); }
+.finder-btn .kbd { margin-left: 2px; }
+@media (max-width: 1100px) { .finder-btn .kbd { display: none; } }
 .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 70; display: flex; align-items: center; gap: 10px; max-width: min(640px, calc(100vw - 32px)); padding: 8px 8px 8px 14px; background: var(--ink); color: var(--inv); font-size: 13px; box-shadow: var(--pop); }
-.toast > span { min-width: 0; overflow-wrap: anywhere; }
+.toast-t { min-width: 0; overflow-wrap: break-word; }
 .toast .btn { flex: none; }
 .toast .btn.ghost { color: var(--inv); }
 
@@ -115,6 +125,29 @@ body { overflow-x: hidden; }
 .inc-path .chain { margin: 0 5px; }
 .inc-path .sub { display: block; font-size: 12px; color: var(--mut); margin-top: 2px; }
 .t.inc .who { white-space: normal; }
+/* acknowledged-in-place / changed-since-loaded states of a row, and the same in the panel */
+.ack-state { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink2); }
+.ack-state .chain { margin: 0; }
+.ack-done { font-weight: 600; color: var(--ink); white-space: nowrap; }
+.ack-state.warn .ack-done { color: var(--amber); white-space: normal; max-width: 200px; text-align: left; line-height: 1.3; }
+.ack-state.big { flex: 1; justify-content: flex-end; min-height: 38px; font-size: 15px; }
+.t.inc tr.stale td { background: var(--amber-t); }
+.paging-stopped { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink); line-height: 1.35; }
+.resolve-ask { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--rule); background: var(--soft); }
+/* Stats: full tiles only when the list has room. Beside an open panel, or when the list is narrow (every phone),
+   they are one row of chips that scrolls sideways, so the first incident stays in the first screen (QA P2-4, P2-5). */
+.shell[data-panel="1"] .shell-main .tiles { flex-wrap: nowrap; overflow-x: auto; gap: 6px; background: none; border: 0; margin-bottom: 12px; scrollbar-width: thin; }
+.shell[data-panel="1"] .shell-main .tiles .tile:nth-child(n) { flex: none; display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 0 10px; border: 1px solid var(--rule); box-shadow: none; white-space: nowrap; }
+.shell[data-panel="1"] .shell-main .tiles .tile .v { font-size: 15px; line-height: 1; margin: 0; letter-spacing: 0; }
+.shell[data-panel="1"] .shell-main .tiles .tile .d { display: none; }
+.shell[data-panel="1"] .shell-main .tiles .tile.on .d { display: block; margin: 0; }
+@container page (max-width: 899px) {
+  .shell-main .tiles { flex-wrap: nowrap; overflow-x: auto; gap: 6px; background: none; border: 0; margin-bottom: 12px; scrollbar-width: thin; }
+  .shell-main .tiles .tile:nth-child(n) { flex: none; display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 0 10px; border: 1px solid var(--rule); box-shadow: none; white-space: nowrap; }
+  .shell-main .tiles .tile .v { font-size: 15px; line-height: 1; margin: 0; letter-spacing: 0; }
+  .shell-main .tiles .tile .d { display: none; }
+  .shell-main .tiles .tile.on .d { display: block; margin: 0; }
+}
 /* column priority by list width: Paged first, then Age. Sev, Status, path, incident and Acknowledge always stay. */
 @container page (max-width: 999px) { .t.inc .c-paged { display: none; } }
 @container page (max-width: 799px) { .t.inc .c-age { display: none; } .inc-keys { display: none; } .t.inc th, .t.inc td { padding-left: 8px; padding-right: 8px; } }
@@ -170,8 +203,15 @@ body { overflow-x: hidden; }
   .shell-lay, .shell-main { display: block; }
   .shell-main > .panel { min-width: 0; border-left: 0; }
   .shell-main > .panel .panel-body { overflow: visible; }
-  .toast { bottom: 68px; }
+  /* full width, just above the bottom menu; at most three lines of text, never taller than 96px */
+  .toast { left: 8px; right: 8px; bottom: calc(56px + 8px + env(safe-area-inset-bottom)); transform: none; max-width: none; max-height: 96px; padding: 6px 6px 6px 12px; gap: 6px; }
+  .toast-t { flex: 1; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; line-height: 1.35; }
   .toast .btn { min-height: 44px; min-width: 44px; }
+  .tap { display: inline-flex; align-items: center; min-height: 44px; }
+  .ph { margin-bottom: 12px; }
+  .ack-state .btn, .t.inc .c-act .ack-state .btn { min-width: 64px; }
+  .ack-state.big { justify-content: flex-start; }
+  .resolve-ask .hero-actions .btn { flex: 1; }
   .ph h1 { font-size: 23px; }
   .g-main > *, .g-detail > * { min-width: 0; }
   .g3 { grid-template-columns: minmax(0, 1fr); }

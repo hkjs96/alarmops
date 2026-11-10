@@ -164,6 +164,11 @@ function ownInsideOf(c: ScopeCustomerNode, p?: ScopeProjectNode): number {
   return c.projects.reduce((n, q) => n + (q.ownSteps ? 1 : 0) + q.services.filter((s) => s.ownSteps).length, 0);
 }
 
+const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name, "en", { sensitivity: "base" });
+/** My customers keep the order the server gave (few, and the user knows them); everyone else is listed by name. */
+export const myCustomers = (customers: ScopeCustomerNode[]) => customers.filter((c) => c.mine);
+export const otherCustomers = (customers: ScopeCustomerNode[]) => customers.filter((c) => !c.mine).sort(byName);
+
 export function buildTree(customers: ScopeCustomerNode[], opts: BuildTreeOptions): TreeView {
   const sel = normalizeSel(opts.sel);
   const tk = tokensOf(opts.query);
@@ -229,8 +234,8 @@ export function buildTree(customers: ScopeCustomerNode[], opts: BuildTreeOptions
     }
   }
 
-  const mine = customers.filter((c) => c.mine);
-  const other = customers.filter((c) => !c.mine);
+  const mine = myCustomers(customers);
+  const other = otherCustomers(customers);
   const rows: TreeRow[] = [{
     key: ROOT_KEY, kind: "root", label: "All customers", depth: 0, level: 1, hasKids: false, expanded: false,
     selected: !sel.customer && !sel.mine, filterInside: false, hit: false, count: customers.length,
@@ -352,4 +357,93 @@ export function highlightParts(label: string, tokens: string[]): { text: string;
     } else out.push({ text: w, mark: false });
   }
   return out;
+}
+
+/* ---------- "Filter to…" (Ctrl/⌘K): one search over customers, projects and services (E14) ---------- */
+
+export interface ScopeHit {
+  /** "mirae/core/checkout"; ROOT_KEY and MY_KEY for the two rows without a customer */
+  key: string;
+  kind: "all" | "mine" | "customer" | "project" | "service";
+  sel: ScopeSel;
+  /** customer first: ["Mirae Pay", "Core", "Checkout"] */
+  path: string[];
+  /** the customer is one of the user's */
+  mine: boolean;
+  sub?: string;
+}
+export interface ScopeSearchView {
+  groups: { label: string; hits: ScopeHit[] }[];
+  /** all hits in display order (the keyboard walks this) */
+  flat: ScopeHit[];
+  /** index in `flat` that Enter takes before the user moves; -1 = nothing is preselected */
+  preselect: number;
+  /** names of the customers that share the typed project/service name, when that is why nothing is preselected */
+  ambiguous: string[];
+}
+
+const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
+const KIND_RANK = { all: 0, mine: 0, customer: 0, project: 1, service: 2 } as const;
+
+/**
+ * Word-start match over the whole path. My customers come first and the customer is always part of the row.
+ * When the best matches are the same project/service name under several customers, nothing is preselected and the
+ * rows follow the tree's order instead of putting the user's own customers first — Enter must not pick one of them by accident.
+ */
+export function searchScopes(customers: ScopeCustomerNode[], query: string, limit = 30): ScopeSearchView {
+  const tk = tokensOf(query);
+  const mine = myCustomers(customers);
+  const other = otherCustomers(customers);
+  const order = [...mine, ...other];
+  const cHit = (c: ScopeCustomerNode): ScopeHit => ({
+    key: c.slug, kind: "customer", sel: { customer: c.slug }, path: [c.name], mine: c.mine,
+    sub: `${plural(c.projects.length, "project")} · ${plural(c.projects.reduce((n, p) => n + p.services.length, 0), "service")}`,
+  });
+  if (!tk.length) {
+    const head: ScopeHit[] = [
+      { key: ROOT_KEY, kind: "all", sel: {}, path: ["All customers"], mine: false, sub: `${plural(customers.length, "customer")} · no filter` },
+      ...(mine.length ? [{ key: MY_KEY, kind: "mine" as const, sel: { mine: true }, path: ["My customers"], mine: true, sub: plural(mine.length, "customer") }] : []),
+    ];
+    const groups = [
+      { label: "", hits: head },
+      ...(mine.length ? [{ label: `My customers · ${mine.length}`, hits: mine.map(cHit) }] : []),
+      ...(other.length ? [{ label: `${mine.length ? "Other customers" : "Customers"} · ${other.length}`, hits: other.map(cHit) }] : []),
+    ];
+    return { groups, flat: groups.flatMap((g) => g.hits), preselect: -1, ambiguous: [] };
+  }
+  const q = tk.join(" ");
+  const found: { h: ScopeHit; rank: number; ci: number }[] = [];
+  const consider = (h: ScopeHit, ci: number) => {
+    const pw = words(h.path.join(" "));
+    if (!tk.every((t) => starts(pw, t))) return;
+    const leaf = h.path[h.path.length - 1]!.toLowerCase();
+    const lw = words(leaf);
+    // rank 0: the typed text names this row itself; rank 1: it only matches through its parents
+    found.push({ h, rank: leaf.startsWith(q) || tk.every((t) => starts(lw, t)) ? 0 : 1, ci });
+  };
+  order.forEach((c, ci) => {
+    consider(cHit(c), ci);
+    for (const p of c.projects) {
+      consider({ key: `${c.slug}/${p.slug}`, kind: "project", sel: { customer: c.slug, project: p.slug }, path: [c.name, p.name], mine: c.mine }, ci);
+      for (const s of p.services) {
+        consider({ key: `${c.slug}/${p.slug}/${s.slug}`, kind: "service", sel: { customer: c.slug, project: p.slug, service: s.slug }, path: [c.name, p.name, s.name], mine: c.mine }, ci);
+      }
+    }
+  });
+  if (!found.length) return { groups: [], flat: [], preselect: -1, ambiguous: [] };
+  const text = (x: { h: ScopeHit }) => x.h.path.join(" › ");
+  const best = Math.min(...found.map((x) => x.rank));
+  const tops = found.filter((x) => x.rank === best);
+  const names = [...new Set(tops.filter((x) => x.h.kind !== "customer").sort((a, b) => a.ci - b.ci).map((x) => x.h.path[0]!))];
+  if (names.length > 1 && !tops.some((x) => x.h.kind === "customer")) {
+    const hits = found.sort((a, b) => a.rank - b.rank || a.ci - b.ci || text(a).localeCompare(text(b))).slice(0, limit).map((x) => x.h);
+    return { groups: [{ label: "Matches · same order as the customer tree", hits }], flat: hits, preselect: -1, ambiguous: names };
+  }
+  const sorted = found.sort((a, b) => Number(!a.h.mine) - Number(!b.h.mine) || a.rank - b.rank || KIND_RANK[a.h.kind] - KIND_RANK[b.h.kind] || text(a).localeCompare(text(b)))
+    .slice(0, limit).map((x) => x.h);
+  const groups = [
+    { label: "My customers", hits: sorted.filter((h) => h.mine) },
+    { label: mine.length ? "Other customers" : "Customers", hits: sorted.filter((h) => !h.mine) },
+  ].filter((g) => g.hits.length);
+  return { groups, flat: groups.flatMap((g) => g.hits), preselect: 0, ambiguous: [] };
 }

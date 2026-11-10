@@ -4,8 +4,8 @@ import { getApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { requireSession, UnauthorizedError } from "@/lib/auth";
 import { NotConfiguredError } from "@/lib/mode";
-import { assertBulkAction, assertId, assertIds, assertToken, assertVersion, InvalidInputError } from "@/lib/validate";
-import type { BulkPreview, BulkResult } from "@/lib/api/types";
+import { assertBulkAction, assertBulkItems, assertId, assertToken, assertVersion, InvalidInputError } from "@/lib/validate";
+import type { BulkItem, BulkPreview, BulkResult } from "@/lib/api/types";
 
 export type ActionResult<T = null> = { ok: true; data: T } | { ok: false; code: string; message: string; requestId: string };
 
@@ -22,18 +22,23 @@ async function run<T>(fn: () => Promise<T>, revalidate = true): Promise<ActionRe
   try {
     await requireSession();
     const data = await fn();
-    if (revalidate) revalidatePath("/incidents", "layout");
+    if (revalidate) revalidatePath("/", "layout"); // the list lives at /incidents and beside every /c/… panel
     return { ok: true, data };
   } catch (e) {
     return fail(e);
   }
 }
 
-export async function ackIncident(id: string, version: number) {
+/**
+ * Acknowledge one incident — the row, the card and the panel all use this. The version the user saw goes as If-Match,
+ * so an Acknowledge pressed on a stale list does not land on an incident that re-fired or escalated meanwhile
+ * (409 VERSION_CONFLICT, security R-3). Returns the undo token.
+ */
+export async function ackIncident(id: string, version: number): Promise<ActionResult<{ undoToken: string }>> {
   return run(async () => {
     const [i, v] = [assertId(id), assertVersion(version)];
-    await (await getApi()).ack(i, v);
-    return null;
+    const r = await (await getApi()).ack(i, v);
+    return { undoToken: r.undoToken };
   });
 }
 export async function resolveIncident(id: string, version: number) {
@@ -50,15 +55,15 @@ export async function escalateIncident(id: string) {
     return null;
   });
 }
-export async function previewBulk(action: "ack" | "resolve", ids: string[]): Promise<ActionResult<BulkPreview>> {
+export async function previewBulk(action: "ack" | "resolve", items: BulkItem[]): Promise<ActionResult<BulkPreview>> {
   return run(async () => {
-    const [a, list] = [assertBulkAction(action), assertIds(ids)];
+    const [a, list] = [assertBulkAction(action), assertBulkItems(items)];
     return (await getApi()).bulkPreview(a, list);
   }, false);
 }
-export async function executeBulk(action: "ack" | "resolve", ids: string[]): Promise<ActionResult<BulkResult>> {
+export async function executeBulk(action: "ack" | "resolve", items: BulkItem[]): Promise<ActionResult<BulkResult>> {
   return run(async () => {
-    const [a, list] = [assertBulkAction(action), assertIds(ids)];
+    const [a, list] = [assertBulkAction(action), assertBulkItems(items)];
     return (await getApi()).bulkExecute(a, list);
   });
 }

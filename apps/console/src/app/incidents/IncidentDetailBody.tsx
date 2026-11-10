@@ -2,7 +2,8 @@ import Link from "next/link";
 import { Avatar, Card, EmptyState, Mark, SevBadge, SourceChip, StatusBadge, Tabs, cx, type Shape } from "@alarmops/design-system";
 import { safeExternalUrl } from "@/lib/safe-url";
 import type { IncidentDetail, IncidentEvent, NotificationLogEntry, RemediationStage } from "@/lib/api/types";
-import { displayStatus } from "@/lib/incidents";
+import { displayStatus, orgChainParts } from "@/lib/incidents";
+import { isSlug } from "@/lib/validate";
 import { duration, groupDigits, kstDateTime, kstTime } from "@/lib/format";
 import { HeroActions } from "./[id]/HeroActions";
 
@@ -72,18 +73,37 @@ function Notifications({ items }: { items: NotificationLogEntry[] }) {
   );
 }
 
+/** "Paging stopped at 03:16 — acknowledged by Haeun": once acknowledged, nobody else is called. */
+export function pagingStopped(inc: Pick<IncidentDetail, "status" | "acknowledgedAt" | "acknowledgedBy">): string | null {
+  if (inc.status !== "ACKNOWLEDGED" || !inc.acknowledgedAt) return null;
+  const who = inc.acknowledgedBy?.name.split(" ")[0];
+  return `Paging stopped at ${kstTime(inc.acknowledgedAt)} — acknowledged${who ? ` by ${who}` : ""}`;
+}
+
+function Stopped({ text }: { text: string }) {
+  return <div className="paging-stopped" role="status" data-testid="paging-stopped"><span className="st ack"><Mark shape="ring" /></span><b>{text}</b></div>;
+}
+
 function Escalation({ inc, now }: { inc: IncidentDetail; now: number }) {
   const snap = inc.assignmentSnapshot;
   const esc = inc.escalation;
+  const stopped = pagingStopped(inc);
   if (!snap || !esc) {
-    return <Card title="Escalation"><div className="sm mut">{inc.unmapped ? "No owner — unmapped account, not escalating." : "No paging steps."}</div></Card>;
+    return (
+      <Card title="Escalation">
+        {stopped ? <Stopped text={stopped} /> : <div className="sm mut">{inc.unmapped ? "No owner — unmapped account, not escalating." : "No paging steps."}</div>}
+      </Card>
+    );
   }
   const base = Date.parse(snap.capturedAt);
   const customer = inc.org.customer?.name;
+  const callOrderSlug = inc.org.customer && isSlug(inc.org.customer.slug) ? inc.org.customer.slug : null;
+  // acknowledged: only what was actually sent. The calls that will not happen are not listed.
+  const steps = stopped ? snap.steps.filter((s) => s.index <= esc.step) : snap.steps;
   return (
-    <Card bodyless title="Escalation" actions={<span className="mono xs">step {esc.step + 1}/{esc.totalSteps} · repeat {esc.repeat}/{esc.repeatCount}</span>}>
+    <Card bodyless title="Escalation" actions={<span className="mono xs">{stopped ? `stopped at step ${esc.step + 1}/${esc.totalSteps}` : `step ${esc.step + 1}/${esc.totalSteps} · repeat ${esc.repeat}/${esc.repeatCount}`}</span>}>
       <div className="plist">
-        {snap.steps.map((s) => {
+        {steps.map((s) => {
           const at = new Date(base + s.atMin * 60_000).toISOString();
           const done = s.index < esc.step || (s.index === esc.step && inc.status !== "RESOLVED");
           const who = s.targetType === "ALL_RESPONDERS" ? (s.label ?? "everyone in Responders") : s.resolved.map((r) => `${r.name}${r.via ? ` (${r.via})` : ""}`).join(", ");
@@ -103,11 +123,12 @@ function Escalation({ inc, now }: { inc: IncidentDetail; now: number }) {
           );
         })}
       </div>
+      {stopped ? <div style={{ padding: "10px 16px", borderTop: "1px solid var(--grid)" }}><Stopped text={stopped} /></div> : null}
       <div className="xs mut" style={{ padding: "10px 16px", borderTop: "1px solid var(--grid)" }}>
-        <div>Then repeats {snap.repeatCount === 1 ? "once" : `${snap.repeatCount} times`}.</div>
+        {stopped ? null : <div>Then repeats {snap.repeatCount === 1 ? "once" : `${snap.repeatCount} times`}.</div>}
         <div className="row" style={{ marginTop: 4, gap: 6 }}>
           {snap.planLabel ? <span className="pill accent">{snap.planLabel}</span> : null}
-          {inc.org.customer ? <Link href={`/call-order?customer=${inc.org.customer.slug ?? ""}`}>Call order for {customer}</Link> : null}
+          {callOrderSlug ? <Link className="tap" href={`/call-order?customer=${callOrderSlug}`}>Call order for {customer}</Link> : null}
         </div>
         {inc.severity === "SEV_1" ? <div style={{ marginTop: 4 }}>SEV-1 · pages through maintenance windows</div> : esc.mutedByMaintenance ? <div style={{ marginTop: 4 }}>Muted by maintenance ({inc.severity.replace("_", "-")})</div> : null}
       </div>
@@ -121,6 +142,9 @@ export function IncidentDetailBody({ inc, timeline, notifs, now }: { inc: Incide
   const why = inc.why;
   const rem = inc.remediation;
   const stageIdx = rem ? STAGES.findIndex((s) => s.key === rem.stage) : -1;
+  const stopped = pagingStopped(inc);
+  // once acknowledged or resolved, the calls that were still to come are not shown as if they would happen
+  const paged = inc.status === "TRIGGERED" ? inc.paged : inc.paged.filter((p) => p.done);
 
   return (
     <div className="inc-detail">
@@ -142,17 +166,18 @@ export function IncidentDetailBody({ inc, timeline, notifs, now }: { inc: Incide
                 {inc.region ? <> · {inc.region}</> : null}
                 {inc.env === "prd" ? <> · <span className="pill prd">Production</span></> : null}
               </div>
-              {inc.paged.length ? (
-                <div className="paged">
+              {paged.length || stopped ? (
+                <div className="paged" data-testid="paged-line">
                   <span className="ov">Paged</span>
-                  {inc.paged.map((p, n) => (
+                  {paged.map((p, n) => (
                     <span key={n}>{n > 0 ? <span className="faint" aria-hidden="true">→ </span> : null}<span style={{ color: "var(--accent)" }}><span className={p.done ? "b" : undefined}>{p.label}</span> <span className="mono">{kstTime(p.at)}</span>{p.done ? " ✓" : ""}</span></span>
                   ))}
-                  {inc.assignmentSnapshot?.planLabel ? <span className="pill accent">{inc.assignmentSnapshot.planLabel}</span> : null}
+                  {stopped ? <span className="b" style={{ flexBasis: "100%" }}>{stopped}</span> : null}
+                  {!stopped && inc.assignmentSnapshot?.planLabel ? <span className="pill accent">{inc.assignmentSnapshot.planLabel}</span> : null}
                 </div>
               ) : null}
             </div>
-            <HeroActions id={inc.id} status={inc.status} version={inc.version} canEscalate={Boolean(inc.escalation)} />
+            <HeroActions id={inc.id} title={inc.title} pathText={inc.org.customer ? orgChainParts(inc).join(" › ") : "an unmapped account"} status={inc.status} version={inc.version} canEscalate={Boolean(inc.escalation)} />
           </div>
         </div>
       </section>
@@ -160,7 +185,7 @@ export function IncidentDetailBody({ inc, timeline, notifs, now }: { inc: Incide
       <div className="g-detail">
         <div className="stack" style={{ minWidth: 0 }}>
           {why ? (
-            <Card title="Why it fired" actions={why.resourceId ? <Link className="sm" href={`/monitoring/resources/${why.resourceId}`}>Open resource →</Link> : null}>
+            <Card title="Why it fired" actions={why.resourceId ? <Link className="sm tap" href={`/monitoring/resources/${encodeURIComponent(why.resourceId)}`}>Open resource →</Link> : null}>
               <div className="g3" style={{ border: "1px solid var(--rule)", marginBottom: 14 }}>
                 <div style={{ padding: "12px 14px" }}>
                   <div className="ov">Current</div>
@@ -249,7 +274,7 @@ export function IncidentDetailBody({ inc, timeline, notifs, now }: { inc: Incide
               <dt>Source</dt><dd>{inc.details.source}</dd>
               <dt>Resource</dt><dd className="mono sm">{inc.details.resource}</dd>
               <dt>Alarm</dt><dd className="sm">{inc.details.alarm}</dd>
-              {inc.details.runbookUrl ? <><dt>Runbook</dt><dd>{safeExternalUrl(inc.details.runbookUrl) ? <a href={safeExternalUrl(inc.details.runbookUrl)!} target="_blank" rel="noopener noreferrer">{inc.details.runbookLabel ?? "Runbook"} ↗</a> : <span className="sm mono" style={{ overflowWrap: "anywhere" }}>{inc.details.runbookUrl}</span>}</dd></> : null}
+              {inc.details.runbookUrl ? <><dt>Runbook</dt><dd>{safeExternalUrl(inc.details.runbookUrl) ? <a className="tap" href={safeExternalUrl(inc.details.runbookUrl)!} target="_blank" rel="noopener noreferrer">{inc.details.runbookLabel ?? "Runbook"} ↗</a> : <span className="sm mono" style={{ overflowWrap: "anywhere" }}>{inc.details.runbookUrl}</span>}</dd></> : null}
               {inc.details.lastTime ? <><dt>Last time</dt><dd className="sm">{inc.details.lastTime}</dd></> : null}
             </dl>
           </Card>

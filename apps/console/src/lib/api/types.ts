@@ -24,8 +24,8 @@ export interface ApiErrorBody {
 export interface OrgRef {
   id: string;
   name: string;
-  /** PROPOSED: URL-safe name used in `?customer=&project=&service=` and `/c/<customer>/<project>/<service>/…` */
-  slug?: string;
+  /** URL-safe name used in `?customer=&project=&service=` and `/c/<customer>/<project>/<service>/…` (API-CONTRACT §8.0: required, only sent inside the caller's scope) */
+  slug: string;
 }
 
 /** service › project › customer resolution result shown as the org chain. */
@@ -103,6 +103,8 @@ export interface IncidentListItem {
   escalation: EscalationProgress | null;
   triggeredAt: string;
   acknowledgedAt: string | null;
+  /** DATA-MODEL Incident.acknowledgedBy, resolved to a name for "Paging stopped at 03:16 — acknowledged by Haeun" */
+  acknowledgedBy?: PersonRef | null;
   resolvedAt: string | null;
   resolvedVia?: "MANUAL" | "AUTO" | "RECONCILE";
   version: number;
@@ -115,6 +117,10 @@ export interface IncidentCounts {
   acknowledged: number;
   resolved24h: number;
   muted: number;
+  /**
+   * Open = TRIGGERED (escalated included), nobody has acknowledged it. The one meaning of "open" on every screen:
+   * the menu badge, the tree, the tiles, the "Outside this view" line. API-CONTRACT §8.0: counts.open + outside.open = the badge.
+   */
   open: number;
   /** PROPOSED tile sub-lines */
   meta?: {
@@ -134,7 +140,7 @@ export interface UnmappedSummary {
 }
 
 /**
- * PROPOSED: incidents the scope filter hides, over all customers the user may see. Scope filter only
+ * API-CONTRACT §8.0: incidents the scope filter hides, over all customers the user may see. Scope filter only
  * (customer/project/service or mine); status, severity and search do not change it.
  * Invariant: open incidents in the filtered list + `open` = the nav badge.
  */
@@ -148,21 +154,22 @@ export interface OutsideCounts {
 
 export interface IncidentListResponse extends Paginated<IncidentListItem> {
   counts: IncidentCounts;
-  /** PROPOSED: unmapped-account banner source */
+  /** unmapped-account banner source (INTERNAL users only) */
   unmapped: UnmappedSummary[];
-  /** PROPOSED: null when no scope filter is set */
+  /** null when no scope filter is set */
   outside: OutsideCounts | null;
 }
 
 export interface IncidentListQuery {
-  status?: "open" | IncidentStatus;
+  /** "active" = not resolved (open + acknowledged): the default list. "open" is never used for this (see IncidentCounts.open). */
+  status?: "active" | IncidentStatus;
   severity?: Severity;
   customerId?: string;
-  /** PROPOSED scope filter by slug. project needs customer, service needs project. Unknown or out-of-scope slug → 404. */
+  /** Scope filter by slug (API-CONTRACT §2). project needs customer, service needs project. Unknown or out-of-scope slug → 404. */
   customer?: string;
   project?: string;
   service?: string;
-  /** PROPOSED: only customers the signed-in user is a responder for (plus unmapped accounts) */
+  /** only customers the signed-in user is a responder for (plus unmapped accounts); the server works it out from the session */
   mine?: boolean;
   assignee?: "me";
   unmapped?: boolean;
@@ -283,10 +290,24 @@ export interface BulkPreview {
   skipped: { id: string; reason: string }[];
 }
 
+/** One target of POST /incidents/bulk: the id and the version the user saw (security R-3). */
+export interface BulkItem {
+  id: string;
+  version: number;
+}
+
+/** POST /incidents/bulk (preview:false) — API-CONTRACT §8.1 */
 export interface BulkResult {
-  updated: string[];
+  done: string[];
+  /** skipped: the version moved on (VERSION_CONFLICT), not visible (NOT_FOUND), or not in a state the action applies to */
+  conflicts: { id: string; code: string }[];
   undoToken: string;
-  undoExpiresAt: string;
+}
+
+/** POST /incidents/{id}/ack — the token goes to /incidents/bulk/undo (5 min, the person who acknowledged) */
+export interface AckResult {
+  incident: IncidentDetail;
+  undoToken: string;
 }
 
 export interface Me {
@@ -297,7 +318,7 @@ export interface Me {
 }
 
 /**
- * PROPOSED: GET /scope-tree — customer › project › service with what the tree shows per node:
+ * GET /scope-tree (API-CONTRACT §8.0) — customer › project › service with what the tree shows per node:
  * openIncidents (same definition as the nav badge), callHealth (customer level, D-32 paging-health level),
  * ownSteps (project/service has a paging override), mine (signed-in user is a responder). slug is unique within its parent.
  */

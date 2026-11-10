@@ -13,7 +13,7 @@ export function parseQuery(sp: SP): IncidentListQuery {
     project: sel.project,
     service: sel.service,
     mine: sel.mine || undefined,
-    status: status === "ACKNOWLEDGED" || status === "RESOLVED" ? status : "open",
+    status: status === "ACKNOWLEDGED" || status === "RESOLVED" ? status : "active",
     severity: SEVERITIES.includes(one(sp.severity) as Severity) ? (one(sp.severity) as Severity) : undefined,
     source: (["CLOUDWATCH", "PROMETHEUS", "GRAFANA"] as const).find((x) => x === one(sp.source)) as AlertSource | undefined,
     assignee: one(sp.assignee) === "me" ? "me" : undefined,

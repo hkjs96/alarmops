@@ -40,7 +40,7 @@ function Tags({ row }: { row: TreeRow }) {
   const h = row.health ? HEALTH[row.health] : null;
   return (
     <span className="stree-tags">
-      {row.ownSteps ? <span className="stag own" title="Own steps: this level has its own call order, as in the Call order list">Own steps</span> : null}
+      {row.ownSteps ? <span className="stag own" title="Own steps: this project or service has its own call order instead of the customer's">Own steps</span> : null}
       {row.ownInside > 0 && collapsed ? <span className="stag-in" role="img" aria-label="Contains own steps" title={`Contains ${row.ownInside} level${row.ownInside === 1 ? "" : "s"} with own steps. Expand to see.`} /> : null}
       {h ? <span className={cx("stag", h.cls)} title={`${h.label}: ${h.tip}`}>{h.label}</span> : null}
       {row.openIncidents > 0 ? (
@@ -49,6 +49,29 @@ function Tags({ row }: { row: TreeRow }) {
         </span>
       ) : null}
     </span>
+  );
+}
+
+/**
+ * What the tree's tags mean, in plain words. One link, collapsed until asked for; the tree and the phone sheet share it.
+ */
+export function ScopeLegend({ open, onToggle, className }: { open: boolean; onToggle: () => void; className?: string }) {
+  const id = useId();
+  return (
+    <div className={cx("stree-leg", className)}>
+      <button type="button" className="stree-legt" aria-expanded={open} aria-controls={id} onClick={onToggle}>
+        What do these mean?<span aria-hidden="true">{open ? "▾" : "▸"}</span>
+      </button>
+      {open ? (
+        <ul className="stree-legl" id={id}>
+          <li><span className="stag-n">2</span><span>Open incidents here: triggered or escalated, and nobody has acknowledged them yet.</span></li>
+          <li><span className="stag unr">Unreachable</span><span>If something breaks now, nobody for this customer can be called or texted.</span></li>
+          <li><span className="stag ar">At risk</span><span>The person who is called first has no verified phone number.</span></li>
+          <li><span className="stag own">Own steps</span><span>This project or service has its own call order instead of the customer&apos;s.</span></li>
+          <li><span className="stag-in" /><span>Something inside has its own call order. Expand to see which.</span></li>
+        </ul>
+      ) : null}
+    </div>
   );
 }
 
@@ -69,7 +92,7 @@ export function ScopeTree(props: ScopeTreeProps) {
   const uid = useId();
   const [query, setQuery] = useState("");
   const [problems, setProblems] = useState(false);
-  const [legend, setLegend] = useState(true);
+  const [legend, setLegend] = useState(false);
   const [maps, setMaps] = useState<{ o: Record<string, boolean>; op: Record<string, boolean>; oq: Record<string, boolean> }>({ o: {}, op: {}, oq: {} });
   const [cur, setCur] = useState<string | null>(null);
   const [ambiguous, setAmbiguous] = useState(false);
@@ -89,7 +112,7 @@ export function ScopeTree(props: ScopeTreeProps) {
     if (s) {
       setMaps((m) => ({ ...m, o: s.o ?? {}, op: s.op ?? {} }));
       setProblems(Boolean(s.prob));
-      setLegend(s.leg !== false);
+      setLegend(s.leg === true);
     }
     setLoaded(true);
   }, [storageKey]);
@@ -136,7 +159,16 @@ export function ScopeTree(props: ScopeTreeProps) {
   });
   useEffect(() => {
     if (curIdx < 0) return;
-    document.getElementById(`${uid}-n${curIdx}`)?.scrollIntoView?.({ block: "nearest" });
+    // Not scrollIntoView: Chrome then starts keyboard navigation from that row, and the first Tab on a fresh page
+    // would skip the skip link, the menu and the tree (QA P2-1). Moving scrollTop has no such side effect.
+    const el = document.getElementById(`${uid}-n${curIdx}`);
+    const box = el?.closest<HTMLElement>(".stree-s");
+    if (!el || !box) return;
+    const r = el.getBoundingClientRect();
+    const b = box.getBoundingClientRect();
+    const head = el.classList.contains("hdr") ? 0 : 28; // sticky group heading
+    if (r.top < b.top + head) box.scrollTop -= b.top + head - r.top;
+    else if (r.bottom > b.bottom) box.scrollTop += r.bottom - b.bottom;
   }, [uid, curIdx, curKey]);
 
   const toggle = (key: string) => {
@@ -319,25 +351,13 @@ export function ScopeTree(props: ScopeTreeProps) {
           ) : null}
         </div>
       </div>
-      <div className="stree-leg">
-        <button type="button" className="stree-legt" aria-expanded={legend} title={`${legend ? "Hide" : "Show"} the legend`} onClick={() => setLegend((l) => !l)}>
-          Legend<span aria-hidden="true">{legend ? "▾" : "▸"}</span>
-        </button>
-        {legend ? (
-          <div className="stree-legl">
-            <span className="it"><span className="stag-n">n</span> open incidents</span>
-            <span className="it"><span className="stag unr">Unreachable</span> nobody can be called</span>
-            <span className="it"><span className="stag ar">At risk</span> first on shift has no verified phone</span>
-            <span className="it"><span className="stag own">Own steps</span> own call order</span>
-            <span className="it"><span className="stag-in" /> own steps inside (collapsed)</span>
-          </div>
-        ) : null}
-      </div>
       <div
         className="stree-rz" role="separator" aria-orientation="vertical" tabIndex={0} title="Drag to resize"
         aria-label="Resize the tree (arrow keys, 200 to 360 px)" aria-valuemin={TREE_MIN_WIDTH} aria-valuemax={TREE_MAX_WIDTH} aria-valuenow={width}
         onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} onKeyDown={onResizeKey}
       />
+      {/* last in the tree, one line until asked for (shell-scope §2.2) */}
+      <ScopeLegend open={legend} onToggle={() => setLegend((l) => !l)} />
     </aside>
   );
 }

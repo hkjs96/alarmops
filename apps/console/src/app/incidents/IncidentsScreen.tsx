@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Banner, Card, Mark, cx } from "@alarmops/design-system";
 import { getApi, nowMs } from "@/lib/api";
-import { ApiError } from "@/lib/api/client";
+import { ApiError, isHidden } from "@/lib/api/client";
 import type { IncidentDetail, IncidentEvent, IncidentListResponse, NotificationLogEntry } from "@/lib/api/types";
 import { parseQuery, type SP } from "@/lib/query";
 import { incidentPanelPath, panelRouteMatches, parseScopeParams, scopeQuery, type PanelRoute } from "@/lib/scope";
@@ -43,7 +43,8 @@ export async function IncidentsScreen({ sp, panel }: { sp: SP; panel?: PanelRout
       const [timeline, notifs] = await Promise.all([api.getTimeline(panel.id), api.getNotifications(panel.id)]);
       open = { inc, timeline: timeline.items, notifs: notifs.items };
     } catch (e) {
-      if (e instanceof ApiError && e.status === 404) notFound();
+      // not there, or not for this user (a 403 on a read is folded into the same Not found — security R-5)
+      if (isHidden(e)) notFound();
       throw e;
     }
   }
@@ -54,7 +55,7 @@ export async function IncidentsScreen({ sp, panel }: { sp: SP; panel?: PanelRout
     data = await api.listIncidents(q);
   } catch (e) {
     // unknown customer, project or service — or one this user may not see: the same Not found
-    if (e instanceof ApiError && e.status === 404) notFound();
+    if (isHidden(e)) notFound();
     error = e instanceof ApiError ? e : new ApiError(500, "UNKNOWN", "Could not load incidents.", "");
   }
 
@@ -69,7 +70,7 @@ export async function IncidentsScreen({ sp, panel }: { sp: SP; panel?: PanelRout
   const filtered = Boolean(scope.sel.customer || scope.sel.mine);
   const c = data?.counts;
   const listed = data?.items.length ?? 0;
-  const openN = c ? c.triggered + c.escalated : 0;
+  const activeN = c ? c.open + c.acknowledged : 0;
   const inc = open?.inc;
   const outsideFilter = inc && scope.sel.customer
     ? !(inc.org.customer?.slug === scope.sel.customer && (!scope.sel.project || inc.org.project?.slug === scope.sel.project) && (!scope.sel.service || inc.org.service?.slug === scope.sel.service))
@@ -82,7 +83,7 @@ export async function IncidentsScreen({ sp, panel }: { sp: SP; panel?: PanelRout
         <div className="ph">
           <div>
             <h1 tabIndex={-1}>Incidents</h1>
-            <div className="desc">{kstHeading(nowIso)}{c ? <> · {listed} incident{listed === 1 ? "" : "s"} listed, {openN} open</> : null}</div>
+            <div className="desc" data-testid="inc-summary">{kstHeading(nowIso)}{c ? <> · {listed} listed · <b>{c.open} open</b> · {c.acknowledged} acknowledged</> : null}</div>
           </div>
         </div>
 
@@ -93,16 +94,14 @@ export async function IncidentsScreen({ sp, panel }: { sp: SP; panel?: PanelRout
         ))}
 
         {c ? (
-          <div className="tiles" aria-label="Incident counts for the current filter">
-            <div className={cx("tile", c.triggered > 0 && "on")}>
-              <div className="row"><span className="st trig"><Mark shape="dot" /></span><span className="ov">Triggered</span></div>
-              <div className={cx("v", c.triggered > 0 && "red")}>{c.triggered}</div>
-              <div className="d">{c.meta?.triggeredSev1 ?? 0} SEV-1{c.meta?.oldestTriggeredAt ? ` · oldest ${age(c.meta.oldestTriggeredAt, now)}` : ""}</div>
-            </div>
-            <div className="tile">
-              <div className="row"><span className="st esc"><Mark shape="tri" /></span><span className="ov">Escalated</span></div>
-              <div className={cx("v", c.escalated > 0 && "orange")}>{c.escalated}</div>
-              <div className="d">{c.meta?.escalatedNext ? `next step at ${kstTime(c.meta.escalatedNext)}` : "none pending"}</div>
+          <div className="tiles" role="group" aria-label="Incident counts for the current filter" data-testid="tiles">
+            <div className={cx("tile", c.open > 0 && "on")} data-testid="tile-open" title="Open = triggered or escalated, nobody has acknowledged it. The same meaning as the Incidents badge and the Outside this view line.">
+              <div className="row"><span className="st trig"><Mark shape="dot" /></span><span className="ov">Open</span></div>
+              <div className={cx("v", c.open > 0 && "red")}>{c.open}</div>
+              <div className="d">
+                {c.triggered} triggered · {c.escalated} escalated{c.meta?.triggeredSev1 ? ` · ${c.meta.triggeredSev1} SEV-1` : ""}
+                {c.meta?.oldestTriggeredAt ? ` · oldest ${age(c.meta.oldestTriggeredAt, now)}` : ""}{c.meta?.escalatedNext ? ` · next step ${kstTime(c.meta.escalatedNext)}` : ""}
+              </div>
             </div>
             <div className="tile">
               <div className="row"><span className="st ack"><Mark shape="ring" /></span><span className="ov">Acknowledged</span></div>
@@ -124,8 +123,9 @@ export async function IncidentsScreen({ sp, panel }: { sp: SP; panel?: PanelRout
 
         <div className="row inc-filters">
           <div className="chips" role="group" aria-label="Status">
-            <Link className={cx("chip", q.status === "open" && "on")} href={href({ status: undefined })} aria-current={q.status === "open" ? "true" : undefined}>
-              <span className="st trig"><Mark shape="dot" /></span>Open<span className="n">{c?.open ?? "—"}</span>
+            <Link className={cx("chip", q.status === "active" && "on")} href={href({ status: undefined })} aria-current={q.status === "active" ? "true" : undefined}
+              title="Active = not resolved yet: open (nobody has acknowledged) plus acknowledged">
+              <span className="st trig"><Mark shape="dot" /></span>Active<span className="n">{c ? activeN : "—"}</span>
             </Link>
             <Link className={cx("chip", q.status === "ACKNOWLEDGED" && "on")} href={href({ status: "ACKNOWLEDGED" })} aria-current={q.status === "ACKNOWLEDGED" ? "true" : undefined}>
               <span className="st ack"><Mark shape="ring" /></span>Acknowledged<span className="n">{c?.acknowledged ?? "—"}</span>
@@ -151,7 +151,8 @@ export async function IncidentsScreen({ sp, panel }: { sp: SP; panel?: PanelRout
             items={data!.items.map((i) => ({ ...i, href: incidentPanelPath(i.org, i.id) + listQuery }))}
             nowMs={now}
             openId={inc?.id}
-            emptyKind={q.status === "RESOLVED" ? "resolved incidents in the last 24h" : q.status === "ACKNOWLEDGED" ? "acknowledged incidents" : "open incidents"}
+            listKey={listQuery}
+            emptyKind={q.status === "RESOLVED" ? "resolved incidents in the last 24h" : q.status === "ACKNOWLEDGED" ? "acknowledged incidents" : "active incidents"}
             clearFiltersHref={hasFilters ? href({ severity: undefined, source: undefined, assignee: undefined, q: undefined }) : undefined}
             allCustomersHref={filtered ? "/incidents" + scopeQuery({}, params) : undefined}
           />

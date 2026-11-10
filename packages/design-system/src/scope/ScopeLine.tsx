@@ -17,6 +17,8 @@ export interface ScopeLineProps {
   onClear: (level: ScopeLevel) => void;
   /** phone: the line is one button that opens the sheet */
   onOpenPicker?: () => void;
+  /** phone: a search button beside the line opens "Filter to…" (desktop has it in the top bar, Ctrl/⌘K) */
+  onOpenSearch?: () => void;
   /** right side on desktop, second row on a phone (e.g. <OutsideLine/>) */
   outside?: ReactNode;
   /** replaces the path with fixed text (Settings: MSP-wide) */
@@ -80,6 +82,11 @@ export function ScopeLine(p: ScopeLineProps) {
           </span>
           <span className="car" aria-hidden="true">▼</span>
         </button>
+        {p.onOpenSearch ? (
+          <button type="button" className="btn sline-clr sline-find" aria-haspopup="dialog" aria-label="Filter to a customer, project or service by name" onClick={p.onOpenSearch}>
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><circle cx="7.5" cy="7.5" r="5" /><path d="M11.5 11.5 16 16" /></svg>
+          </button>
+        ) : null}
         {filtered ? <button type="button" className="btn sline-clr" aria-label="Clear the filter, show all customers" onClick={() => p.onClear("customer")}>×</button> : null}
       </span>
       {p.outside ? <><span className="sp sline-desk" /><span className="sline-out">{p.outside}</span></> : null}

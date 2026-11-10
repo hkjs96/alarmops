@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { cx } from "../cx";
-import { normalizeSel, tokensOf, type ScopeCustomerNode, type ScopeSel } from "./model";
+import { myCustomers, normalizeSel, otherCustomers, tokensOf, type ScopeCustomerNode, type ScopeSel } from "./model";
+import { ScopeLegend } from "./ScopeTree";
 
 export interface ScopeSheetProps {
   open: boolean;
@@ -35,6 +36,7 @@ export function ScopeSheet({ open, customers, value, onApply, onClose }: ScopeSh
   const [cSlug, setCSlug] = useState<string | undefined>();
   const [pSlug, setPSlug] = useState<string | undefined>();
   const [q, setQ] = useState("");
+  const [legend, setLegend] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const headRef = useRef<HTMLHeadingElement>(null);
 
@@ -44,6 +46,7 @@ export function ScopeSheet({ open, customers, value, onApply, onClose }: ScopeSh
     setPSlug(cur.project);
     setStep(cur.service ? 3 : cur.project ? 2 : 1);
     setQ("");
+    setLegend(false); // collapsed every time the sheet opens
     const prev = document.activeElement as HTMLElement | null;
     headRef.current?.focus();
     return () => prev?.focus?.();
@@ -68,9 +71,9 @@ export function ScopeSheet({ open, customers, value, onApply, onClose }: ScopeSh
 
   const tk = tokensOf(q);
   const match = (name: string) => !tk.length || tk.every((t) => name.toLowerCase().split(/\s+/).some((w) => w.startsWith(t)));
-  const mine = customers.filter((c) => c.mine && match(c.name));
-  const other = customers.filter((c) => !c.mine && match(c.name));
-  const mineAll = customers.filter((c) => c.mine).length;
+  const mine = myCustomers(customers).filter((c) => match(c.name));
+  const other = otherCustomers(customers).filter((c) => match(c.name));
+  const mineAll = myCustomers(customers).length;
 
   const Row = (p: { label: React.ReactNode; on?: boolean; onClick: () => void; tags?: React.ReactNode; next?: boolean; testid?: string }) => (
     <button type="button" className={cx("ssheet-row", p.on && "on")} aria-current={p.on ? "true" : undefined} onClick={p.onClick} data-testid={p.testid}>
@@ -132,6 +135,8 @@ export function ScopeSheet({ open, customers, value, onApply, onClose }: ScopeSh
               ))}
             </>
           )}
+          {/* in the flow under the rows: it never covers the list, the header or the button below */}
+          <ScopeLegend className="ssheet-leg" open={legend} onToggle={() => setLegend((l) => !l)} />
         </div>
         {s === 2 ? (
           <div className="ssheet-foot"><button type="button" className="btn pri" onClick={() => onApply({ customer: customer!.slug })}>Use {customer!.name} only</button></div>

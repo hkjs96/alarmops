@@ -153,7 +153,7 @@ test.describe("filter", () => {
     await expect(page).toHaveURL(/\?customer=mirae&project=core&service=checkout$/);
     await expect(page.locator(".sline-desk").first()).toHaveText("MPMirae Pay×›Core×›Checkout×");
     await expect(page.getByTestId("incident-row")).toHaveCount(0);
-    await expect(page.getByText("No open incidents in Mirae Pay › Core › Checkout.")).toBeVisible();
+    await expect(page.getByText("No active incidents in Mirae Pay › Core › Checkout.")).toBeVisible();
     await expect(outside(page)).toHaveText("Outside this view: 4 open (1 from an unmapped account) · 3 acknowledged");
 
     // × clears one level
@@ -538,6 +538,7 @@ test.describe("acknowledge from the row", () => {
     await expect(badge(page)).toContainText("3");
     await expect(row.getByRole("button", { name: "Undo acknowledge" })).toBeVisible();
     await expect(page.getByRole("treeitem", { name: /^Daon Retail$/ })).toBeVisible(); // no open count left on the row
+    await page.waitForTimeout(700); // a toast's button is armed 600 ms after it appears (it may come up under a second tap)
     await page.locator(".toast").getByRole("button", { name: "Undo" }).click();
     await expect(badge(page)).toContainText("4");
     await expect(row.getByRole("button", { name: /^Acknowledge/ })).toBeVisible();

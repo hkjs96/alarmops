@@ -83,7 +83,7 @@ describe("panel route", () => {
     expect(panelRouteMatches(r("-", []), { customer: null, project: null, service: null })).toBe(true);
   });
   it("every fixture incident has a parseable, matching panel path", async () => {
-    const all = [...(await api().listIncidents({ status: "open" })).items, ...(await api().listIncidents({ status: "RESOLVED" })).items];
+    const all = [...(await api().listIncidents({ status: "active" })).items, ...(await api().listIncidents({ status: "RESOLVED" })).items];
     expect(all.length).toBeGreaterThan(20);
     for (const i of all) {
       const segs = incidentPanelPath(i.org, i.id).split("/").slice(2);
@@ -119,7 +119,7 @@ describe("mock scope tree", () => {
   it("tree total of open incidents + unmapped = the badge", async () => {
     const a = api();
     const t = (await a.scopeTree()).customers;
-    const all = await a.listIncidents({ status: "open" });
+    const all = await a.listIncidents({ status: "active" });
     const badge = all.counts.triggered + all.counts.escalated;
     const unmapped = all.items.filter((i) => i.unmapped && i.status === "TRIGGERED").length;
     expect(t.reduce((n, c) => n + c.openIncidents, 0) + unmapped).toBe(badge);
@@ -133,32 +133,32 @@ describe("mock scope tree", () => {
 
 describe("outside this view", () => {
   it("is null without a scope filter", async () => {
-    expect((await api().listIncidents({ status: "open" })).outside).toBeNull();
-    expect((await api().listIncidents({ status: "open", severity: "SEV_1" })).outside).toBeNull();
+    expect((await api().listIncidents({ status: "active" })).outside).toBeNull();
+    expect((await api().listIncidents({ status: "active", severity: "SEV_1" })).outside).toBeNull();
   });
   it("matches the mockup's numbers", async () => {
     const a = api();
     // default: 7 listed, badge 4
-    expect((await a.listIncidents({ status: "open" })).items).toHaveLength(7);
+    expect((await a.listIncidents({ status: "active" })).items).toHaveLength(7);
     // My customers (Haeun): Mirae, Bora and the unmapped account stay → 2 open · 2 acknowledged outside
-    const my = await a.listIncidents({ status: "open", mine: true });
+    const my = await a.listIncidents({ status: "active", mine: true });
     expect(my.items).toHaveLength(3);
     expect(my.outside).toEqual({ open: 2, unmapped: 0, acknowledged: 2 });
     // Mirae Pay: 3 open (1 from an unmapped account) · 3 acknowledged
-    const mirae = await a.listIncidents({ status: "open", customer: "mirae" });
+    const mirae = await a.listIncidents({ status: "active", customer: "mirae" });
     expect(mirae.items).toHaveLength(1);
     expect(mirae.outside).toEqual({ open: 3, unmapped: 1, acknowledged: 3 });
     // Daon Retail › Commerce › Checkout: 4 open (1 unmapped) · 2 acknowledged
-    const co = await a.listIncidents({ status: "open", customer: "daon", project: "commerce", service: "checkout" });
+    const co = await a.listIncidents({ status: "active", customer: "daon", project: "commerce", service: "checkout" });
     expect(co.items.map((i) => i.title)).toEqual(["grafana: Checkout p95 latency above 800 ms"]);
     expect(co.outside).toEqual({ open: 4, unmapped: 1, acknowledged: 2 });
     // a customer with no incidents of its own hides everything
-    expect((await a.listIncidents({ status: "open", customer: "ara" })).outside).toEqual({ open: 4, unmapped: 1, acknowledged: 3 });
+    expect((await a.listIncidents({ status: "active", customer: "ara" })).outside).toEqual({ open: 4, unmapped: 1, acknowledged: 3 });
   });
   it("open in view + open outside = badge, for every scope", async () => {
     const a = api(34);
     const t = (await a.scopeTree()).customers;
-    const all = await a.listIncidents({ status: "open" });
+    const all = await a.listIncidents({ status: "active" });
     const badge = all.counts.triggered + all.counts.escalated;
     const scopes: { customer?: string; project?: string; service?: string; mine?: boolean }[] = [{ mine: true }];
     for (const c of t) {
@@ -170,8 +170,9 @@ describe("outside this view", () => {
     }
     expect(scopes.length).toBeGreaterThan(100);
     for (const s of scopes) {
-      const r = await a.listIncidents({ status: "open", ...s });
-      const openInView = r.counts.triggered + r.counts.escalated;
+      const r = await a.listIncidents({ status: "active", ...s });
+      const openInView = r.counts.open; // the contract's invariant: counts.open + outside.open = the badge
+      expect(r.counts.open).toBe(r.counts.triggered + r.counts.escalated);
       expect(openInView + r.outside!.open, JSON.stringify(s)).toBe(badge);
       expect(r.counts.acknowledged + r.outside!.acknowledged, JSON.stringify(s)).toBe(all.counts.acknowledged);
       expect(r.outside!.unmapped).toBeLessThanOrEqual(r.outside!.open);

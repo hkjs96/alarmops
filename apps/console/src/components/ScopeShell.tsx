@@ -3,7 +3,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  OutsideLine, ScopeLine, ScopeSheet, ScopeTree, clampTreeWidth, cx, normalizeSel, readSession, resolveSel, sameSel, selKey, selLabel, writeSession,
+  OutsideLine, ScopeLine, ScopeSearch, ScopeSheet, ScopeTree, clampTreeWidth, cx, normalizeSel, readSession, resolveSel, sameSel, selKey, selLabel, writeSession,
   TREE_DEFAULT_WIDTH, type ScopeCustomerNode, type ScopeLevel, type ScopeSel,
 } from "@alarmops/design-system";
 import type { OutsideCounts } from "@/lib/api/types";
@@ -11,15 +11,13 @@ import { clearLevel, isPanelPath, parseScopeParams, scopeQuery } from "@/lib/sco
 import { ShellContext, type ShellApi, type ToastAction } from "./ShellContext";
 import { NotFoundBody } from "./NotFoundBody";
 import { TopNav } from "./TopNav";
-
-/** Below this width, opening a panel collapses the tree to its rail (the user can open it again beside the panel). */
-export const AUTO_RAIL_BELOW = 1408;
-/** Without a remembered choice the tree starts as a rail up to this width. */
-const DEFAULT_RAIL_MAX = 1100;
-const PREFS_KEY = "ao-scope-shell";
+import { sectionFor } from "@/lib/nav";
+import { AUTO_RAIL_BELOW, DEFAULT_RAIL_MAX, PREFS_KEY } from "@/lib/shell-prefs";
 
 interface Prefs { col: boolean | null; w: number }
-interface Toast { id: number; text: string; action?: ToastAction }
+interface Toast { id: number; text: string; action?: ToastAction; at: number }
+/** A toast's button does nothing this soon after the toast appeared: it may have come up under a second tap. */
+const TOAST_ARM_MS = 600;
 
 export function ScopeShell({ customers, userName, openCount, children }: { customers: ScopeCustomerNode[]; userName: string; openCount: number; children: ReactNode }) {
   const pathname = usePathname();
@@ -45,6 +43,8 @@ export function ScopeShell({ customers, userName, openCount, children }: { custo
   const [prefs, setPrefs] = useState<Prefs>({ col: null, w: TREE_DEFAULT_WIDTH });
   const [expandedBesidePanel, setExpandedBesidePanel] = useState(false);
   const [sheet, setSheet] = useState(false);
+  const [finder, setFinder] = useState(false);
+  const [acks, setAcks] = useState<Record<string, string>>({});
   const [outside, setOutside] = useState<OutsideCounts | null>(null);
   const [toastState, setToast] = useState<Toast | null>(null);
   const focusTitle = useRef(false);
@@ -81,14 +81,21 @@ export function ScopeShell({ customers, userName, openCount, children }: { custo
     }
   };
 
-  const toast = useCallback((text: string, action?: ToastAction) => setToast({ id: Date.now(), text, action }), []);
+  const toast = useCallback((text: string, action?: ToastAction) => setToast({ id: Date.now(), text, action, at: performance.now() }), []);
   useEffect(() => {
     if (!toastState) return;
     const t = setTimeout(() => setToast(null), 9000);
     return () => clearTimeout(t);
   }, [toastState]);
 
-  const setFilter = (next: ScopeSel, from: "tree" | "line" | "sheet") => {
+  const setAck = useCallback((id: string, token: string | null) => setAcks((a) => {
+    if (token ? a[id] === token : !(id in a)) return a;
+    const n = { ...a };
+    if (token) n[id] = token; else delete n[id];
+    return n;
+  }), []);
+
+  const setFilter = (next: ScopeSel, from: "tree" | "line" | "sheet" | "search") => {
     const n = normalizeSel(next);
     if (sameSel(n, sel) && valid) return; // choosing the filter that is already set leaves an open panel alone
     const keep = new URLSearchParams(search);
@@ -105,13 +112,41 @@ export function ScopeShell({ customers, userName, openCount, children }: { custo
     document.querySelector<HTMLElement>("#main h1")?.focus();
   }, [key, pathname]);
 
+  const clearToast = useCallback(() => setToast(null), []);
   const api: ShellApi = useMemo(
-    () => ({ sel, label, filtered, totalCustomers: customers.length, toast, setOutside }),
-    [sel, label, filtered, customers.length, toast],
+    () => ({ sel, label, filtered, totalCustomers: customers.length, toast, clearToast, setOutside, acks, setAck }),
+    [sel, label, filtered, customers.length, toast, clearToast, acks, setAck],
   );
 
+  // Ctrl/⌘K opens "Filter to…" on every screen that has a filter; Esc with the focus in the tree closes an open panel
+  const listHref = listPath + scopeQuery(sel, new URLSearchParams(search));
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "k") {
+        if (settings) return;
+        e.preventDefault();
+        setSheet(false);
+        setFinder((v) => !v);
+        return;
+      }
+      if (e.key === "Escape" && !e.defaultPrevented && panelOpen && (e.target as HTMLElement | null)?.closest?.(".stree")) {
+        e.preventDefault();
+        router.push(listHref);
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [settings, panelOpen, listHref, router]);
+
   const allHref = listPath + scopeQuery({}, new URLSearchParams(search));
-  const outsideNode = outside && filtered && valid ? (
+  // the list's counts arrive after the first paint; the line keeps its place until then, so nothing jumps (QA P2-2)
+  const expectsOutside = filtered && valid && !settings && (pathname === "/incidents" || panelOpen);
+  const outsideNode = !outside && expectsOutside ? (
+    <span className="outside-w" aria-hidden="true">
+      <span className="outside calm pending" data-testid="outside-pending">Outside this view: …</span>
+      <span className="outside-i pending" />
+    </span>
+  ) : outside && filtered && valid ? (
     <OutsideLine
       open={outside.open} unmapped={outside.unmapped} acknowledged={outside.acknowledged} href={allHref}
       filterLabel={label} totalCustomers={customers.length}
@@ -128,8 +163,8 @@ export function ScopeShell({ customers, userName, openCount, children }: { custo
 
   return (
     <ShellContext.Provider value={api}>
-      <div className={cx("shell", ready && "ready", settings && "no-tree")} data-panel={panelOpen ? "1" : "0"} data-rail={rail ? "1" : "0"}>
-        <TopNav openCount={openCount} userName={userName} scopeQuery={scopeQuery(sel)} />
+      <div className={cx("shell", mounted && "mounted", ready && "ready", settings && "no-tree")} data-panel={panelOpen ? "1" : "0"} data-rail={rail ? "1" : "0"}>
+        <TopNav openCount={openCount} userName={userName} scopeQuery={scopeQuery(sel)} onOpenFinder={settings ? undefined : () => { setToast(null); setFinder(true); }} />
         {settings ? (
           <ScopeLine totalCustomers={customers.length} mineCustomers={mineCount} onClear={() => undefined} locked={<><b>MSP-wide settings</b> · all {customers.length} customers</>} />
         ) : (
@@ -138,6 +173,7 @@ export function ScopeShell({ customers, userName, openCount, children }: { custo
             totalCustomers={customers.length} mineCustomers={mineCount}
             onClear={(level: ScopeLevel) => setFilter(clearLevel(sel, level), "line")}
             onOpenPicker={() => { setToast(null); setSheet(true); }}
+            onOpenSearch={() => { setToast(null); setFinder(true); }}
             outside={outsideNode}
           />
         )}
@@ -155,11 +191,17 @@ export function ScopeShell({ customers, userName, openCount, children }: { custo
         {settings ? null : (
           <ScopeSheet open={sheet} customers={customers} value={sel} onClose={() => setSheet(false)} onApply={(s) => { setSheet(false); setFilter(s, "sheet"); }} />
         )}
-        {toastState && !sheet ? (
-          <div className="toast" role="status" key={toastState.id}>
-            <span>{toastState.text}</span>
+        {settings ? null : (
+          <ScopeSearch
+            open={finder} customers={customers} screen={sectionFor(listPath)?.label ?? "this screen"}
+            onClose={() => setFinder(false)} onPick={(s) => { setFinder(false); setFilter(s, "search"); }}
+          />
+        )}
+        {toastState && !sheet && !finder ? (
+          <div className="toast" role="status" key={toastState.id} data-testid="toast">
+            <span className="toast-t" title={toastState.text}>{toastState.text}</span>
             {toastState.action?.href ? <Link className="btn sm" href={toastState.action.href} onClick={() => setToast(null)}>{toastState.action.label}</Link> : null}
-            {toastState.action?.onAction ? <button type="button" className="btn sm" onClick={() => { const a = toastState.action!.onAction!; setToast(null); a(); }}>{toastState.action.label}</button> : null}
+            {toastState.action?.onAction ? <button type="button" className="btn sm" onClick={(e) => { if (e.detail > 0 && performance.now() - toastState.at < TOAST_ARM_MS) return; const a = toastState.action!.onAction!; setToast(null); a(); }}>{toastState.action.label}</button> : null}
             <button type="button" className="btn sm ghost" aria-label="Dismiss" onClick={() => setToast(null)}>×</button>
           </div>
         ) : null}

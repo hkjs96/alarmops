@@ -1,7 +1,7 @@
 import { ApiError, type ConsoleApi } from "../client";
-import type { BulkResult, IncidentDetail, IncidentEvent, IncidentListItem, IncidentListQuery, IncidentStatus, ScopeTreeResponse } from "../types";
-import { computeCounts, matchesBaseFilters, matchesStatus, needsAck, outsideCounts, sortIncidents } from "../../incidents";
-import { isSlug } from "../../scope";
+import type { AckResult, BulkItem, BulkResult, IncidentDetail, IncidentEvent, IncidentListItem, IncidentListQuery, IncidentStatus, ScopeTreeResponse } from "../types";
+import { computeCounts, isOpen, matchesBaseFilters, matchesStatus, outsideCounts, sortIncidents } from "../../incidents";
+import { isSlug } from "../../validate";
 import * as fx from "./fixtures";
 import { customers14, customers34, type FxCustomer } from "./scope-fixtures";
 
@@ -81,6 +81,7 @@ export function createMockApi(store: Store = createStore(), clock: () => number 
     i.version += 1;
     if (to === "ACKNOWLEDGED") {
       i.acknowledgedAt = at;
+      i.acknowledgedBy = { contactId: ME.contactId, name: ME.name };
       i.assigneeNote = `ack'd ${new Date(clock() + 9 * 3600_000).toISOString().slice(11, 16)}`;
       if (i.escalation) i.escalation = { ...i.escalation, nextAt: null, doneAt: at, summary: "stopped" };
     } else {
@@ -92,6 +93,13 @@ export function createMockApi(store: Store = createStore(), clock: () => number 
       id: `ev_${i.version}_${to}`, at, kind: to === "ACKNOWLEDGED" ? "ACKED" : "RESOLVED", actorType: "USER", actorId: ME.id,
       message: `${to === "ACKNOWLEDGED" ? "Acknowledged" : "Resolved"} by ${ME.name}`,
     });
+  }
+
+  /** undo token for a single ack or a bulk run: 5 minutes */
+  function remember(snapshot: IncidentListItem[]): string {
+    const undoToken = `undo_${++reqSeq}`;
+    store.undo.set(undoToken, { snapshot, exp: clock() + 5 * 60_000 });
+    return undoToken;
   }
 
   function checkVersion(i: IncidentListItem, version: number) {
@@ -127,12 +135,13 @@ export function createMockApi(store: Store = createStore(), clock: () => number 
       if (!find(id)) throw notFound();
       return { items: structuredClone(fx.notifications[id] ?? []), nextCursor: null };
     },
-    async ack(id, version) {
+    async ack(id, version): Promise<AckResult> {
       const i = find(id);
       if (!i) throw notFound();
       checkVersion(i, version);
+      const snapshot = [structuredClone(i)];
       transition(i, "ACKNOWLEDGED");
-      return detail(i);
+      return { incident: detail(i), undoToken: remember(snapshot) };
     },
     async resolve(id, version) {
       const i = find(id);
@@ -150,26 +159,33 @@ export function createMockApi(store: Store = createStore(), clock: () => number 
       i.escalation = { ...i.escalation, step: Math.min(i.escalation.step + 1, i.escalation.totalSteps - 1) };
       return detail(i);
     },
-    async bulkPreview(action, ids) {
+    async bulkPreview(action, items: BulkItem[]) {
       const targets = [];
       const skipped = [];
-      for (const id of ids) {
+      for (const { id, version } of items) {
         const i = find(id);
         if (!i) { skipped.push({ id, reason: "Not found" }); continue; }
+        if (i.version !== version) { skipped.push({ id, reason: "Changed since you loaded the list" }); continue; }
         const ok = action === "ack" ? i.status === "TRIGGERED" : i.status !== "RESOLVED";
         if (ok) targets.push({ id: i.id, key: i.key, title: i.title, status: i.status });
         else skipped.push({ id, reason: action === "ack" ? "Already acknowledged" : "Already resolved" });
       }
       return { action, targets, skipped };
     },
-    async bulkExecute(action, ids): Promise<BulkResult> {
-      const pre = await this.bulkPreview(action, ids);
-      const snapshot = structuredClone(pre.targets.map((t) => find(t.id)!));
-      for (const t of pre.targets) transition(find(t.id)!, action === "ack" ? "ACKNOWLEDGED" : "RESOLVED");
-      const undoToken = `undo_${++reqSeq}`;
-      const exp = clock() + 5 * 60_000;
-      store.undo.set(undoToken, { snapshot, exp });
-      return { updated: pre.targets.map((t) => t.id), undoToken, undoExpiresAt: new Date(exp).toISOString() };
+    async bulkExecute(action, items: BulkItem[]): Promise<BulkResult> {
+      // a version that moved on is skipped and reported; the rest runs (API-CONTRACT §8.1)
+      const done: IncidentListItem[] = [];
+      const conflicts: BulkResult["conflicts"] = [];
+      for (const { id, version } of items) {
+        const i = find(id);
+        if (!i) conflicts.push({ id, code: "NOT_FOUND" });
+        else if (i.version !== version) conflicts.push({ id, code: "VERSION_CONFLICT" });
+        else if (action === "ack" ? i.status !== "TRIGGERED" : i.status === "RESOLVED") conflicts.push({ id, code: "INVALID_TRANSITION" });
+        else done.push(i);
+      }
+      const snapshot = structuredClone(done);
+      for (const i of done) transition(i, action === "ack" ? "ACKNOWLEDGED" : "RESOLVED");
+      return { done: done.map((i) => i.id), conflicts, undoToken: remember(snapshot) };
     },
     async bulkUndo(undoToken) {
       const u = store.undo.get(undoToken);
@@ -178,12 +194,14 @@ export function createMockApi(store: Store = createStore(), clock: () => number 
       for (const snap of u.snapshot) {
         const idx = store.incidents.findIndex((i) => i.id === snap.id);
         if (idx >= 0) store.incidents[idx] = { ...snap, version: store.incidents[idx]!.version + 1 };
+        const tl = store.timelines[snap.id];
+        if (tl?.[0] && (tl[0].kind === "ACKED" || tl[0].kind === "RESOLVED") && tl[0].actorId === ME.id) tl.shift();
       }
       return { restored: u.snapshot.map((s) => s.id) };
     },
     async oncallNow() { return structuredClone(fx.oncallNow); },
     async scopeTree(): Promise<ScopeTreeResponse> {
-      const open = store.incidents.filter(needsAck);
+      const open = store.incidents.filter(isOpen);
       const n = (f: (i: IncidentListItem) => boolean) => open.filter(f).length;
       return {
         customers: store.customers.map((c) => ({

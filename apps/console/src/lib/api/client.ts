@@ -1,5 +1,5 @@
 import type {
-  BulkPreview, BulkResult, IncidentDetail, IncidentEvent, IncidentListQuery, IncidentListResponse, Me,
+  AckResult, BulkItem, BulkPreview, BulkResult, IncidentDetail, IncidentEvent, IncidentListQuery, IncidentListResponse, Me,
   NotificationLogEntry, OncallNowEntry, Paginated, ResolveKind, ApiErrorBody, ScopeTreeResponse,
 } from "./types";
 
@@ -15,6 +15,12 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Read paths: a 403 is treated exactly like a 404 (security R-5). The contract says reads never answer 403, but if a
+ * backend slips, "you may not see this" must not look different from "this does not exist".
+ */
+export const isHidden = (e: unknown): boolean => e instanceof ApiError && (e.status === 404 || e.status === 403);
+
 /** Typed surface of API-CONTRACT §8.1 the console uses (plus /me and /oncall/now for the list side panel). */
 export interface ConsoleApi {
   me(): Promise<Me>;
@@ -22,14 +28,14 @@ export interface ConsoleApi {
   getIncident(id: string): Promise<IncidentDetail>;
   getTimeline(id: string, cursor?: string): Promise<Paginated<IncidentEvent>>;
   getNotifications(id: string, cursor?: string): Promise<Paginated<NotificationLogEntry>>;
-  ack(id: string, version: number): Promise<IncidentDetail>;
+  ack(id: string, version: number): Promise<AckResult>;
   resolve(id: string, version: number, body: { kind?: ResolveKind; note?: string }): Promise<IncidentDetail>;
   escalate(id: string): Promise<IncidentDetail>;
-  bulkPreview(action: "ack" | "resolve", ids: string[]): Promise<BulkPreview>;
-  bulkExecute(action: "ack" | "resolve", ids: string[]): Promise<BulkResult>;
+  bulkPreview(action: "ack" | "resolve", items: BulkItem[]): Promise<BulkPreview>;
+  bulkExecute(action: "ack" | "resolve", items: BulkItem[]): Promise<BulkResult>;
   bulkUndo(undoToken: string): Promise<{ restored: string[] }>;
   oncallNow(customerId?: string): Promise<OncallNowEntry[]>;
-  /** PROPOSED (not in API-CONTRACT yet): GET /scope-tree */
+  /** GET /scope-tree (API-CONTRACT §8.0) */
   scopeTree(): Promise<ScopeTreeResponse>;
 }
 
@@ -77,8 +83,8 @@ export function createHttpApi(opts: { baseUrl: string; fetch?: typeof fetch; hea
     ack: (id, version) => call("POST", `/incidents/${enc(id)}/ack`, {}, { "If-Match": String(version) }),
     resolve: (id, version, body) => call("POST", `/incidents/${enc(id)}/resolve`, body, { "If-Match": String(version) }),
     escalate: (id) => call("POST", `/incidents/${enc(id)}/escalate`, {}),
-    bulkPreview: (action, ids) => call("POST", "/incidents/bulk", { action, ids, preview: true }),
-    bulkExecute: (action, ids) => call("POST", "/incidents/bulk", { action, ids, preview: false }),
+    bulkPreview: (action, items) => call("POST", "/incidents/bulk", { action, items, preview: true }),
+    bulkExecute: (action, items) => call("POST", "/incidents/bulk", { action, items, preview: false }),
     bulkUndo: (undoToken) => call("POST", "/incidents/bulk/undo", { undoToken }),
     oncallNow: (customerId) => call("GET", "/oncall/now" + toQuery({ customerId })),
     scopeTree: () => call("GET", "/scope-tree"),
