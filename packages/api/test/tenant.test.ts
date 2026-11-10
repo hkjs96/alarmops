@@ -38,7 +38,7 @@ describe('GET /scope-tree — the response is the isolation (security R-1)', () 
     expect(body(await w.call(nobody, 'GET', '/scope-tree'))).toEqual({ customers: [] });
     // '*' is never honoured for a customer user, and a malformed context fails closed.
     expect(body(await w.call({ ...nobody, customerIds: '*' }, 'GET', '/scope-tree'))).toEqual({ customers: [] });
-    expect(body(await w.call({ ...nobody, customerIds: undefined as never }, 'GET', '/incidents')).items).toEqual([]);
+    expect((await w.call({ ...nobody, customerIds: undefined as never }, 'GET', '/incidents')).status).toBe(401); // not a session at all (B-1)
     const limited: AuthContext = { ...USERS.viewer, customerIds: ['cus_hanbit'] };
     expect(body(await w.call(limited, 'GET', '/scope-tree')).customers.map((c: any) => c.slug)).toEqual(['hanbit']);
   });

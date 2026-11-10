@@ -6,6 +6,7 @@
 import type {
   AuditInput, Contact, DeliveryLog, IncidentCommit, IncidentEventInput, IncidentRow, MaintenanceWindow, PagingConfig, PagingWorld, Severity, Source, SuppressionPolicy,
 } from '@alarmops/core';
+import type { UserInfo } from './audience.js';
 import type { ScopeFilter } from './auth.js';
 
 export interface OrgNode { id: string; name: string; slug: string }
@@ -69,6 +70,8 @@ export interface UndoRecord {
 export interface NotifiedPerson { contactId: string; name: string; scope: { level: 'CUSTOMER' | 'PROJECT' | 'SERVICE'; id: string; name: string } }
 
 export interface StoredResponse { status: number; headers: Record<string, string>; body: unknown }
+/** `fingerprint` binds the key to the request it was first used for (method + path + If-Match + body hash, R-5). */
+export interface IdempotentEntry { fingerprint: string; res: StoredResponse }
 
 export interface ApiRepository {
   // ── org / scope ──
@@ -78,7 +81,8 @@ export interface ApiRepository {
   /** Customers the session user is a Responder for (direct or via template). Computed from the user id only. */
   responderCustomerIds(userId: string): Promise<string[]>;
   contactIdForUser(userId: string): Promise<string | null>;
-  userNames(userIds: string[]): Promise<Map<string, string>>;
+  /** Name and kind of session users (INTERNAL staff or a customer's portal user) — the serializers decide what leaves. */
+  userDirectory(userIds: string[]): Promise<Map<string, UserInfo>>;
   /** Slack channel for the customer is set and verified (paging health input). */
   slackChannelVerified(customerId: string): Promise<boolean>;
   /** Resource → org position, inside the scope. */
@@ -101,7 +105,11 @@ export interface ApiRepository {
   // ── paging ──
   /** Configs + responders/rotations/overrides/leaves of one customer. Caller has already checked the customer is in scope. */
   pagingContext(customerId: string): Promise<{ configs: PagingConfig[]; world: PagingWorld }>;
-  /** Insert (expectedVersion null) or replace `WHERE version = expected`. Returns the stored row (version bumped). */
+  /**
+   * Insert (expectedVersion null) or replace `WHERE version = expected`. Returns the stored row (version bumped).
+   * Versions never restart (N-3): a row created again after a delete continues after the deleted row's last
+   * version (soft delete or a version sequence per (customer, scope)), so an If-Match from before the delete can never match.
+   */
   savePagingConfig(cfg: PagingConfig, expectedVersion: number | null, audit: AuditInput): Promise<PagingConfig | 'CONFLICT'>;
   deletePagingConfig(id: string, expectedVersion: number, audit: AuditInput): Promise<'OK' | 'CONFLICT'>;
   /** Any contact by id — used to tell CROSS_CUSTOMER from "unknown" when validating a step target. Never returned to the client. */
@@ -111,6 +119,6 @@ export interface ApiRepository {
   notifiedPeople(customerId: string, path: { projectId?: string | null; serviceId?: string | null }): Promise<NotifiedPerson[]>;
 
   // ── idempotency (API-CONTRACT §2 "멱등", 24h) ──
-  getIdempotent(key: string, now: Date): Promise<StoredResponse | null>;
-  putIdempotent(key: string, res: StoredResponse, expiresAt: Date): Promise<void>;
+  getIdempotent(key: string, now: Date): Promise<IdempotentEntry | null>;
+  putIdempotent(key: string, entry: IdempotentEntry, expiresAt: Date): Promise<void>;
 }

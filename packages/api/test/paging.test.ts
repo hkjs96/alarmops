@@ -193,9 +193,10 @@ describe('GET /oncall/paging-path — "who gets paged for…" (same function as 
   it('search candidates stay inside the caller’s customers', async () => {
     const w = await world();
     w.store.services.set('svc_pay2', { id: 'svc_pay2', customerId: 'cus_hanbit', projectId: 'prj_shop', name: 'Payments gateway', slug: 'payments-gateway' });
-    const r = body(await w.call(USERS.yuna, 'GET', '/oncall/paging-path', { query: { q: 'pay' } }));
-    expect(r.path[0]).toMatchObject({ id: 'svc_pay' }); // one match for her: the other customer's service is not a candidate
-    expect(body(await w.call(USERS.yuna, 'GET', '/oncall/paging-path', { query: { q: 'shop' } })).candidates).toEqual([]);
+    const miraeOnly = { ...USERS.viewer, customerIds: ['cus_mirae'] }; // staff limited to one customer (the route is INTERNAL only)
+    const r = body(await w.call(miraeOnly, 'GET', '/oncall/paging-path', { query: { q: 'pay' } }));
+    expect(r.path[0]).toMatchObject({ id: 'svc_pay' }); // one match: the other customer's service is not a candidate
+    expect(body(await w.call(miraeOnly, 'GET', '/oncall/paging-path', { query: { q: 'shop' } })).candidates).toEqual([]);
   });
 
   it('known-bugs 7-3 / 7-5: nothing configured up the chain is "nobody is paged", never "inherited"', async () => {

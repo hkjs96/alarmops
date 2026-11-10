@@ -4,7 +4,8 @@
  */
 import { MemoryTickStore, incidentMute, parseSnapshot, type AuditInput, type IncidentRow, type PagingConfig } from '@alarmops/core';
 import { inScope, nodeVisible, seesCustomer, type ScopeFilter } from './auth.js';
-import type { AlertMemberRow, ApiRepository, IncidentFilter, IncidentPage, NodeFilter, NotifiedPerson, OpenCounts, StatusCounts, StoredResponse, UndoRecord } from './repo.js';
+import type { UserInfo } from './audience.js';
+import type { AlertMemberRow, ApiRepository, IdempotentEntry, IncidentFilter, IncidentPage, NodeFilter, NotifiedPerson, OpenCounts, StatusCounts, UndoRecord } from './repo.js';
 
 export interface ContactScopeRow { contactId: string; customerId: string; scopeType: 'CUSTOMER' | 'PROJECT' | 'SERVICE'; scopeId: string; role: 'NOTIFY' | 'APPROVER' | 'PORTAL_USER' }
 
@@ -14,7 +15,9 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
   resources = new Map<string, { id: string; name: string; customerId: string; serviceId: string | null }>();
   verifiedSlack = new Set<string>();
   undo = new Map<string, UndoRecord>();
-  idempotent = new Map<string, { res: StoredResponse; expiresAt: Date }>();
+  idempotent = new Map<string, { entry: IdempotentEntry; expiresAt: Date }>();
+  /** Last version of deleted paging configs, so a re-created one continues the sequence (N-3). */
+  configTombstones = new Map<string, number>();
   /** Counts scoped reads, so tests can assert that out-of-scope ids never reach an unscoped lookup. */
   reads: string[] = [];
 
@@ -42,7 +45,16 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     return contactId ? [...new Set(this.responders.filter((r) => r.contactId === contactId).map((r) => r.customerId))] : [];
   }
   async contactIdForUser(userId: string) { return this.users.get(userId)?.contactId ?? null; }
-  async userNames(ids: string[]) { return new Map(ids.flatMap((id) => (this.users.has(id) ? [[id, this.users.get(id)!.name] as const] : []))); }
+  async userDirectory(ids: string[]) {
+    const out = new Map<string, UserInfo>();
+    for (const id of ids) {
+      const u = this.users.get(id);
+      if (!u) continue;
+      const c = u.contactId ? this.contacts.get(u.contactId) : undefined;
+      out.set(id, { name: u.name, kind: c?.kind === 'CUSTOMER' ? 'CUSTOMER' : 'INTERNAL', customerId: c?.kind === 'CUSTOMER' ? c.customerId : null });
+    }
+    return out;
+  }
   async slackChannelVerified(customerId: string) { return this.verifiedSlack.has(customerId); }
   async findResource(scope: ScopeFilter, id: string) {
     const r = this.resources.get(id);
@@ -138,7 +150,8 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
   async savePagingConfig(cfg: PagingConfig, expectedVersion: number | null, audit: AuditInput) {
     const i = this.configs.findIndex((c) => c.customerId === cfg.customerId && c.scopeType === cfg.scopeType && c.scopeId === cfg.scopeId);
     if (expectedVersion === null ? i >= 0 : i < 0 || this.configs[i]!.version !== expectedVersion) return 'CONFLICT' as const;
-    const stored: PagingConfig = { ...structuredClone(cfg), version: (expectedVersion ?? 0) + 1 };
+    const key = `${cfg.customerId}|${cfg.scopeType}|${cfg.scopeId}`;
+    const stored: PagingConfig = { ...structuredClone(cfg), version: (expectedVersion ?? this.configTombstones.get(key) ?? 0) + 1 };
     if (i >= 0) this.configs[i] = stored; else this.configs.push(stored);
     this.audits.push(audit);
     return structuredClone(stored);
@@ -146,7 +159,8 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
   async deletePagingConfig(id: string, expectedVersion: number, audit: AuditInput) {
     const i = this.configs.findIndex((c) => c.id === id);
     if (i < 0 || this.configs[i]!.version !== expectedVersion) return 'CONFLICT' as const;
-    this.configs.splice(i, 1);
+    const [gone] = this.configs.splice(i, 1);
+    this.configTombstones.set(`${gone!.customerId}|${gone!.scopeType}|${gone!.scopeId}`, gone!.version);
     this.audits.push(audit);
     return 'OK' as const;
   }
@@ -167,7 +181,7 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
   }
   async getIdempotent(key: string, now: Date) {
     const hit = this.idempotent.get(key);
-    return hit && hit.expiresAt.getTime() > now.getTime() ? structuredClone(hit.res) : null;
+    return hit && hit.expiresAt.getTime() > now.getTime() ? structuredClone(hit.entry) : null;
   }
-  async putIdempotent(key: string, res: StoredResponse, expiresAt: Date) { this.idempotent.set(key, { res: structuredClone(res), expiresAt }); }
+  async putIdempotent(key: string, entry: IdempotentEntry, expiresAt: Date) { this.idempotent.set(key, { entry: structuredClone(entry), expiresAt }); }
 }

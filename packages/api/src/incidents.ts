@@ -4,9 +4,10 @@
  */
 import { randomBytes } from 'node:crypto';
 import {
-  SEVERITIES, ack, escalationView, incidentMute, parseSnapshot, planEscalation, resolve, scheduleNext, unack,
+  MANUAL_ESCALATE_MIN_GAP_SEC, SEVERITIES, ack, escalationView, incidentMute, parseSnapshot, planEscalation, resolve, scheduleNext, unack,
   type IncidentCommit, type IncidentRow, type MaintenanceWindow, type Severity, type Source, type SuppressionPolicy,
 } from '@alarmops/core';
+import { DEFAULT_API_CONFIG, serializerFor, type ApiConfig, type EventCtx, type IncidentSerializer, type UserInfo } from './audience.js';
 import { requireAuth, requireRole, scopeOf, type AuthContext, type ScopeFilter } from './auth.js';
 import {
   ApiError, decodeCursor, encodeCursor, ifMatch, invalid, invalidTransition, isRecord, limitOf, notFound, ok, q, validation, versionConflict,
@@ -15,7 +16,7 @@ import {
 import type { ApiRepository, IncidentFilter, NodeFilter, OrgTree, UndoRecord } from './repo.js';
 import { resolveNodeFilter } from './scope.js';
 
-export interface Deps { repo: ApiRepository; now: () => Date }
+export interface Deps { repo: ApiRepository; now: () => Date; config?: ApiConfig }
 
 const UNDO_TTL_MS = 5 * 60_000;
 const BULK_MAX = 200;
@@ -30,14 +31,18 @@ interface ViewCtx {
   policy: SuppressionPolicy;
   org: OrgTree;
   windows: Map<string, MaintenanceWindow[]>;
-  names: Map<string, string>;
+  users: Map<string, UserInfo>;
+  /** The audience's serializer: every person, id and delivery detail in a response goes through it (audience.ts). */
+  ser: IncidentSerializer;
 }
+
+const eventCtx = (inc: IncidentRow, users: Map<string, UserInfo>): EventCtx => ({ incident: inc, snapshot: parseSnapshot(inc.assignmentSnapshot), users });
 
 async function viewCtx(deps: Deps, auth: AuthContext, scope: ScopeFilter, rows: IncidentRow[], now: Date): Promise<ViewCtx> {
   const windows = new Map<string, MaintenanceWindow[]>();
   for (const cid of new Set(rows.filter((r) => r.status !== 'RESOLVED').map((r) => r.customerId ?? ''))) windows.set(cid, await deps.repo.maintenanceWindows(cid || null, now));
   const userIds = [...new Set(rows.flatMap((r) => [r.acknowledgedBy, r.resolvedBy]).filter((x): x is string => !!x))];
-  return { auth, now, policy: await deps.repo.loadPolicy(), org: await deps.repo.orgTree(scope), windows, names: await deps.repo.userNames(userIds) };
+  return { auth, now, policy: await deps.repo.loadPolicy(), org: await deps.repo.orgTree(scope), windows, users: await deps.repo.userDirectory(userIds), ser: serializerFor(auth, deps.config ?? DEFAULT_API_CONFIG) };
 }
 
 const iso = (d: Date | null | undefined): string | null => (d ? d.toISOString() : null);
@@ -59,7 +64,7 @@ export function listItem(inc: IncidentRow, c: ViewCtx) {
   );
   const v = escalationView(inc, { now: c.now, renotifyAfterSec: c.policy.renotifyAfterSec, mutedUntil: inc.status === 'RESOLVED' ? null : mute?.endsAt ?? null });
   const first = snap?.steps[0]?.resolved[0];
-  const person = (id: string | null) => (id ? { contactId: id, name: c.names.get(id) ?? id } : null);
+  const ectx = eventCtx(inc, c.users);
   return {
     id: inc.id, number: inc.number, key: displayKey(inc), title: inc.title, severity: inc.severity, status: inc.status,
     escalated: inc.status === 'TRIGGERED' && v.escalated,
@@ -68,16 +73,22 @@ export function listItem(inc: IncidentRow, c: ViewCtx) {
     // Account ids are internal-only (security R-2).
     awsAccountIds: c.auth.kind === 'INTERNAL' ? inc.accountIds : [],
     resourceTypes: inc.resourceTypes, source: inc.source ?? 'CLOUDWATCH', memberCount: inc.memberCount,
-    assignee: first ? { contactId: first.contactId, name: first.name, via: first.via } : null,
+    assignee: first ? c.ser.assignee(first) : null,
     escalation: {
       /** PROPOSED: PAGING | MUTED | STOPPED_ACKED | STOPPED_RESOLVED | STOPPED_EXHAUSTED | NEVER_ESCALATING | UNREACHABLE */
       state: v.state, step: v.step, firedSteps: v.firedSteps, totalSteps: v.totalSteps, repeat: v.repeat, repeatCount: v.repeatCount,
-      nextAt: iso(v.nextAt), nextLabel: v.nextLabel, doneAt: iso(v.doneAt), baseAt: iso(v.baseAt), stoppedAt: iso(v.stoppedAt), renotifyAt: iso(v.renotifyAt),
+      nextAt: iso(v.nextAt), nextLabel: c.ser.nextLabel(inc, v.nextLabel), doneAt: iso(v.doneAt), baseAt: iso(v.baseAt), stoppedAt: iso(v.stoppedAt), renotifyAt: iso(v.renotifyAt),
       mutedByMaintenance: v.mutedByMaintenance,
     },
-    triggeredAt: inc.triggeredAt.toISOString(), acknowledgedAt: iso(inc.acknowledgedAt), acknowledgedBy: person(inc.acknowledgedBy),
+    triggeredAt: inc.triggeredAt.toISOString(), acknowledgedAt: iso(inc.acknowledgedAt), acknowledgedBy: c.ser.user(inc.acknowledgedBy, ectx),
     resolvedAt: iso(inc.resolvedAt), ...(inc.resolvedVia ? { resolvedVia: inc.resolvedVia } : {}), version: inc.version,
   };
+}
+
+/** Users who acted in these events, added to the directory the serializer reads names from. */
+async function actorsOf(deps: Deps, events: Array<{ actorType: string; actorId: string | null }>, known: Map<string, UserInfo>): Promise<Map<string, UserInfo>> {
+  const ids = [...new Set(events.filter((e) => e.actorType === 'USER' && e.actorId && !known.has(e.actorId)).map((e) => e.actorId!))];
+  return ids.length ? new Map([...known, ...(await deps.repo.userDirectory(ids))]) : known;
 }
 
 async function detailView(deps: Deps, auth: AuthContext, scope: ScopeFilter, inc: IncidentRow, now: Date) {
@@ -86,15 +97,13 @@ async function detailView(deps: Deps, auth: AuthContext, scope: ScopeFilter, inc
   const snap = parseSnapshot(inc.assignmentSnapshot);
   const events = await deps.repo.incidentEvents(scope, inc.id, { limit: 200 });
   const notes = await deps.repo.incidentNotifications(scope, inc.id, { limit: 1 });
-  const paged = events.rows.filter((e) => e.kind === 'NOTIFIED' || e.kind === 'ESCALATED').map((e) => ({ label: e.message, at: e.at.toISOString(), done: true }));
+  const ectx = eventCtx(inc, await actorsOf(deps, events.rows, c.users));
+  const paged = events.rows.filter((e) => e.kind === 'NOTIFIED' || e.kind === 'ESCALATED').map((e) => ({ label: c.ser.eventMessage(e, ectx), at: e.at.toISOString(), done: true }));
   if (item.escalation.nextAt && item.escalation.nextLabel) paged.push({ label: item.escalation.nextLabel, at: item.escalation.nextAt, done: false });
   return {
     ...item,
     alerts: (await deps.repo.incidentAlerts(scope, inc.id)).map((a) => ({ ...a, lastEventAt: a.lastEventAt.toISOString() })),
-    assignmentSnapshot: snap && {
-      capturedAt: snap.capturedAt, pagingConfigId: snap.pagingConfigId, planLabel: snap.planLabel, level: snap.level, repeatCount: snap.repeatCount,
-      steps: snap.steps.map((s) => ({ index: s.index, atMin: s.atMin, targetType: s.targetType, ...(s.targetId ? { targetId: s.targetId } : {}), resolved: s.resolved, channels: s.channels, ...(s.label ? { label: s.label } : {}) })),
-    },
+    assignmentSnapshot: snap && c.ser.snapshot(snap),
     why: null, suppression: [], remediation: null,
     rcaPlaceholder: { availableAfterPoc: true as const }, // D-14
     details: { source: inc.source ?? 'CLOUDWATCH', resource: inc.resourceTypes.join(', '), alarm: inc.title },
@@ -177,11 +186,13 @@ export async function getTimeline(req: ApiRequest, deps: Deps, id: string): Prom
   const scope = scopeOf(auth);
   const limit = limitOf(req);
   const after = decodeCursor(q(req, 'cursor'), isCursor);
-  await visibleIncident(deps, scope, id);
+  const inc = await visibleIncident(deps, scope, id);
   const page = await deps.repo.incidentEvents(scope, id, { limit, after });
   const last = page.rows[page.rows.length - 1];
+  const ser = serializerFor(auth, deps.config ?? DEFAULT_API_CONFIG);
+  const ectx = eventCtx(inc, await actorsOf(deps, page.rows, new Map()));
   return ok({
-    items: page.rows.map((e) => ({ id: e.id, at: e.at.toISOString(), kind: e.kind, actorType: e.actorType, actorId: e.actorId, message: e.message })),
+    items: page.rows.map((e) => ser.event(e, ectx)),
     nextCursor: page.hasMore && last ? encodeCursor({ t: last.at.toISOString(), id: last.id }) : null,
   });
 }
@@ -194,11 +205,10 @@ export async function getNotifications(req: ApiRequest, deps: Deps, id: string):
   await visibleIncident(deps, scope, id);
   const page = await deps.repo.incidentNotifications(scope, id, { limit, after });
   const last = page.rows[page.rows.length - 1];
+  // R-4: provider text and message ids are internal; every audience gets the mapped `reason` code.
+  const ser = serializerFor(auth, deps.config ?? DEFAULT_API_CONFIG);
   return ok({
-    items: page.rows.map((l) => ({
-      id: l.id, at: l.at.toISOString(), channel: l.channel, status: l.status, targetSummary: l.targetSummary, escalationStep: l.escalationStep, error: l.error,
-      providerMessageId: l.providerMessageId, attempt: l.attempt, warnings: l.warnings,
-    })),
+    items: page.rows.map((l) => ser.notification(l)),
     nextCursor: page.hasMore && last ? encodeCursor({ t: last.at.toISOString(), id: last.id }) : null,
   });
 }
@@ -206,12 +216,12 @@ export async function getNotifications(req: ApiRequest, deps: Deps, id: string):
 // ───────────────────────────── transitions ─────────────────────────────
 
 type Action = 'ack' | 'resolve' | 'escalate';
-type Outcome = { ok: true; commit: IncidentCommit } | { ok: false; code: 'INVALID_TRANSITION'; message: string };
+type Outcome = { ok: true; commit: IncidentCommit } | { ok: false; code: 'INVALID_TRANSITION'; message: string } | { ok: false; code: 'MUTED_BY_MAINTENANCE' | 'RATE_LIMITED'; message: string; details: Record<string, unknown> };
 
 const actorName = (auth: AuthContext): string => auth.name ?? auth.userId;
 
 /** Pure: what the action writes, given the row the caller's version matched. */
-function transition(action: Action, inc: IncidentRow, auth: AuthContext, now: Date, policy: SuppressionPolicy, requestId: string, body: { kind: ResolveKind | null; note: string | null }): Outcome {
+function transition(action: Action, inc: IncidentRow, auth: AuthContext, now: Date, policy: SuppressionPolicy, requestId: string, body: { kind: ResolveKind | null; note: string | null }, mutedUntil: Date | null = null): Outcome {
   const audit = (after: unknown) => ({
     at: now, customerId: inc.customerId, actorType: 'USER' as const, actorId: auth.userId, action: `incident.${action}`, targetType: 'Incident', targetId: inc.id,
     before: { status: inc.status, version: inc.version }, after, requestId,
@@ -233,10 +243,20 @@ function transition(action: Action, inc: IncidentRow, auth: AuthContext, now: Da
     } };
   }
   if (inc.status !== 'TRIGGERED') return { ok: false, code: 'INVALID_TRANSITION', message: 'Only a triggered incident can be escalated.' };
-  const plan = planEscalation(inc, { ...sched, force: { by: actorName(auth) } });
+  // R-7: at most one manual step per MANUAL_ESCALATE_MIN_GAP_SEC per incident, so a held button cannot run the whole ladder.
+  const sinceManual = inc.lastManualEscalationAt ? (now.getTime() - inc.lastManualEscalationAt.getTime()) / 1000 : Infinity;
+  if (sinceManual < MANUAL_ESCALATE_MIN_GAP_SEC) {
+    const retryAfterSec = Math.ceil(MANUAL_ESCALATE_MIN_GAP_SEC - sinceManual);
+    return { ok: false, code: 'RATE_LIMITED', message: `This incident was escalated manually a moment ago. Try again in ${retryAfterSec} s.`, details: { retryAfterSec } };
+  }
+  // R-7 / D-17: a maintenance window mutes manual escalation too. SEV-1 is never muted (mutedUntil is null for it).
+  const plan = planEscalation(inc, { ...sched, mutedUntil, force: { by: actorName(auth) } });
+  if (plan.kind === 'MUTED') {
+    return { ok: false, code: 'MUTED_BY_MAINTENANCE', message: `Paging for this incident is muted by a maintenance window until ${mutedUntil!.toISOString()}. Only SEV-1 incidents page during maintenance.`, details: { mutedUntil: mutedUntil!.toISOString() } };
+  }
   if (plan.kind !== 'STEP') return { ok: false, code: 'INVALID_TRANSITION', message: plan.kind === 'NONE' && plan.reason === 'NO_SNAPSHOT' ? 'No call order applies to this incident: there is nobody to escalate to.' : 'There is no further step to escalate to.' };
   return { ok: true, commit: {
-    row: { ...inc, ...plan.patch }, expectedVersion: inc.version, bump: true, jobs: plan.intents, audit: audit({ step: plan.stepIndex, repeat: plan.repeat }),
+    row: { ...inc, ...plan.patch, lastManualEscalationAt: now }, expectedVersion: inc.version, bump: true, jobs: plan.intents, audit: audit({ step: plan.stepIndex, repeat: plan.repeat, manual: true }),
     events: [{ incidentId: inc.id, customerId: inc.customerId, at: now, kind: plan.event.kind, actorType: 'USER', actorId: auth.userId, message: plan.event.message, data: plan.event.data }],
   } };
 }
@@ -269,8 +289,19 @@ export async function actOnIncident(req: ApiRequest, deps: Deps, id: string, act
   requireRole(auth, 'OPERATOR');
   if (inc.version !== version) throw versionConflict('Incident', inc.version);
   const now = deps.now();
-  const t = transition(action, inc, auth, now, await deps.repo.loadPolicy(), req.requestId, body);
-  if (!t.ok) throw invalidTransition(t.message);
+  let mutedUntil: Date | null = null;
+  if (action === 'escalate') {
+    mutedUntil = incidentMute(
+      { customerId: inc.customerId, projectId: inc.projectId, serviceId: inc.serviceId, accountIds: inc.accountIds, resourceTypes: inc.resourceTypes, severity: inc.severity },
+      await deps.repo.maintenanceWindows(inc.customerId, now), now,
+    )?.endsAt ?? null;
+  }
+  const t = transition(action, inc, auth, now, await deps.repo.loadPolicy(), req.requestId, body, mutedUntil);
+  if (!t.ok) {
+    if (t.code === 'RATE_LIMITED') throw new ApiError(429, t.code, t.message, t.details);
+    if (t.code === 'MUTED_BY_MAINTENANCE') throw new ApiError(409, t.code, t.message, t.details);
+    throw invalidTransition(t.message);
+  }
   const saved = await deps.repo.commitIncident(t.commit);
   if (saved === 'CONFLICT') throw versionConflict('Incident'); // the tick or someone else won between read and write
   const detail = await detailView(deps, auth, scope, saved, now);
@@ -340,6 +371,12 @@ export async function bulkIncidents(req: ApiRequest, deps: Deps): Promise<ApiRes
  * POST /incidents/bulk/undo — 5 minutes, the person who acted, and only items nobody touched since
  * (version unchanged). Unknown, used, expired and other people's tokens are the same 404.
  * An undone ack continues the ladder from the step where it stopped.
+ *
+ * Undo of an ack and pending pages (R-8). The ack cancelled the pages of the current step that had not gone out
+ * yet (queued or waiting for a retry → SKIPPED "acknowledged"). Undo puts exactly those back in the outbox, due
+ * now, with the attempts they had already used. It does not re-send pages that were delivered, does not revive
+ * pages of earlier steps or of other skip reasons, and does not move the schedule: the next step is still counted
+ * from the last page. A page whose retries ran out before the ack stays failed.
  */
 export async function undoIncidents(req: ApiRequest, deps: Deps): Promise<ApiResponse> {
   const auth = requireAuth(req);
@@ -370,7 +407,8 @@ export async function undoIncidents(req: ApiRequest, deps: Deps): Promise<ApiRes
     row = { ...row, nextEscalationAt: scheduleNext(row, { now, renotifyAfterSec: policy.renotifyAfterSec }) };
     const saved = await deps.repo.commitIncident({
       row, expectedVersion: inc.version, bump: true, ...(rec.action === 'ack' ? { memberEffect: 'UNACK' as const } : {}),
-      events: [{ incidentId: inc.id, customerId: inc.customerId, at: now, kind: 'NOTE', actorType: 'USER', actorId: auth.userId,
+      ...(rec.action === 'ack' && inc.escalationStep > 0 ? { restoreAckSkipped: { stepIndex: inc.escalationStep - 1, repeat: inc.escalationRepeat, at: now } } : {}),
+      events: [{ incidentId: inc.id, customerId: inc.customerId, at: now, kind: 'NOTE', actorType: 'USER', actorId: auth.userId, data: { note: rec.action === 'ack' ? 'UNDO_ACK' : 'UNDO_RESOLVE' },
         message: rec.action === 'ack' ? `Acknowledgement undone by ${actorName(auth)}. Paging continues.` : `Resolve undone by ${actorName(auth)}.` }],
       audit: { at: now, customerId: inc.customerId, actorType: 'USER', actorId: auth.userId, action: `incident.${rec.action}.undo`, targetType: 'Incident', targetId: inc.id, before: { status: inc.status }, after: { status: row.status }, requestId: req.requestId },
     });

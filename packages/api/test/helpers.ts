@@ -1,5 +1,5 @@
 import { Sim, T0, at, closedGroup, PATTERNS, seedWorld } from '../../core/test/world.js';
-import { createApi, MemoryApiStore, type ApiRequest, type ApiResponse, type AuthContext } from '../src/index.js';
+import { createApi, MemoryApiStore, type ApiConfig, type ApiRequest, type ApiResponse, type AuthContext } from '../src/index.js';
 
 export { T0, at, closedGroup, PATTERNS };
 
@@ -27,7 +27,7 @@ export interface World {
  * Two customers with one open incident each plus one from an unmapped AWS account, opened by a real tick at T0.
  * Mirae Pay uses the Standard template on the shared rotation; Hanbit uses its own rotation (Urgent).
  */
-export async function world(): Promise<World> {
+export async function world(opts: { config?: Partial<ApiConfig> } = {}): Promise<World> {
   const store = seedWorld(new MemoryApiStore()) as MemoryApiStore;
   for (const [id, name, contactId] of [['usr_haeun', 'Haeun Kim', 'ct_haeun'], ['usr_minjae', 'Minjae Lee', 'ct_minjae'], ['usr_viewer', 'Viewer', null], ['usr_yuna', 'Yuna Seo', 'ct_yuna'], ['usr_dohyun', 'Dohyun Han', 'ct_dohyun']] as const) {
     store.users.set(id, { id, name, contactId });
@@ -43,7 +43,7 @@ export async function world(): Promise<World> {
   closedGroup(store, { customerId: null, at: T0, alerts: [{ id: 'al_u1', title: 'unknown account disk' }] });
   await sim.tick();
   const by = (customerId: string | null) => [...store.incidents.values()].find((i) => i.customerId === customerId)!.id;
-  const api = createApi({ repo: store, now: () => sim.now });
+  const api = createApi({ repo: store, now: () => sim.now, config: opts.config });
   let seq = 0;
   return {
     store, sim, ids: { mirae: by('cus_mirae'), hanbit: by('cus_hanbit'), unmapped: by(null) },

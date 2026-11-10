@@ -22,14 +22,14 @@ describe('GET /incidents/{id}', () => {
   it('timeline and notification log, paged by cursor', async () => {
     const w = await world();
     await w.sim.run(3);
-    const t1 = body(await w.call(USERS.yuna, 'GET', `/incidents/${w.ids.mirae}/timeline`, { query: { limit: '2' } }));
+    const t1 = body(await w.call(USERS.viewer, 'GET', `/incidents/${w.ids.mirae}/timeline`, { query: { limit: '2' } }));
     expect(t1.items.map((e: any) => e.kind)).toEqual(['TRIGGERED', 'NOTE']);
-    const t2 = body(await w.call(USERS.yuna, 'GET', `/incidents/${w.ids.mirae}/timeline`, { query: { limit: '2', cursor: t1.nextCursor } }));
+    const t2 = body(await w.call(USERS.viewer, 'GET', `/incidents/${w.ids.mirae}/timeline`, { query: { limit: '2', cursor: t1.nextCursor } }));
     expect(t2.items.map((e: any) => e.kind)).toEqual(['NOTIFIED', 'ESCALATED']);
     expect(t2.items[1].message).toContain('of the previous page 2026-11-09 03:00Z'); // known-bugs 7-2
     expect(t2.nextCursor).toBeNull();
-    const n = body(await w.call(USERS.yuna, 'GET', `/incidents/${w.ids.mirae}/notifications`));
-    expect(n.items.map((l: any) => [l.channel, l.status, l.targetSummary, l.escalationStep, l.providerMessageId])).toEqual([['SLACK_BOT', 'SENT', 'C_MIRAE', 0, expect.stringMatching(/^slack-\d$/)], ['SMS', 'SENT', 'Haeun Kim', 1, 'sms-1']]);
+    const n = body(await w.call(USERS.viewer, 'GET', `/incidents/${w.ids.mirae}/notifications`));
+    expect(n.items.map((l: any) => [l.channel, l.status, l.targetSummary, l.escalationStep, l.providerMessageId, l.reason])).toEqual([['SLACK_BOT', 'SENT', 'Customer Slack channel', 0, expect.stringMatching(/^slack-\d$/), null], ['SMS', 'SENT', 'Haeun Kim', 1, 'sms-1', null]]);
   });
 });
 

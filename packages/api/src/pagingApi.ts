@@ -3,11 +3,12 @@
  * GET /oncall/paging-path. D-30: each customer owns its steps; service › project › customer, first existing wins.
  */
 import {
-  isPageableFor, pagingPath, resolvePagingConfig, sentence, templateSteps,
+  MAX_ALL_RESPONDERS, MAX_AT_MIN, MAX_REPEAT, MAX_SENDS_PER_CYCLE, MAX_SENDS_PER_HOUR, MAX_STEPS, estimateSends, isPageableFor, pagingPath, resolvePagingConfig, sentence, templateSteps,
   type EscalationStep, type PagingConfig, type PagingWorld, type ScopeLevel, type StepChannel, type TargetType,
 } from '@alarmops/core';
-import { requireAuth, requireRole, scopeOf, type AuthContext } from './auth.js';
+import { customerWide, inScope, requireAuth, requireRole, scopeOf, type AuthContext } from './auth.js';
 import { ApiError, ifMatch, invalid, isRecord, notFound, ok, q, validation, versionConflict, type ApiRequest, type ApiResponse } from './http.js';
+import type { ScopeFilter } from './auth.js';
 import type { ApiRepository, OrgTree } from './repo.js';
 import { resolveSlugs } from './scope.js';
 
@@ -17,11 +18,9 @@ const STYLES = ['ALL_AT_ONCE', 'CUSTOMER_ROTATION', 'SHARED_ROTATION', 'CUSTOM']
 const PLANS = ['STANDARD', 'URGENT', 'QUIET'] as const;
 const TARGETS = ['PERSON', 'ROTATION', 'ALL_RESPONDERS'] as const;
 const CHANNELS: readonly StepChannel[] = ['SLACK_CHANNEL', 'SLACK_DM', 'SMS', 'VOICE', 'EMAIL'];
-export const MAX_STEPS = 12;
-export const MAX_AT_MIN = 24 * 60;
-export const MAX_REPEAT = 5;
+export { MAX_STEPS, MAX_AT_MIN, MAX_REPEAT };
 
-const unprocessable = (code: 'CROSS_CUSTOMER' | 'NOT_PAGEABLE', message: string, details: Record<string, unknown>) => new ApiError(422, code, message, details);
+const unprocessable = (code: 'CROSS_CUSTOMER' | 'NOT_PAGEABLE' | 'SEND_CAP_EXCEEDED' | 'RESPONDER_LIMIT_EXCEEDED', message: string, details: Record<string, unknown>) => new ApiError(422, code, message, details);
 
 /** Step sentence with nobody resolved yet is still useful after a save: resolve against the world now. */
 function view(cfg: PagingConfig, w: PagingWorld, now: Date) {
@@ -84,7 +83,8 @@ async function buildConfig(body: unknown, base: Pick<PagingConfig, 'id' | 'custo
         errors.push({ field: `${f}.channels`, message: `channels must be a non-empty list of ${CHANNELS.join(', ')}.` });
       }
       const prev = list[i - 1];
-      if (i > 0 && isRecord(prev) && typeof prev.atMin === 'number' && typeof s.atMin === 'number' && s.atMin < prev.atMin) errors.push({ field: `${f}.atMin`, message: 'Steps must be in time order.' });
+      // Strictly increasing (R-1): two steps at the same minute are one step with more targets, not a way around the caps.
+      if (i > 0 && isRecord(prev) && typeof prev.atMin === 'number' && typeof s.atMin === 'number' && s.atMin <= prev.atMin) errors.push({ field: `${f}.atMin`, message: 'Each step must start later than the step before it.' });
     });
     if (errors.length) throw validation(errors);
     built = (list as Array<Record<string, unknown>>).map((s, index) => ({
@@ -108,14 +108,33 @@ async function buildConfig(body: unknown, base: Pick<PagingConfig, 'id' | 'custo
       if (r.scope === 'CUSTOMER' && r.customerId !== base.customerId) throw unprocessable('CROSS_CUSTOMER', 'A customer rotation can only be used by its own customer.', { field });
     }
   }
+  // R-1: what one incident may send. Checked for template-built steps too.
+  const responders = w.responders.filter((r) => r.customerId === base.customerId && r.role === 'PAGEABLE' && isPageableFor(w, r.contactId)).length;
+  const everyone = built.find((s) => s.targetType === 'ALL_RESPONDERS');
+  if (everyone && responders > MAX_ALL_RESPONDERS) {
+    throw unprocessable('RESPONDER_LIMIT_EXCEEDED', `A step that pages everyone in Responders can reach at most ${MAX_ALL_RESPONDERS} people; this customer has ${responders} pageable responders. Page a rotation or named people instead, or reduce the responders.`,
+      { field: `steps[${everyone.index}].targetType`, responders, limit: MAX_ALL_RESPONDERS });
+  }
+  const sends = estimateSends(built, repeat as number, responders);
+  if (sends.perCycle > MAX_SENDS_PER_CYCLE || sends.perHour > MAX_SENDS_PER_HOUR) {
+    const over = sends.perCycle > MAX_SENDS_PER_CYCLE
+      ? `${sends.perCycle} notifications per incident in one pass of the steps (limit ${MAX_SENDS_PER_CYCLE})`
+      : `${sends.perHour} notifications per incident within one hour, repeats included (limit ${MAX_SENDS_PER_HOUR})`;
+    throw unprocessable('SEND_CAP_EXCEEDED', `This call order would send ${over}. Use fewer steps, channels or repeats, or page fewer people per step.`,
+      { perCycle: sends.perCycle, perHour: sends.perHour, limits: { perCycle: MAX_SENDS_PER_CYCLE, perHour: MAX_SENDS_PER_HOUR } });
+  }
   return { ...base, style: st, plan: pl, edited, repeatCount: repeat as number, version: 0, steps: built };
 }
 
-async function visibleCustomer(deps: Deps, auth: AuthContext, customerId: string) {
-  const tree = await deps.repo.orgTree(scopeOf(auth));
+async function visibleCustomer(deps: Deps, auth: AuthContext, customerId: string, level: 'CUSTOMER' | 'BELOW' = 'BELOW') {
+  const scope = scopeOf(auth);
+  const tree = await deps.repo.orgTree(scope);
   const customer = tree.customers.find((c) => c.id === customerId);
   if (!customer) throw notFound(); // unknown and out-of-scope: same answer
-  return { tree, customer };
+  // R-6: the customer's own call order belongs to people who have the whole customer. For a user narrowed to a
+  // project or service it does not exist — the same 404 as an unknown customer, before any role or header check.
+  if (level === 'CUSTOMER' && !customerWide(scope, customer.id)) throw notFound();
+  return { tree, customer, scope };
 }
 
 const audit = (req: ApiRequest, auth: AuthContext, now: Date, action: string, cfgId: string, customerId: string, before: unknown, after: unknown) =>
@@ -124,7 +143,7 @@ const audit = (req: ApiRequest, auth: AuthContext, now: Date, action: string, cf
 /** GET /customers/{id}/paging — the customer's own steps plus the list of project/service overrides. */
 export async function getCustomerPaging(req: ApiRequest, deps: Deps, customerId: string): Promise<ApiResponse> {
   const auth = requireAuth(req);
-  const { tree, customer } = await visibleCustomer(deps, auth, customerId);
+  const { tree, customer } = await visibleCustomer(deps, auth, customerId, 'CUSTOMER');
   requireRole(auth, 'ADMIN');
   const { configs, world } = await deps.repo.pagingContext(customer.id);
   const cfg = configs.find((c) => c.scopeType === 'CUSTOMER' && c.scopeId === customer.id);
@@ -156,31 +175,36 @@ async function putConfig(req: ApiRequest, deps: Deps, auth: AuthContext, custome
 /** PUT /customers/{id}/paging (If-Match). Changes apply to incidents opened afterwards; open incidents keep their frozen order (R3-1). */
 export async function putCustomerPaging(req: ApiRequest, deps: Deps, customerId: string): Promise<ApiResponse> {
   const auth = requireAuth(req);
-  const { customer } = await visibleCustomer(deps, auth, customerId);
+  const { customer } = await visibleCustomer(deps, auth, customerId, 'CUSTOMER');
   return putConfig(req, deps, auth, customer.id, 'CUSTOMER', customer.id);
 }
 
-function overrideTarget(tree: OrgTree, customerId: string, scopeType: string, scopeId: string): { scopeType: 'PROJECT' | 'SERVICE'; scopeId: string } {
+function overrideTarget(tree: OrgTree, scope: ScopeFilter, customerId: string, scopeType: string, scopeId: string): { scopeType: 'PROJECT' | 'SERVICE'; scopeId: string } {
   if (scopeType !== 'PROJECT' && scopeType !== 'SERVICE') throw invalid('scopeType', 'scopeType must be PROJECT or SERVICE.');
   // The project/service must belong to THIS customer (and be visible): another customer's id is the same 404 as a made-up one.
-  const hit = scopeType === 'PROJECT' ? tree.projects.find((p) => p.id === scopeId && p.customerId === customerId) : tree.services.find((s) => s.id === scopeId && s.customerId === customerId);
+  const project = scopeType === 'PROJECT' ? tree.projects.find((p) => p.id === scopeId && p.customerId === customerId) : undefined;
+  const service = scopeType === 'SERVICE' ? tree.services.find((s) => s.id === scopeId && s.customerId === customerId) : undefined;
+  const hit = project ?? service;
   if (!hit) throw notFound();
+  // R-6: only inside the caller's own subtree. The tree also shows the PARENT project of a granted service (so the
+  // console can draw the path); that parent is visible, not editable — its override is the same 404.
+  if (!inScope(scope, { customerId, projectId: project?.id ?? service!.projectId, serviceId: service?.id ?? null })) throw notFound();
   return { scopeType, scopeId: hit.id };
 }
 
 /** PUT /customers/{id}/paging-overrides/{scopeType}/{scopeId} */
 export async function putPagingOverride(req: ApiRequest, deps: Deps, customerId: string, scopeType: string, scopeId: string): Promise<ApiResponse> {
   const auth = requireAuth(req);
-  const { tree, customer } = await visibleCustomer(deps, auth, customerId);
-  const t = overrideTarget(tree, customer.id, scopeType, scopeId);
+  const { tree, customer, scope } = await visibleCustomer(deps, auth, customerId);
+  const t = overrideTarget(tree, scope, customer.id, scopeType, scopeId);
   return putConfig(req, deps, auth, customer.id, t.scopeType, t.scopeId);
 }
 
 /** DELETE /customers/{id}/paging-overrides/{scopeType}/{scopeId} — the scope goes back to inheriting. */
 export async function deletePagingOverride(req: ApiRequest, deps: Deps, customerId: string, scopeType: string, scopeId: string): Promise<ApiResponse> {
   const auth = requireAuth(req);
-  const { tree, customer } = await visibleCustomer(deps, auth, customerId);
-  const t = overrideTarget(tree, customer.id, scopeType, scopeId);
+  const { tree, customer, scope } = await visibleCustomer(deps, auth, customerId);
+  const t = overrideTarget(tree, scope, customer.id, scopeType, scopeId);
   requireRole(auth, 'ADMIN');
   const version = ifMatch(req);
   const { configs } = await deps.repo.pagingContext(customer.id);
@@ -196,9 +220,13 @@ export async function deletePagingOverride(req: ApiRequest, deps: Deps, customer
  * GET /oncall/paging-path — "Who gets paged for…". Asked by `serviceId` / `resourceId` / `q` (contract) or by
  * `projectId` / `customerId` / slugs `customer[&project[&service]]` (PROPOSED: the console panel asks by scope).
  * Same resolution function as incident paging (known-bugs 7-3): what this says is what the tick does.
+ *
+ * INTERNAL only (security Q-1): the answer is the MSP's call order with staff, rotation and config ids. For portal
+ * users the route does not exist — the one 404, before any parameter is looked at.
  */
 export async function getPagingPath(req: ApiRequest, deps: Deps): Promise<ApiResponse> {
   const auth = requireAuth(req);
+  if (auth.kind !== 'INTERNAL') throw notFound();
   const scope = scopeOf(auth);
   const tree = await deps.repo.orgTree(scope);
   const lv = (level: 'RESOURCE' | ScopeLevel, n: { id: string; name: string }) => ({ level, id: n.id, name: n.name });
@@ -241,6 +269,9 @@ export async function getPagingPath(req: ApiRequest, deps: Deps): Promise<ApiRes
   if ((serviceId || projectId) && !project) throw notFound();
   const customer = tree.customers.find((c) => c.id === (project?.customerId ?? customerId));
   if (!customer) throw notFound();
+  // R-6: staff narrowed to a project/service ask about that subtree only. The tree shows the parent project of a
+  // granted service and the customer node above it; asking for THEIR call order is the same 404.
+  if (!inScope(scope, { customerId: customer.id, projectId: project?.id ?? null, serviceId: service?.id ?? null })) throw notFound();
 
   const now = deps.now();
   const { configs, world } = await deps.repo.pagingContext(customer.id);

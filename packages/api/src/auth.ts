@@ -2,7 +2,7 @@
  * Authorization context and tenant scope (API-CONTRACT §2 "범위", §8.0 tenant rules; DATA-MODEL §0).
  * The adapter resolves the session (Google SSO etc.) into an AuthContext; this package never talks to an auth provider.
  */
-import { roleRequired, unauthenticated, type ApiRequest } from './http.js';
+import { isRecord, roleRequired, unauthenticated, type ApiRequest } from './http.js';
 
 export type Role = 'VIEWER' | 'OPERATOR' | 'ADMIN';
 
@@ -45,6 +45,16 @@ export function scopeOf(auth: AuthContext): ScopeFilter {
 
 export const seesCustomer = (s: ScopeFilter, customerId: string): boolean => s.customerIds === '*' || s.customerIds.includes(customerId);
 
+/**
+ * Does the scope cover the WHOLE customer (not just some project/service of it)? Customer-level settings — the
+ * customer's own call order — exist only for these users; for a narrowed user they are "not found" (R-6).
+ */
+export const customerWide = (s: ScopeFilter, customerId: string): boolean => {
+  if (!seesCustomer(s, customerId)) return false;
+  const subs = s.subScopes.filter((x) => x.customerId === customerId);
+  return subs.length === 0 || subs.some((x) => !x.projectId && !x.serviceId);
+};
+
 /** Is an entity at (customer, project?, service?) inside the scope? null customer = unmapped. */
 export function inScope(s: ScopeFilter, e: { customerId: string | null; projectId?: string | null; serviceId?: string | null }): boolean {
   if (e.customerId == null) return s.unmapped;
@@ -70,8 +80,29 @@ export function nodeVisible(s: ScopeFilter, n: { customerId: string; projectId?:
 
 const RANK: Record<Role, number> = { VIEWER: 0, OPERATOR: 1, ADMIN: 2 };
 
+const isStr = (v: unknown): v is string => typeof v === 'string' && v.length > 0;
+
+/**
+ * Shape check of what the session adapter handed over (security B-1). Anything this package does not expect is
+ * "not signed in": a missing or unknown `kind`, a `customerIds` that is neither '*' nor a list of ids, a broken
+ * `subScopes`. `role` is deliberately NOT required here — without a valid role the user can still read (as the
+ * scope allows) and every write answers 403 (requireRole).
+ */
+export function isAuthContext(a: unknown): a is AuthContext {
+  if (!isRecord(a) || !isStr(a.userId)) return false;
+  if (a.kind !== 'INTERNAL' && a.kind !== 'CUSTOMER') return false;
+  if (a.name !== undefined && typeof a.name !== 'string') return false;
+  if (!(a.customerIds === '*' || (Array.isArray(a.customerIds) && a.customerIds.every(isStr)))) return false;
+  if (a.subScopes !== undefined) {
+    const ok = Array.isArray(a.subScopes) && a.subScopes.every((x) => isRecord(x) && isStr(x.customerId)
+      && (x.projectId === undefined || isStr(x.projectId)) && (x.serviceId === undefined || isStr(x.serviceId)));
+    if (!ok) return false;
+  }
+  return true;
+}
+
 export function requireAuth(req: ApiRequest): AuthContext {
-  if (!req.auth || !req.auth.userId) throw unauthenticated();
+  if (!isAuthContext(req.auth)) throw unauthenticated();
   return req.auth;
 }
 
@@ -81,8 +112,10 @@ export function requireAuth(req: ApiRequest): AuthContext {
  * Portal (CUSTOMER) users are VIEWER whatever their stored role says (org-tenant R4-3).
  */
 export function requireRole(auth: AuthContext, min: Role): void {
-  const effective: Role = auth.kind === 'CUSTOMER' ? 'VIEWER' : auth.role;
-  if (!(effective in RANK) || RANK[effective] < RANK[min]) throw roleRequired(min);
+  // Fail closed (B-1): the stored role counts for INTERNAL staff only; every other kind — including a kind this
+  // code does not know — is VIEWER. Own-property lookup, so 'constructor' and friends are not roles.
+  const effective: Role = auth.kind === 'INTERNAL' ? auth.role : 'VIEWER';
+  if (!Object.hasOwn(RANK, effective) || RANK[effective] < RANK[min]) throw roleRequired(min);
 }
 
 /** Stable identity of the caller's range, for ETags that must differ between users (§8.0 rule 5). */
