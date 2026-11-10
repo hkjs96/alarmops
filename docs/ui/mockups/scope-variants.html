@@ -771,6 +771,81 @@ div.e-lvr.on:hover{background:var(--accent-t)}
 .e-amb{margin:8px 16px;padding:8px 12px;border:1px solid var(--amber);border-left:3px solid var(--amber);background:var(--amber-t);font-size:13px}
 .e-swh{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--rule)}
 
+/* scope picker styles: E-1 cascade (selectors + sheet), E-2 tree (sidebar + drawer) */
+.e-pks{display:inline-flex;align-items:center;gap:4px;flex:none}
+.e-pks b{color:var(--faint);letter-spacing:.08em;font-size:10px;margin-right:2px}
+.e-pks button[aria-pressed="true"]{background:var(--ink);color:var(--inv);border-color:var(--ink)}
+.e-pkm{margin-top:28px;padding-top:12px;border-top:1px dashed var(--deco);flex-direction:column;align-items:flex-start;gap:8px;font:400 11px var(--mono);color:var(--mut)}
+.e-pkm .e-pks b{display:none}
+.e-pkm .e-pks button{min-height:44px;padding:0 10px;border:1px solid var(--rule);background:var(--surface);font:700 11px var(--mono);color:var(--ink2)}
+.e-sg{display:inline-flex;align-items:stretch;min-width:0;flex:0 1 auto}
+.e-bar .e-sg .v-seg{min-width:0;flex:0 1 auto}
+.e-sg .v-seg small{font:700 10px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--mut);flex:none}
+.e-sg .v-seg.any{color:var(--ink);font-weight:600}
+.e-sg .v-seg:disabled{border-style:dashed;color:var(--mut);font-weight:500;cursor:not-allowed}
+.e-sg .v-seg[aria-expanded="true"]{background:var(--accent-t);border-color:var(--accent)}
+.e-sg .v-seg:focus-visible,.e-segx:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.e-segx{width:28px;border:1px solid var(--ink);border-left:0;background:var(--surface);color:var(--ink2);font:700 15px/1 var(--mono);flex:none}
+.e-segx:hover{background:var(--soft);color:var(--ink)}
+.e-cur2{background:var(--surface);border-color:var(--ink);font-weight:400;color:var(--ink2);min-width:0}
+.e-cur2 b{color:var(--ink)}
+.e-dd{position:fixed;z-index:82;width:384px;max-width:calc(100vw - 16px);background:var(--surface);border:1px solid var(--ink);box-shadow:var(--pop);display:flex;flex-direction:column}
+.e-dd input.q,.e-sheet input.q{height:42px;flex:none;border:0;border-bottom:1px solid var(--rule);padding:0 14px;font:inherit;background:transparent;color:var(--ink);outline:0;width:100%}
+.e-dd input.q:focus-visible,.e-sheet input.q:focus-visible{box-shadow:inset 0 -2px 0 var(--accent)}
+.e-ddl{overflow-y:auto;flex:1;min-height:0}
+.e-opt{display:flex;align-items:center;gap:8px;padding:5px 12px 5px 8px;min-height:40px;cursor:pointer;font-size:13px;color:var(--ink2)}
+.e-opt:hover{background:var(--soft)}
+.e-opt.cur{background:var(--accent-t);box-shadow:inset 3px 0 0 var(--accent)}
+.e-opt .ck{width:14px;flex:none;display:inline-flex;justify-content:center;color:var(--ink)}
+.e-opt .x{flex:1;min-width:0}
+.e-opt .x b{font-weight:600;color:var(--ink)}
+.e-opt.on .x b{font-weight:700}
+.e-opt .x small{display:block;font-size:12px;color:var(--mut)}
+.e-opt .go{color:var(--faint);font:700 15px var(--mono);flex:none}
+.e-stt{display:inline-flex;align-items:center;gap:8px;flex:none;white-space:nowrap}
+.e-oi,.e-pr{display:inline-flex;align-items:center;gap:4px;font:700 11px var(--mono)}
+.e-oi{color:var(--red)}.e-pr{color:var(--amber)}
+.e-oi .mk,.e-pr .mk{flex:none;width:8px;height:8px}
+.e-pr .mk.tri{width:9px;height:8px}
+.e-own{font:700 9.5px var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--accent);border:1px solid var(--accent);padding:1px 4px;white-space:nowrap}
+.e-leg{display:flex;flex-wrap:wrap;align-items:center;gap:4px 14px;padding:7px 12px;border-top:1px solid var(--rule);background:var(--soft);font-size:11.5px;color:var(--mut);flex:none}
+.e-leg .it{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+.e-dd .v-sw-f{padding:6px 12px;font-size:11.5px;gap:12px}
+.e-sheet{position:fixed;inset:0;z-index:81;background:var(--surface);display:flex;flex-direction:column}
+.e-shh{display:flex;align-items:center;gap:10px;padding:6px 12px;min-height:56px;border-bottom:1px solid var(--rule);flex:none}
+.e-shh b{flex:1;font-size:15px}
+.e-shs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-bottom:1px solid var(--rule);flex:none}
+.e-shs button{min-height:52px;border:0;border-right:1px solid var(--grid);background:var(--soft);text-align:left;padding:6px 10px;color:var(--ink2);min-width:0}
+.e-shs button:last-child{border-right:0}
+.e-shs button small{display:block;font:700 10px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--mut)}
+.e-shs button span{display:block;font-size:13px;font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.e-shs button.on{background:var(--surface);box-shadow:inset 0 -3px 0 var(--ink)}
+.e-shs button:disabled span,.e-shs button:disabled small{color:var(--faint)}
+/* tree */
+.e-lay{display:flex;align-items:flex-start}
+.e-lay>.page{flex:1;min-width:0}
+.e-tree{position:sticky;top:calc(var(--mkh) + 100px);height:calc(100vh - var(--mkh) - 100px);flex:none;background:var(--surface);border-right:1px solid var(--rule);display:flex;flex-direction:column;z-index:5}
+.e-tree.col{width:40px;align-items:center;padding-top:8px;gap:10px}
+.e-tree.col .vt{writing-mode:vertical-rl;font:700 10px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--mut)}
+.e-trh{display:flex;gap:6px;padding:8px;border-bottom:1px solid var(--rule);flex:none}
+.e-trh .inp{flex:1;min-width:0;height:32px}
+.e-tr{flex:1;min-height:0;overflow-y:auto;outline:0;padding:2px 0 8px}
+.e-tr:focus-visible .e-tn.cur{outline:2px solid var(--accent);outline-offset:-2px}
+.e-tn{display:flex;align-items:center;gap:2px;min-height:30px;padding:0 10px 0 2px;font-size:13px;cursor:pointer;color:var(--ink2)}
+.e-tn.d1{padding-left:18px}.e-tn.d2{padding-left:34px}
+.e-tn .tw{width:24px;height:24px;border:0;background:none;color:var(--ink2);flex:none;font-size:13px;padding:0;display:inline-flex;align-items:center;justify-content:center}
+.e-tn button.tw:hover{color:var(--ink);background:var(--hair)}
+.e-tn .x{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.e-tn.d0 .x{font-weight:600;color:var(--ink)}
+.e-tn:hover{background:var(--soft)}
+.e-tn.on{background:var(--accent-t);box-shadow:inset 3px 0 0 var(--accent);color:var(--ink)}
+.e-tn.on .x{font-weight:700}
+.e-tn .e-stt{gap:6px;margin-left:6px}
+.e-trz{position:absolute;right:-4px;top:0;bottom:0;width:8px;cursor:col-resize}
+.e-trz:hover,.e-trz:focus-visible,body.e-rsz .e-trz{background:var(--accent);opacity:.35;outline:0}
+body.e-rsz{cursor:col-resize;user-select:none}
+.e-drw{position:fixed;z-index:81;left:0;top:0;bottom:0;width:min(348px,90vw);background:var(--surface);border-right:1px solid var(--ink);box-shadow:var(--pop);display:flex;flex-direction:column}
+
 @media (min-width:1101px){
   body.e-has-panel .page{max-width:none;margin:0;padding-right:624px}
   body.e-has-panel .hide-p{display:none}
@@ -834,6 +909,19 @@ div.e-lvr.on:hover{background:var(--accent-t)}
   .e-dlg .acts .btn{flex:1 1 100%;justify-content:center;text-align:center}
   .e-swi{min-height:52px}
   .e-ct{white-space:normal}
+  .mk-url #mk-pk{display:none}
+  .e-lay{display:block}
+  .e-tree{display:none}
+  .e-barm .e-clr{width:44px;flex:none;padding:0;justify-content:center;font:700 18px/1 var(--mono)}
+  .e-dd input.q,.e-sheet input.q{height:48px;font-size:16px}
+  .e-opt{min-height:52px;padding:6px 14px 6px 10px;font-size:15px}
+  .e-opt .x small{font-size:13px}
+  .e-sheet .v-sw-g,.e-drw .v-sw-g{padding-top:14px}
+  .e-drw .e-trh .inp{height:44px}
+  .e-drw .e-tn{min-height:48px;font-size:15px;padding-right:12px}
+  .e-drw .e-tn .tw{width:44px;height:44px;font-size:17px}
+  .e-drw .e-tn.d1{padding-left:20px}.e-drw .e-tn.d2{padding-left:40px}
+  .e-leg{padding:8px 12px 10px}
 }
 /*E-CSS-END*/
 </style>
@@ -841,7 +929,7 @@ div.e-lvr.on:hover{background:var(--accent-t)}
 <body>
 <div class="mk-wrap">
   <div class="mk-bar" id="mk"></div>
-  <div class="mk-url"><b>URL</b><span class="u" id="mk-url"></span><button data-act="copy">COPY LINK</button></div>
+  <div class="mk-url"><b>URL</b><span class="u" id="mk-url"></span><span id="mk-pk"></span><button data-act="copy">COPY LINK</button></div>
 </div>
 <div id="app"></div>
 <div id="ov"></div>
@@ -952,7 +1040,7 @@ var MW=[
 /* ===== state (all of it lives in the URL hash, so every view is a shareable link) ===== */
 var SCREENS=[['incidents','Incidents'],['monitoring','Monitoring'],['paging','Paging'],['people','People'],['maintenance','Maintenance']];
 var VAR={A:'Global scope bar',B:'Scope required',C:'Customer workspace',D:'Hybrid lists + panel',E:'Combined'};
-var DEF={v:'E',s:'incidents',c:'',p:'',svc:'',o:'',u:'jp',n:'14',m:'',all:'',o2:'',q:'',pt:''};
+var DEF={v:'E',s:'incidents',c:'',p:'',svc:'',o:'',u:'jp',n:'14',m:'',all:'',o2:'',q:'',pt:'',pk:''};
 var S={};
 var PIN=['mirae||','hanbit|Tracking|'],REC=['daon||','mirae|Core|Payments API'];
 function $(s,r){return (r||document).querySelector(s);}
@@ -1366,10 +1454,10 @@ function productUrl(){if(S.v==='E')return eUrl();var x=sc(),slug=function(s){ret
   return 'console.alarmops.example'+path+(q.length?'?'+q.join('&'):'');}
 function renderMk(){var u=D.staff[S.u];
   $('#mk').innerHTML='<span class="lbl">SCOPE VARIANTS</span>'+Object.keys(VAR).map(function(k){return '<button class="vb" aria-selected="'+(S.v===k)+'" data-v="'+k+'">'+k+' · '+VAR[k]+'</button>';}).join('')+
-    '<span class="sepv"></span>'+SCREENS.map(function(x){return '<button aria-selected="'+(S.s===x[0])+'" data-s="'+x[0]+'">'+x[1]+'</button>';}).join('')+'<span class="sp"></span>'+
+    '<span class="sepv"></span>'+SCREENS.map(function(x){return '<button aria-selected="'+(S.s===x[0])+'" data-s="'+x[0]+'">'+(S.v==='E'?eSL(x):x[1])+'</button>';}).join('')+'<span class="sp"></span>'+
     (S.v==='E'?'<button class="tt" data-e="portal" aria-pressed="'+(S.pt==='1')+'">PORTAL MODE: '+(S.pt?'ON (SOYEON)':'OFF')+'</button>':'')+
     '<button class="tt" data-act="n">'+(S.n==='34'?'34':'14')+' CUSTOMERS</button><button class="tt" data-act="u">AS '+u.n.split(' ')[0].toUpperCase()+'</button><button class="tt" data-act="theme">THEME</button>';
-  $('#mk-url').textContent=productUrl();}
+  $('#mk-url').textContent=productUrl();$('#mk-pk').innerHTML=S.v==='E'?ePkSw():'';}
 function renderOv(){if(S.v==='E'){var sy={};$$('.e-panel').forEach(function(p){sy[p.id]=p.scrollTop;});$('#ov').innerHTML=eOv();$$('.e-panel').forEach(function(p){if(sy[p.id])p.scrollTop=sy[p.id];});eRestore();return;}$('#ov').innerHTML=panel()+popHtml()+swHtml();}
 function render(){readHash();document.title='AlarmOps · Scope variant '+S.v+' · '+S.s;renderMk();document.body.setAttribute('data-v',S.v);$('#app').innerHTML=shell();renderOv();eAfter();}
 function closest(el,sel){while(el&&el.nodeType===1){if(el.matches(sel))return el;el=el.parentNode;}return null;}
@@ -1471,7 +1559,7 @@ function eArg(o){return (o||'').slice((o||'').indexOf(':')+1);}
 function eEdit(o){return /^(paging|thr|alarm|mwnew|personnew|person)$/.test(eTy(o));}
 function eDk(o){return eTy(o)==='paging'?'paging:'+key(ePg(o).x):o;}
 function eOL(o){var ty=eTy(o),a=eArg(o),x=null,kind='';
-  if(ty==='paging'){x=ePg(o).x;kind='paging steps';}
+  if(ty==='paging'){x=ePg(o).x;kind='call order steps';}
   else if(ty==='thr'){x={c:a};kind='default thresholds';}
   else if(ty==='alarm'){var al=ALARMS[+a];x={c:al.c,p:al.p,s:al.s};kind='threshold of '+al.r;}
   else if(ty==='mwnew'||ty==='personnew'){x=a&&a[0]!=='~'?parseKey(a):null;kind=ty==='mwnew'?'new maintenance window':'new person';}
@@ -1507,10 +1595,10 @@ function eNotes(){var h='';if(ePt())return h;var cur=eCur();
 /* ---- shell: nav, then ONE filter bar in one fixed place ---- */
 function eTop(){var pt=ePt(),u=pt?P_USER:D.staff[S.u];
   return '<header class="top"><span class="logo"><i></i>AlarmOps'+(pt?'<span class="e-pt">'+esc(C(P_CUST).n)+' portal</span>':'')+'</span><nav class="nav hide-m">'+
-    SCREENS.map(function(x){return '<a class="'+(S.s===x[0]?'on':'')+'" data-s="'+x[0]+'">'+x[1]+(x[0]==='incidents'?eCnt():'')+'</a>';}).join('')+'</nav><div class="top-r">'+
+    SCREENS.map(function(x){return '<a class="'+(S.s===x[0]?'on':'')+'" data-s="'+x[0]+'">'+eSL(x)+(x[0]==='incidents'?eCnt():'')+'</a>';}).join('')+'</nav><div class="top-r">'+
     (pt?'<span class="sm mut hide-m">Signed in as '+u.n+'</span>':'<button class="ib hide-m" data-e="sw" title="Filter this screen to a customer, project or service. You stay on this screen.">Filter to…<span class="kbd">Ctrl K</span></button><button class="ib'+(S.s==='settings'?' on':'')+'" data-s="settings">Settings</button>')+
     '<span class="av on" title="'+u.n+'">'+u.i+'</span></div></header>';}
-function eBottom(){return '<nav class="v-bb">'+SCREENS.map(function(x,i){return '<a class="'+(S.s===x[0]?'on':'')+'" data-s="'+x[0]+'"><i></i>'+SHORT[i]+(x[0]==='incidents'?eCnt():'')+'</a>';}).join('')+'</nav>';}
+function eBottom(){return '<nav class="v-bb">'+SCREENS.map(function(x,i){return '<a class="'+(S.s===x[0]?'on':'')+'" data-s="'+x[0]+'"><i></i>'+(x[0]==='paging'?'Call order':SHORT[i])+(x[0]==='incidents'?eCnt():'')+'</a>';}).join('')+'</nav>';}
 function eOutDef(){var f=sc();return 'Incidents in all '+CUS().length+' customers that your filter ('+(f?esc(lbl(f)):'My customers')+') hides. <b>Open</b>: triggered or escalated, nobody has acknowledged it. <b>Acknowledged</b>: someone has taken it. <b>Unmapped account</b>: alerts from an AWS account that is not assigned to a customer, so nobody is paged. Each incident is counted once. The link shows them in Incidents with the filter removed.';}
 function eOutLine(){var o=eOut();if(!o)return '';
   return '<span class="e-outw"><a class="e-out'+(o.open?'':' calm')+'" data-e="outgo" role="link" tabindex="0" title="'+eOutDef().replace(/<[^>]+>/g,'')+'">'+(o.open?'<span class="mk tri"></span>':'')+
@@ -1520,17 +1608,30 @@ function eMyChip(){return '<button class="chip e-my'+(S.m==='1'?' on':'')+'" dat
 function eBar(){var x=sc(),pt=ePt(),c=x&&C(x.c),h='<div class="e-bar" role="region" aria-label="Filter"><span class="lb">Showing:</span>';
   var idc=c?'<span class="e-id">'+mono(c)+'</span>':'',def=OUTI&&eFilterOn()?'<div class="e-outd" role="note">'+eOutDef()+'</div>':'';
   if(S.s==='settings')return h+'<span class="e-lock"><span class="e-id all">ALL</span>MSP-wide settings · all '+CUS().length+' customers</span></div><div class="e-barm"><div class="r1"><div class="sb"><span class="e-id all">ALL</span><span class="tx"><small>Showing</small><b>MSP-wide settings</b> · all '+CUS().length+' customers</span></div></div></div>';
-  if(pt)h+='<span class="e-lock" title="Your organisation. This cannot be changed.">'+idc+esc(c.n)+'</span>';
-  else h+='<button class="v-seg'+(x?'':' any')+'" data-e="sw" style="'+(x?'':'color:var(--ink);font-weight:600')+'">'+idc+'<span class="x">'+(x?esc(c.n):S.m==='1'?'My customers · '+mine().length:'All customers · '+CUS().length)+'</span><span class="car">▼</span></button>';
+  if(pt&&ePk()!=='c')h+='<span class="e-lock" title="Your organisation. This cannot be changed.">'+idc+esc(c.n)+'</span>';
+  var pk=ePk(),ch='<span class="chain">›</span>',cl=x?esc(c.n):S.m==='1'?'My customers · '+mine().length:'All customers · '+CUS().length;
+  if(pk==='c'){   // E-1: three linked selectors, always all three
+    h+=(pt?'<span class="e-lock" title="Your organisation. This cannot be changed.">'+idc+esc(c.n)+'</span>':eSeg('c','Customer',idc+'<span class="x">'+cl+'</span>',false,!!x||S.m==='1'))+ch+
+      eSeg('p','Project','<span class="x">'+esc(x&&x.p||'All projects')+'</span>',!x,!!(x&&x.p))+ch+eSeg('s','Service','<span class="x">'+esc(x&&x.s||'All services')+'</span>',!(x&&x.p),!!(x&&x.s));
+    if(!pt&&!x)h+=eMyChip();}
+  else if(pk==='t'){   // E-2: the bar states the filter; the tree on the left is the picker
+    if(!pt)h+='<span class="e-lock e-cur2">'+idc+'<span>'+(x?ePath(x):cl)+'</span></span>'+(x?'<button class="btn ghost sm" data-e="filt" data-a="">Show all customers</button>':eMyChip());
+    else if(x.p)h+=ch+'<span class="e-lock e-cur2"><span>'+ePath(x,1)+'</span></span><button class="btn ghost sm" data-e="ddclr" data-a="p">Show all of '+esc(c.n)+'</button>';}
+  else{
+  if(!pt)h+='<button class="v-seg'+(x?'':' any')+'" data-e="sw" style="'+(x?'':'color:var(--ink);font-weight:600')+'">'+idc+'<span class="x">'+cl+'</span><span class="car">▼</span></button>';
   if(x){h+='<span class="chain">›</span>'+seg('',x.p||'All projects','data-pop="p"',!x.p);
     if(x.p)h+='<span class="chain">›</span>'+seg('',x.s||'All services','data-pop="s"',!x.s);}
-  if(!pt){h+=x?'<button class="btn ghost sm" data-e="filt" data-a="">Show all customers</button>':eMyChip();h+='<span class="sp"></span>'+eOutLine();}
+  if(!pt)h+=x?'<button class="btn ghost sm" data-e="filt" data-a="">Show all customers</button>':eMyChip();}
+  if(!pt)h+='<span class="sp"></span>'+eOutLine();
   h+=def+'</div><div class="e-barm" role="region" aria-label="Filter"><div class="r1">';
-  var tx='<span class="tx"><small>Showing</small>'+(x?ePath(x):S.m==='1'?'<b>My customers</b> · '+mine().length:'<b>All customers</b> · '+CUS().length)+'</span>';
-  if(pt)h+='<button class="sb" data-pop="ps">'+idc+tx+'<span class="car">▼</span></button>';
+  var nxt=pk!=='s'&&x&&!x.s?'<span class="chain">›</span><span class="nw mut">'+(x.p?'All services':'All projects')+'</span>':'';
+  var tx='<span class="tx"><small>Showing</small>'+(x?ePath(x)+nxt:S.m==='1'?'<b>My customers</b> · '+mine().length:'<b>All customers</b> · '+CUS().length)+'</span>';
+  if(pk!=='s')h+='<button class="sb" data-e="'+(pk==='c'?'sheet':'drawer')+'" aria-haspopup="dialog">'+idc+tx+'<span class="car">▼</span></button>'+(pt?'':x?'<button class="btn e-clr" data-e="ddclr" data-a="c" aria-label="Clear the filter, show all customers">×</button>':eMyChip());
+  else if(pt)h+='<button class="sb" data-pop="ps">'+idc+tx+'<span class="car">▼</span></button>';
   else h+='<button class="sb" data-e="sw">'+idc+tx+'<span class="car">▼</span></button>'+(x?'<button class="btn sm" data-pop="ps">Narrow</button>':eMyChip());
   return h+'</div>'+(pt?'':eOutLine())+def+'</div>';}
-function eShell(){return eTop()+eBar()+'<main class="page">'+eScreen()+(ePt()?'<div class="sm mut" style="margin-top:24px">Signed in as '+P_USER.n+' · '+esc(C(P_CUST).n)+'. This portal only ever shows '+esc(C(P_CUST).n)+'.</div>':'')+'</main>'+eBottom();}
+function eShell(){var tl=$('.e-tree .e-tr');if(tl)TR.sy=tl.scrollTop;var tree=ePk()==='t'&&S.s!=='settings';
+  return eTop()+eBar()+(tree?'<div class="e-lay">'+eTreeAside():'')+'<main class="page">'+eScreen()+(ePt()?'<div class="sm mut" style="margin-top:24px">Signed in as '+P_USER.n+' · '+esc(C(P_CUST).n)+'. This portal only ever shows '+esc(C(P_CUST).n)+'.</div>':'')+'<div class="e-pkm only-m"><span>Mockup only · scope picker style</span>'+ePkSw()+'</div></main>'+(tree?'</div>':'')+eBottom();}
 function eScreen(){return ({incidents:eInc,monitoring:eMon,paging:ePaging,people:ePeople,maintenance:eMaint,settings:eSettings})[S.s]();}
 function eAllN(){return 'all '+CUS().length+' customers';}
 function eViewT(){var x=sc();if(ePt())return x.p?ePath(x,1)+' of '+esc(C(x.c).n):'all of '+esc(C(x.c).n);
@@ -1549,12 +1650,12 @@ function eInc(){var x=sc(),rows=INC.filter(eInView),n=function(st){return rows.f
   var h=head('Incidents','Mon Nov 9 · 03:16 KST · '+pl(rows.length,'incident')+', '+rows.filter(eOpenSt).length+' open')+eNotes();
   h+='<div class="tiles t4">'+tile('Triggered',n('trig'),rows.filter(function(i){return i.sev===1&&eOpenSt(i);}).length+' SEV-1','red')+tile('Escalated',n('esc'),'','orange')+tile('Acknowledged',n('ack'))+tile('Listed',rows.length,'incidents')+'</div>';
   h+='<div class="tw"><table class="t ccards"><thead><tr><th>Sev</th><th>Status</th><th>'+(ePt()?'Project › service':'Customer › project › service')+'</th><th>Incident</th><th class="hide-p">Paged</th><th class="r">Age</th><th></th></tr></thead><tbody>';
-  if(!rows.length)h+='<tr><td colspan="7" class="e-empty"><div class="e-big">No incidents in '+eViewT()+'.</div>'+(ePt()?'':'<div class="row" style="margin-top:12px">'+(x?'<button class="btn" data-e="open" data-a="paging:'+esc(key(x))+'">Paging steps for '+esc(lbl(x))+'</button>':'')+eBackAll()+'</div>')+'</td></tr>';
+  if(!rows.length)h+='<tr><td colspan="7" class="e-empty"><div class="e-big">No incidents in '+eViewT()+'.</div>'+(ePt()?'':'<div class="row" style="margin-top:12px">'+(x?'<button class="btn" data-e="open" data-a="paging:'+esc(key(x))+'">Call order for '+esc(lbl(x))+'</button>':'')+eBackAll()+'</div>')+'</td></tr>';
   rows.forEach(function(i){h+='<tr '+eRowCls('inc:'+i.id,i.st==='trig'?'hot':i.st==='esc'?'esc':'')+'><td data-l="">'+sev(i.sev,i.sev===1)+'</td><td data-l="">'+stt(i.st)+'</td><td data-l="" class="e-sctd">'+eSc(i)+'</td>'+
     '<td data-l=""><div><span class="ttl">'+esc(i.t)+'</span><div class="org">'+esc(i.k)+'</div></div></td>'+
     '<td data-l="Paged" class="hide-p">'+(i.who?'<div><span class="who"><span class="av">'+i.wi+'</span>'+esc(i.who)+'</span><div class="org">'+esc(i.sub)+'</div></div>':'<span class="mut sm">No owner · not escalating</span>')+'</td>'+
     '<td data-l="Age" class="r mono sm">'+i.age+'</td><td data-l="" class="r e-acts">'+eAckBtn(i)+'</td></tr>';});
-  return h+'</tbody></table></div><div class="sm mut" style="margin-top:10px">Open a row for its paging order. Opening a row never changes what this list shows.</div>';}
+  return h+'</tbody></table></div><div class="sm mut" style="margin-top:10px">Open a row for its call order. Opening a row never changes what this list shows.</div>';}
 
 /* ---- Monitoring: list is read-only; defaults exist at customer level only ---- */
 function eOwnV(a){return a.src==='TAG'||a.src==='CONSOLE';}
@@ -1629,14 +1730,14 @@ function ePaging(){var x=sc(),pt=ePt(),rows=[];
   var cl=CUS().filter(function(c){return eVis(c.id)&&(!x||c.id===x.c);}).sort(function(a,b){var r={unr:0,ar:1,ok:2};return r[health(a)]-r[health(b)];});
   cl.forEach(function(c){rows.push({c:c,y:{c:c.id,p:null,s:null}});overrides(c).forEach(function(o){if(!x||overlap(o,x))rows.push({c:c,y:{c:o.c,p:o.p,s:o.s||null}});});
     if(x&&x.p&&!rows.some(function(r){return key(r.y)===key(x);}))rows.push({c:c,y:x});});
-  var h=head('Paging','Who is paged first. Projects and services with their own steps have their own row.')+eNotes();
+  var h=head('Call order','Who gets called, in what order')+eNotes();
   h+='<div class="tw"><table class="t ccards"><thead><tr><th>'+(pt?'Scope':'Customer › project › service')+'</th><th class="hide-p">Reach</th><th>Paged first</th><th class="hide-p">Then</th><th>Steps</th></tr></thead><tbody>';
   rows.forEach(function(w){var c=w.c,y=w.y,r=resolve(y),hl=health(c),f=x&&key(x)===key(y)&&x.p;
     h+='<tr '+eRowCls('paging:'+key(y),hl==='unr'?'hot':hl==='ar'?'amb':'')+'><td data-l="" class="e-sctd"><span class="e-sc">'+ePath(y)+'</span>'+(f?' <span class="e-lv f">your filter</span>':'')+'</td>'+
       '<td data-l="Reach" class="hide-p"><div>'+HL[hl]+(HD[hl]?'<div class="org">'+HD[hl]+'</div>':'')+'</div></td><td data-l="Paged first"><div>'+(respN(c)?tgt(c,r.steps[0].to):'<span class="mut">nobody</span>')+'</div></td>'+
       '<td data-l="Then" class="sm mut hide-p">'+r.steps.slice(1).map(function(s){return s.at+' min '+s.how.join('+').toLowerCase();}).join(' · ')+'</td>'+
       '<td data-l="Steps">'+(r.own?'<span class="pill'+(y.p?' cz':'')+'">'+(y.p?'Own steps':'Customer steps')+'</span>':'<span class="sm">Inherits from <b>'+esc(lbl(r.from))+'</b></span>')+'</td></tr>';});
-  return h+'</tbody></table></div><div class="sm mut" style="margin-top:10px">'+(pt?'Open a row to see the full order.':'Open a row to edit its steps. The panel edits exactly the row you opened. Editing something wider is a separate, explicit step inside the panel.')+'</div>';}
+  return h+'</tbody></table></div><div class="sm mut" style="margin-top:10px">'+(pt?'Open a row to see the full order.':'Projects and services with their own steps have their own row. Open a row to edit its steps. The panel edits exactly the row you opened. Editing something wider is a separate, explicit step inside the panel.')+'</div>';}
 
 /* ---- People: one list. With a customer/project/service filter it is exactly eReached(filter). Contacts are masked (reveal is deferred). ---- */
 function eCt(p,id){var st=!isP(id),f=p.n.toLowerCase().split(' '),dom=st?'msp.example':p.c+'.example',n=0,i;for(i=0;i<p.n.length;i++)n=(n*31+p.n.charCodeAt(i))%10000;var d=('000'+n).slice(-4);
@@ -1718,7 +1819,7 @@ function eKbd(){return ' <span class="kbd hide-m">Ctrl/⌘+Enter</span>';}
 function eFoot(inner,note){return '<div class="e-foot"><span class="e-dirty" id="edirty"><span class="mk dot"></span>Unsaved</span>'+(note?'<span class="sm mut">'+note+'</span>':'')+'<span class="sp"></span>'+inner+'</div>';}
 function eRO(){return '<div class="note" style="margin-top:16px"><span>Managed by your MSP. You can see this, and your MSP changes it.</span></div>';}
 function ePagingPanel(o){var q=ePg(o),x=q.x,c=C(x.c),r=resolve(x),dk=eDk(o),dr=DRAFT[dk]||{v:{}},creating=!r.own&&!!dr.creating,pt=ePt(),ro=pt||(!r.own&&!creating),rr=eReach(x),L=eLvName(x).toLowerCase();
-  var h=eBand(x,pt?'Paging steps · '+L+' level':'Paging steps · editing at '+L+' level','')+'<div class="e-pb" data-dk="'+esc(dk)+'"><div class="stack e-main">';
+  var h=eBand(x,pt?'Call order · '+L+' level':'Call order · editing at '+L+' level','')+'<div class="e-pb" data-dk="'+esc(dk)+'"><div class="stack e-main">';
   h+=eLevels(q.org,x);
   if(creating)h+='<div class="e-inh"><div class="e-big">Creating own steps for '+esc(lbl(x))+'</div><div style="margin-top:4px">Started from the steps of '+esc(lbl(r.from))+'. Nothing changes until you save. After saving, '+(rr.n?'<b>'+eReachT(rr)+'</b> of '+esc(lbl(x))+' stop following '+esc(lbl(r.from)):'<b>no service changes right now</b> ('+rr.ex.map(esc).join(', ')+' already '+(rr.ex.length>1?'have':'has')+' own steps); services added to '+esc(lbl(x))+' later would use these steps')+'. '+esc(lbl(r.from))+' itself is not changed.</div></div>';
   else if(!r.own)h+='<div class="e-inh"><div class="e-big">Inherited from '+esc(lbl(r.from))+'</div><div style="margin-top:4px"><b>'+esc(lbl(x))+'</b> has no steps of its own. The steps below belong to '+esc(lbl(r.from))+' and cannot be edited at this level.</div>'+
@@ -1755,10 +1856,10 @@ function eAlarmPanel(o){var a=ALARMS[+eArg(o)],x={c:a.c,p:a.p,s:a.s},c=C(a.c),pt
   return h+'</div>';}
 function eIncPanel(o){var i=INC.filter(function(q){return q.id===eArg(o);})[0],x=i.c?{c:i.c,p:i.p,s:i.s}:null,pt=ePt();
   var h=eBand(x,'Incident',esc(i.t),'Unmapped account')+'<div class="e-pb"><div class="stack e-main"><div class="row">'+sev(i.sev,i.sev===1)+stt(i.st)+'<span class="mono sm mut">'+i.age+' · '+esc(i.k)+'</span><span class="sp"></span>'+eAckBtn(i,1)+'</div>';
-  if(x){var r=resolve(x);h+='<div><div class="ov" style="margin-bottom:6px">Paging order</div><div class="oc-sent" style="font-size:13.5px">'+eSent(C(x.c),r)+'</div><div class="sm mut" style="margin-top:6px">'+(r.own?'Own steps of ':'Inherited from ')+esc(lbl(r.from))+'</div></div>'+
+  if(x){var r=resolve(x);h+='<div><div class="ov" style="margin-bottom:6px">Call order</div><div class="oc-sent" style="font-size:13.5px">'+eSent(C(x.c),r)+'</div><div class="sm mut" style="margin-top:6px">'+(r.own?'Own steps of ':'Inherited from ')+esc(lbl(r.from))+'</div></div>'+
       '<div><div class="ov" style="margin-bottom:6px">Paged now</div><div><span class="who"><span class="av">'+i.wi+'</span><b>'+esc(i.who)+'</b></span><div class="sm mut">'+esc(i.sub)+' · step '+i.esc+'</div></div></div>'+
       '<div><div class="ov" style="margin-bottom:6px">Maintenance touching it</div>'+(MW.filter(function(w){return overlap(w,x);}).map(function(w){return '<div class="sm">'+w.st+' · '+esc(lbl(w))+' · <span class="mono">'+esc(w.w)+'</span></div>';}).join('')||'<div class="sm mut">None.</div>')+'</div>'+
-      (pt?'':'<div class="row"><button class="btn" data-e="open" data-a="paging:'+esc(key(x))+'">Open paging steps</button><button class="btn" data-e="filt" data-a="'+esc(key(x))+'" data-s2="people">Who is reached</button></div>');}
+      (pt?'':'<div class="row"><button class="btn" data-e="open" data-a="paging:'+esc(key(x))+'">Open call order</button><button class="btn" data-e="filt" data-a="'+esc(key(x))+'" data-s2="people">Who is reached</button></div>');}
   else h+='<div class="banner amber"><span>This AWS account is not assigned to a customer, so nobody is paged. It is shown to everyone until it is mapped.</span></div>';
   return h+'</div></div>';}
 function ePersonPanel(o){var id=eArg(o),p=per(id),st=!isP(id),pt=ePt(),h;
@@ -1842,11 +1943,11 @@ function eSwList(){var q=SW.q.trim().toLowerCase(),n=0,h='',idx=swIndex();SW.lis
   h+='<div class="v-sw-g">My customers · '+mine().length+'</div>';mine().forEach(function(c){add({k:key({c:c.id}),kind:'Customer',t:c.n,sub:pl(c.tree.length,'project')+' · '+pl(svcs({c:c.id}).length,'service')});});
   var oth=CUS().filter(function(c){return !eMyC(c);});if(oth.length){h+='<div class="v-sw-g">Other customers · '+oth.length+'</div>';oth.forEach(function(c){add({k:key({c:c.id}),kind:'Customer',t:c.n,sub:pl(c.tree.length,'project')+' · '+pl(svcs({c:c.id}).length,'service')});});}
   return h;}
-function eSwHtml(){if(!SW.open)return '';var scr=(SCREENS.filter(function(s){return s[0]===S.s;})[0]||['','Settings'])[1];
+function eSwHtml(){if(!SW.open)return '';var scr=eScrN();
   return '<div class="v-scrim" data-e="swclose"></div><div class="v-sw" role="dialog" aria-label="Filter to a customer, project or service"><div class="e-swh only-m" style="display:none"><b style="flex:1">Filter '+scr+' to…</b><button class="btn" data-e="swclose">Close</button></div>'+
     '<input id="eq" placeholder="Customer, project or service…" autocomplete="off" value="'+esc(SW.q)+'"><div class="v-sw-l" id="el">'+eSwList()+'</div>'+
     '<div class="v-sw-f hide-m"><span><span class="kbd">↑↓</span> move</span><span><span class="kbd">Enter</span> filter '+scr+' to it</span><span><span class="kbd">Esc</span> close</span></div></div>';}
-function eSwOpen(){if(ePt())return;POP=null;OUTI=false;eToastClear();SW.open=true;SW.q='';SW.i=0;SW.moved=false;renderOv();var i=$('#eq');if(i&&!ePhone())i.focus();}
+function eSwOpen(){if(ePt())return;DD=null;TR.drawer=false;POP=null;OUTI=false;eToastClear();SW.open=true;SW.q='';SW.i=0;SW.moved=false;renderOv();var i=$('#eq');if(i&&!ePhone())i.focus();}
 function eFilt(k,extra){var x=k&&k[0]!=='~'&&k!=='*'?parseKey(k):null,patch={c:x?x.c:'',p:x&&x.p||'',svc:x&&x.s||'',m:k==='~my'?'1':''},q;
   if(x){REC=[k].concat(REC.filter(function(r){return r!==k;})).slice(0,5);}
   for(q in (extra||{}))patch[q]=extra[q];SW.open=false;OUTI=false;EFOC=S.o&&!(extra&&extra.o==='')?null:'h1';ego(patch);}
@@ -1903,7 +2004,7 @@ function eAck(id){var i=INC.filter(function(q){return q.id===id;})[0];i.was={st:
 function eUnack(id){var i=INC.filter(function(q){return q.id===id;})[0];if(!i||!i.was)return;i.st=i.was.st;i.sub=i.was.sub;i.esc=i.was.esc;delete i.was;render();eToast('Acknowledge undone in <b>'+esc(lbl(i))+'</b> · paging continues');}
 
 /* ---- render glue ---- */
-function eOv(){return ePanels()+popHtml()+eSwHtml()+eDlgHtml();}
+function eOv(){return ePanels()+popHtml()+eDdHtml()+eDrwHtml()+eSwHtml()+eDlgHtml();}
 function eSlug(s){return String(s).toLowerCase().replace(/[^a-z0-9]+/g,'-');}
 /* product URL. Portal: never a /c/<customer> path, and a link that is not found keeps the address as typed (no redirect to a canonical path). */
 function eUrlPath(){var pth=function(x){return x?'/c/'+x.c+(x.p?'/'+eSlug(x.p):'')+(x.s?'/'+eSlug(x.s):''):'';},x=sc(),pt=ePt(),host=pt?'portal.alarmops.example':'console.alarmops.example';
@@ -1931,11 +2032,13 @@ function eLive(){var o=S.o,ty=eTy(o),p=$('#eprev'),s=$('#esent'),w=$('#ewarn');
   else if(ty==='mwnew'){var e=$('#ewhen');if(e)e.innerHTML=eWhen(d);if(w&&(d.why||'').trim())w.textContent='';}
   else if(ty==='personnew'){if(w&&(d.name||'').trim())w.textContent='';}}
 function eAfter(){document.body.classList.toggle('e-has-panel',S.v==='E'&&!!S.o);window.ERH=S.v==='E'?location.hash:null;if(S.v!=='E'){EFOC=null;return;}
-  eLive();if(DLG)eDlgFocus();
+  eLive();if(DLG)eDlgFocus();var tl=$('.e-tree .e-tr');if(tl&&TR.sy)tl.scrollTop=TR.sy;
   var h1=$('.page h1');if(h1)h1.setAttribute('tabindex','-1');
   var f=EFOC;EFOC=null;if(!f||DLG)return;var el=null,pn_=$('.e-panel');
   if(f==='load')el=pn_?pn_.querySelector('.e-path'):h1;
   else if(f==='h1')el=h1;else if(f==='panel'){if(pn_){el=(!ePhone()&&pn_.querySelector('.e-main input:not([disabled])'))||pn_.querySelector('.e-path');pn_.scrollTop=0;}}
+  else if(f.indexOf('seg:')===0)el=$('.e-bar [data-e="dd"][data-a="'+f.slice(4)+'"]:not([disabled])')||$('.e-bar [data-e="dd"]');
+  else if(f==='tree')el=$('.e-tree .e-tr');
   else if(f.indexOf('row:')===0)el=$$('.page [data-e="open"]').filter(function(r){return r.getAttribute('data-a')===f.slice(4);})[0]||h1;
   if(el){try{el.focus({preventScroll:f!=='h1'&&f!=='load'});}catch(_){el.focus();}if(f==='h1')scrollTo(0,0);}}
 function eNavTo(s){if(s===S.s&&!S.o){return;}eGuard(function(){eToastClear();OUTI=false;EFOC='h1';ego({s:s,o:'',q:''});scrollTo(0,0);});}
@@ -1943,6 +2046,7 @@ function eClick(e){var t=e.target,el,a,arg;
   if(DLG){if((el=closest(t,'[data-e="dlg"]'))){var act=DLG.a[+el.getAttribute('data-a')];DLG=null;renderOv();act[2]();}e.stopPropagation();return true;}
   if((el=closest(t,'[data-e]'))){a=el.getAttribute('data-e');arg=el.getAttribute('data-a')||'';e.stopPropagation();
     if(a==='sw')eSwOpen();else if(a==='swclose'){SW.open=false;renderOv();}
+    else if(ePkClick(a,arg,el)){}
     else if(a==='swpick')eFilt(arg);
     else if(a==='my')eFilt(S.m==='1'?'':'~my');
     else if(a==='filt'){var s2=el.getAttribute('data-s2');if(s2)eGuard(function(){eToastClear();eFilt(arg,{s:s2,o:'',q:''});});else eFilt(arg);}
@@ -1965,6 +2069,8 @@ function eClick(e){var t=e.target,el,a,arg;
   if(OUTI){OUTI=false;render();}
   return false;}
 function eInput(e){var t=e.target;
+  if(t.id==='ddq'&&DD){DD.q=t.value;DD.i=0;$('#ddl').innerHTML=eDdList();return true;}
+  if(t.classList&&t.classList.contains('e-tq')){TR.q=t.value;TR.qo={};TR.cur=null;eTrRe();return true;}
   if(t.id==='eq'){SW.q=t.value;SW.i=0;SW.moved=false;$('#el').innerHTML=eSwList();return true;}
   if(t.id==='egq'){var q=t.value.trim().toLowerCase();$$('.e-gc').forEach(function(b){b.classList.toggle('hide',!!q&&b.getAttribute('data-q').split(' ').every(function(w){return w.indexOf(q)!==0;})&&b.getAttribute('data-q').indexOf(q)!==0);});$$('.e-panel details').forEach(function(d){if(q)d.open=true;});return true;}
   var f=t.getAttribute&&t.getAttribute('data-f');if(f){var box=closest(t,'[data-dk]'),dk=box&&box.getAttribute('data-dk');if(!dk)return true;
@@ -1979,6 +2085,7 @@ function eKey(e){var t=e.target,save=(e.ctrlKey||e.metaKey)&&e.key==='Enter';
     else if(e.key==='Tab'){var bs=$$('.e-dlg .btn'),ix=bs.indexOf(document.activeElement);e.preventDefault();bs[(ix+(e.shiftKey?bs.length-1:1))%bs.length].focus();}
     return;}
   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();if(SW.open){SW.open=false;renderOv();}else eSwOpen();return;}
+  if(ePkKey(e))return;
   if(e.key==='Escape'){if(SW.open){SW.open=false;renderOv();}else if(POP){POP=null;renderOv();}else if(OUTI){OUTI=false;render();}else if(S.o)eClose();return;}
   if(SW.open){
     if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();SW.moved=true;SW.i=Math.max(0,Math.min(SW.list.length-1,SW.i+(e.key==='ArrowDown'?1:-1)));$('#el').innerHTML=eSwList();var c=$('.e-swi.cur');if(c)c.scrollIntoView({block:'nearest'});}
@@ -1987,6 +2094,149 @@ function eKey(e){var t=e.target,save=(e.ctrlKey||e.metaKey)&&e.key==='Enter';
   if(save){var sb=$('.e-foot [data-e="save"]')||(S.s==='settings'&&!S.o?$('#emspb'):null);if(sb&&!sb.disabled){e.preventDefault();eSave();}return;}
   if(e.key==='Enter'&&t.id==='egq'){var vis_=$$('.e-gc').filter(function(b){return !b.classList.contains('hide');});if(vis_.length===1)vis_[0].click();return;}
   if((e.key==='Enter'||e.key===' ')&&t.matches&&t.matches('[data-e][tabindex]')){e.preventDefault();t.click();return;}}
+
+/* ===== E scope picker styles. One filter state (S.c / S.p / S.svc / S.m) and one URL; three ways to set it:
+   E-1 cascade (default): three linked selectors in the filter bar. E-2 tree: collapsible tree on the left. E-3 search: the Ctrl/⌘K search only.
+   Ctrl/⌘K works in all three. The switch (S.pk) is a mockup control, not a product setting. ===== */
+var DD=null,TR={q:'',open:{},qo:{},col:false,w:272,drawer:false,cur:null,ta:'',tat:0,sy:0,list:[]};
+var PKN=[['','E-1 Cascade'],['t','E-2 Tree'],['s','E-3 Search']],LVN={c:'customer',p:'project',s:'service'};
+function ePk(){return S.pk==='t'?'t':S.pk==='s'?'s':'c';}
+function eSL(x){return x[0]==='paging'?'Call order':x[1];}
+function eScrN(){var x=SCREENS.filter(function(s){return s[0]===S.s;})[0];return x?eSL(x):'Settings';}
+function ePkSw(){return '<span class="e-pks" role="group" aria-label="Scope picker style (mockup)"><b>PICKER</b>'+PKN.map(function(p){return '<button data-e="pk" data-a="'+p[0]+'" aria-pressed="'+((S.pk||'')===p[0])+'">'+p[1]+'</button>';}).join('')+'</span>';}
+function eWp(t,q){if(!q)return true;t=t.toLowerCase();var ws=t.split(/\s+/),tk=q.split(/\s+/).filter(Boolean);return t.indexOf(q)===0||tk.every(function(w){return ws.some(function(z){return z.indexOf(w)===0;});});}
+/* what a node carries: open incidents, call-order + threshold problems, and whether it has settings of its own */
+function eStat(x){var c=C(x.c),o={own:[]};
+  o.inc=INC.filter(function(i){return eOpenSt(i)&&match(i,x);}).length;
+  o.pg=!x.p&&health(c)!=='ok'?1:0;o.pgt=HD[health(c)]||'';o.th=ALARMS.filter(function(a){return a.review&&match(a,x);}).length;o.prob=o.pg+o.th;
+  if(x.s){if(sn(x.c,x.p,x.s).ov)o.own.push('own call-order steps');}
+  else if(x.p){if(pn(x.c,x.p).ov)o.own.push('own call-order steps');}
+  else{if(c.steps)o.own.push('own call-order steps');if(METRICS.some(function(m){return m.cust[c.id]!=null;}))o.own.push('own threshold defaults');}
+  return o;}
+function eStatH(st,short){var h='<span class="e-stt">';
+  if(st.own.length)h+='<span class="e-own" title="Own settings: '+st.own.join(', ')+'">'+(short?'own':'own settings')+'</span>';
+  if(st.prob)h+='<span class="e-pr" title="'+[st.pg?'Call order: '+st.pgt:'',st.th?pl(st.th,'threshold')+' to review':''].filter(Boolean).join(' · ')+'"><span class="mk tri"></span>'+st.prob+'</span>';
+  if(st.inc)h+='<span class="e-oi" title="'+pl(st.inc,'open incident')+'"><span class="mk dot"></span>'+st.inc+(short?'':' open')+'</span>';
+  return h+'</span>';}
+var ELEG='<div class="e-leg"><span class="it"><span class="e-oi"><span class="mk dot"></span>n</span> open incidents</span><span class="it"><span class="e-pr"><span class="mk tri"></span>n</span> call-order or threshold problems</span><span class="it"><span class="e-own">own</span> own settings</span></div>';
+
+/* ---- E-1: cascading selectors ---- */
+function eSeg(lv,cap,inner,dis,clr){var nm=LVN[lv];
+  return '<span class="e-sg"><button class="v-seg'+(clr?'':' any')+'" data-e="dd" data-a="'+lv+'" aria-haspopup="listbox" aria-expanded="false" aria-label="'+cap+'"'+(dis?' disabled title="Choose a '+(lv==='p'?'customer':'project')+' first"':'')+'><small>'+cap+'</small>'+inner+'<span class="car">▼</span></button>'+
+    (clr?'<button class="e-segx" data-e="ddclr" data-a="'+lv+'" aria-label="Clear '+nm+'" title="Clear '+nm+'">×</button>':'')+'</span>';}
+function eOpts(lv){var x=sc(),o=[],me=eMe().split(' ')[0];
+  function cu(c,g){o.push({k:key({c:c.id}),t:c.n,sub:pl(c.tree.length,'project')+' · '+pl(svcs({c:c.id}).length,'service'),st:eStat({c:c.id}),g:g,on:!!x&&x.c===c.id,more:1});}
+  if(lv==='c'){o.push({k:'',t:'All customers',sub:CUS().length+' customers · no filter',fx:1,on:!x&&S.m!=='1'});
+    o.push({k:'~my',t:'My customers',sub:'the '+mine().length+' customers '+me+' covers',fx:1,on:!x&&S.m==='1'});
+    var my=mine(),ot=CUS().filter(function(c){return !eMyC(c);});
+    my.forEach(function(c){cu(c,'My customers · '+my.length);});ot.forEach(function(c){cu(c,'Other customers · '+ot.length);});}
+  else if(lv==='p'){var c=C(x.c);o.push({k:key({c:x.c}),t:'All projects',sub:'all of '+c.n+' · '+pl(svcs({c:x.c}).length,'service'),fx:1,on:!x.p});
+    c.tree.forEach(function(p){o.push({k:key({c:x.c,p:p.n}),t:p.n,sub:pl(p.s.length,'service'),st:eStat({c:x.c,p:p.n}),on:x.p===p.n,more:1});});}
+  else{var P=pn(x.c,x.p);o.push({k:key({c:x.c,p:x.p}),t:'All services',sub:'all of '+x.p+' · '+pl(P.s.length,'service'),fx:1,on:!x.s});
+    P.s.forEach(function(s){o.push({k:key({c:x.c,p:x.p,s:s.n}),t:s.n,sub:'',st:eStat({c:x.c,p:x.p,s:s.n}),on:x.s===s.n});});}
+  return o;}
+function eDdList(){var q=DD.q.trim().toLowerCase(),os=eOpts(DD.lv).filter(function(o){return !q||(!o.fx&&eWp(o.t,q));}),g=null,h='';DD.list=os.map(function(o){return o.k;});
+  if(!os.length)return '<div class="v-sw-g">No '+LVN[DD.lv]+' starts with “'+esc(DD.q)+'”</div>';
+  if(DD.i==null){DD.i=0;os.forEach(function(o,n){if(o.on)DD.i=n;});}
+  DD.i=Math.max(0,Math.min(os.length-1,DD.i));
+  os.forEach(function(o,n){if(o.g&&o.g!==g){g=o.g;h+='<div class="v-sw-g">'+g+'</div>';}
+    h+='<div class="e-opt'+(n===DD.i&&!DD.sheet?' cur':'')+(o.on?' on':'')+'" role="option" aria-selected="'+!!o.on+'" data-e="ddpick" data-a="'+esc(o.k)+'"><span class="ck">'+(o.on?'<span class="mk chk"></span>':'')+'</span><span class="x"><b>'+esc(o.t)+'</b>'+(o.sub?'<small>'+esc(o.sub)+'</small>':'')+'</span>'+
+      (o.st?eStatH(o.st):'')+(DD.sheet&&o.more?'<span class="go">›</span>':'')+'</div>';});
+  return h;}
+function eDdHtml(){if(!DD)return '';var x=sc(),nm=LVN[DD.lv],ph='Search '+nm+'s'+(DD.lv==='p'?' of '+C(x.c).n:DD.lv==='s'?' of '+x.p:'')+'…';
+  var body='<input id="ddq" class="q" placeholder="'+esc(ph)+'" aria-label="'+esc(ph)+'" autocomplete="off" value="'+esc(DD.q)+'"><div class="e-ddl" id="ddl" role="listbox" aria-label="'+nm+'s">'+eDdList()+'</div>'+ELEG;
+  if(!DD.sheet)return '<div class="v-scrim" style="background:none" data-e="ddclose"></div><div class="e-dd" role="dialog" aria-label="Choose a '+nm+'" style="left:'+DD.x+'px;top:'+DD.y+'px;max-height:calc(100vh - '+(DD.y+12)+'px)">'+body+
+    '<div class="v-sw-f"><span><span class="kbd">↑↓</span> move</span><span><span class="kbd">Enter</span> choose</span><span>type to search</span><span><span class="kbd">Esc</span> close</span></div></div>';
+  var pt=ePt(),up=DD.lv==='s'?'p':DD.lv==='p'&&!pt?'c':'',val={c:x?C(x.c).n:S.m==='1'?'My customers':'All',p:x&&x.p||'All',s:x&&x.s||'All'},dis={c:pt,p:!x,s:!(x&&x.p)};
+  return '<div class="e-sheet" role="dialog" aria-modal="true" aria-label="Filter '+eScrN()+'"><div class="e-shh">'+(up?'<button class="btn" data-e="ddlv" data-a="'+up+'" aria-label="Back to '+LVN[up]+'">← Back</button>':'')+'<b>Filter '+eScrN()+'</b><button class="btn" data-e="ddclose">Done</button></div>'+
+    '<div class="e-shs">'+['c','p','s'].map(function(l,i){return '<button class="'+(DD.lv===l?'on':'')+'" data-e="ddlv" data-a="'+l+'"'+(dis[l]?' disabled':'')+(DD.lv===l?' aria-current="step"':'')+'><small>'+(i+1)+' · '+LVN[l]+'</small><span>'+esc(val[l])+'</span></button>';}).join('')+'</div>'+body+'</div>';}
+function eDdMark(){$$('.e-bar [data-e="dd"]').forEach(function(b){b.setAttribute('aria-expanded',String(!!DD&&b.getAttribute('data-a')===DD.lv));});}
+function eDdOpen(lv,q,sheet){if(DLG)return;var x=sc();if((lv==='p'&&!x)||(lv==='s'&&!(x&&x.p))||(lv==='c'&&ePt()))return;
+  SW.open=false;POP=null;TR.drawer=false;eToastClear();DD={lv:lv,q:q||'',i:q?0:null,sheet:!!sheet};
+  if(!sheet){var b=$('.e-bar [data-e="dd"][data-a="'+lv+'"]'),r=b.getBoundingClientRect();DD.x=Math.max(8,Math.min(r.left,innerWidth-392));DD.y=r.bottom+4;}
+  renderOv();eDdMark();var i=$('#ddq');if(i&&!sheet){i.focus();i.setSelectionRange(i.value.length,i.value.length);}}
+function eDdClose(foc){if(!DD)return;var lv=DD.lv,sh=DD.sheet;DD=null;renderOv();eDdMark();if(foc){var b=sh?$('.e-barm .sb'):$('.e-bar [data-e="dd"][data-a="'+lv+'"]');if(b)b.focus();}}
+/* one setter for the filter, used by the selectors, the sheet and the tree. Changing the customer always resets project and service. */
+function eSetF(k,foc){var x=k&&k[0]!=='~'?parseKey(k):null;if(x)REC=[k].concat(REC.filter(function(r){return r!==k;})).slice(0,5);
+  OUTI=false;EFOC=foc||(S.o?null:'h1');ego({c:x?x.c:'',p:x&&x.p||'',svc:x&&x.s||'',m:k==='~my'?'1':''});}
+function eDdPick(k){var lv=DD.lv,sh=DD.sheet,x=k&&k[0]!=='~'?parseKey(k):null,nx=lv==='c'&&x?'p':lv==='p'&&x&&x.p?'s':'';
+  if(sh&&nx){DD.lv=nx;DD.q='';DD.i=null;eSetF(k,'none');return;}   // phone: the stepped sheet moves on to the next level
+  DD=null;eSetF(k,sh?'h1':'seg:'+(nx||lv));}                        // desktop: focus moves to the next selector
+function eClr(lv){var x=sc();DD=null;eSetF(lv==='c'||!x?'':lv==='p'?key({c:x.c}):key({c:x.c,p:x.p}),ePhone()?'h1':ePk()==='c'?'seg:'+lv:'h1');}
+
+/* ---- E-2: tree ---- */
+function eTrNodes(){var q=TR.q.trim().toLowerCase(),x=sc(),o=[],pt=ePt();
+  function ex(k,def){var m=q?TR.qo:TR.open;return m[k]!=null?m[k]:def;}
+  if(!pt&&!q){o.push({k:'',t:'All customers',n:CUS().length,d:0,on:!x&&S.m!=='1'});o.push({k:'~my',t:'My customers',n:mine().length,d:0,on:!x&&S.m==='1'});}
+  function cu(c,g){var cm=eWp(c.n,q),ps=c.tree.map(function(p){return {p:p,pm:eWp(p.n,q),ss:p.s.filter(function(s){return eWp(s.n,q);})};}),sub=ps.some(function(z){return z.pm||z.ss.length;});
+    if(q&&!cm&&!sub)return;var ck=key({c:c.id}),e=ex(ck,q?sub&&!cm:!!x&&x.c===c.id);
+    o.push({k:ck,t:c.n,d:0,kids:1,exp:e,g:g,st:eStat({c:c.id}),on:!!x&&x.c===c.id&&!x.p});if(!e)return;
+    ps.forEach(function(z){if(q&&sub&&!cm&&!z.pm&&!z.ss.length)return;var pk=key({c:c.id,p:z.p.n}),pe=ex(pk,q?z.ss.length>0&&!z.pm:!!x&&x.c===c.id&&x.p===z.p.n);
+      o.push({k:pk,t:z.p.n,d:1,kids:1,exp:pe,st:eStat({c:c.id,p:z.p.n}),on:!!x&&x.c===c.id&&x.p===z.p.n&&!x.s});if(!pe)return;
+      (q&&z.ss.length&&!z.pm?z.ss:z.p.s).forEach(function(s){o.push({k:key({c:c.id,p:z.p.n,s:s.n}),t:s.n,d:2,st:eStat({c:c.id,p:z.p.n,s:s.n}),on:!!x&&x.c===c.id&&x.p===z.p.n&&x.s===s.n});});});}
+  var my=pt?[C(P_CUST)]:mine(),ot=pt?[]:CUS().filter(function(c){return !eMyC(c);});
+  my.forEach(function(c){cu(c,pt?'':'My customers · '+my.length);});ot.forEach(function(c){cu(c,'Other customers · '+ot.length);});return o;}
+function eTrList(){var ns=eTrNodes(),g=null,h='';TR.list=ns;
+  if(!ns.length)return '<div class="v-sw-g">No customer, project or service starts with “'+esc(TR.q)+'”</div>';
+  if(!ns.some(function(n){return n.k===TR.cur;})){var onn=ns.filter(function(n){return n.on;})[0];TR.cur=(onn||ns[0]).k;}
+  ns.forEach(function(n){if(n.g&&n.g!==g){g=n.g;h+='<div class="v-sw-g" role="presentation">'+g+'</div>';}
+    h+='<div class="e-tn d'+n.d+(n.on?' on':'')+(n.k===TR.cur?' cur':'')+'" role="treeitem" aria-level="'+(n.d+1)+'" aria-selected="'+!!n.on+'"'+(n.kids?' aria-expanded="'+!!n.exp+'"':'')+' data-e="trpick" data-a="'+esc(n.k)+'">'+
+      (n.kids?'<button class="tw" tabindex="-1" data-e="trtog" data-a="'+esc(n.k)+'" aria-label="'+(n.exp?'Collapse ':'Expand ')+esc(n.t)+'">'+(n.exp?'▾':'▸')+'</button>':'<span class="tw"></span>')+
+      '<span class="x">'+esc(n.t)+(n.n!=null?' <span class="mut">· '+n.n+'</span>':'')+'</span>'+(n.st?eStatH(n.st,1):'')+'</div>';});
+  return h;}
+function eTrBox(dr){return '<div class="e-trh"><input class="inp e-tq" placeholder="Filter the tree…" aria-label="Filter the tree by customer, project or service name" autocomplete="off" value="'+esc(TR.q)+'">'+(dr?'':'<button class="btn sm" data-e="trcol" title="Hide the tree" aria-label="Hide the tree">«</button>')+'</div>'+
+  '<div class="e-tr" role="tree" tabindex="0" aria-label="Customers, projects and services">'+eTrList()+'</div>'+ELEG;}
+function eTreeAside(){if(TR.col)return '<aside class="e-tree col" aria-label="Scope tree, hidden"><button class="btn sm" data-e="trcol" title="Show the tree" aria-label="Show the tree">»</button><span class="vt">Customers</span></aside>';
+  return '<aside class="e-tree" style="width:'+TR.w+'px" aria-label="Scope tree">'+eTrBox()+'<div class="e-trz" role="separator" aria-orientation="vertical" tabindex="0" aria-label="Resize the tree (arrow keys)" title="Drag to resize"></div></aside>';}
+function eDrwHtml(){if(!TR.drawer)return '';return '<div class="v-scrim" data-e="drwclose"></div><div class="e-drw" role="dialog" aria-modal="true" aria-label="Filter '+eScrN()+'"><div class="e-shh"><b>Filter '+eScrN()+'</b><button class="btn" data-e="drwclose">Close</button></div>'+eTrBox(1)+'</div>';}
+function eTrRe(){var l=$(TR.drawer?'.e-drw .e-tr':'.e-tree .e-tr');if(!l)return;var s=l.scrollTop;l.innerHTML=eTrList();l.scrollTop=s;var c=$('.e-tn.cur',l);if(c)c.scrollIntoView({block:'nearest'});}
+function eTrNode(k){return TR.list.filter(function(n){return n.k===k;})[0];}
+function eTrTog(k){var n=eTrNode(k);if(!n||!n.kids)return;(TR.q.trim()?TR.qo:TR.open)[k]=!n.exp;TR.cur=k;eTrRe();}
+function eTrPick(k){TR.cur=k;if(k&&k[0]!=='~'){delete TR.open[k];if(TR.q.trim())TR.qo[k]=true;}var dr=TR.drawer;if(dr){TR.drawer=false;TR.q='';TR.qo={};}eSetF(k,dr?'h1':'tree');}
+function eTrKey(e){var ns=TR.list,i=-1,j,k=e.key;ns.forEach(function(n,q){if(n.k===TR.cur)i=q;});if(i<0)return false;var n=ns[i];
+  if(k==='ArrowDown')i=Math.min(ns.length-1,i+1);else if(k==='ArrowUp')i=Math.max(0,i-1);else if(k==='Home')i=0;else if(k==='End')i=ns.length-1;
+  else if(k==='ArrowRight'){if(n.kids&&!n.exp){e.preventDefault();eTrTog(n.k);return true;}if(n.kids&&ns[i+1]&&ns[i+1].d>n.d)i++;}
+  else if(k==='ArrowLeft'){if(n.kids&&n.exp){e.preventDefault();eTrTog(n.k);return true;}for(j=i-1;j>=0;j--)if(ns[j].d<n.d){i=j;break;}}
+  else if(k==='Enter'||k===' '){e.preventDefault();eTrPick(n.k);return true;}
+  else if(k.length===1&&!e.ctrlKey&&!e.metaKey&&!e.altKey){var now=Date.now();TR.ta=(now-TR.tat<700?TR.ta:'')+k.toLowerCase();TR.tat=now;
+    for(j=0;j<ns.length;j++){var q=(i+(TR.ta.length>1?0:1)+j)%ns.length;if(ns[q].t.toLowerCase().indexOf(TR.ta)===0){i=q;break;}}}
+  else return false;
+  e.preventDefault();TR.cur=ns[i].k;eTrRe();return true;}
+
+/* ---- glue ---- */
+function ePkClick(a,arg,el){
+  if(a==='dd'){if(DD&&DD.lv===arg&&!DD.sheet)eDdClose(1);else eDdOpen(arg);}
+  else if(a==='ddclose')eDdClose(1);else if(a==='ddpick')eDdPick(arg);else if(a==='ddclr')eClr(arg);
+  else if(a==='ddlv'){if(DD){DD.lv=arg;DD.q='';DD.i=null;renderOv();}}
+  else if(a==='sheet'){var x=sc();eDdOpen(ePt()?(x.p?'s':'p'):!x?'c':!x.p?'p':'s','',true);}
+  else if(a==='drawer'){DD=null;SW.open=false;POP=null;eToastClear();TR.drawer=true;TR.q='';TR.qo={};TR.cur=null;renderOv();}
+  else if(a==='drwclose'){TR.drawer=false;renderOv();var b=$('.e-barm .sb');if(b)b.focus();}
+  else if(a==='trpick')eTrPick(arg);else if(a==='trtog')eTrTog(arg);
+  else if(a==='trcol'){TR.col=!TR.col;render();var tb=$('.e-tree [data-e="trcol"]');if(tb)tb.focus();}
+  else if(a==='pk'){DD=null;TR.drawer=false;SW.open=false;POP=null;ego({pk:arg});}
+  else return false;
+  return true;}
+function ePkKey(e){var t=e.target,k=e.key,is=function(sel){return t.matches&&t.matches(sel);};
+  if(DD){
+    if(k==='Escape'){eDdClose(1);return true;}
+    if(k==='Tab'&&!DD.sheet){eDdClose(1);return true;}
+    if(k==='ArrowDown'||k==='ArrowUp'||(k==='Enter'&&!DD.sheet)){e.preventDefault();
+      if(k==='Enter'){if(DD.list.length)eDdPick(DD.list[DD.i]);return true;}
+      DD.i=Math.max(0,Math.min(DD.list.length-1,DD.i+(k==='ArrowDown'?1:-1)));$('#ddl').innerHTML=eDdList();var c=$('.e-opt.cur');if(c)c.scrollIntoView({block:'nearest'});return true;}
+    return !is('button');}
+  if(SW.open)return false;
+  if(k==='Escape'&&TR.drawer){TR.drawer=false;renderOv();return true;}
+  if(is('.e-tr'))return eTrKey(e);
+  if(is('.e-tq')){if(k==='ArrowDown'||(k==='Enter'&&TR.q.trim())){e.preventDefault();var l=$(TR.drawer?'.e-drw .e-tr':'.e-tree .e-tr');if(k==='Enter'&&TR.list.length)eTrPick(TR.cur);else if(l)l.focus();return true;}return false;}
+  if(is('.e-trz')&&(k==='ArrowLeft'||k==='ArrowRight')){e.preventDefault();TR.w=Math.max(200,Math.min(480,TR.w+(k==='ArrowRight'?16:-16)));t.parentNode.style.width=TR.w+'px';return true;}
+  if(is('.e-bar [data-e="dd"]')){var lv=t.getAttribute('data-a');
+    if(k==='ArrowDown'){e.preventDefault();eDdOpen(lv);return true;}
+    if(k.length===1&&k!==' '&&!e.ctrlKey&&!e.metaKey&&!e.altKey){e.preventDefault();eDdOpen(lv,k);return true;}}   // type-ahead: a letter opens the list already searched
+  return false;}
+document.addEventListener('mousedown',function(e){var z=e.target;if(!z.classList||!z.classList.contains('e-trz'))return;e.preventDefault();var a=z.parentNode,x0=e.clientX,w0=a.offsetWidth;
+  function mv(ev){TR.w=Math.max(200,Math.min(480,w0+ev.clientX-x0));a.style.width=TR.w+'px';}
+  function up(){document.removeEventListener('mousemove',mv);document.removeEventListener('mouseup',up);document.body.classList.remove('e-rsz');}
+  document.body.classList.add('e-rsz');document.addEventListener('mousemove',mv);document.addEventListener('mouseup',up);});
 /*E-JS-END*/
 window.addEventListener('hashchange',function(){if(window.ERH===location.hash)return;render();});
 render();
