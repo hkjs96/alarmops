@@ -177,3 +177,72 @@
 | 콘솔 오류 | 전 화면 | `ERR_TUNNEL_CONNECTION_FAILED` 2건 — 외부 폰트 요청이 점검 환경 프록시에서 막힌 것으로 보임(스모크 테스트도 fonts 도메인은 제외). 앱 오류 없음 | — |
 
 **판정: 통과** — P1 없음. 다크 테마·실제 Google SSO 경로는 이번 점검 범위 밖.
+
+## Console 범위 틀 점검 — 2026-11-10
+
+대상: `apps/console` (feat/console-scope, 커밋 `1fa37ca`), `MOCK_API=1 next dev -p 3117` (개발 서버. 준호 시나리오는 `MOCK_CUSTOMERS=34`로 재기동). Playwright로 실제 화면을 조작, 1440×900 · 1280×900 · 1024×768 · 390×844(터치), 라이트·다크. 판정은 화면과 스크린샷만으로 했고 제품 소스는 읽지 않음. 캡처: `docs/qa/shots/console-scope/qa-1110/` (gitignore 대상, 로컬 전용). 디자인 기준: `docs/ui/mockups/scope-variants.html` 변형 E.
+
+### 시나리오 결과
+
+| # | 페르소나·폭 | 시나리오 | 결과 | 클릭/탭 | 관찰 | 캡처 |
+|---|---|---|---|---|---|---|
+| H1 | 하은 390 | 로그아웃 상태로 인시던트 링크 → 로그인 → 그 인시던트 도착 | 통과 | 1 | `/incidents/<id>` → `/login?next=…` → dev sign-in 1탭 → `/c/mirae/core/payments-api/incident/<id>` 패널로 바로 도착. 가로 스크롤 없음. 로그인 링크는 여전히 156×14px (이전 점검 P2 그대로) | h-01, h-02 |
+| H2 | 하은 390 | 목록에서 Mirae Pay payments 인시던트 찾기, 고객/프로젝트/서비스 말하기 | 통과 | 0 (스크롤 1) | 카드에 "Mirae Pay › Core › Payments API" 한 줄로 읽힘. 다만 첫 화면(844px)은 배너+통계 5칸이 차지해 첫 인시던트 카드는 스크롤해야 보임 (P2-5) | h-03 |
+| H3 | 하은 390 | 목록에서 Acknowledge → Undo | 부분 (P1-1, P1-3) | 2 | Ack 44px 버튼 1탭 → ACK'D, 토스트 "Acknowledged in Mirae Pay › Core › Payments API · … Undo" 약 9초, Undo 1탭 → "Acknowledge undone … paging continues", 배지 4→3→4. 하지만 토스트가 폰에서 깨지고(P1-3), Ack한 행이 아래로 내려가면서 같은 자리에 다음 인시던트의 Acknowledge가 올라옴(P1-1) | h-05, h-06 |
+| H4 | 하은 390 | 패널(링크로 도착한 화면)에서 Acknowledge → Undo | 실패 (P1-2) | 1 | Ack 후 Undo가 어디에도 없음(토스트 없음, 목록 행에도 없음). Acknowledge 자리에 Resolve 버튼이 그대로 들어옴 | m-03 |
+| H5 | 하은 390 | 시트로 타이핑 없이 Daon Retail › Commerce › Checkout | 통과 | 4 | Showing 버튼 → Daon Retail → Commerce → Checkout. 시트 항목 전부 44px 이상, 단계 탭(1·Customer/2·Project/3·Service)으로 위치가 보임. 주소 `?customer=daon&project=commerce&service=checkout` | h-07~h-10 |
+| H6 | 하은 390 | 필터 켠 상태에서 "Outside this view" 읽기 | 통과 (P2-3 용어) | 0 | "Outside this view: 4 open (1 from an unmapped account) · 2 acknowledged" 가 필터 줄 바로 아래. ? 버튼 설명이 정확함. 줄을 누르면 필터 해제된 목록으로, 뒤로 가기 시 필터 복귀. 단 같은 화면의 "Open 1" 탭과 "0 open" 문구가 서로 다른 뜻 | h-10, h-11 |
+| H7 | 하은 390 | 고객 3번 바꾸기 (Mirae Pay → Hanbit → Bora) | 통과 | 4, 3, 3 | 열기 → 고객 → "Use <고객> only". 서비스까지 좁힌 상태에서 다시 열면 3단계(서비스)에서 시작해 "1 · Customer" 탭 1번이 더 듦. 고객 행을 누르면 바로 적용되지 않고 프로젝트 단계로 감(하단 파란 버튼으로 확정) | h-12~h-14 |
+| J1 | 준호 1440, 34곳 | 트리 훑기 | 통과 (P2-6) | — | My customers 7 / Other customers 27 그룹, 그룹 제목 고정. Other 27곳이 이름순이 아님(… Zio Fashion, Nuri Soft, Maru Homes …) | j-01, j-05 |
+| J2 | 준호 1440 | "Only with problems" | 통과 | 1 | 34곳 → 5곳(Mirae Pay, Daon Retail, Hanbit, Kumho Clinic=Unreachable, Lumen Bank=At risk), 접힌 그룹 자동 펼침, "1 of 7 / 4 of 27" 표기. 목록 필터는 안 바뀜 | j-02 |
+| J3 | 준호 1440 | 키보드만으로 선택 (화살표, 타이핑) | 부분 (P2-1) | — | 트리 안에서는 ↑↓←→, Home/End, Enter 선택, 타이핑 이동("dao"→Daon Retail, "han"→Hanbit, 접힌 그룹 안도 찾음) 동작. 하지만 새로 연 화면에서 첫 Tab이 LEGEND로 가서 상단 메뉴·트리를 건너뜀. Space는 선택 안 됨(P3) | j-03~j-05 |
+| J4 | 준호 1440 | 인시던트 패널 열기 — 트리가 내용을 밀어내는가, 목록이 쓸 만한가 | 통과 (P2-4) | 1 | 트리 272 + 목록 약 688 + 패널 442. 목록은 Sev/Status/고객/인시던트/Ack 열 유지(Paged·Age 열은 숨김), 가로 스크롤 없음, 다른 행 클릭 시 패널만 교체. 통계가 2줄로 접히며 목록 첫 행이 y≈605 → 900px 높이에서 2.5행만 보임 | j-11-panel-1440 |
+| J5 | 준호 1280 | 1408 미만 자동 레일, 다시 펼치기 | 통과 | 1 | 패널 열면 1407px 이하에서 트리가 45px 레일(세로 "All customers" + 펼침 버튼)로, 패널 닫으면 복귀. 레일 버튼 1번으로 패널 옆에 트리 재펼침(목록은 카드형 530px로 유지). 1024에서 재펼침하면 목록이 숨고 "← Back to the list"만 남음 | j-11-panel-1280, j-13, j-32 |
+| J6 | 준호 1440 | 딥 링크 복사 → 새로고침 → 뒤로/앞으로 | 통과 | 1 | Copy link → "Copied" + 클립보드에 내 필터가 빠진 `/c/mirae/core/payments-api/incident/<id>`. 새 탭에서 열면 All customers + 같은 패널. 새로고침 시 필터·패널 유지. 뒤로 3번(패널→필터 목록→전체), 앞으로 2번 모두 주소·필터 줄·트리 선택·패널이 일치 | j-40, j-41 |
+| J7 | 준호 1440 | 없는 고객 slug → Not found | 통과 | — | `?customer=nope`, `/c/nope/…`, 없는 인시던트 id, 프로젝트 불일치, 다른 고객 경로에 남의 인시던트 id 모두 같은 "Not found — There is nothing to show at this address" + Back to Incidents. 상단 메뉴·트리 유지, 존재 여부를 구분해 주지 않음(좋음) | j-43, j-44 |
+| N1 | 신입 1440 | 이름을 모른 채 문제 있는 고객 찾기 | 통과 | 1 | 기본 화면에서도 Mirae Pay에 빨간 1, 접힌 "Other customers"에 UNREACHABLE·2 요약이 보임. "Only with problems" 1클릭이면 5곳만 남음 | n-01 |
+| N2 | 신입 1440 | Mirae Pay의 서비스 알아내기 | 통과 | 4 | ▸ Mirae Pay → Core(Payments API, Settlement, Checkout) / Merchant(Merchant portal) / Data platform(Ledger). 프로젝트마다 한 번씩 펼쳐야 함 | n-02 |
+| N3 | 신입 1440 | 트리 태그를 도움 없이 이해 | 부분 (P2-7) | 0 | LEGEND가 기본으로 펼쳐져 있어 n / UNREACHABLE / AT RISK는 문장으로 이해됨. "OWN STEPS — own call order", "own steps inside (collapsed)"는 steps가 뭔지 몰라 추측. "Only with problems" 옆 숫자 5는 설명 없음(마우스 올려야 나옴) | d-01 |
+| S1 | 1440·390 | 스텁 화면(Monitoring, Call order, People, Maintenance, Settings)의 틀·범위 일관성 | 통과 | 각 1 | 필터(Daon Retail › Commerce)를 켠 채 이동하면 주소 쿼리·필터 줄·트리 선택이 그대로 따라옴, 본문은 "This list will show Daon Retail › Commerce". Settings만 트리가 사라지고 "MSP-wide settings · all 34 customers"로 바뀌며, Incidents로 돌아오면 필터 복귀. 390에서도 동일, 가로 스크롤 없음 | s-* |
+
+### 문제 목록
+
+| 등급 | # | 문제 | 재현 |
+|---|---|---|---|
+| P1 | 1 | 목록에서 Ack하면 그 행이 Ack'd 묶음으로 내려가고, 방금 누른 자리에 다음 인시던트의 Acknowledge 버튼이 올라온다. 졸린 상태의 두 번 탭/더블클릭이 다른 고객의 인시던트를 Ack한다 | 390 또는 1440, `/incidents` → Mirae Pay 행 Acknowledge → 같은 좌표에 "Acknowledge api-alb 5XX rate above 2%"(Hanbit)가 위치 (h-05, m-09) |
+| P1 | 2 | 패널에서 Ack하면 Undo가 없다. 토스트도 없고 목록 행에도 Undo가 안 생긴다. Acknowledge가 있던 자리를 Resolve 버튼이 덮어(390: x193–361, Ack는 x228–361) 두 번 탭하면 Resolve가 눌린다. Ack 후에도 "→ call Yuna 03:22 → call everyone…"이 그대로 남아 호출이 멈췄는지 알 수 없음 | 390 또는 1440, `/c/mirae/core/payments-api/incident/inc-7f3a0c91b2d4-20261108181204` → Acknowledge (m-03, m-10). Slack 링크로 들어온 하은의 기본 경로 |
+| P1 | 3 | 폰에서 Ack 토스트가 깨진다. 폭 약 195px 상자에 글이 "Acknowle/dged in/Mirae/Pay ›…" 12줄로 쪼개지고 화면 가운데 카드 2개를 가린다. Undo 버튼은 52×44로 눌리긴 함 | 390, `/incidents` → 아무 행 Acknowledge (h-05). 1440에서는 640px 한 줄로 정상 |
+| P2 | 1 | 새로 연 화면에서 첫 Tab이 트리 아래 LEGEND 버튼으로 간다. Skip to content, 상단 메뉴, Find by name, Only with problems, 트리를 모두 건너뛰어 키보드 사용자는 Shift+Tab으로 거슬러 올라가야 한다 | 1440, `/incidents` 또는 `/people` 로드 직후 Tab 1번 |
+| P2 | 2 | 트리를 레일로 접어 둔 뒤 새로고침하면 첫 그림은 272px 트리로 나왔다가 약 0.3초 뒤 45px 레일로 줄어든다(본문이 옆으로 튐). 테마(다크)는 깜빡임 없음. 개발 서버 측정이라 빌드본에서 재확인 필요 | 1440, « 클릭 → 새로고침, 프레임별 폭 272→45 |
+| P2 | 3 | "open"이 두 뜻으로 쓰인다. 탭 "Open 7"은 Ack 포함, 제목 줄 "7 incidents listed, 4 open"·배지 4·"Outside this view: 4 open"은 Ack 제외. 필터 뒤 "Open 1" 탭 바로 위에 "0 open" | `/incidents`, `/incidents?customer=daon&project=commerce&service=checkout` (h-10) |
+| P2 | 4 | 패널을 열면 통계 5칸이 2줄로 접히고 배너도 2줄이 되어 목록 첫 행이 화면 아래쪽(y≈605/900)으로 밀린다. 1440·1280·1024 공통. 패널이 열렸을 때는 통계를 줄이거나 접는 편이 낫다 | 1440, 아무 행 열기 (j-11) |
+| P2 | 5 | 폰 첫 화면에 인시던트가 한 건도 안 보인다. 배너 + 통계 5칸(약 500px) + 탭·필터 뒤에 첫 카드가 y≈745에서 시작해 하단 메뉴에 가린다. 하은의 "스크롤 없이 가장 심각한 것" 기준 미달(숫자 "1 SEV-1 · oldest 26m"는 보임) | 390, `/incidents` (h-03) |
+| P2 | 6 | 34곳일 때 Other customers 27곳이 이름순이 아니어서 눈으로 찾기 어렵다. 타이핑 이동·Find by name으로 보완은 됨. 폰 시트도 같은 순서 | 1440, `MOCK_CUSTOMERS=34`, Other customers 펼침 (j-05) |
+| P2 | 7 | "OWN STEPS / own call order / own steps inside" 설명이 용어를 되풀이할 뿐이라 처음 보는 사람은 뜻을 모른다. 예: "has its own paging order, different from the customer's" 같은 문장 필요. 폰 시트에는 범례가 아예 없음(OWN STEPS, Unreachable, At risk 태그만 표시) | 1440 LEGEND, 390 시트 2단계 (h-13) |
+| P2 | 8 | 필터 줄이 폰에서 스크롤과 함께 사라진다. 목록을 내리면 지금 어떤 고객으로 좁혀 보고 있는지, "Outside this view"가 몇 건인지 안 보인다 | 390, 필터 켠 뒤 300px 스크롤 |
+| P3 | 1 | 패널 제목(고객 › 프로젝트 › 서비스)이 442px 패널과 390에서 2줄로 접히며 둘째 줄이 "›"로 시작. 도착 시 제목에 굵은 파란 포커스 테두리가 남아 강조처럼 보임 | j-11-panel-1440, h-02 |
+| P3 | 2 | 트리에서 Space로 선택 안 됨(Enter만). 트리에 포커스가 있을 때 Esc로 패널이 안 닫힘. 맨 아래 고객을 →로 펼치면 자식이 범례 뒤로 내려가 안 보임 | j-05 |
+| P3 | 3 | 패널이 열린 채 트리에서 다른 고객을 고르면 패널이 닫히고 목록으로 돌아간다("Opening a row never changes what this list shows"의 반대 방향은 안내 없음) | 1440, 패널 연 뒤 Bora Foods 클릭 |
+| P3 | 4 | "Other customers …"가 272px에서 말줄임되어 "· 27" 개수가 안 보임. 펼친 범례가 트리 높이 약 170px을 계속 차지(기준 목업은 "What do these mean?" 링크 한 줄) | d-01 |
+| P3 | 5 | 폰 하단 메뉴 "Incidents"가 왼쪽 가장자리에 붙음(x≈2). 브라우저 탭 제목이 모든 화면에서 "AlarmOps" | h-03 |
+| P3 | 6 | 다크에서 목록·패널의 "›" 구분자가 거의 안 보임. 그 밖의 다크 대비·배지 색은 양호 | k-02 |
+| P3 | 7 | 서비스까지 좁힌 뒤 시트를 다시 열면 3단계에서 시작(고객 바꾸려면 탭 1번 추가). "All projects"와 "Use <고객> only"가 같은 동작 | h-12 |
+| P3 | 8 | 목 데이터: Hanbit api-alb는 목록에 "Escalated · Junho called 03:12"인데 패널은 "No events yet / No paging steps / Notifications 0". Ack된 인시던트만 있는 고객은 "Only with problems"에서 빠짐(5→4) | j-13 |
+
+### 디자인 기준(변형 E)과 비교
+
+| 항목 | 판단 |
+|---|---|
+| 틀 | 상단 메뉴 · Showing 줄 · 272px 트리 · 본문 · 패널 구성이 목업과 같음. 간격·정렬·글꼴 굵기 일치, 1440/1280/1024/390 어디서도 페이지 가로 스크롤 없음 |
+| 다른 점 | Settings가 상단 메뉴 안으로(목업은 우측 버튼), "Filter to… Ctrl K" 검색 없음, 통계가 5칸(목업 4칸: Listed 대신 Resolved·Muted), 범례가 기본 펼침 |
+| 글 잘림 | 폰 토스트(P1-3), "Other customers …"(P3-4), 패널 제목 줄바꿈(P3-1) 외에는 없음 |
+| 첫 그림 | 테마·필터 줄·트리 선택·패널은 첫 프레임부터 맞게 나옴. 접힌 레일만 깜빡임(P2-2) |
+| 다크 | 1440·390 목록/패널/스텁 모두 깨짐 없음. 구분자 대비만 약함(P3-6) |
+| 터치 | 390에서 44px 미만: Sev·Assignee 선택(42px), 패널 안 텍스트 링크(Open resource 20px, Call order for Mirae Pay 18px, Runbook 15px) |
+| 콘솔 오류 | 앱 오류 0건 (Not found 주소의 404 응답 로그만) |
+
+### 판정
+
+**머지 보류 — P1 3건.** 범위 틀 자체(트리, 시트, 주소에 담긴 필터, 딥 링크, 뒤로/앞으로, Not found, 스텁 일관성, 자동 레일)는 세 페르소나 모두 통과했고 목업 E와도 잘 맞는다. 막는 것은 전부 Acknowledge 주변이다: 목록에서 Ack 직후 다른 인시던트의 버튼이 손가락 밑으로 오는 것(P1-1), 패널 Ack에 Undo가 없고 Resolve가 같은 자리에 오는 것(P1-2), 폰 토스트 깨짐(P1-3). 세 건 수정 후 하은 H3·H4만 재실행하면 됨. P2 8건은 백로그 또는 같은 PR에서 처리.
+
+점검 한계: 개발 서버(`next dev`)라 속도와 첫 그림 시점은 빌드본과 다를 수 있음. 대비 4.5:1 자동 측정은 하지 않고 눈으로만 확인. 점검 중 Ack 상태가 목 서버 메모리에 남아 시나리오 사이에 서버를 재기동함.
