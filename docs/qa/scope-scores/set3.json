@@ -1,0 +1,397 @@
+{
+ "evaluator": "set3-outsiders",
+ "personas": [
+  "신입 운영자 (day 2, desktop 1440, knows no customer names)",
+  "소연 (Daon Retail IT manager, portal mode)",
+  "보안 검토자 (tenant/level at save, silent scope drift)"
+ ],
+ "scores": {
+  "A": {
+   "c1": {
+    "concept": 4,
+    "asbuilt": 4,
+    "why": "Persistent three-segment bar on every screen; save button says only 'Create for Core'."
+   },
+   "c2": {
+    "concept": 2,
+    "asbuilt": 2,
+    "why": "Sticky global scope retargets open form silently; pre-filled, one-click save, no guard."
+   },
+   "c3": {
+    "concept": 3,
+    "asbuilt": 2,
+    "why": "Palette lists only my 12 customers, no problem marks; projects need pick-then-dropdown."
+   },
+   "c4": {
+    "concept": 4,
+    "asbuilt": 4,
+    "why": "Ctrl+K anywhere, pins, inline form; T3 in four clicks."
+   },
+   "c5": {
+    "concept": 3,
+    "asbuilt": 3,
+    "why": "One-line scope plus elsewhere count; 34px trigger; services reachable only by typing."
+   },
+   "c6": {
+    "concept": 3,
+    "asbuilt": 2,
+    "why": "Other 22 customers never listed for browsing; ambiguous Enter takes first match."
+   },
+   "c7": {
+    "concept": 4,
+    "asbuilt": 4,
+    "why": "One concept, one bar; pins and outside-count add mild noise."
+   }
+  },
+  "B": {
+   "c1": {
+    "concept": 2,
+    "asbuilt": 2,
+    "why": "Scope indicator changes place per screen; top pill customer-only; absent on phone header."
+   },
+   "c2": {
+    "concept": 3,
+    "asbuilt": 2,
+    "why": "Gate forces a choice, then scope is sticky; no hidden-incident warning, no guard."
+   },
+   "c3": {
+    "concept": 3,
+    "asbuilt": 3,
+    "why": "Gate lists every customer with project/service counts; no problem signals."
+   },
+   "c4": {
+    "concept": 3,
+    "asbuilt": 3,
+    "why": "Gate adds a step whenever scope is empty; otherwise like A."
+   },
+   "c5": {
+    "concept": 2,
+    "asbuilt": 2,
+    "why": "Scope box eats 150px on some screens, missing on others; 28px trigger."
+   },
+   "c6": {
+    "concept": 2,
+    "asbuilt": 2,
+    "why": "38-card wall at 34 customers; nothing ranks problem customers."
+   },
+   "c7": {
+    "concept": 3,
+    "asbuilt": 2,
+    "why": "Gated on some screens, not others; scope rendered three different ways."
+   }
+  },
+  "C": {
+   "c1": {
+    "concept": 4,
+    "asbuilt": 3,
+    "why": "Coloured customer band unmistakable; level hides in small dropdown; tab count shows global 4."
+   },
+   "c2": {
+    "concept": 4,
+    "asbuilt": 3,
+    "why": "Hard customer boundary by design; as built Ctrl+K swaps workspace under open form."
+   },
+   "c3": {
+    "concept": 3,
+    "asbuilt": 2,
+    "why": "Home offers three shortcuts plus same my-12 palette; no problem marks."
+   },
+   "c4": {
+    "concept": 3,
+    "asbuilt": 3,
+    "why": "Cross-customer triage means leaving and re-entering workspaces."
+   },
+   "c5": {
+    "concept": 3,
+    "asbuilt": 2,
+    "why": "Band plus controls take 140px before content; 30px triggers."
+   },
+   "c6": {
+    "concept": 3,
+    "asbuilt": 2,
+    "why": "One customer at a time; overview is read-only, palette hides 22 customers."
+   },
+   "c7": {
+    "concept": 4,
+    "asbuilt": 3,
+    "why": "Workspace metaphor learnable; two modes with renamed tabs confuse a newcomer."
+   }
+  },
+  "D": {
+   "c1": {
+    "concept": 3,
+    "asbuilt": 2,
+    "why": "Scope is filter chips among filters; chips clip off-screen at 390; position moves."
+   },
+   "c2": {
+    "concept": 3,
+    "asbuilt": 2,
+    "why": "Panel header binds scope to object; new-window panel follows filter, Ctrl+K retargets it."
+   },
+   "c3": {
+    "concept": 3,
+    "asbuilt": 3,
+    "why": "Cross-customer lists answer T2 in one click; palette hides 22 customers."
+   },
+   "c4": {
+    "concept": 4,
+    "asbuilt": 4,
+    "why": "List row to panel in one click; no mode switches."
+   },
+   "c5": {
+    "concept": 2,
+    "asbuilt": 2,
+    "why": "Chip row scrolls horizontally, service chip hidden; 28px targets."
+   },
+   "c6": {
+    "concept": 4,
+    "asbuilt": 3,
+    "why": "Health-sorted cross-customer lists scale; no problem-only filter, no tree."
+   },
+   "c7": {
+    "concept": 3,
+    "asbuilt": 3,
+    "why": "Chips, extra columns and side panel; moderate concept count."
+   }
+  },
+  "E-1": {
+   "c1": {
+    "concept": 5,
+    "asbuilt": 5,
+    "why": "Labelled CUSTOMER/PROJECT/SERVICE segments; panel header states edit level explicitly."
+   },
+   "c2": {
+    "concept": 5,
+    "asbuilt": 5,
+    "why": "Edit scope separate from filter; nothing preselected; confirm lists services; dirty guard."
+   },
+   "c3": {
+    "concept": 4,
+    "asbuilt": 4,
+    "why": "Dropdown shows counts and problem badges; projects visible only after committing customer."
+   },
+   "c4": {
+    "concept": 3,
+    "asbuilt": 3,
+    "why": "Up to three dropdowns, two clicks each; create is six clicks."
+   },
+   "c5": {
+    "concept": 4,
+    "asbuilt": 4,
+    "why": "Three-step sheet, 44px rows, badges; bar plus warning uses 120px."
+   },
+   "c6": {
+    "concept": 4,
+    "asbuilt": 4,
+    "why": "Grouped searchable list with badges handles 34; no problems-only switch."
+   },
+   "c7": {
+    "concept": 4,
+    "asbuilt": 3,
+    "why": "Familiar dropdowns; shell adds outside banner, drafts, confirms."
+   }
+  },
+  "E-3": {
+   "c1": {
+    "concept": 4,
+    "asbuilt": 4,
+    "why": "Same bar, unlabelled segments; panel header still states level."
+   },
+   "c2": {
+    "concept": 5,
+    "asbuilt": 5,
+    "why": "Same guards; ambiguous search refuses to auto-select."
+   },
+   "c3": {
+    "concept": 3,
+    "asbuilt": 4,
+    "why": "Search-first is weak without names; list still shows all customers with counts."
+   },
+   "c4": {
+    "concept": 5,
+    "asbuilt": 4,
+    "why": "Ctrl+K one-shot to any level; create flow still six clicks."
+   },
+   "c5": {
+    "concept": 3,
+    "asbuilt": 3,
+    "why": "Typing required on phone to reach project or service."
+   },
+   "c6": {
+    "concept": 4,
+    "asbuilt": 3,
+    "why": "Search scales with count; palette shows no problem signals."
+   },
+   "c7": {
+    "concept": 4,
+    "asbuilt": 4,
+    "why": "Single control, sparse bar; fewest visible parts of the E family."
+   }
+  },
+  "E-tree": {
+   "c1": {
+    "concept": 5,
+    "asbuilt": 4,
+    "why": "Bar plus highlighted tree node double-code location; badges compete beside it."
+   },
+   "c2": {
+    "concept": 5,
+    "asbuilt": 5,
+    "why": "Same guards; tree click during dirty edit raises scope-named dialog."
+   },
+   "c3": {
+    "concept": 5,
+    "asbuilt": 5,
+    "why": "Expand without changing scope; badges, problems-only toggle, find-by-name."
+   },
+   "c4": {
+    "concept": 4,
+    "asbuilt": 4,
+    "why": "One click on a visible node; Ctrl+K also present."
+   },
+   "c5": {
+    "concept": 4,
+    "asbuilt": 3,
+    "why": "Tree becomes sheet; legend steals a fifth of it."
+   },
+   "c6": {
+    "concept": 5,
+    "asbuilt": 4,
+    "why": "My/other groups and problems-only (5) tame 34; long list when fully expanded."
+   },
+   "c7": {
+    "concept": 3,
+    "asbuilt": 2,
+    "why": "Tree, six-symbol legend, bar, banner, panel, drafts: most to learn."
+   }
+  }
+ },
+ "tasks": [
+  {
+   "task": "T1 browse: customers, which have problems, Mirae Pay projects/services (1440, no names)",
+   "results": {
+    "A": "partial: 3 clicks; palette lists only my 12, no problem marks; problems only via Incidents list",
+    "B": "partial: 2 clicks; gate lists all 14 with counts, no problem marks",
+    "C": "partial: 3 clicks; same palette as A; must enter workspace to see projects",
+    "D": "partial: 2 clicks; lists show customer columns, palette hides others, projects by typing",
+    "E-1": "pass: 2 clicks; dropdown shows 14 with counts and open/problem badges; projects need customer commit (+2)",
+    "E-3": "partial: 1 click; all 14 with counts, no problem marks; projects need typing",
+    "E-tree": "pass: 1 click expands Mirae Pay in place, filter unchanged; badges + 'Only with problems 5'"
+   }
+  },
+  {
+   "task": "T2 call order for Hanbit > Fulfilment > Orders API, own or inherited",
+   "results": {
+    "A": "pass: 3 clicks (Paging, Hanbit row, tree node); 'own' stated as 'Inherits: nothing ... while these own steps exist'",
+    "B": "pass: 3 clicks (Paging, gate card, tree node); same wording",
+    "C": "pass: 3 clicks (On-call now, row, tree node); same wording",
+    "D": "pass: 1 click to see OWN STEPS row, 2 for panel",
+    "E-1": "pass: 1 click to see OWN STEPS row, 2 for panel 'Editing at service level - own steps'",
+    "E-3": "pass: 1 click list row, 2 for panel; same as E-1",
+    "E-tree": "pass: 1 click list row, 2 for panel; tree also marks OWN STEPS"
+   }
+  },
+  {
+   "task": "T3 create maintenance window for Mirae Pay > Core; scope the screen states",
+   "results": {
+    "A": "pass: 5 clicks; 'Applies to Mirae Pay > Core - 3 services: Payments API, Settlement, Checkout...'; button 'Create for Core'; no confirm; nothing persisted (toast only)",
+    "B": "pass: 5 clicks; same form and wording as A",
+    "C": "pass: 5 clicks; same form; workspace band names Mirae Pay",
+    "D": "pass: 6 clicks; panel header 'Scope - New maintenance window / Mirae Pay > Core'; same form",
+    "E-1": "pass: 6 clicks; 'Applies to Mirae Pay > Core - 3 services ... Nothing outside it'; button and confirm name full path; row appears in list",
+    "E-3": "pass: 6 clicks; identical flow to E-1",
+    "E-tree": "pass: 6 clicks; identical flow to E-1"
+   }
+  },
+  {
+   "task": "T4 5-second test, 5 screens x 1440/390, service scope active",
+   "results": {
+    "A": "instant 10/10",
+    "B": "partial: instant 6/10, must search 4/10 (Incidents, Monitoring: only subtitle/filter chip; top pill customer-only); wrong 0",
+    "C": "instant 10/10 (customer instant; project/service in small dropdown)",
+    "D": "partial: instant 5/10 (1440), must search 5/10 (390: service chip clipped, subtitle only); wrong 0",
+    "E-1": "instant 10/10",
+    "E-3": "instant 10/10",
+    "E-tree": "instant 10/10"
+   }
+  },
+  {
+   "task": "T5 three ways to make displayed and saved scope differ (Ctrl+K/picker mid-edit, Back/URL edit, change level then save)",
+   "results": {
+    "A": "fail: mismatch 0/3 but silent retarget 3/3; form jumps to other customer, typed reason reset, no warning",
+    "B": "fail: mismatch 0/3, silent retarget 3/3",
+    "C": "fail: mismatch 0/3, silent retarget 3/3 (workspace swapped under the form)",
+    "D": "fail: mismatch 0/3, silent retarget 3/3 (Ctrl+K works behind the open panel)",
+    "E-1": "pass: mismatch 0/3, silent retarget 0/3; scope-named unsaved dialog, URL edit opens fresh empty form",
+    "E-3": "pass: 0/3, 0/3; plus ambiguous search selects nothing",
+    "E-tree": "pass: 0/3, 0/3; tree click behind panel raises the same dialog"
+   }
+  },
+  {
+   "task": "T6 Soyeon portal: other customer's name, count or incident",
+   "results": {
+    "A": "fail (no portal mode; judged): 4 leak points if locked - outside-scope count, pinned strip, palette, 'of 14' tile",
+    "B": "fail (no portal mode; judged): 3 leak points - gate list, palette, 'of 14' tile",
+    "C": "partial (no portal mode; judged): structure fits a locked customer; 3 controls to strip - other-customers count, Switch, All customers",
+    "D": "fail (no portal mode; judged): 4 leak points - removable customer chip, customer columns, palette, My customers count",
+    "E-1": "pass: 0 leaks on 5 screens + picker; 7 URL attempts all 'Not found'",
+    "E-3": "pass: 0 leaks; 7 URL attempts 'Not found'",
+    "E-tree": "pass: 0 leaks at 1440 and 390; tree shows only Daon Retail; 7 URL attempts 'Not found'"
+   }
+  }
+ ],
+ "ranking_concept": [
+  "E-tree",
+  "E-1",
+  "E-3",
+  "C",
+  "A",
+  "D",
+  "B"
+ ],
+ "ranking_asbuilt": [
+  "E-1",
+  "E-tree",
+  "E-3",
+  "A",
+  "D",
+  "C",
+  "B"
+ ],
+ "best_for_each_persona": {
+  "신입 운영자": "E-tree",
+  "소연": "E-tree (portal identical across E pickers; among A-D only C's structure fits)",
+  "보안 검토자": "E-1 (same guards as all E, plus labelled levels)"
+ },
+ "totals": {
+  "A": {
+   "concept": 23,
+   "asbuilt": 21
+  },
+  "B": {
+   "concept": 18,
+   "asbuilt": 16
+  },
+  "C": {
+   "concept": 24,
+   "asbuilt": 18
+  },
+  "D": {
+   "concept": 22,
+   "asbuilt": 19
+  },
+  "E-1": {
+   "concept": 29,
+   "asbuilt": 28
+  },
+  "E-3": {
+   "concept": 28,
+   "asbuilt": 27
+  },
+  "E-tree": {
+   "concept": 31,
+   "asbuilt": 27
+  }
+ },
+ "notes": "A-D share one stateless form: save is a toast, nothing persists, so 'saved scope' was judged from the toast. In no candidate could displayed and saved scope be made to differ; A-D instead let scope change under an open form without warning. E-1/E-3/E-tree share shell, panel, guards and portal, so c2 ties are real, not politeness. E-3 and E-tree tie on as-built total (27); E-tree ranked higher because browse-without-names is my personas' main task. A-D have no portal mode; T6 there is a judgement of the shell if locked. Phone edit panels were only briefly checked. E-2 Tree was not scored."
+}
