@@ -21,3 +21,4 @@ export { ScopeLine, OutsideLine, type ScopeLineProps, type OutsideLineProps, typ
 export { ScopeSheet, type ScopeSheetProps } from "./scope/ScopeSheet";
 export { Panel, type PanelProps } from "./scope/Panel";
 export { DirtyGuard, type DirtyGuardProps } from "./scope/DirtyGuard";
+export { ConfirmDialog, type ConfirmDialogProps } from "./scope/ConfirmDialog";

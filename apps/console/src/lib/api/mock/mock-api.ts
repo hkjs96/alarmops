@@ -4,20 +4,24 @@ import { computeCounts, isOpen, matchesBaseFilters, matchesStatus, outsideCounts
 import { isSlug } from "../../validate";
 import * as fx from "./fixtures";
 import { customers14, customers34, type FxCustomer } from "./scope-fixtures";
+import { createPaging, type FxPaging } from "./paging-fixtures";
+import { createPagingApi, hasOwnSteps, healthOf } from "./paging-mock";
 
 interface Store {
   customers: FxCustomer[];
   incidents: IncidentListItem[];
   timelines: Record<string, IncidentEvent[]>;
   undo: Map<string, { snapshot: IncidentListItem[]; exp: number }>;
+  paging: FxPaging;
 }
 
 const ME = { id: "usr_haeun", contactId: "ct_haeun", name: "Haeun Kim", email: "haeun@msp.example", role: "OPERATOR" as const };
 
 /** `customers: 34` adds the 20 extra customers of the mockup's "34 customers" toggle. */
 export function createStore(opts: { customers?: 14 | 34 } = {}): Store {
+  const customers = opts.customers === 34 ? customers34 : customers14;
   return {
-    customers: opts.customers === 34 ? customers34 : customers14,
+    customers, paging: createPaging(customers),
     incidents: structuredClone([...fx.openIncidents, ...fx.resolvedIncidents]),
     timelines: structuredClone(fx.timelines),
     undo: new Map(),
@@ -106,7 +110,14 @@ export function createMockApi(store: Store = createStore(), clock: () => number 
     if (i.version !== version) throw new ApiError(409, "VERSION_CONFLICT", "Incident was updated by someone else.", `req_mock_${++reqSeq}`);
   }
 
+  const pagingApi = createPagingApi({
+    customers: store.customers, paging: store.paging, me: ME, now: nowIso,
+    openCustomerIds: () => new Set(store.incidents.filter(isOpen).map((i) => i.org.customer?.id).filter((v): v is string => Boolean(v))),
+    err: (status, code, message) => new ApiError(status, code, message, `req_mock_${++reqSeq}`),
+  });
+
   return {
+    ...pagingApi,
     async me() { return { id: ME.id, name: ME.name, email: ME.email, role: ME.role }; },
     async listIncidents(q = {}) {
       const scope = scopeOf(q);
@@ -206,12 +217,12 @@ export function createMockApi(store: Store = createStore(), clock: () => number 
       const n = (f: (i: IncidentListItem) => boolean) => open.filter(f).length;
       return {
         customers: store.customers.map((c) => ({
-          id: c.id, slug: c.slug, name: c.name, mine: c.mine, callHealth: c.callHealth,
+          id: c.id, slug: c.slug, name: c.name, mine: c.mine, callHealth: healthOf(store.paging, c).level,
           openIncidents: n((i) => i.org.customer?.id === c.id),
           projects: c.projects.map((p) => ({
-            id: p.id, slug: p.slug, name: p.name, ownSteps: p.ownSteps,
+            id: p.id, slug: p.slug, name: p.name, ownSteps: hasOwnSteps(store.paging, c.id, "PROJECT", p.id),
             openIncidents: n((i) => i.org.project?.id === p.id),
-            services: p.services.map((v) => ({ id: v.id, slug: v.slug, name: v.name, ownSteps: v.ownSteps, openIncidents: n((i) => i.org.service?.id === v.id) })),
+            services: p.services.map((v) => ({ id: v.id, slug: v.slug, name: v.name, ownSteps: hasOwnSteps(store.paging, c.id, "SERVICE", v.id), openIncidents: n((i) => i.org.service?.id === v.id) })),
           })),
         })),
       };

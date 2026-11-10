@@ -1,5 +1,6 @@
-import { StubPage } from "@/components/StubPage";
+import type { SP } from "@/lib/query";
+import { CallOrderScreen } from "./CallOrderScreen";
 
-export default function Page() {
-  return <StubPage title="Call order" desc="Who gets called, in what order" spec="docs/ui/scope-variants.md §7" />;
+export default async function CallOrderPage({ searchParams }: { searchParams: Promise<SP> }) {
+  return <CallOrderScreen sp={await searchParams} />;
 }

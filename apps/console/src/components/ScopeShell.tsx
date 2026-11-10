@@ -8,10 +8,10 @@ import {
 } from "@alarmops/design-system";
 import type { OutsideCounts } from "@/lib/api/types";
 import { clearLevel, isPanelPath, parseScopeParams, scopeQuery } from "@/lib/scope";
-import { ShellContext, type LocalMark, type ShellApi, type ToastAction } from "./ShellContext";
+import { ShellContext, type LeaveGuard, type LocalMark, type ShellApi, type ToastAction } from "./ShellContext";
 import { NotFoundBody } from "./NotFoundBody";
 import { TopNav } from "./TopNav";
-import { sectionFor } from "@/lib/nav";
+import { panelListPath, sectionFor } from "@/lib/nav";
 import { AUTO_RAIL_BELOW, DEFAULT_RAIL_MAX, PREFS_KEY } from "@/lib/shell-prefs";
 
 interface Prefs { col: boolean | null; w: number }
@@ -35,7 +35,7 @@ export function ScopeShell({ customers, userName, openCount, children }: { custo
 
   const panelOpen = isPanelPath(pathname);
   const settings = pathname.startsWith("/settings");
-  const listPath = panelOpen ? "/incidents" : pathname;
+  const listPath = panelOpen ? panelListPath(pathname) : pathname;
 
   const [mounted, setMounted] = useState(false);
   const [ready, setReady] = useState(false);
@@ -47,6 +47,13 @@ export function ScopeShell({ customers, userName, openCount, children }: { custo
   const [acks, setAcks] = useState<Record<string, string>>({});
   const [marks, setMarks] = useState<Record<string, LocalMark>>({});
   const listView = useRef<unknown>(null);
+  const callOrderView = useRef<unknown>(null);
+  const [problemsOnly, setProblemsOnly] = useState(false);
+  const leaveGuard = useRef<LeaveGuard | null>(null);
+  const setLeaveGuard = useCallback((g: LeaveGuard | null) => { leaveGuard.current = g; }, []);
+  const requestLeave = useCallback((proceed: () => void, leavingTo?: string) => {
+    if (leaveGuard.current) leaveGuard.current(proceed, leavingTo); else proceed();
+  }, []);
   const shellRef = useRef<HTMLDivElement>(null);
   const [outside, setOutside] = useState<OutsideCounts | null>(null);
   const [toastState, setToast] = useState<Toast | null>(null);
@@ -107,6 +114,8 @@ export function ScopeShell({ customers, userName, openCount, children }: { custo
   // the list keeps its order while the user stays in Incidents (list ↔ panel); leaving is a navigation: next time it is sorted
   const inIncidents = sectionFor(pathname)?.key === "incidents";
   useEffect(() => { if (!inIncidents) listView.current = null; }, [inIncidents]);
+  const inCallOrder = sectionFor(pathname)?.key === "call-order";
+  useEffect(() => { if (!inCallOrder) callOrderView.current = null; }, [inCallOrder]);
   // on a phone the filter line sticks to the top; whatever sticks below it needs its height
   useEffect(() => {
     const line = shellRef.current?.querySelector<HTMLElement>(".sline");
@@ -122,11 +131,14 @@ export function ScopeShell({ customers, userName, openCount, children }: { custo
     const n = normalizeSel(next);
     if (sameSel(n, sel) && valid) return; // choosing the filter that is already set leaves an open panel alone
     const keep = new URLSearchParams(search);
-    focusTitle.current = from !== "tree";
-    setToast(null);
-    router.push(listPath + scopeQuery(n, keep));
-    // a panel never stays open under a filter it was not opened from (T11)
-    if (panelOpen) toast(`Panel closed · the list now shows ${selLabel(customers, n)}`);
+    // an unsaved edit in the panel is asked about first; the filter changes only if the user lets go of it (T11, §6)
+    requestLeave(() => {
+      focusTitle.current = from !== "tree";
+      setToast(null);
+      router.push(listPath + scopeQuery(n, keep));
+      // a panel never stays open under a filter it was not opened from (T11)
+      if (panelOpen) toast(`Panel closed · the list now shows ${selLabel(customers, n)}`);
+    }, "continue");
   };
   const key = selKey(sel);
   useEffect(() => {
@@ -137,8 +149,8 @@ export function ScopeShell({ customers, userName, openCount, children }: { custo
 
   const clearToast = useCallback(() => setToast(null), []);
   const api: ShellApi = useMemo(
-    () => ({ sel, label, filtered, totalCustomers: customers.length, toast, clearToast, setOutside, acks, setAck, marks, mark, listView }),
-    [sel, label, filtered, customers.length, toast, clearToast, acks, setAck, marks, mark],
+    () => ({ sel, label, filtered, totalCustomers: customers.length, toast, clearToast, setOutside, acks, setAck, marks, mark, listView, customers, problemsOnly, callOrderView, requestLeave, setLeaveGuard }),
+    [sel, label, filtered, customers, toast, clearToast, acks, setAck, marks, mark, problemsOnly, requestLeave, setLeaveGuard],
   );
 
   // Ctrl/⌘K opens "Filter to…" on every screen that has a filter; Esc with the focus in the tree closes an open panel
@@ -154,16 +166,16 @@ export function ScopeShell({ customers, userName, openCount, children }: { custo
       }
       if (e.key === "Escape" && !e.defaultPrevented && panelOpen && (e.target as HTMLElement | null)?.closest?.(".stree")) {
         e.preventDefault();
-        router.push(listHref);
+        requestLeave(() => router.push(listHref), "continue");
       }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [settings, panelOpen, listHref, router]);
+  }, [settings, panelOpen, listHref, router, requestLeave]);
 
   const allHref = listPath + scopeQuery({}, new URLSearchParams(search));
   // the list's counts arrive after the first paint; the line keeps its place until then, so nothing jumps (QA P2-2)
-  const expectsOutside = filtered && valid && !settings && (pathname === "/incidents" || panelOpen);
+  const expectsOutside = filtered && valid && !settings && listPath === "/incidents";
   const outsideNode = !outside && expectsOutside ? (
     <span className="outside-w" aria-hidden="true">
       <span className="outside calm pending" data-testid="outside-pending">Outside this view: …</span>
@@ -206,7 +218,7 @@ export function ScopeShell({ customers, userName, openCount, children }: { custo
               customers={customers} value={sel} onChange={(s) => setFilter(s, "tree")}
               rail={rail} onRailChange={onRailChange}
               width={prefs.w} onWidthChange={(w) => save({ ...prefs, w })}
-              beside={panelOpen ? "panel" : "list"} me={userName.split(" ")[0]}
+              beside={panelOpen ? "panel" : "list"} me={userName.split(" ")[0]} onProblemsChange={setProblemsOnly}
             />
           )}
           <main id="main" className="shell-main">{valid ? children : <NotFoundBody />}</main>

@@ -26,7 +26,7 @@ export function DirtyGuard({ open, scopeLabel, leavingTo, body, onSave, onKeepDr
   if (!open) return null;
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onCancel(); return; }
-    if (e.key !== "Tab") return;
+    if (e.key !== "Tab") { e.stopPropagation(); return; }
     const f = Array.from(ref.current?.querySelectorAll<HTMLButtonElement>("button") ?? []);
     const first = f[0];
     const last = f[f.length - 1];
@@ -36,7 +36,7 @@ export function DirtyGuard({ open, scopeLabel, leavingTo, body, onSave, onKeepDr
   };
   return (
     <div className="dguard-scrim">
-      <div ref={ref} className="dguard" role="alertdialog" aria-modal="true" aria-labelledby="dguard-h" aria-describedby="dguard-b" onKeyDown={onKey}>
+      <div ref={ref} className="dguard" role="alertdialog" aria-modal="true" data-testid="dirty-guard" aria-labelledby="dguard-h" aria-describedby="dguard-b" onKeyDown={onKey}>
         <h3 id="dguard-h">Unsaved changes for {scopeLabel}</h3>
         <div id="dguard-b" className="dguard-b">
           {body ?? "Nothing has been saved yet. Save it, keep it as a draft for later, or discard it."}

@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, useLayoutEffect } from "react";
 import { cx } from "../cx";
 import { searchScopes, type ScopeCustomerNode, type ScopeHit, type ScopeSel } from "./model";
 
@@ -27,7 +27,8 @@ export function ScopeSearch({ open, customers, screen = "this screen", onPick, o
   const boxRef = useRef<HTMLDivElement>(null);
   const view = useMemo(() => searchScopes(customers, q), [customers, q]);
 
-  useEffect(() => {
+  // Layout effect: the old query is gone before the first key can land in the box (typing right after Ctrl/⌘K used to append to it)
+  useLayoutEffect(() => {
     if (!open) return;
     setQ("");
     setCur(null);

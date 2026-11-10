@@ -1,6 +1,8 @@
 import type {
   AckResult, BulkItem, BulkPreview, BulkResult, IncidentDetail, IncidentEvent, IncidentListQuery, IncidentListResponse, Me,
   NotificationLogEntry, OncallNowEntry, Paginated, ResolveKind, ApiErrorBody, ScopeTreeResponse,
+  AddResponderInput, CallOrderListQuery, CallOrderListResponse, CustomerPersonRole, PagingConfig, PagingConfigInput, PagingHealth, PagingPath, PagingPathQuery,
+  RespondersResponse, RotationSummary, StaffSummary,
 } from "./types";
 
 export class ApiError extends Error {
@@ -38,6 +40,31 @@ export interface ConsoleApi {
   oncallNow(customerId?: string): Promise<OncallNowEntry[]>;
   /** GET /scope-tree (API-CONTRACT §8.0) */
   scopeTree(): Promise<ScopeTreeResponse>;
+
+  /* ---- Call order (API-CONTRACT §8.3) ---- */
+  /** GET /oncall/now with the scope filter: one row per customer, per project/service with own steps, and for the asked node */
+  callOrderList(q?: CallOrderListQuery): Promise<CallOrderListResponse>;
+  /** GET /oncall/paging-path for a scope (PROPOSED slug query) */
+  pagingPath(q: PagingPathQuery): Promise<PagingPath>;
+  getPaging(customerId: string): Promise<PagingConfig>;
+  /** PUT /customers/{id}/paging, If-Match */
+  putPaging(customerId: string, body: PagingConfigInput, version: number): Promise<PagingConfig>;
+  /**
+   * PUT /customers/{id}/paging-overrides/{scopeType}/{scopeId}. `version` is If-Match; null = creating own steps, sent
+   * as `If-None-Match: *` so a level that got steps meanwhile is not overwritten (PROPOSED: the contract names no
+   * version header for overrides).
+   */
+  putPagingOverride(customerId: string, scopeType: "PROJECT" | "SERVICE", scopeId: string, body: PagingConfigInput, version: number | null): Promise<PagingConfig>;
+  deletePagingOverride(customerId: string, scopeType: "PROJECT" | "SERVICE", scopeId: string, version: number): Promise<void>;
+  pagingHealth(customerId: string): Promise<PagingHealth>;
+  getResponders(customerId: string): Promise<RespondersResponse>;
+  addResponder(customerId: string, input: AddResponderInput): Promise<{ contactId: string }>;
+  patchResponder(customerId: string, contactId: string, body: { role: CustomerPersonRole }): Promise<void>;
+  removeResponder(customerId: string, contactId: string): Promise<void>;
+  /** GET /rotations — read-only on this screen */
+  listRotations(q?: { scope?: "MSP" | "CUSTOMER"; customerId?: string }): Promise<RotationSummary[]>;
+  /** GET /staff?q= */
+  listStaff(q?: string): Promise<StaffSummary[]>;
 }
 
 /** Empty params are dropped (known-bugs 9-6). */
@@ -71,6 +98,7 @@ export function createHttpApi(opts: { baseUrl: string; fetch?: typeof fetch; hea
       }
       throw new ApiError(res.status, err.code, err.message, err.requestId);
     }
+    if (res.status === 204) return undefined as T;
     return (await res.json()) as T;
   }
   const enc = encodeURIComponent;
@@ -89,5 +117,19 @@ export function createHttpApi(opts: { baseUrl: string; fetch?: typeof fetch; hea
     bulkUndo: (undoToken) => call("POST", "/incidents/bulk/undo", { undoToken }),
     oncallNow: (customerId) => call("GET", "/oncall/now" + toQuery({ customerId })),
     scopeTree: () => call("GET", "/scope-tree"),
+    callOrderList: (q = {}) => call("GET", "/oncall/now" + toQuery({ customer: q.customer, project: q.project, service: q.service, mine: q.mine ? 1 : undefined, onlyProblems: q.onlyProblems ? true : undefined })),
+    pagingPath: (q) => call("GET", "/oncall/paging-path" + toQuery({ ...q })),
+    getPaging: (id) => call("GET", `/customers/${enc(id)}/paging`),
+    putPaging: (id, body, version) => call("PUT", `/customers/${enc(id)}/paging`, body, { "If-Match": String(version) }),
+    putPagingOverride: (id, scopeType, scopeId, body, version) =>
+      call("PUT", `/customers/${enc(id)}/paging-overrides/${scopeType}/${enc(scopeId)}`, body, version === null ? { "If-None-Match": "*" } : { "If-Match": String(version) }),
+    deletePagingOverride: (id, scopeType, scopeId, version) => call("DELETE", `/customers/${enc(id)}/paging-overrides/${scopeType}/${enc(scopeId)}`, undefined, { "If-Match": String(version) }),
+    pagingHealth: (id) => call("GET", `/customers/${enc(id)}/paging-health`),
+    getResponders: (id) => call("GET", `/customers/${enc(id)}/responders`),
+    addResponder: (id, input) => call("POST", `/customers/${enc(id)}/responders`, input),
+    patchResponder: (id, contactId, body) => call("PATCH", `/customers/${enc(id)}/responders/${enc(contactId)}`, body),
+    removeResponder: (id, contactId) => call("DELETE", `/customers/${enc(id)}/responders/${enc(contactId)}`),
+    listRotations: (q = {}) => call("GET", "/rotations" + toQuery({ ...q })),
+    listStaff: (q) => call("GET", "/staff" + toQuery({ q })),
   };
 }

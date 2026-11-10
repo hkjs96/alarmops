@@ -29,6 +29,7 @@ function Harness({ initial, listKey }: { initial: IncidentRow[]; listKey?: strin
     sel: {}, label: "All customers", filtered: false, totalCustomers: 14, toast, clearToast: () => undefined, setOutside: () => undefined, acks,
     setAck: (id, t) => setAcks((a) => { const n = { ...a }; if (t) n[id] = t; else delete n[id]; return n; }),
     marks, mark: (id, m) => setMarks((a) => { const n = { ...a }; if (m) n[id] = m; else delete n[id]; return n; }), listView,
+    customers: [], problemsOnly: false, callOrderView: { current: null }, requestLeave: (go) => go(), setLeaveGuard: () => undefined,
   };
   return <ShellContext.Provider value={api}><IncidentsTable items={initial} nowMs={Date.parse("2026-11-08T18:16:16Z")} emptyKind="active incidents" listKey={listKey} /></ShellContext.Provider>;
 }

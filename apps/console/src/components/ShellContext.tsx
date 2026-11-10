@@ -1,6 +1,6 @@
 "use client";
 import { createContext, useContext, useLayoutEffect } from "react";
-import type { ScopeSel } from "@alarmops/design-system";
+import type { ScopeCustomerNode, ScopeSel } from "@alarmops/design-system";
 import type { OutsideCounts } from "@/lib/api/types";
 
 export interface ToastAction { label: string; href?: string; onAction?: () => void }
@@ -24,7 +24,21 @@ export interface ShellApi {
   /** the incidents list's on-screen order (lib/stable-list.ts). Kept here so opening or closing a panel does not re-sort it; dropped on leaving Incidents. */
   listView: { current: unknown };
   setOutside: (o: OutsideCounts | null) => void;
+  /** the scope tree (customer › project › service with ownSteps, callHealth, openIncidents) the shell was rendered with */
+  customers: readonly ScopeCustomerNode[];
+  /** the tree's "Only with problems" switch; lists that follow it (Call order) read it here */
+  problemsOnly: boolean;
+  /** the Call order list's on-screen row order, kept while the user stays in Call order (list ↔ panel) */
+  callOrderView: { current: unknown };
+  /**
+   * Every way out of the current view goes through this (shell-scope §6): with an unsaved edit registered, the edit's
+   * own Save / Keep draft / Discard dialog decides whether `proceed` runs; without one it runs at once.
+   */
+  requestLeave: (proceed: () => void, leavingTo?: string) => void;
+  /** an editor with unsaved changes registers here; null when it is clean or gone */
+  setLeaveGuard: (guard: LeaveGuard | null) => void;
 }
+export type LeaveGuard = (proceed: () => void, leavingTo?: string) => void;
 
 export const ShellContext = createContext<ShellApi | null>(null);
 

@@ -166,7 +166,7 @@ export function IncidentDetailBody({ inc, timeline, notifs, now }: { inc: Incide
                 {inc.region ? <> · {inc.region}</> : null}
                 {inc.env === "prd" ? <> · <span className="pill prd">Production</span></> : null}
               </div>
-              {paged.length || stopped ? (
+              {paged.length || stopped || inc.org.customer ? (
                 <div className="paged" data-testid="paged-line">
                   <span className="ov">Paged</span>
                   {paged.map((p, n) => (
@@ -174,6 +174,11 @@ export function IncidentDetailBody({ inc, timeline, notifs, now }: { inc: Incide
                   ))}
                   {stopped ? <span className="b" style={{ flexBasis: "100%" }}>{stopped}</span> : null}
                   {!stopped && inc.assignmentSnapshot?.planLabel ? <span className="pill accent">{inc.assignmentSnapshot.planLabel}</span> : null}
+                  {inc.org.customer ? (
+                    // who is paged is decided by the call order of this incident's own scope: one click to read it (and why)
+                    <Link className="paged-co tap" data-testid="paged-call-order" href={`/c/${[inc.org.customer.slug, inc.org.project?.slug, inc.org.project ? inc.org.service?.slug : undefined].filter(Boolean).join("/")}/call-order`}
+                      aria-label={`Open the call order of ${orgChainParts(inc).join(" › ")}`}>Call order →</Link>
+                  ) : null}
                 </div>
               ) : null}
             </div>

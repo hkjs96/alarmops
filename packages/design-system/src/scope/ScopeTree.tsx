@@ -22,6 +22,8 @@ export interface ScopeTreeProps {
   beside?: "list" | "panel";
   /** first name of the signed-in user, for tooltips */
   me?: string;
+  /** told whenever "Only with problems" is switched (and once when the remembered state loads): lists that follow it read it here */
+  onProblemsChange?: (on: boolean) => void;
   /** sessionStorage key for expansion, "Only with problems" and the legend */
   storageKey?: string;
   className?: string;
@@ -88,7 +90,7 @@ const TreeIcon = () => (
  * and expands; the arrow only expands. The parent owns the filter (value/onChange) and the rail/width state.
  */
 export function ScopeTree(props: ScopeTreeProps) {
-  const { customers, value, onChange, rail, onRailChange, width, onWidthChange, beside = "list", me = "you", storageKey = "ao-scope-tree" } = props;
+  const { customers, value, onChange, rail, onRailChange, width, onWidthChange, beside = "list", me = "you", storageKey = "ao-scope-tree", onProblemsChange } = props;
   const uid = useId();
   const [query, setQuery] = useState("");
   const [problems, setProblems] = useState(false);
@@ -119,6 +121,8 @@ export function ScopeTree(props: ScopeTreeProps) {
   useEffect(() => {
     if (loaded) writeSession(storageKey, { o: maps.o, op: maps.op, prob: problems, leg: legend } satisfies Stored);
   }, [loaded, storageKey, maps.o, maps.op, problems, legend]);
+
+  useEffect(() => { if (loaded) onProblemsChange?.(problems); }, [loaded, problems, onProblemsChange]);
 
   const searching = query.trim().length > 0;
   const mode: "o" | "op" | "oq" = searching ? "oq" : problems ? "op" : "o";

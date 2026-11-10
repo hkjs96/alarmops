@@ -326,3 +326,168 @@ export type ScopeTreeCustomer = ScopeCustomerNode;
 export interface ScopeTreeResponse {
   customers: ScopeTreeCustomer[];
 }
+
+/* ------------------------------------------------------------------------------------------------------------------
+ * Call order (API-CONTRACT §8.3, D-30 · D-32). Fields marked PROPOSED are not pinned by the contract yet; the list
+ * is in docs of the PR that introduced them (feat/console-call-order) and at the top of lib/call-order/model.ts.
+ * ---------------------------------------------------------------------------------------------------------------- */
+export type PagingStyle = "ALL_AT_ONCE" | "CUSTOMER_ROTATION" | "SHARED_ROTATION" | "CUSTOM";
+export type PagingPlan = "STANDARD" | "URGENT" | "QUIET";
+/** channels a paging step can use (DATA-MODEL EscalationStep.channels); the editor offers Slack, SMS and Call */
+export type StepChannel = "SLACK_DM" | "SMS" | "VOICE";
+export type ScopeLevelName = "CUSTOMER" | "PROJECT" | "SERVICE";
+export interface LevelRef { level: ScopeLevelName; id: string; name: string }
+
+/** One step as it is stored: PUT /customers/{id}/paging and /paging-overrides bodies */
+export interface PagingStep {
+  atMin: number;
+  targetType: StepTargetType;
+  /** PERSON → contactId, ROTATION → rotationId, ALL_RESPONDERS → absent */
+  targetId?: string;
+  channels: StepChannel[];
+}
+
+/** Body of PUT /customers/{id}/paging and PUT /customers/{id}/paging-overrides/{scopeType}/{scopeId} */
+export interface PagingConfigInput {
+  style: PagingStyle;
+  plan: PagingPlan;
+  sharedRotationId?: string;
+  steps: PagingStep[];
+  repeatCount: number;
+}
+
+/** Response of GET/PUT /customers/{id}/paging (and the override PUT) */
+export interface PagingConfig extends PagingConfigInput {
+  id: string;
+  customerId: string;
+  scopeType: ScopeLevelName;
+  scopeId: string;
+  edited: boolean;
+  version: number;
+  /** PROPOSED: DATA-MODEL PagingConfig.updatedBy resolved to a name, for "edited by Junho Park, Oct 29" */
+  updatedByName?: string | null;
+  updatedAt?: string | null;
+  sentence: string;
+}
+
+/** A step of GET /oncall/paging-path: the stored step plus who it reaches right now */
+export interface PagingPathStep extends PagingStep {
+  /** contacts this step reaches now (Leave and Override applied) */
+  nowIds: string[];
+  names: string[];
+  /** PROPOSED: name of the rotation (ROTATION) or the person (PERSON) the step names — the contract has only targetId */
+  targetName?: string;
+  /** PROPOSED: the named person is a customer person, shown as "Yuna Seo (Mirae Pay)" */
+  targetIsCustomerPerson?: boolean;
+}
+
+/** GET /oncall/paging-path */
+export interface PagingPath {
+  path: LevelRef[];
+  customer: { id: string; name: string };
+  /** the level whose steps apply. Equal to the asked level when it has its own steps */
+  inheritedFrom: LevelRef;
+  /** PROPOSED: true when the asked level itself holds the steps (saves comparing ids) */
+  own: boolean;
+  style: PagingStyle;
+  plan: PagingPlan;
+  edited: boolean;
+  pagingConfigId: string;
+  version: number;
+  /** PROPOSED: needed to send the config back unchanged in a PUT */
+  sharedRotationId?: string;
+  steps: PagingPathStep[];
+  repeatCount: number;
+  stopAtMin: number;
+  sentence: string;
+  customerNotified: { contactId: string; name: string; scope: LevelRef }[];
+  /** PROPOSED: who last changed the steps that apply */
+  updatedByName?: string | null;
+  updatedAt?: string | null;
+}
+
+/** PROPOSED query of GET /oncall/paging-path: the contract has ?q= / ?resourceId= / ?serviceId= only; the panel asks by scope slugs */
+export interface PagingPathQuery { customer: string; project?: string; service?: string }
+
+export type PagingProblemCode = "NO_PAGEABLE_RESPONDER" | "NO_VERIFIED_PHONE" | "STEP_UNVERIFIED_ONLY" | "ROTATION_GAP";
+export interface PagingProblem {
+  code: PagingProblemCode;
+  stepIndex?: number;
+  contactIds: string[];
+  rotationId?: string;
+  from?: string;
+  to?: string;
+  message: string;
+}
+/** GET /customers/{id}/paging-health (D-32) */
+export interface PagingHealth { level: "OK" | "AT_RISK" | "UNREACHABLE"; problems: PagingProblem[] }
+
+/** PROPOSED: verification state per channel. Never the address itself. */
+export type ChannelState = "VERIFIED" | "UNVERIFIED" | "EXPIRED" | "LINK_SENT" | "NOT_SET";
+export type ContactChannelKey = "SLACK" | "EMAIL" | "SMS" | "VOICE";
+/**
+ * PROPOSED display fields on responders. The contract lists ids only (`staff[{contactId, source, templateId}]`,
+ * `people[{contactId, role, extras[], scope}]`); the panel needs a name, the channel states for the D-32 checks and the
+ * masked contact (D-35 — full values only through POST /contacts/{id}/reveal, which this screen does not call yet).
+ */
+export interface ResponderDisplay {
+  name: string;
+  title?: string;
+  channels: Partial<Record<ContactChannelKey, ChannelState>>;
+  emailMasked?: string;
+  phoneMasked?: string;
+}
+export interface StaffResponder extends ResponderDisplay { contactId: string; source: "TEMPLATE" | "DIRECT"; templateId?: string; templateName?: string }
+export type CustomerPersonRole = "PAGEABLE" | "NOTIFY_ONLY";
+export interface CustomerPersonResponder extends ResponderDisplay {
+  contactId: string;
+  role: CustomerPersonRole;
+  extras: ("APPROVER" | "PORTAL_USER")[];
+  scope: LevelRef;
+}
+/** GET /customers/{id}/responders */
+export interface RespondersResponse { staff: StaffResponder[]; people: CustomerPersonResponder[]; templateId: string | null }
+/** POST /customers/{id}/responders: an existing staff contact, or a new customer person */
+export type AddResponderInput =
+  | { contactId: string; role?: CustomerPersonRole }
+  | { name: string; email?: string; phone?: string; role: CustomerPersonRole; extras?: ("APPROVER" | "PORTAL_USER")[] };
+
+/** GET /rotations and the `rotations[]` of GET /oncall/now. Read-only on this screen. */
+export interface RotationSummary {
+  id: string;
+  scope: "MSP" | "CUSTOMER";
+  customerId?: string;
+  name: string;
+  /** `channels` is PROPOSED: the D-32 checks in the editor need to know whether the person on shift can be reached */
+  onShift: { contactId: string; name: string; until: string; channels?: Partial<Record<ContactChannelKey, ChannelState>> } | null;
+  next?: string | null;
+}
+
+/** GET /staff?q= (People) — the minimum the "add staff" picker needs */
+export interface StaffSummary { contactId: string; name: string; title?: string; /** PROPOSED, as on responders */ channels?: Partial<Record<ContactChannelKey, ChannelState>> }
+
+/**
+ * One row of the Call order list. PROPOSED shape: the contract gives `customers[{id, name, style, plan, edited,
+ * firstStep, steps[], responderCount}]` and says (§8.0) that the list also has a row per project/service with own
+ * steps and a row for the asked node. `rows[]` is that list, already resolved.
+ */
+export interface CallOrderRow {
+  /** "<customer>/<project>/<service>" slugs of the row's scope */
+  key: string;
+  org: OrgChain;
+  level: ScopeLevelName;
+  /** the row's scope has its own steps (customer rows: always) */
+  own: boolean;
+  inheritedFrom: LevelRef | null;
+  style: PagingStyle;
+  plan: PagingPlan;
+  edited: boolean;
+  steps: PagingPathStep[];
+  repeatCount: number;
+  responderCount: number;
+  /** customer level only (Q-API-10) */
+  health: { level: PagingHealth["level"]; problems: number; first?: string } | null;
+}
+export interface CallOrderListQuery { customer?: string; project?: string; service?: string; mine?: boolean; onlyProblems?: boolean }
+/** GET /oncall/now */
+export interface CallOrderListResponse { rotations: RotationSummary[]; rows: CallOrderRow[] }
