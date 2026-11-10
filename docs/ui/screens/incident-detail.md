@@ -2,9 +2,19 @@
 
 | 항목 | 내용 |
 |---|---|
-| 경로 | `/incidents/{id}` |
+| 경로 | 패널 `/c/<customer>/<project>/<service>/incidents/{id}`, 미매핑은 `/incidents/{id}`. 전체 화면 상세도 같은 주소(패널의 "Open full view") |
 | 목적 | 무엇이 왜 터졌는지 읽고 Ack → 원인 → Resolve. 에스컬레이션 이유가 타임라인만으로 읽힘 |
 | 페르소나 | 하은 P1-2, P1-4, P1-5 / 소연 P3-2(포털에서 읽기 전용 축약판) |
+
+
+## 셸·범위 (D-33, `shell-scope.md`)
+| 항목 | 내용 |
+|---|---|
+| 패널 | 목록 행에서 옆 패널(휴대폰 전체 화면)로 열린다. 머리 띠: `Incident` + 전체 경로 + `Copy link`. 미매핑이면 "Unmapped account" |
+| 패널 내용(축약) | Sev·Status·나이, `Acknowledge`, Call order 문장(실명) + "Own steps of … / Inherited from …", Paged now, Maintenance touching it, `Open call order` · `Who is reached` |
+| 전체 상세 | 아래 레이아웃(왜 울렸나, 탭, RCA 자리, 자동 조치). 패널과 같은 범위 머리 띠를 쓴다 |
+| 편집 중에 열 때 | 저장 안 한 편집이 있으면 가드 창의 가운데 버튼이 `Keep draft and open incident` |
+| 목록 필터 | 패널은 필터를 바꾸지 않는다. 필터가 바뀌면 패널은 닫힌다 |
 
 ## 레이아웃
 | 영역 | 내용 |
@@ -42,7 +52,7 @@
 
 ## On-call 표시 (D-30·D-31 개정)
 - 목업 샘플은 같은 데이터 객체 `D`에서 렌더링: payments-db-1 (Mirae Pay › Core › Payments API), Mirae Pay 단계 = Custom steps · Urgent (edited): Slack + call on shift in MSP night desk (Haeun) → 10분 call Yuna Seo (Mirae Pay, Pageable) → 15분 call everyone in Responders (5).
-- Paged 줄: "Slack + call Haeun 03:12 ✓ → call Yuna 03:22 → call everyone in Responders (5) 03:27" (Incident) / 분 단위 문장(Resource). 링크는 Customer › Responders & paging.
-- Escalation 패널: 단계마다 대상(사람 / 로테이션 당번 / 전원)·채널·시각, 다음 단계 남은 시간, **Edit Mirae Pay's paging** 링크.
+- Paged 줄: "Slack + call Haeun 03:12 ✓ → call Yuna 03:22 → call everyone in Responders (5) 03:27" (Incident) / 분 단위 문장(Resource). 링크는 그 범위의 호출 순서 패널(`Open call order`, 읽기 화면).
+- Escalation 패널: 단계마다 대상(사람 / 로테이션 당번 / 전원)·채널·시각, 다음 단계 남은 시간, **Open call order** 링크(읽기 화면으로 열리고 편집은 거기서 `Edit`).
 - 타임라인: "Paging steps at open: Haeun → Yuna → everyone in Responders (5)". Notify only 고객 사람 메일 이벤트 포함(Seojun Bae, Hana Noh, Hyejin Lim).
 - Auto-fix 카드: "Only people with the Auto-fix approver role for Payments API can approve: Yuna Seo (Mirae Pay)."

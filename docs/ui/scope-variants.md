@@ -1,5 +1,7 @@
 # 범위(고객 › 프로젝트 › 서비스) 표시 방식 비교
 
+> **결론(11/10): 변형 E, 기본 피커(데스크톱 트리 · 휴대폰 단계 시트)가 콘솔의 확정 방향이다(D-33, D-34, D-35).** 지금 유효한 규칙은 `docs/ui/screens/shell-scope.md` 하나에 있다. 이 문서는 비교·평가·측정의 기록이고 규칙의 기준이 아니다. §7.1·§7.6의 규칙 표(E1~E20, T1~T13)는 그 문서로 옮겼고, 여기 남은 문장이 그 문서와 다르면 그 문서가 맞다. 11/10 단순화(§7.8) 전의 서술(트리 표식 6종, `REVIEW`, `FILTER INSIDE`, 범례 펼침, 패널이 바로 편집 화면, 설정 저장 Undo 없음, 주소 `/paging`)은 당시 상태다.
+
 상태: A–D 비교 후 독립 평가 3건을 받아 결합안 E를 추가했고, E만 다시 평가한 2건(E1·E2)을 반영해 E를 고치고 줄였다(§7). E가 시안의 기본 탭이다. 채택 여부, D-26·D-29 수정, 기본 보기(§7.5)는 사용자 결정이다.
 
 - 시안: `mockups/scope-variants.html` (파일 하나, 라이트·다크, 390px). A–D는 비교용으로 그대로 두었다.
@@ -160,28 +162,7 @@ D의 목록·패널을 뼈대로, A의 범위 줄(필터로 격하), C의 패널
 
 ### 7.1 규칙
 
-| # | 규칙 | 시안에서 보이는 곳 | 근거 |
-|---|---|---|---|
-| E1 | **목록은 범위를 고르지 않아도 쓸 수 있고, 기본 보기는 All customers다**(잠정 (a), §7.5). 모든 행에 `고객(굵게) › 프로젝트 › 서비스`. 자기 단계를 가진 프로젝트·서비스는 별도 행. | 5개 화면 목록 | E2 P1-2, 1 과제4, 3 항목5 |
-| E2 | **범위 줄은 한 곳(메뉴 바로 아래)에만 있고, 필터다.** `Showing:` + 고객 › 프로젝트 › 서비스. `My customers`는 그 줄의 필터 칩 하나다. 고정·최근 칩은 없다. | `.e-bar` / 휴대폰 `.e-barm` | E2 §4-6, 3 규칙1 |
-| E3 | **Incidents 배지는 숫자 하나: 전체 고객의 열린 인시던트 수.** 필터와 무관하게 같다. 필터(고객 또는 My customers)가 걸렸을 때만 `Outside this view: N open · M acknowledged · K unmapped account`가 뜬다. 세 수는 전체 고객 기준이고 한 건은 한 칸에만 센다(보이는 건 + 세 칸 = 전체, 20조합 확인). 정의는 hover(title)와 `?` 버튼(휴대폰은 탭)으로 보인다. 누르면 필터를 지운 Incidents 목록으로 가고 토스트에 "Back to <필터>"가 있다. | `E-incidents-filtered-outside-*`, `E-incidents-my-*` | E2 P1-2·P2-14, E1 P2-2 |
-| E4 | **편집은 목록에서 하지 않는다.** 행은 범위가 정해진 패널 하나를 연다(데스크톱 옆 패널, 휴대폰 전체 화면). 패널은 겹치지 않는다. 머리 띠는 중립색 + 이니셜 + 전체 경로이고, 패널 범위가 목록 필터와 다르면(더 넓음·다른 고객) 띠 안 한 줄로 알린다. 띠에 `Copy link`가 있다. | `E-panel-*` | E2 §4-1·9·P2-12, E1 P2-5 |
-| E5 | **패널 범위와 목록 필터는 독립이다.** 패널은 필터를 바꾸지 않고 필터를 바꿔도 패널은 그대로다. 패널 주소는 경로 하나(`/c/mirae/core/checkout/paging`)이고 필터는 그 링크에 없다. 패널 = 히스토리 한 칸. 없는 고객·프로젝트·서비스·ID의 링크는 "Not found". | URL 줄, `Copy link` | E2 P2-6, 2 과제2, 3 항목10 |
-| E6 | **패널은 연 행만 고친다. 넓히기는 따로 밟는 단계다.** 패널의 "Level you are editing"은 지금 단계만 선택된 것으로 보여 준다(라디오 없음). 더 넓은 단계는 `Edit project X instead…` / `Edit the whole customer instead…` 버튼 → 무엇이 넓어지는지(대상 서비스 목록, 원래 행이 자기 단계라 안 바뀌는지) 설명하는 확인창(기본 포커스는 "Stay") → 띠가 그 단계로 바뀜. 넓힌 뒤에도 목록에는 편집 중인 행(강조)과 처음 연 행(옅은 표시)이 남는다. 좁히기(`← Back to …`)는 한 번에 된다. 패널 안 트리에서 상위 단계를 눌러도 같은 확인을 거친다. 임계치·알람 패널에는 단계 선택이 없다(문장 하나). | `E-widen-confirm-*`, `E-widened-*` | E1 P1-2, E2 §4-10 |
-| E7 | **자기 설정이 없으면 편집 칸이 잠긴다.** "Inherited from Mirae Pay" + `Create own steps for …`를 눌러야 열린다. 만드는 중 상태는 초안과 함께 보관되어 새로고침해도 같다. 자기 단계 제거는 저장 버튼과 떨어진 줄 + 확인. | `E-panel-paging-inherited-*` | E2 P2-5, 2 과제6 |
-| E8 | **저장 전에 무엇이 바뀌는지 보인다.** ① 호출 단계: "If something breaks now" 문장이 입력하는 대로 바뀌고 옛 값은 취소선으로 남는다. 단계 순서가 뒤집히는 값(예: 2단계 80분 > 3단계 15분)은 경고와 함께 저장이 막힌다. ② 임계치: "What saving would change"가 지표별 전 → 후, 지금 값이 바뀌는 알람, 자기 값을 지키는 알람을 입력하는 대로 보여 준다. ③ 점검 창: `When` 줄. | `E-panel-paging-live-preview-*`, `E-panel-thresholds-preview-*` | E1 P1-1, E2 P2-1 |
-| E9 | **확인 규칙은 하나: 서비스 둘 이상에 닿는 저장은 확인창을 거친다.** 확인창에는 전 → 후 값(점검 창은 시간대·사유), 대상 서비스 목록, 안 바뀌는 것이 있다. 임계치 확인은 **값이 실제로 바뀌는 알람만** 센다(RDS만 바꾸면 "0 alarms change value now"). 바뀐 값이 없으면 저장하지 않는다. | `E-save-confirm-*` | E1 P1-1, E2 P2-1·2·13 |
-| E10 | **버튼·토스트·확인창은 항상 고객을 포함한 전체 경로.** 저장하면 패널이 닫히고, 토스트 하나가 경로 + 전 → 후를 말한다. 토스트는 다른 화면으로 따라가지 않고, 화면 상단 완료 줄은 없다. | 예: `Saved for Mirae Pay · step 2 10 → 8 min · 4 services (Data platform keeps own steps)` | E1 P2-3, 1 과제5, 3 규칙2 |
-| E11 | **MSP 전체 변경은 `Settings › MSP default thresholds`에만 있다.** 값 편집 → 같은 화면의 미리보기(영향 고객 `12 of 14 customers`, 제외 고객, 바뀌는 알람) → 확인창 1회. 고객 수 표기는 "all 14 customers"(전체)와 "12 of 14 customers"(영향)로 통일. | `E-settings-msp-*` | E2 §4-4·P2-3·4, E1 M3 |
-| E12 | **관문은 생성 흐름에만.** `New window`, `Add person`은 1 고객 → 2 범위(고객 전체/프로젝트/서비스) → 3 내용. 미리 선택 없음. 목록 필터는 "Use exactly this · go to step 3" 제안으로만. 점검 창 사유와 사람 이름은 필수. 같은 범위에 이미 있는 창은 "Already here"로 보인다. | `E-gate-*` | E1 P2-7, E2 P2-17, 1 과제5 |
-| E13 | **임계치 기본값은 고객 단계에만 있다.** 목록 옆 카드는 중립 한 줄, 경고("This changes all of Mirae Pay, not only Core")는 패널에만 한 번. 기본값이 없는 고객은 그 고객으로 필터하면 첫 기본값을 만들 수 있다고 적는다. | `E-monitoring-core-*`, `E-panel-thresholds-*` | E2 P2-15·§4-11, E1 P2-8 |
-| E14 | **`Filter to…`(Ctrl/⌘K)**: 검색 + 고객 목록(내 고객, 그 밖). 단어 첫머리 일치만. 고객 이름은 늘 굵게. 내 고객이 먼저지만, **같은 이름이 여러 고객에 걸치면 아무것도 선택하지 않고 내 고객을 위로 올리지도 않는다**(고객 이름순 + `yours` 표시 + 안내). 휴대폰도 같은 검색이다. 고르면 같은 화면에 그 필터로 도착하고 포커스는 제목. | `E-switcher-*` | E1 H3·P2-1·P2-6, E2 §4-13 |
-| E15 | **저장 안 한 편집에서 나가는 길은 전부 같은 창이다**: `Save` / `Keep draft` / `Discard` (+ Cancel). 닫기·Esc·다른 행·메뉴·필터 링크·넓히기·브라우저 뒤로(되돌려 놓고 묻는다) 모두. 편집 중 인시던트를 열 때는 가운데 버튼이 `Keep draft and open incident`. 초안은 범위별로 보관되고 "Draft for … Resume"로 돌아온다. | `E-draft-*` | E1 P2-4, E2 §4-1 |
-| E16 | **사람 목록과 호출 문장은 같은 함수(`eReached`)에서 나온다.** People을 고객·프로젝트·서비스로 거르면 그 범위에서 호출되거나 알림 받는 모든 사람이 나온다 — 상위에서 물려받은 경우 `from Mirae Pay`로 표시. 패널의 "Paged (n) · Also notified (m)" 줄도 같은 목록이다. | `E-people-checkout-*` | E2 P1-1 |
-| E17 | **Acknowledge는 행·카드·패널에 있고 Undo가 있다**(토스트 + 그 세션 동안 행의 `Undo acknowledge`). 설정 저장에는 Undo가 없다(§7.4). | Incidents | E2 P2-7·§4-3 |
-| E18 | **키보드**: 저장 버튼에 `Ctrl/⌘+Enter`가 적혀 있다. 마지막 입력 칸에서 Tab 2번이면 Save. 저장·닫기 뒤 포커스는 편집한 행, 필터 변경·새로고침 뒤에는 제목(패널이 열린 채 새로고침이면 패널 제목). 확인창은 Tab이 안에서 돈다. 생성 1단계 검색 칸에서 Enter는 결과가 하나일 때 고른다. | — | E1 P1-3 |
-| E19 | **휴대폰 390px**: 누르는 영역·입력 칸 44px 이상(16개 상태에서 미달 0), 칩은 줄바꿈(잘림 0), 가로 넘침 0, 선택기·확인창이 열리면 토스트를 치운다, 빈 목록 문구는 한 블록. | `E-*-390` | E1 §4, E2 P2-8·9·10 |
-| E20 | **포털 모드**: 같은 셸을 한 고객에 잠근다. **없는 ID와 남의 고객 ID는 글자 하나 다르지 않은 "Not found"**(15개 링크 → 본문 1종)이고, 주소 줄은 친 그대로 남는다(다른 고객의 정규 경로로 바꾸지 않는다). 포털 주소에는 `/c/<고객>`이 없다. | `E-portal-*`, `E-portal-notfound-*` | E2 P1-3, E1 S1·P2-9 |
+규칙 E1~E20은 `docs/ui/screens/shell-scope.md`로 옮겼다(§3 필터 줄과 목록, §4 패널, §5 생성·MSP 전체, §6 가드, §7 주소, §9 키보드·휴대폰, §10 포털). 그 문서의 괄호 안 번호가 여기 번호다. 11/10에 바뀐 것: E1(기본 보기 확정, D-34), E7·E4(읽기 먼저), E9(확인은 서비스 둘 이상 또는 넓힌 저장만), E10·E17(서비스 하나짜리 저장에 Undo).
 
 ### 7.2 화면당 범위 표시 장치 수 (1440, 종류 기준)
 
@@ -258,21 +239,7 @@ E2가 센 방식 그대로 다시 셌다(개정 전: 목록 5~7, 패널 열림 7
 
 **규칙**
 
-| # | 규칙 | 캡처 |
-|---|---|---|
-| T1 | **범위를 고르는 장치는 하나다.** 데스크톱(761px 이상)은 왼쪽 트리, 휴대폰(760px 이하)은 시트. 필터 줄은 글 한 줄이다: `Showing: Mirae Pay × › Core × › All services` + `Outside this view` 줄. `×`는 그 단계만 지운다(고객 `×` = All customers). 필터 줄에 선택기·`My customers` 칩·`Show all customers` 버튼은 없다. | `E-2p-<화면>-1440` |
-| T2 | **트리는 항상 제자리에 붙고 본문을 밀어낸다 (소유자 피드백 반영 개정: 띠를 누르면 트리가 본문을 덮던 것을 없앴다).** 데스크톱(761px 이상)의 트리는 두 상태뿐이다. 45px 띠(누르는 곳 44px 폭 × 전체 높이, `»` + 아이콘 + 세로로 쓴 현재 필터) 또는 펼친 트리(기본 272px, 200~360px). 띠를 누르면 그 자리에서 펼쳐지고 본문은 남은 폭으로 다시 배치된다. **본문 위에 뜨는 트리는 어느 폭에도 없고 `Pin`도 없다**(펼친 상태 = 붙은 상태 하나). `«`를 누르면 띠로 돌아간다. 폭은 180ms 동안 바뀌고 `prefers-reduced-motion`이면 바로 바뀐다. 펼침·접힘은 기억한다. 기억한 값이 없으면 1101px 이상은 펼침, 761~1100px은 띠다. 패널이 열려 있어도 같다: 트리가 넓어지면 목록과 패널이 T3 순서로 자리를 내준다. 1408px 이상에서는 패널을 여닫아도 목록의 왼쪽 끝이 움직이지 않는다(0px). | `E-2p-dock-<폭>-<list\|panel>-<rail\|tree>` (7개 폭 × 4), `E-2p-dock-incidents-<1440\|1280\|1024>-*`, `E-2p-dock-1024-*-dark` |
-| T3 | **자리가 모자랄 때의 순서 (개정).** ① 목록이 2차 열을 차례로 숨긴다(아래 "열 우선순위" 표). 고객 › 프로젝트 › 서비스 경로, 상태·심각도, 주 동작(Incidents의 `Acknowledge`)은 끝까지 남는다. ② 패널이 열려 있고 트리 + 목록 + 패널이 들어가지 않으면 패널이 600px에서 **440px까지** 줄어든다(줄어든 패널의 호출 단계 줄은 채널 버튼을 아랫줄로 내린다). ③ 그래도 표가 들어가지 않으면 목록이 **한 열 카드 목록**(320px 이상, 휴대폰 목록과 같은 카드)이 된다. ④ 카드 320px도 나오지 않을 때만 패널이 **전체 화면**이 되고 왼쪽 위에 `← Back to the list`가 생긴다. 이때도 트리는 띠/펼침 그대로이고 패널은 트리의 오른쪽 끝에서 시작한다(트리가 패널을 민다). 어느 단계에서도 잘리거나 가로로 스크롤되는 것, 글자가 겹치는 것은 없다. **자동 접힘:** 패널을 열 때 창이 1408px 미만이면 트리가 띠로 접힌다. 사용자는 띠를 눌러 패널 옆에 다시 펼칠 수 있고(위 순서대로 밀어낸다), 패널을 닫으면 트리는 기억한 상태로 돌아온다(자동 접힘은 기억하지 않는다). | `E-2p-dock-1280-panel-tree`(패널 472px), `E-2p-dock-1100-panel-tree`(카드 + 440px), `E-2p-dock-1024-panel-tree`(전체 화면, 트리 옆), `E-2p-dock-900-panel-rail` |
-| T4 | **묶음과 펼침.** 맨 위에 `All customers`(스크롤해도 고정). 그 아래 `My customers · n` 묶음, 그다음 `Other customers · n` 묶음(기본 접힘, 접힌 동안 묶음 줄에 열린 인시던트 합과 가장 나쁜 호출 상태 표시). 묶음 머리는 스크롤 중 위에 붙는다. 고객은 기본 접힘이고 고른 가지만 펼쳐진다. 트리는 본문과 따로 스크롤한다. `My customers` 머리의 이름을 누르면 My customers 필터다. | `E-2p-tree-34-1440`, `E-2p-tree-34-other-selected-1440` |
-| T5 | **`Only with problems`.** 열린 인시던트가 있거나, 호출 상태가 나쁘거나, 검토할 임계치(Needs review)가 있는 고객만 남긴다(E3 개정: 임계치 포함. 옆 숫자 = 그런 고객 수). 켜면 `Other customers`도 펼쳐진다. 하위 단계도 문제가 있는 것과 지금 고른 것만 남는다. | `E-2p-tree-problems-1440`, `E-2p-tree-problems-34-1440` |
-| T6 | **입력하는 대로 거르기.** 친 단어마다 경로(고객 › 프로젝트 › 서비스)의 어느 단어 첫머리와 맞아야 하고, 그중 하나는 그 줄 자신의 이름과 맞아야 한다(E3 개정: `mirae check` → Mirae Pay › Core › Checkout 하나). 맞은 줄의 상위 단계를 함께 보여 주고 맞은 글자는 밑줄 표시. **맞은 것이 둘 이상이면 Enter는 몇 번을 눌러도 아무것도 고르지 않는다**: 포커스만 트리로 가고 안내가 "nothing selected. Use ↑ ↓ to choose one, then Enter"로 바뀐다. 검색 중 `↑↓`는 맞은 줄 사이만 오간다. 하나뿐이면 Enter가 고른다. **고르면 검색어가 지워지고 전체 트리가 돌아온다.** `Ctrl/⌘K`의 같은 이름 목록도 트리와 같은 순서다. | `E-2p-tree-filter-1440`, `E-2p-tree-samename-1440`, `E-2p-tree-samename-enter-1440`, `E-2p-tree-search-path-1440`, `E-2p-ctrlk-samename-1440` |
-| T7 | **줄 표시 (E3 개정: 점·세모를 쓰지 않는다).** 목록에서 `●`·`▲`는 인시던트 상태·심각도라서 트리는 다른 모양을 쓴다. 빨간 숫자 칸 = 열린 인시던트 수(메뉴 배지와 같은 모양). 호출 상태는 글 표식 `UNREACHABLE`(빨강) · `AT RISK`(호박색), Call order 목록의 Reach 열도 같은 표식이다. `REVIEW`(점선) = 검토할 임계치. `OWN STEPS` = 그 프로젝트·서비스에 자기 호출 순서가 있다. Call order 목록의 "Own steps"와 같은 말, 같은 색이고 **고객 줄에는 붙지 않는다**(고객은 목록에서도 "Customer steps"다). 접힌 상위 줄에는 파란 작은 네모 = "안에 own steps가 있다". 접힌 줄 안에 지금 필터가 있으면 그 줄에 파란 띠와 `FILTER INSIDE`. 범례는 트리 아래에 항상 있고 접을 수 있다(세션 기억). 포털 범례에는 MSP 내부 표식이 없다. | 모든 `E-2p-*`, `E-2p-tree-own-steps-1440`, `E-2p-tree-selected-inside-1440`, `E-2p-tree-legend-collapsed-1440` |
-| T8 | **조작.** 이름 = 고르고 펼친다. 화살표 = 펼치기만(필터는 안 바뀜). 키보드: `↑↓` 이동, `→` 펼치기/자식으로, `←` 접기/부모로, `Enter` 선택, 글자 = 그 글자로 시작하는 줄로(접힌 묶음 안의 고객이면 묶음을 열고 이동), `Home/End`. 화살표로 바꾼 펼침·폭·접힘·`Only with problems`는 세션 동안 기억한다(sessionStorage). 폭은 경계를 끌거나 `←→`로 200~360px(끄는 동안 본문이 따라 줄고 T3 순서가 바로 적용된다), `«`로 띠로 접고 띠를 누르면 다시 펼친다(T2). 고객을 바꾸면 프로젝트·서비스는 비워진다. | `E-2p-tree-keyboard-1440`, `E-2p-tree-collapsed-1440` |
-| T9 | **휴대폰.** 범위 줄 하나(`Mirae Pay › Core › All services`, 길면 `›`에서 줄바꿈, 44px 이상) + `×`. 누르면 전체 높이 시트: 1 Customer(All customers · My customers · My customers 묶음 먼저 · 검색 칸 · 표시) → 2 Project(`All projects`) → 3 Service(`All services`). `← Back`, 줄 52px. 2·3단계 아래의 `Use Mirae Pay only` / `Use Mirae Pay › Core only` 버튼은 **적힌 범위를 그대로 적용한다**(E3 개정: Checkout까지 골라 둔 상태에서 `Use Daon Retail › Commerce only`를 누르면 프로젝트 단계가 되고 서비스는 비워진다). 위의 `Close`는 아무것도 바꾸지 않고 닫는다. 시트는 **지금 고른 값이 있는 단계**에서 열린다. 휴대폰에는 트리 서랍이 없다. Call order 카드는 호출되는 사람 이름을 먼저 보여 준다(`Junho, Minjae, Soyeon` / everyone in Responders (3), all at once). | `E-2p-sheet-1-customer-390` ~ `-3-service-390`, `E-2p-sheet-use-only-390`, `E-2p-sheet-34-search-390`, `E-2p-line-wrapped-390`, `E-2p-paging-names-390` |
-| T10 | **포털.** 트리는 그 고객 하나(루트·묶음·`Only with problems` 없음), 필터 줄의 고객은 잠김, 시트는 2단계부터. | `E-2p-portal-1440`, `E-2p-portal-sheet-390` |
-| T11 | **패널이 열린 채 필터를 바꾸면 (E3 신설).** 트리, 필터 줄 `×`, `Ctrl/⌘K` 어느 쪽이든 같다. 저장하지 않은 수정이 있으면 표준 대화상자(Save for X / Keep draft and change the filter / Discard changes / Cancel)가 먼저 뜨고, 고르기 전에는 필터도 패널도 바뀌지 않는다. 수정이 없으면 패널이 닫히고 "Panel closed for X · the list now shows Y" 알림이 뜬다. 어느 경우든 포커스는 목록 제목으로 간다. 고객 X의 패널이 고객 Y의 필터 아래에 남는 일은 없다. 이미 걸린 필터를 다시 고르면 패널은 그대로다. | `E-2p-filter-change-guard-1440`, `E-2p-filter-change-clean-1440` |
-| T12 | **필터 밖 숫자 (E3 개정).** `Outside this view: 4 open (1 from an unmapped account) · 2 acknowledged`. open에는 unmapped 계정이 들어 있어서 "목록의 open + 밖의 open = 메뉴 배지"가 항상 맞는다. 밖에 아무것도 없으면 `Outside this view: no incidents` 한 줄. Monitoring에는 따로 `Outside this view: 2 need review · 3 in alarm`이 칩 줄에 있고, 누르면 필터를 풀고 Needs review를 보여 준다(되돌리기 알림 포함). | `E-incidents-filtered-outside-*`, `E-2p-monitoring-390` |
-| T13 | **주소 (E3 개정).** 패널이 열린 주소는 경로가 패널의 범위, `?filter=`가 목록 필터다: `/c/mirae/paging?filter=mirae/core`. 새로 고치면 둘 다 유지된다. 패널의 `Copy link`는 `?filter=`를 뺀다(받는 사람은 자기 필터를 유지). | — |
+규칙 T1~T13은 `docs/ui/screens/shell-scope.md`로 옮겼다(§2 범위 고르기, §3 T11·T12, §7 T13, §8 반응형 T2·T3, §10 T10). 11/10에 바뀐 것: T5(`Only with problems` = 열린 인시던트 또는 호출 문제, 임계치 제외), T7(표식 3종, 범례 접힘, `FILTER INSIDE` 대신 고른 줄까지 자동 펼침), T9(시트 범례는 열 때마다 접힘), T13(주소 `/call-order`). 캡처 이름은 그대로 `E-2p-*`다.
 
 **화면당 범위 표시 장치 수** (1440, Mirae Pay › Core 필터, §7.2와 같은 방식)
 
@@ -336,15 +303,7 @@ E2가 센 방식 그대로 다시 셌다(개정 전: 목록 5~7, 패널 열림 7
 
 목록 칸의 숫자는 Call order 기준이다(화면마다 표가 필요한 폭이 달라 패널 폭이 다르면 괄호에 적었다).
 
-**열 우선순위** (목록 폭 기준. 이 폭에서도 실제 행이 들어가지 않으면 잘리는 대신 다음 단계로 넘어간다)
-
-| 화면 | 끝까지 남는 것 | 1차로 숨김 | 2차로 숨김 | 카드로 바뀜 |
-|---|---|---|---|---|
-| Incidents | Sev, Status, 경로, Incident, `Acknowledge` | Paged (1000px 미만) | Age (800px 미만) | 690px 미만 |
-| Monitoring | Resource · metric, 경로, Sev, State | `Default thresholds` 카드가 표 옆에서 아래로 (1040px 미만) | Threshold (720px 미만) | 560px 미만 |
-| Call order | 경로, Paged first, Steps | Then (900px 미만) | Reach 열 → 고객 이름 옆 글 표식 (760px 미만) | 500px 미만 |
-| People | Person, 경로(Notified for), Channels needing action | Role, Contact (1100px 미만) | Kind (720px 미만) | 500px 미만 |
-| Maintenance | Status, 경로, Window | By, Muted (900px 미만) | Reason (700px 미만) | 500px 미만 |
+**열 우선순위** 표는 `docs/ui/screens/shell-scope.md` §8로 옮겼다.
 
 카드 목록은 1차 열을 뺀 나머지를 이름표와 함께 보여 준다. E3 때와 달라진 것: Incidents의 `Acknowledge`와 Monitoring의 Sev는 더 이상 숨기지 않는다.
 - P1-1 회귀 검사: 패널 14종(호출 순서 3, 임계치, 알람, 인시던트, 사람 2, 유지보수 창, 새 창 1~3단계, 새 사람, Not found) × {1440 마우스, 1024 마우스, 1440 터치, 390 터치}. 입력 칸 15개와 빈 자리(1440 마우스 122곳, 390 터치는 조작 요소에서 16px 이상 떨어진 곳만)를 누른 뒤 패널이 그대로인지, 입력 칸에 포커스가 남는지 본다. 트리 `Find by name`, 시트 검색 칸, `Ctrl/⌘K` 입력, Settings 입력, E-1·E-2·E-3 피커도 포함.
@@ -381,6 +340,46 @@ E2가 센 방식 그대로 다시 셌다(개정 전: 목록 5~7, 패널 열림 7
 - P3 "다른 고객의 Acknowledge 알림이 패널의 Unsaved 표시를 덮는다"는 그대로다.
 - 펼침·범례 기억은 세션 단위다. 폭 조절은 마우스·키보드만.
 - 만든 쪽이 스크립트로 밟은 결과다. E3 뒤의 독립 재평가와 `/persona-check`는 하지 않았다.
+
+### 7.8 평가 3조 점수와 단순화 (11/10)
+
+점수: `docs/qa/scope-scores/`(set1 당번·휴대폰, set2, set3 — 같은 과제를 후보 7개 A·B·C·D·E-1·E-3·E-tree에 수행, 기준 7개 × 개념/현재 목업). **E-tree가 개념 점수 94/105로 1위**였고, 기준 중 단순함(c7)이 가장 낮았다(현재 목업 평균 2.0/5: "표식 5종, 범례, 띠, 시트, outside 줄 — 배울 것이 가장 많다"). 소유자 결정: E-tree가 콘솔의 방향이고(D-33), 아래 네 가지로 줄인다. 규칙 문장은 `screens/shell-scope.md`에 있다.
+
+| | 바꾼 것 |
+|---|---|
+| a | 트리 표식 6종 → 3종(열린 인시던트 수 · 호출 문제 표식 `UNREACHABLE`/`AT RISK` · `OWN STEPS`). `REVIEW`, "안에 own steps" 네모, `FILTER INSIDE`를 없앴다. `FILTER INSIDE` 대신 트리가 고른 줄까지 자동으로 펼친다(열 때·필터 변경·띠에서 펼칠 때). `Only with problems` = 열린 인시던트 또는 호출 문제(임계치 검토 제외) |
+| b | 범례는 기본 접힘, 링크 한 줄 "What do these mean?". 휴대폰 시트에서는 열 때마다 접혀 있고 목록 아래 흐름 안에 있다(덮지 않는다) |
+| c | 호출 순서·기본 임계치·알람 임계치·고객 사람 패널은 읽기 전용으로 열린다. `Edit`(키 `E`)를 눌러야 편집 화면과 기존 가드가 나온다. 읽는 중에는 넓은 단계를 그냥 열 수 있고, 편집 중에는 넓히기 확인을 거친다 |
+| d | 저장 확인창은 서비스 둘 이상에 닿거나 넓힌 저장만. 서비스 하나(리소스 하나, 사람 하나)는 `Ctrl/⌘+Enter` 한 번에 적용되고 알림에 전체 경로 + `Undo` |
+
+함께 바꾼 것: 화면 이름에 맞춰 주소를 `/paging` → `/call-order`.
+
+**화면에 보이는 개념 수** (같은 스크립트로 변경 전 커밋 `ccbf7ab`와 지금을 잰 값)
+
+| 어디 | 무엇을 셌나 | 전 | 후 |
+|---|---|---|---|
+| 트리 (1440, 34곳, 전부 펼침) | 표식 종류 | 6 + `FILTER INSIDE` = 7 | 3 (호출 문제 표식은 글자 2가지) |
+| 트리 아래 범례 | 항상 보이는 줄 / 높이 | 6줄 / 165px | 0줄(링크 1) / 31px. 펼치면 3줄 |
+| 휴대폰 시트 범례 | 높이 | 시트의 약 1/5, 항상 | 44px 링크. 펼쳐도 568px 높이 화면에서 시트의 1/4 이하 |
+| Call order 패널, 연 직후 (Mirae Pay, 1440) | 입력 칸 / 편집 전용 블록(단계 상자·넓히기·"updates as you type") | 2 / 2 | 0 / 0 |
+| Call order 패널, 물려받은 서비스 (Checkout) | 입력 칸(잠김 포함) / 경고·단계 상자 / 버튼·링크 | 2 / 2 / 16 | 0 / 0 / 15 |
+| 기본 임계치 패널 (Mirae Pay) | 입력 칸 / 제목 블록 | 4 / 2 | 0 / 1 |
+| Call order 패널 (390, Orders API) | 입력 칸 / 버튼·링크 | 1 / 15 | 0 / 12 |
+| 연 직후 패널이 설명해야 하는 것 | 손으로 센 개념 | 9: 경로, 편집 단계, 넓히기, 물려받음 잠금, 단계 입력, 실시간 문장, Unsaved, Save 문구, 자기 단계 제거 | 5: 경로, 문장, 단계, 어디서 오나, Edit |
+| 서비스 하나 저장 | 키 입력 | `Ctrl+Enter` (호출 순서·알람·사람은 이미 1회, 임계치 기본값은 항상 확인) | `Ctrl+Enter` 1회 + 되돌릴 수 있음(`Undo`) |
+
+편집 화면 자체의 개념 수는 줄지 않았다(같은 편집기에 `Cancel`이 하나 늘었다). 줄어든 것은 "열자마자 보이는 것"이다. 패널의 버튼·링크 수가 거의 그대로인 것은 "Where steps come from" 트리의 줄(누를 수 있음)이 대부분이기 때문이다.
+
+**검사**: `mockups/checks/scope-e-check.py`에 8(a) · 9(b) · 10(c) · 11(d)를 더했다. 전체 246개 통과, 콘솔 오류 0(변경 전 147개; 새 검사 100개, 없어진 표식에 대한 옛 검사 몇 개는 뺐다). 배치 검사(7개 폭)는 패널이 읽기 화면일 때와 편집 화면일 때 둘 다 돈다.
+
+**캡처** (1440 · 1024 · 390): `E-2p-<화면>-*` 15장 다시, `E-2p-read-<paging|paging-own|paging-inherited|thresholds|alarm|alarm-tag|person>-*`, `E-2p-edit-<…>-*`, `E-2p-save-one-service-undo-*`, `E-2p-save-confirm-many-*`, `E-2p-edit-cancel-dirty-1440`, `E-2p-tree-legend-open-*`, `E-2p-sheet-legend-open-390`, `E-2p-sheet-legend-open-small-390`(568px 높이), 트리·시트 캡처 다시. 지운 것: `E-2p-tree-selected-inside-1440`, `E-2p-tree-legend-collapsed-1440`. 다시 찍지 않은 것: `E-2p-dock-*`(배치는 그대로지만 범례·패널 내용이 옛 모습), `E-panel-*`·`E-save-confirm-*`·`E-widen*`·`E-draft-*`·`E-gate-*`, 비교용 `E-1-*`·`E-3-*`, 다크 캡처.
+
+**하지 않은 것**
+- 독립 재평가, `/persona-check`.
+- 연락처 `Reveal` 버튼(D-35)은 시안에 그리지 않았다. 규칙과 API만 문서에 있다.
+- `Customers` 메뉴, Rotations·Templates를 새 셸로 그리지 않았다.
+- 비교용 피커(E-1·E-2·E-3)의 범례·표식은 옛 그대로다. 읽기 먼저와 확인 규칙은 패널 공통이라 같이 적용된다.
+- 사용자가 고른 가지를 직접 접으면 접힌 줄이 선택 표시를 갖는다. 다음에 필터를 바꾸거나 새로 고치면 다시 펼쳐진다.
 
 ### 7.7 비교용으로 남긴 방식 (E-1 · E-2 · E-3)
 

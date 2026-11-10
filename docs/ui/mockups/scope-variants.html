@@ -739,6 +739,9 @@ div.e-lvr.on:hover{background:var(--accent-t)}
 .e-lvr .w small{display:block;font-size:12px;color:var(--mut)}
 .e-inh{border:1px solid var(--amber);border-left:4px solid var(--amber);background:var(--amber-t);padding:14px}
 .e-foot{order:3;position:sticky;bottom:0;background:var(--surface);border-top:1px solid var(--ink);margin:16px -20px -56px;padding:12px 20px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;z-index:1}
+.e-foot.ro{border-top-color:var(--rule)}
+.e-foot.ro .btn{white-space:normal;height:auto;min-height:38px;padding:6px 14px;text-align:left;line-height:1.3;font-weight:600}
+.v-steps.ro .v-step{min-height:40px}
 .e-foot .btn.pri{white-space:normal;height:auto;min-height:38px;padding:6px 16px;text-align:left;line-height:1.3}
 .e-dirty{display:none;align-items:center;gap:6px;font-size:12px;color:var(--amber);font-weight:600}
 .e-dirty.on{display:inline-flex}
@@ -881,7 +884,7 @@ body.e-rsz{cursor:col-resize;user-select:none}
   body[data-v="E"] .chip{height:44px;padding:0 12px}
   body[data-v="E"] .inp{height:44px;font-size:16px}
   body[data-v="E"] .inp.num,body[data-v="E"] .v-step .inp.num{width:72px;height:44px}
-  .e-foot .btn.pri{min-height:44px}
+  .e-foot .btn.pri,.e-foot.ro .btn{min-height:44px}
   .e-lnk{display:flex;align-items:center;min-height:44px}
   .e-bx .btn{min-height:44px}
   .e-lvw .btn{flex:1 1 100%}
@@ -940,22 +943,18 @@ body.e-rsz{cursor:col-resize;user-select:none}
 .e-tree.plus .e-tn.on .x{font-weight:700}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
 .e-tg{display:inline-flex;align-items:center;font:700 9px/1 var(--mono);letter-spacing:.04em;text-transform:uppercase;padding:2px 3px;border:1px solid currentColor;background:var(--surface);white-space:nowrap;flex:none}
-.e-tg.unr{color:var(--red)}.e-tg.ar{color:var(--amber)}.e-tg.rv{color:var(--amber);border-style:dashed}
+.e-tg.unr{color:var(--red)}.e-tg.ar{color:var(--amber)}
 .t .e-tg{font-size:11px;padding:3px 5px}
-.e-inown{display:inline-block;width:6px;height:6px;background:var(--accent);flex:none}
-.e-tn.oni{box-shadow:inset 3px 0 0 var(--accent)}
-.e-tn.oni .x{font-weight:700;color:var(--ink)}
-.e-onit{font:700 9px/1 var(--mono);letter-spacing:.04em;text-transform:uppercase;color:var(--accent);white-space:nowrap;flex:none;margin-left:4px}
 .e-tr.amb:focus-visible .e-tn.cur{outline:0}
 .e-trq.warn{background:var(--amber-t);box-shadow:inset 3px 0 0 var(--amber)}
 .e-trq .kbd{margin:0 1px}
-.e-legx{flex-direction:column;align-items:flex-start;flex-wrap:nowrap;gap:4px;padding:0 12px 8px}
+.e-legx{flex-direction:column;align-items:flex-start;flex-wrap:nowrap;gap:2px;padding:2px 12px 8px;background:none}
 .e-legl{display:flex;flex-direction:column;gap:4px}
 .e-sheet .e-legl{flex-direction:row;flex-wrap:wrap;gap:6px 14px}
 .e-legx .it{white-space:normal}
 .e-hlin{display:none;margin-left:8px;vertical-align:1px}
-.e-legt{display:flex;align-items:center;justify-content:space-between;width:calc(100% + 24px);margin:0 -12px;padding:0 12px;min-height:28px;border:0;background:none;font:700 10px var(--mono);letter-spacing:.07em;text-transform:uppercase;color:var(--ink2)}
-.e-legt:hover{background:var(--hair)}
+.e-legt{display:inline-flex;align-items:center;min-height:28px;padding:0;border:0;background:none;font:inherit;font-size:12px;color:var(--ink2);text-decoration:underline;text-underline-offset:2px;cursor:pointer}
+.e-legt:hover{color:var(--accent)}
 .e-legt:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .e-legx:has(.e-legt[aria-expanded="false"]){padding-bottom:0}
 .e-out.warn{border-color:var(--amber);background:var(--amber-t)}.e-out.warn b{color:var(--amber)}
@@ -1063,8 +1062,10 @@ body.e-rsz{cursor:col-resize;user-select:none}
   .e-pkm .e-pks{flex-wrap:wrap}
   .e-sheet .e-ic{font-size:12px;padding:2px 6px}
   .e-sheet .e-own,.e-sheet .e-tg{font-size:10.5px}
-  .e-sheet .e-legx{padding-bottom:10px}
-  .e-sheet .e-legt{min-height:44px}
+  .e-sheet .e-legx{padding:0 14px 6px;border-top:1px solid var(--rule)}
+  .e-sheet .e-legt{min-height:44px;font-size:13px}
+  .e-sheet .e-legl{max-height:96px;overflow-y:auto;padding-bottom:6px}
+  .e-sheet .e-ddl{min-height:180px}
   /* tap targets: links inside card heads and rows */
   body[data-v="E"] .card-h{height:auto;min-height:44px}
   body[data-v="E"] .card-h a[data-s],body[data-v="E"] .plist a[data-s]{display:inline-flex;align-items:center;justify-content:flex-end;min-height:44px;min-width:44px;padding:0 2px}
@@ -1649,7 +1650,7 @@ document.addEventListener('keydown',function(e){
 /* ===== E: combined. D's cross-customer lists + one filter bar (A) + scope band on the edit panel (C) + gate only for create (B).
    Revised after evaluations E1/E2 (docs/qa/scope-eval-E1.md, -E2.md). Rules are listed in docs/ui/scope-variants.md, section 7. ===== */
 var P_CUST='daon',P_USER={i:'SC',n:'Soyeon Choi'};
-var DRAFT={},DLG=null,EFOC='load',EPEND=null,EBYP=false,OUTI=false;
+var DRAFT={},DLG=null,EFOC='load',EPEND=null,EBYP=false,OUTI=false,EED=null;
 var EHI=(history.state&&history.state.hi)||0;
 try{if(!history.state||history.state.hi==null)history.replaceState({ep:0,hi:EHI},'',location.href);}catch(_){}
 try{DRAFT=JSON.parse(sessionStorage.getItem('e-drafts')||'{}')||{};}catch(_){DRAFT={};}
@@ -1706,6 +1707,11 @@ function eTy(o){return (o||'').split(':')[0];}
 function eArg(o){return (o||'').slice((o||'').indexOf(':')+1);}
 function eEdit(o){return /^(paging|thr|alarm|mwnew|personnew|person)$/.test(eTy(o));}
 function eDk(o){return eTy(o)==='paging'?'paging:'+key(ePg(o).x):o;}
+/* READ FIRST: call order, thresholds and people open as a read-only view. "Edit" (or the E key) switches that one panel to edit mode (EED).
+   A kept draft or an own-steps creation in progress re-opens in edit mode, because it is an edit. The portal never edits. */
+function eEd(o){var dk=eDk(o),d=DRAFT[dk];return !ePt()&&(EED===dk||!!(d&&(d.dirty||d.creating)));}
+function eEditBtn(label,note){return '<div class="e-foot ro"><span class="sm mut">'+(note||'Read only until you press Edit.')+'</span><span class="sp"></span><button class="btn" data-e="edit">'+label+' <span class="kbd hide-m">E</span></button></div>';}
+function eEdCancel(){return '<button class="btn ghost" data-e="edcancel" title="Back to the read-only view. Nothing is saved.">Cancel</button>';}
 function eOL(o){var ty=eTy(o),a=eArg(o),x=null,kind='';
   if(ty==='paging'){x=ePg(o).x;kind='call order steps';}
   else if(ty==='thr'){x={c:a};kind='default thresholds';}
@@ -1731,10 +1737,11 @@ function eToastClear(){$$('.e-toast').forEach(function(o){o.remove();});}
 function eToast(t,act,fn){eToastClear();var o=document.createElement('div');o.className='e-toast';o.setAttribute('role','status');o.innerHTML='<span>'+t+'</span>';
   if(act){var b=document.createElement('button');b.textContent=act;b.onclick=function(){o.remove();fn();};o.appendChild(b);}
   document.body.appendChild(o);setTimeout(function(){o.remove();},act?9000:4200);}
-/* after a save: draft gone, panel closes, focus returns to the row that was edited. No banner, no settings undo (deferred). */
-function eDone(msg,then,row){var c=eCur();if(c){delete DRAFT[c.dk];eStore();}
-  if(then){then();eToast(msg);return;}
-  EFOC='row:'+(row||S.o);ego({o:''});eToast(msg);}
+/* after a save: draft gone, panel closes, focus returns to the row that was edited. A save that was applied without a confirm (one service) carries Undo in its toast. */
+function eDone(msg,then,row,undo){var c=eCur();if(c){delete DRAFT[c.dk];eStore();}
+  var who=(msg.match(/<b>.*?<\/b>/g)||[]).pop()||'',u=undo?function(){var m=undo();render();eToast(m||'Undone · '+who+' is back to what it was before the save');}:null;
+  if(then){then();eToast(msg,u?'Undo':null,u);return;}
+  EFOC='row:'+(row||S.o);ego({o:''});eToast(msg,u?'Undo':null,u);}
 function eNotes(){var h='';if(ePt())return h;var cur=eCur();
   Object.keys(DRAFT).forEach(function(dk){var d=DRAFT[dk];if(!d.dirty||(cur&&cur.dk===dk))return;
     h+='<div class="banner amber e-note"><span><b>Draft for '+esc(d.path)+'</b> — '+esc(d.kind)+', not saved · '+d.t+'</span><span class="sp"></span><button class="btn sm" data-e="resume" data-a="'+esc(dk)+'">Resume</button><button class="btn sm ghost" data-e="dropdraft" data-a="'+esc(dk)+'">Discard</button></div>';});
@@ -1973,43 +1980,59 @@ function eLevels(org,x){var ls=[{c:org.c,p:null,s:null}];if(org.p)ls.push({c:org
   if(up.length&&!pt)h+='<div class="e-lvw"><span class="sm mut">Need to change more than '+esc(cur.s||cur.p)+'?</span>'+up.map(function(y){return '<button class="btn sm" data-e="widen" data-a="'+esc(key(y))+'">'+(y.p?'Edit project '+esc(y.p)+' instead…':'Edit the whole customer instead…')+'</button>';}).join('')+'</div>';
   return h+'</div>';}
 function eKbd(){return ' <span class="kbd hide-m">Ctrl/⌘+Enter</span>';}
-function eFoot(inner,note){return '<div class="e-foot"><span class="e-dirty" id="edirty"><span class="mk dot"></span>Unsaved</span>'+(note?'<span class="sm mut">'+note+'</span>':'')+'<span class="sp"></span>'+inner+'</div>';}
+function eFoot(inner,note,cancel){return '<div class="e-foot"><span class="e-dirty" id="edirty"><span class="mk dot"></span>Unsaved</span>'+(note?'<span class="sm mut">'+note+'</span>':'')+'<span class="sp"></span>'+(cancel?eEdCancel():'')+inner+'</div>';}
 function eRO(){return '<div class="note" style="margin-top:16px"><span>Managed by your MSP. You can see this, and your MSP changes it.</span></div>';}
-function ePagingPanel(o){var q=ePg(o),x=q.x,c=C(x.c),r=resolve(x),dk=eDk(o),dr=DRAFT[dk]||{v:{}},creating=!r.own&&!!dr.creating,pt=ePt(),ro=pt||(!r.own&&!creating),rr=eReach(x),L=eLvName(x).toLowerCase();
-  var h=eBand(x,pt?'Call order · '+L+' level':'Call order · editing at '+L+' level','')+'<div class="e-pb" data-dk="'+esc(dk)+'"><div class="stack e-main">';
+function ePagingRef(x,c){var h='<div class="stack e-ref"><div class="card"><div class="card-h"><span class="ov">Where steps come from · '+esc(c.n)+'</span></div><ul class="v-tree"><li><div class="'+(eDepth(x)===1?'cur':'')+'" tabindex="0" role="button" data-e="open" data-a="paging:'+esc(key({c:c.id}))+'"><span class="b">'+esc(c.n)+'</span><span class="pill">Customer steps</span></div></li>'+
+    c.tree.map(function(p){var pk={c:c.id,p:p.n};return '<li><div class="l1'+(key(x)===key(pk)?' cur':'')+'" tabindex="0" role="button" data-e="open" data-a="paging:'+esc(key(pk))+'"><span>'+esc(p.n)+'</span>'+(p.ov?'<span class="pill cz">Own steps</span>':'<span class="sm mut">inherits '+esc(c.n)+'</span>')+'</div></li>'+
+      p.s.map(function(s){var sk={c:c.id,p:p.n,s:s.n};return '<li><div class="l2'+(key(x)===key(sk)?' cur':'')+'" tabindex="0" role="button" data-e="open" data-a="paging:'+esc(key(sk))+'"><span>'+esc(s.n)+'</span>'+(s.ov?'<span class="pill cz">Own steps</span>':'<span class="sm mut">inherits '+esc(p.ov?p.n:c.n)+'</span>')+'</div></li>';}).join('');}).join('')+'</ul></div>';
+  return h+respCard(c);}
+/* read view: the sentence with real names, the steps, who is also notified, where the steps come from. Nothing here can be typed into. */
+function ePagingRead(o){var q=ePg(o),x=q.x,c=C(x.c),r=resolve(x),pt=ePt(),rr=eReach(x),L=eLvName(x).toLowerCase();
+  var h=eBand(x,'Call order · '+L+' level','')+'<div class="e-pb"><div class="stack e-main">';
+  h+='<div><div class="ov" style="margin-bottom:6px">If something breaks now</div><div class="oc-sent">'+eSent(c,r)+'</div>'+eReachLine(x)+'</div>';
+  h+='<div><div class="ov" style="margin-bottom:6px">Steps</div><div class="v-steps ro">'+r.steps.map(function(s,i){return '<div class="v-step"><span class="ord'+(i?'':' first')+'">'+(i+1)+'</span><span class="mono b nowrap">'+s.at+' min</span><span>'+tgt(c,s.to)+'</span><span class="sm hw">'+esc(s.how.join(' · '))+'</span></div>';}).join('')+
+    '<div class="v-step"><span></span><span class="mono sm mut nowrap">then</span><span class="sm mut">'+(r.rep?'repeat once':'no repeat')+'</span></div></div></div>';
+  h+='<dl class="v-ap"><dt>'+(r.own?'Comes from':'Inherited from')+'</dt><dd>'+(r.own?'<b>'+esc(lbl(x))+'</b> · '+(x.p?'own steps':'customer steps')+' · used by '+eReachT(rr)+(r.ov?' · edited by '+r.ov.by+', '+r.ov.on:'')+'.':
+    '<b>'+esc(lbl(r.from))+'</b>. '+esc(x.s||x.p)+' has no steps of its own and follows it. <a class="e-lnk" data-e="open" data-a="paging:'+esc(key(r.from))+'" role="link" tabindex="0">Open the call order of '+esc(lbl(r.from))+' →</a>')+'</dd></dl></div>';
+  if(pt)h+=eRO();
+  else if(r.own)h+=eEditBtn('Edit call order for '+esc(lbl(x)),rr.n>1?'Read only. An edit here reaches '+pl(rr.n,'service')+'.':'');
+  else h+=eEditBtn('Create own steps for '+esc(lbl(x))+'…','Read only. To change these steps for everything that follows them, open '+esc(lbl(r.from))+'.');
+  return h+ePagingRef(x,c)+'</div></div>';}
+function ePagingPanel(o){if(!eEd(o))return ePagingRead(o);
+  var q=ePg(o),x=q.x,c=C(x.c),r=resolve(x),dk=eDk(o),dr=DRAFT[dk]||{v:{}},creating=!r.own&&!!dr.creating,ro=!r.own&&!creating,rr=eReach(x),L=eLvName(x).toLowerCase();
+  var h=eBand(x,'Call order · editing at '+L+' level','')+'<div class="e-pb" data-dk="'+esc(dk)+'"><div class="stack e-main">';
   h+=eLevels(q.org,x);
   if(creating)h+='<div class="e-inh"><div class="e-big">Creating own steps for '+esc(lbl(x))+'</div><div style="margin-top:4px">Started from the steps of '+esc(lbl(r.from))+'. Nothing changes until you save. After saving, '+(rr.n?'<b>'+eReachT(rr)+'</b> of '+esc(lbl(x))+' stop following '+esc(lbl(r.from)):'<b>no service changes right now</b> ('+rr.ex.map(esc).join(', ')+' already '+(rr.ex.length>1?'have':'has')+' own steps); services added to '+esc(lbl(x))+' later would use these steps')+'. '+esc(lbl(r.from))+' itself is not changed.</div></div>';
   else if(!r.own)h+='<div class="e-inh"><div class="e-big">Inherited from '+esc(lbl(r.from))+'</div><div style="margin-top:4px"><b>'+esc(lbl(x))+'</b> has no steps of its own. The steps below belong to '+esc(lbl(r.from))+' and cannot be edited at this level.</div>'+
-    (pt?'':'<div class="row" style="margin-top:12px"><button class="btn pri" data-e="mkown">Create own steps for '+esc(lbl(x))+'</button></div>')+'</div>';
+    '<div class="row" style="margin-top:12px"><button class="btn pri" data-e="mkown">Create own steps for '+esc(lbl(x))+'</button></div></div>';
   h+='<div class="v-steps">'+r.steps.map(function(s,i){return '<div class="v-step"><span class="ord'+(i?'':' first')+'">'+(i+1)+'</span><span class="nowrap">'+(i?'<input class="inp num" inputmode="numeric" aria-label="Step '+(i+1)+' minutes" data-f="at'+i+'" '+(ro?'disabled ':'')+'value="'+s.at+'"> <span class="sm mut">min</span>':'<span class="mono b">0 min</span>')+'</span>'+
     '<span>'+tgt(c,s.to)+'</span><span class="row hw" style="gap:4px;flex-wrap:nowrap">'+['Slack','SMS','Call'].map(function(m){return '<span class="ch'+(s.how.indexOf(m)>=0?' on':'')+'">'+m+'</span>';}).join('')+'</span></div>';}).join('')+'</div>';
   h+='<div><div class="ov" style="margin-bottom:6px">If something breaks now'+(ro?'':' <span class="e-livet">· updates as you type</span>')+'</div><div class="oc-sent" id="esent" aria-live="polite">'+eSent(c,r,dr.v)+'</div><div class="e-warn" id="ewarn" role="alert">'+esc(eStepBad(r,dr.v))+'</div>'+eReachLine(x)+'</div></div>';
-  if(pt)h+=eRO();
-  else if(!ro)h+=eFoot('<button class="btn pri" data-e="save">'+(r.own?'Save for ':'Save own steps for ')+esc(lbl(x))+eKbd()+'</button>',r.ov?'Edited by '+r.ov.by+' · '+r.ov.on:'');
-  h+='<div class="stack e-ref"><div class="card"><div class="card-h"><span class="ov">Where steps come from · '+esc(c.n)+'</span></div><ul class="v-tree"><li><div class="'+(eDepth(x)===1?'cur':'')+'" tabindex="0" role="button" data-e="open" data-a="paging:'+esc(key({c:c.id}))+'"><span class="b">'+esc(c.n)+'</span><span class="pill">Customer steps</span></div></li>'+
-    c.tree.map(function(p){var pk={c:c.id,p:p.n};return '<li><div class="l1'+(key(x)===key(pk)?' cur':'')+'" tabindex="0" role="button" data-e="open" data-a="paging:'+esc(key(pk))+'"><span>'+esc(p.n)+'</span>'+(p.ov?'<span class="pill cz">Own steps</span>':'<span class="sm mut">inherits '+esc(c.n)+'</span>')+'</div></li>'+
-      p.s.map(function(s){var sk={c:c.id,p:p.n,s:s.n};return '<li><div class="l2'+(key(x)===key(sk)?' cur':'')+'" tabindex="0" role="button" data-e="open" data-a="paging:'+esc(key(sk))+'"><span>'+esc(s.n)+'</span>'+(s.ov?'<span class="pill cz">Own steps</span>':'<span class="sm mut">inherits '+esc(p.ov?p.n:c.n)+'</span>')+'</div></li>';}).join('');}).join('')+'</ul></div>';
-  h+=respCard(c);
-  if(r.own&&x.p&&!pt){var up=x.s&&pn(x.c,x.p).ov?{c:x.c,p:x.p}:{c:x.c};h+='<div class="row"><span class="sm mut">No longer needed?</span><button class="btn danger sm" data-e="rmown">Remove own steps of '+esc(lbl(x))+'…</button><span class="sm mut">It would inherit from '+esc(lbl(up))+' again.</span></div>';}
+  if(!ro)h+=eFoot('<button class="btn pri" data-e="save">'+(r.own?'Save for ':'Save own steps for ')+esc(lbl(x))+eKbd()+'</button>',r.ov?'Edited by '+r.ov.by+' · '+r.ov.on:'',1);
+  else h+=eFoot('',' ',1);
+  h+=ePagingRef(x,c);
+  if(r.own&&x.p){var up=x.s&&pn(x.c,x.p).ov?{c:x.c,p:x.p}:{c:x.c};h+='<div class="row"><span class="sm mut">No longer needed?</span><button class="btn danger sm" data-e="rmown">Remove own steps of '+esc(lbl(x))+'…</button><span class="sm mut">It would inherit from '+esc(lbl(up))+' again.</span></div>';}
   return h+'</div></div>';}
-function eThrPanel(o){var cid=eArg(o),c=C(cid),x={c:cid,p:null,s:null},r=eThrReach(cid),f=sc(),pt=ePt(),d=(DRAFT[o]||{v:{}}).v;
-  var warn=f&&f.c===cid&&f.p&&!pt,h=eBand(x,'Default thresholds · customer level','','',warn?2:0)+'<div class="e-pb" data-dk="'+esc(o)+'"><div class="stack e-main">';
+function eThrPanel(o){var cid=eArg(o),c=C(cid),x={c:cid,p:null,s:null},r=eThrReach(cid),f=sc(),pt=ePt(),ed=eEd(o),d=(DRAFT[o]||{v:{}}).v;
+  var warn=ed&&f&&f.c===cid&&f.p,h=eBand(x,'Default thresholds · '+(ed?'editing at ':'')+'customer level','','',warn?2:0)+'<div class="e-pb"'+(ed?' data-dk="'+esc(o)+'"':'')+'><div class="stack e-main">';
   var apT='<b>'+esc(c.n)+'</b> — '+r.ext+'. Defaults exist at customer level only; there is no project or service default. To change one resource, open its row in Monitoring. '+pl(r.own,'alarm')+' set by resource tag or in the console keep'+(r.own===1?'s its':' their')+' value. Blank fields use the MSP default.';
   if(warn)h+='<div class="e-inh"><div class="e-big">This changes all of '+esc(c.n)+', not only '+esc(f.s||f.p)+'.</div><div style="margin-top:4px">Your list is filtered to <b>'+esc(lbl(f))+'</b>; that only narrows the alarm list. Applies to '+apT+'</div></div>';
-  else h+=ap([['Applies to',apT]]);
+  else h+=ap([['Applies to',ed?apT:'<b>'+esc(c.n)+'</b> — '+r.ext+'. '+pl(r.own,'alarm')+' set by resource tag or in the console keep'+(r.own===1?'s its':' their')+' own value.']]);
   h+='<div class="tw"><table class="t"><thead><tr><th>Metric</th><th class="r">Code</th><th class="r">MSP</th><th class="r">'+esc(c.n)+'</th></tr></thead><tbody>'+METRICS.map(function(m,i){var cv=m.cust[cid];
-    return '<tr><td>'+m.k+' <span class="mono sm mut">'+esc(m.op)+'</span></td><td class="r mono sm mut">'+m.code+m.u+'</td><td class="r mono sm">'+m.msp+m.u+'</td><td class="r nowrap"><input class="inp num" inputmode="numeric" style="width:72px" aria-label="'+esc(c.n)+' default for '+m.k+'" data-f="t'+i+'" '+(pt?'disabled ':'')+'value="'+(cv==null?'':cv)+'" placeholder="'+m.msp+'"> <span class="mono sm mut">'+m.u.trim()+'</span></td></tr>';}).join('')+'</tbody></table></div>';
-  if(!pt)h+='<div><div class="ov" style="margin-bottom:6px">What saving would change <span class="e-livet">· updates as you type</span></div><div class="e-prev" id="eprev" aria-live="polite">'+eThrDiffHtml(cid,d)+'</div></div>';
-  h+='</div>'+(pt?eRO():eFoot('<button class="btn pri" data-e="save">Save defaults for '+esc(c.n)+eKbd()+'</button>'));
+    return '<tr><td>'+m.k+' <span class="mono sm mut">'+esc(m.op)+'</span></td><td class="r mono sm mut">'+m.code+m.u+'</td><td class="r mono sm">'+m.msp+m.u+'</td><td class="r nowrap">'+
+      (ed?'<input class="inp num" inputmode="numeric" style="width:72px" aria-label="'+esc(c.n)+' default for '+m.k+'" data-f="t'+i+'" value="'+(cv==null?'':cv)+'" placeholder="'+m.msp+'"> <span class="mono sm mut">'+m.u.trim()+'</span>':
+       cv==null?'<span class="sm mut">uses MSP</span>':'<span class="mono b">'+cv+m.u+'</span>')+'</td></tr>';}).join('')+'</tbody></table></div>';
+  if(ed)h+='<div><div class="ov" style="margin-bottom:6px">What saving would change <span class="e-livet">· updates as you type</span></div><div class="e-prev" id="eprev" aria-live="polite">'+eThrDiffHtml(cid,d)+'</div></div>';
+  h+='</div>'+(pt?eRO():ed?eFoot('<button class="btn pri" data-e="save">Save defaults for '+esc(c.n)+eKbd()+'</button>','',1):eEditBtn('Edit defaults for '+esc(c.n),'Read only. An edit here reaches '+r.ext+'.'));
   return h+'</div>';}
-function eAlarmPanel(o){var a=ALARMS[+eArg(o)],x={c:a.c,p:a.p,s:a.s},c=C(a.c),pt=ePt(),m=METRICS.filter(function(q){return a.m===q.k;})[0]||METRICS[0],lock=a.src==='TAG';
+function eAlarmPanel(o){var a=ALARMS[+eArg(o)],x={c:a.c,p:a.p,s:a.s},c=C(a.c),pt=ePt(),ed=eEd(o),m=METRICS.filter(function(q){return a.m===q.k;})[0]||METRICS[0],lock=a.src==='TAG';
   var lay=[['TAG','Resource tag',a.src==='TAG'?a.th:'—'],['CONSOLE','This resource (console)',a.src==='CONSOLE'?a.th:'—'],['CUSTOMER',c.n+' default',m.cust[a.c]!=null?m.op+' '+m.cust[a.c]+m.u:'—'],['MSP','MSP default',m.op+' '+m.msp+m.u],['CODE','Code default',m.op+' '+m.code+m.u]];
-  var h=eBand(x,'Alarm threshold · one resource','<span class="mono">'+a.r+'</span> · '+a.m)+'<div class="e-pb" data-dk="'+esc(o)+'"><div class="stack e-main">';
+  var h=eBand(x,'Alarm threshold · one resource','<span class="mono">'+a.r+'</span> · '+a.m)+'<div class="e-pb"'+(ed?' data-dk="'+esc(o)+'"':'')+'><div class="stack e-main">';
   h+=ap([['Applies to','<b>'+a.r+'</b> only. '+(lock?'The resource tag wins and is read-only here; it is changed in the customer\'s AWS account.':'Currently <b>'+a.src+'</b>. Clearing the value falls back to the '+esc(c.n)+' default, then MSP, then code.')]]);
   h+='<div class="tw"><table class="t"><thead><tr><th>Layer</th><th>Value</th><th></th></tr></thead><tbody>'+lay.map(function(l){var on=l[0]===a.src;return '<tr class="'+(on?'cur':'dim')+'"><td>'+src(l[0])+' '+esc(l[1])+'</td><td class="mono sm nowrap">'+esc(l[2])+'</td><td class="sm">'+(on?'<b>in effect</b>':'')+'</td></tr>';}).join('')+'</tbody></table></div>'+
-    '<div class="row"><label class="lab" style="margin:0" for="eav">Value for '+a.r+'</label><input class="inp num" id="eav" inputmode="numeric" data-f="val" '+(lock||pt?'disabled ':'')+'value="'+a.th.replace(/[^0-9]/g,'')+'"><span class="sm" id="eprev" aria-live="polite"></span></div>'+
-    (pt?'':'<div class="sm mut">To change the default for every resource of '+esc(c.n)+' ('+eThrReach(a.c).ext+') instead: <a class="e-lnk" data-e="open" data-a="thr:'+a.c+'" role="link" tabindex="0">Open '+esc(c.n)+' defaults →</a></div>')+'</div>';
-  h+=pt?eRO():eFoot('<button class="btn pri" data-e="save" '+(lock?'disabled':'')+'>Save for '+esc(lbl(x))+' › '+a.r+eKbd()+'</button>',lock?'Set by tag — read-only':'');
+    (ed?'<div class="row"><label class="lab" style="margin:0" for="eav">Value for '+a.r+'</label><input class="inp num" id="eav" inputmode="numeric" data-f="val" value="'+a.th.replace(/[^0-9]/g,'')+'"><span class="sm" id="eprev" aria-live="polite"></span></div>':'')+
+    (pt?'':'<div class="sm mut">The default for every resource of '+esc(c.n)+' ('+eThrReach(a.c).ext+') is a separate setting: <a class="e-lnk" data-e="open" data-a="thr:'+a.c+'" role="link" tabindex="0">Open '+esc(c.n)+' defaults →</a></div>')+'</div>';
+  h+=pt?eRO():ed?eFoot('<button class="btn pri" data-e="save">Save for '+esc(lbl(x))+' › '+a.r+eKbd()+'</button>','',1):lock?'<div class="e-foot ro"><span class="sm mut">Set by resource tag. Read only here.</span></div>':eEditBtn('Edit threshold for '+esc(lbl(x))+' › '+a.r);
   return h+'</div>';}
 function eIncPanel(o){var i=INC.filter(function(q){return q.id===eArg(o);})[0],x=i.c?{c:i.c,p:i.p,s:i.s}:null,pt=ePt();
   var h=eBand(x,'Incident',esc(i.t),'Unmapped account')+'<div class="e-pb"><div class="stack e-main"><div class="row">'+sev(i.sev,i.sev===1)+stt(i.st)+'<span class="mono sm mut">'+i.age+' · '+esc(i.k)+'</span><span class="sp"></span>'+eAckBtn(i,1)+'</div>';
@@ -2026,12 +2049,13 @@ function ePersonPanel(o){var id=eArg(o),p=per(id),st=!isP(id),pt=ePt(),h;
       '<div>'+eCtHtml(p,id)+'</div><div class="row" style="gap:5px">'+cvs(p.ch)+'</div><div class="card"><div class="card-h"><span class="ov">Responder for · '+cv.length+'</span></div><div class="plist">'+cv.map(function(c){var t=c.template&&D.templates[c.template].members.indexOf(id)>=0;
         return '<div tabindex="0" role="button" data-e="open" data-a="paging:'+esc(key({c:c.id}))+'"><span class="e-id">'+mono(c)+'</span><div class="b">'+esc(c.n)+'</div><span class="sp"></span><span class="sm mut">'+(t?'from '+D.templates[c.template].n:'added directly')+' →</span></div>';}).join('')+'</div></div>')+'</div></div>';return h;}
   var c=C(p.c),x=pScope(p);
-  h=eBand({c:p.c},'Customer person',esc(p.n)+' · '+esc(p.title))+'<div class="e-pb" data-dk="'+esc(o)+'"><div class="stack e-main"><div>'+roles(p)+'</div>'+
+  var ed=eEd(o);
+  h=eBand({c:p.c},'Customer person'+(ed?' · editing':''),esc(p.n)+' · '+esc(p.title))+'<div class="e-pb"'+(ed?' data-dk="'+esc(o)+'"':'')+'><div class="stack e-main"><div>'+roles(p)+'</div>'+
     ap([['Belongs to','<b>'+esc(c.n)+'</b> only. Notified for <b>'+esc(p.sc.length?lbl(x):'all of '+c.n)+'</b>'+(p.sc.length?', not other projects of '+esc(c.n)+'.':'.')],
       ['Paging',p.roles.indexOf('pageable')>=0?'Pageable: called wherever a paging step of '+esc(c.n)+' names them or “everyone in Responders”, whatever “Notified for” says. People lists them under every scope where that happens.':'Notify only: status emails for incidents in the scope above. Never called.']])+
     '<div><div class="ov" style="margin-bottom:6px">Contact</div>'+eCtHtml(p,id)+'</div><div class="row" style="gap:5px">'+cvs(p.ch)+'</div>'+
-    (pt?'':'<div><label class="lab" for="epn">Title</label><input class="inp" id="epn" data-f="title" value="'+esc(p.title)+'"></div>')+'</div>'+
-    (pt?'':eFoot('<button class="btn pri" data-e="save">Save '+esc(p.n)+' for '+esc(c.n)+eKbd()+'</button>'))+'</div>';return h;}
+    (ed?'<div><label class="lab" for="epn">Title</label><input class="inp" id="epn" data-f="title" value="'+esc(p.title)+'"></div>':'')+'</div>'+
+    (pt?'':ed?eFoot('<button class="btn pri" data-e="save">Save '+esc(p.n)+' for '+esc(c.n)+eKbd()+'</button>','',1):eEditBtn('Edit '+esc(p.n)+' for '+esc(c.n)))+'</div>';return h;}
 function eMwPanel(o){var w=MW[+eArg(o)],x={c:w.c,p:w.p,s:w.s},pt=ePt();
   return eBand(x,'Maintenance window · '+w.st,esc(w.why))+'<div class="e-pb"><div class="stack e-main">'+ap([['Applies to','<b>'+esc(lbl(x))+'</b> — '+extent(x)+'. Nothing outside it.'],['Mutes','SEV-2 to SEV-5 in this scope. SEV-1 always pages.']])+
     '<dl class="kv"><dt>Window</dt><dd class="mono">'+esc(w.w)+' KST</dd><dt>Created by</dt><dd>'+w.by+'</dd><dt>Muted so far</dt><dd class="mono">'+w.muted+'</dd></dl></div>'+(pt?'':eFoot('<button class="btn danger" data-e="revoke">Revoke window for '+esc(lbl(x))+'…</button>'))+'</div>';}
@@ -2111,7 +2135,7 @@ function eFilt(k,extra){var x=k&&k[0]!=='~'&&k!=='*'?parseKey(k):null,patch={c:x
   for(q in (extra||{}))patch[q]=extra[q];SW.open=false;OUTI=false;if(extra){EFOC='h1';ego(patch);}else{if(S.o)renderOv();eFGo(patch);}}
 /* opening: a wider paging level of the same customer is never a plain click; an incident opened over a dirty edit asks first */
 function eOpen(id,inPanel){var cur=S.o;
-  if(inPanel&&eTy(id)==='paging'&&eTy(cur)==='paging'&&eFound(cur)&&eFound(id)){var a=ePg(cur).x,b=ePg(id).x;if(a.c===b.c&&eDepth(b)<eDepth(a)&&match(a,b)){eWiden(key(b));return;}}
+  if(inPanel&&eTy(id)==='paging'&&eTy(cur)==='paging'&&eFound(cur)&&eFound(id)&&eEd(cur)){var a=ePg(cur).x,b=ePg(id).x;if(a.c===b.c&&eDepth(b)<eDepth(a)&&match(a,b)){eWiden(key(b));return;}}
   eGuard(function(){EFOC='panel';SW.open=false;eToastClear();ego({o:id});},eTy(id)==='inc'?'Keep draft and open incident':null);}
 function eWiden(k){var q=ePg(S.o),a=q.x,b=parseKey(k),rb=resolve(b),ra=resolve(a),rr=eReach(b),keeps=ra.own&&eDepth(ra.from)>eDepth(b),lv=b.p?'p':'c';
   eDlg({focus:1,t:'Edit '+(b.p?'all of project '+esc(b.p):'the whole customer '+esc(C(b.c).n))+' instead?',
@@ -2119,11 +2143,12 @@ function eWiden(k){var q=ePg(S.o),a=q.x,b=parseKey(k),rb=resolve(b),ra=resolve(a
       '<div class="e-chg" style="margin-top:8px"><b>What widens:</b> '+(rb.own?'the steps of '+esc(lbl(b))+' page for <b>'+pl(rr.n,'service')+'</b>:':esc(lbl(b))+' has no own steps yet (it follows '+esc(lbl(rb.from))+'). Creating them would change <b>'+pl(rr.n,'service')+'</b>:')+
       '<ul>'+rr.list.map(function(n){return '<li>'+esc(C(b.c).n+' › '+n)+'</li>';}).join('')+'</ul>'+(rr.ex.length?'Not reached: '+rr.ex.map(esc).join(', ')+' (own steps).':'')+
       (keeps?' <b>'+esc(lbl(a))+' has its own steps, so it would not change.</b>':'')+'</div>The panel header changes to '+esc(lbl(b))+'. Your list filter stays as it is. You can go back to '+esc(a.s||a.p)+' in one click.',
-    a:[['Edit '+esc(lbl(b))+' · '+pl(rr.n,'service'),'pri',function(){eGuard(function(){EFOC='panel';ego({o:'paging:'+key(q.org)+'@'+lv});});}],['Stay on '+esc(lbl(a)),'',function(){}]]});}
+    a:[['Edit '+esc(lbl(b))+' · '+pl(rr.n,'service'),'pri',function(){eGuard(function(){var no='paging:'+key(q.org)+'@'+lv;EED=eDk(no);EFOC='panel';ego({o:no});});}],['Stay on '+esc(lbl(a)),'',function(){}]]});}
 function eClose(){var o=S.o;eGuard(function(){EFOC='row:'+eRowOf(o);ego({o:''});});}
 function eRowOf(o){return eTy(o)==='paging'&&eFound(o)?'paging:'+key(ePg(o).x):o;}
 
-/* ---- save. One rule: a save that reaches more than one service is confirmed with before → after. Then the panel closes and focus returns to the row. ---- */
+/* ---- save. One rule: a save is confirmed (before → after + the services it reaches) only when it reaches MORE THAN ONE service or was widened beyond the row that was opened.
+   Everything else is applied at once: one Ctrl/⌘+Enter, a toast with the full path and Undo. Then the panel closes and focus returns to the row. ---- */
 function eSnap(c){var s=JSON.stringify(c);return function(){var o=JSON.parse(s),k;for(k in c)delete c[k];for(k in o)c[k]=o[k];};}
 function eConfirm(title,body,label,fn){eDlg({t:title,b:body,a:[[label,'pri',fn],['Cancel','',function(){}]]});}
 function eWarn(msg,sel){var w=$('.e-panel #ewarn');if(w){w.textContent=msg;}var f=sel&&$(sel);if(f){f.classList.add('bad');f.focus();}}
@@ -2133,27 +2158,30 @@ function eSave(then){if(S.s==='settings'&&!S.o){eMspApply(then);return;}
     if(!r.own&&!(DRAFT[dk]&&DRAFT[dk].creating))return;if(bad){eWarn(bad);return;}
     if(!creating&&!df.length){eToast('Nothing to save — no value changed for <b>'+esc(lbl(x))+'</b>');return;}
     var chg=df.length?eStepDiffHtml(r,d):'<div class="e-chg">Same minutes as '+esc(lbl(r.from))+', now as own steps.</div>',short=df.map(function(z){return 'step '+(z.i+1)+' '+z.from+' → '+z.to+' min';}).join(', ');
-    var doit=function(){var steps=JSON.parse(JSON.stringify(r.steps));eSteps(r,d).forEach(function(s,i){steps[i].at=s.at;});
+    var wide=rr.n>1||eDepth(x)<eDepth(q.org),holder=x.s?sn(x.c,x.p,x.s):x.p?pn(x.c,x.p):c;
+    var doit=function(){var un=wide?null:eSnap(holder),steps=JSON.parse(JSON.stringify(r.steps));eSteps(r,d).forEach(function(s,i){steps[i].at=s.at;});
       var ov={repeat:r.rep,by:me,on:'Nov 9',steps:steps};if(x.s)sn(x.c,x.p,x.s).ov=ov;else if(x.p)pn(x.c,x.p).ov=ov;else{c.steps=steps;c.edited={by:me,on:'Nov 9'};}
-      eDone((creating?'Own steps created for ':'Saved for ')+'<b>'+esc(lbl(x))+'</b> · '+(short?short+' · ':'')+eReachT(rr),then,'paging:'+key(x));};
-    if(rr.n>1)eConfirm((creating?'Create own steps for ':'Save for ')+esc(lbl(x))+'?','<div class="ov">Before → after</div>'+chg+'<div class="oc-sent" style="font-size:13px;margin:8px 0">'+eSent(c,r,d)+'</div>This changes who is paged for <b>'+pl(rr.n,'service')+'</b>:<ul>'+rr.list.map(function(n){return '<li>'+esc(C(x.c).n+' › '+n)+'</li>';}).join('')+'</ul>'+(rr.ex.length?'Not changed: '+rr.ex.map(esc).join(', ')+' (own steps).':'Nothing else is changed.'),(creating?'Create own steps for ':'Save for ')+esc(lbl(x)),doit);else doit();}
+      eDone((creating?'Own steps created for ':'Saved for ')+'<b>'+esc(lbl(x))+'</b> · '+(short?short+' · ':'')+eReachT(rr),then,'paging:'+key(x),un);};
+    if(wide)eConfirm((creating?'Create own steps for ':'Save for ')+esc(lbl(x))+'?','<div class="ov">Before → after</div>'+chg+'<div class="oc-sent" style="font-size:13px;margin:8px 0">'+eSent(c,r,d)+'</div>This changes who is paged for <b>'+pl(rr.n,'service')+'</b>:<ul>'+rr.list.map(function(n){return '<li>'+esc(C(x.c).n+' › '+n)+'</li>';}).join('')+'</ul>'+(rr.ex.length?'Not changed: '+rr.ex.map(esc).join(', ')+' (own steps).':'Nothing else is changed.'),(creating?'Create own steps for ':'Save for ')+esc(lbl(x)),doit);else doit();}
   else if(ty==='thr'){var cid=eArg(o),cc=C(cid),tr=eThrReach(cid),td=eThrDiff(cid,d),nch=0;td.forEach(function(z){nch+=z.ch.length;});
     if(!td.length){eToast('Nothing to save — no default changed for <b>'+esc(cc.n)+'</b>');return;}
-    var go2=function(){td.forEach(function(z){if(z.nv==null)delete z.m.cust[cid];else z.m.cust[cid]=z.nv;z.ch.forEach(function(a){a.th=z.m.op+' '+z.to+z.m.u;a.src=z.nv==null?'MSP':'CUSTOMER';});});
-      eDone('Saved defaults for <b>'+esc(cc.n)+'</b> · '+pl(td.length,'metric')+', '+pl(nch,'alarm')+' changed value',then);};
-    eConfirm('Save defaults for '+esc(cc.n)+'?','<div class="ov">Before → after</div>'+eThrDiffHtml(cid,d)+'<div style="margin-top:8px"><b>'+pl(nch,'alarm')+' change'+(nch===1?'s':'')+' value now.</b> The default belongs to all of '+esc(cc.n)+' — '+tr.ext+'. There are no project or service defaults.</div>','Save defaults for '+esc(cc.n),go2);}
+    var one=svcs({c:cid}).length<=1;
+    var go2=function(){var uns=one?td.map(function(z){return eSnap(z.m.cust);}).concat(ALARMS.map(eSnap)):null;
+      td.forEach(function(z){if(z.nv==null)delete z.m.cust[cid];else z.m.cust[cid]=z.nv;z.ch.forEach(function(a){a.th=z.m.op+' '+z.to+z.m.u;a.src=z.nv==null?'MSP':'CUSTOMER';});});
+      eDone('Saved defaults for <b>'+esc(cc.n)+'</b> · '+pl(td.length,'metric')+', '+pl(nch,'alarm')+' changed value',then,null,uns&&function(){uns.forEach(function(f){f();});});};
+    if(one)go2();else eConfirm('Save defaults for '+esc(cc.n)+'?','<div class="ov">Before → after</div>'+eThrDiffHtml(cid,d)+'<div style="margin-top:8px"><b>'+pl(nch,'alarm')+' change'+(nch===1?'s':'')+' value now.</b> The default belongs to all of '+esc(cc.n)+' — '+tr.ext+'. There are no project or service defaults.</div>','Save defaults for '+esc(cc.n),go2);}
   else if(ty==='alarm'){var a=ALARMS[+eArg(o)],was=a.th,nv=d.val!=null?String(d.val).trim():'';if(a.src==='TAG')return;
     if(nv===''||a.th.replace(/[^0-9.]/g,'')===nv){eToast('Nothing to save — the value of <b>'+a.r+'</b> did not change');return;}
-    a.th=a.th.replace(/[0-9.]+/,nv);a.src='CONSOLE';eDone('Saved for <b>'+esc(lbl(a))+' › '+a.r+'</b> · '+esc(was)+' → '+esc(a.th)+' · 1 resource',then);}
+    var ua=eSnap(a);a.th=a.th.replace(/[0-9.]+/,nv);a.src='CONSOLE';eDone('Saved for <b>'+esc(lbl(a))+' › '+a.r+'</b> · '+esc(was)+' → '+esc(a.th)+' · 1 resource',then,null,ua);}
   else if(ty==='mwnew'){var y=parseKey(eArg(o)),n=svcs(y).length,why=(d.why||'').trim(),when=(d.from!=null?d.from:'Mon 9 · 22:00')+' → '+(d.to!=null?d.to:'Tue 10 · 02:00');
     if(!why){eWarn('A reason is required, so others know why alerts are muted.','#emw');return;}
     var mk=function(){var w={st:'Scheduled',c:y.c,p:y.p,s:y.s,w:when,why:why,by:me,muted:0};MW.unshift(w);
-      eDone('Window created for <b>'+esc(lbl(y))+'</b> · '+esc(when)+' KST · mutes SEV-2 to SEV-5 for '+pl(n,'service'),then,'mw:0');};
+      eDone('Window created for <b>'+esc(lbl(y))+'</b> · '+esc(when)+' KST · mutes SEV-2 to SEV-5 for '+pl(n,'service'),then,'mw:0',n>1?null:function(){MW.splice(MW.indexOf(w),1);return 'Undone · the window for <b>'+esc(lbl(y))+'</b> was removed';});};
     if(n>1)eConfirm('Create window for '+esc(lbl(y))+'?','<div class="e-chg"><b>Window</b> <span class="mono">'+esc(when)+' KST</span><br><b>Reason</b> '+esc(why)+'</div>SEV-2 to SEV-5 alerts are muted for <b>'+pl(n,'service')+'</b>:<ul>'+svcs(y).map(function(s){return '<li>'+esc(s)+'</li>';}).join('')+'</ul>SEV-1 still pages. Nothing outside '+esc(lbl(y))+' is muted.','Create window for '+esc(lbl(y)),mk);else mk();}
   else if(ty==='personnew'){var z=parseKey(eArg(o)),nm=(d.name||'').trim();if(!nm){eWarn('A name is required.','#epn2');return;}
     var np={id:'p:n'+D.people.length,c:z.c,n:nm,i:nm.split(' ').map(function(w){return w[0];}).join('').slice(0,2).toUpperCase(),title:'Added Nov 9',sc:[z.p,z.s].filter(Boolean),roles:['notify'],ch:{Email:'sent'}};
     D.people.push(np);eDone('<b>'+esc(nm)+'</b> added to <b>'+esc(lbl(z))+'</b> · notify only',then,'person:'+np.id);}
-  else if(ty==='person'){var p=per(eArg(o)),t0=p.title;if(d.title==null||d.title===t0){eToast('Nothing to save — no change for <b>'+esc(p.n)+'</b>');return;}p.title=d.title;eDone('Saved <b>'+esc(p.n)+'</b> for <b>'+esc(C(p.c).n)+'</b> · title '+esc(t0)+' → '+esc(p.title),then);}}
+  else if(ty==='person'){var p=per(eArg(o)),t0=p.title;if(d.title==null||d.title===t0){eToast('Nothing to save — no change for <b>'+esc(p.n)+'</b>');return;}p.title=d.title;eDone('Saved <b>'+esc(p.n)+'</b> for <b>'+esc(C(p.c).n)+'</b> · title '+esc(t0)+' → '+esc(p.title),then,null,function(){p.title=t0;});}}
 function eRmOwn(){var x=ePg(S.o).x,c=C(x.c),rr=eReach(x),up=x.s&&pn(x.c,x.p).ov?{c:x.c,p:x.p}:{c:x.c};
   eConfirm('Remove own steps of '+esc(lbl(x))+'?','<b>'+eReachT(rr)+'</b> would follow the steps of <b>'+esc(lbl(up))+'</b> again:<div class="oc-sent" style="font-size:13px;margin-top:8px">'+eSent(c,resolve(up))+'</div>','Remove own steps of '+esc(lbl(x)),function(){if(x.s)delete sn(x.c,x.p,x.s).ov;else delete pn(x.c,x.p).ov;eDone('Own steps removed for <b>'+esc(lbl(x))+'</b> · now inherits from '+esc(lbl(up)),null,'paging:'+key(up));});}
 /* Acknowledge keeps its undo: in the toast, and on the row for as long as this session lasts */
@@ -2166,9 +2194,9 @@ function eOv(){return ePanels()+popHtml()+eDdHtml()+eDrwHtml()+eSwHtml()+eDlgHtm
 function eSlug(s){return String(s).toLowerCase().replace(/[^a-z0-9]+/g,'-');}
 /* product URL. Portal: never a /c/<customer> path, and a link that is not found keeps the address as typed (no redirect to a canonical path). */
 function eUrlPath(){var pth=function(x){return x?'/c/'+x.c+(x.p?'/'+eSlug(x.p):'')+(x.s?'/'+eSlug(x.s):''):'';},x=sc(),pt=ePt(),host=pt?'portal.alarmops.example':'console.alarmops.example';
-  var seg={inc:'incidents',mw:'maintenance',alarm:'alarms',person:'people',thr:'thresholds',paging:'paging',mwnew:'maintenance/new',personnew:'people/new'};
+  var seg={inc:'incidents',mw:'maintenance',alarm:'alarms',person:'people',thr:'thresholds',paging:'call-order',mwnew:'maintenance/new',personnew:'people/new'};
   function pu(o){var ty=eTy(o),a=eArg(o),L=eOL(o);
-    if(ty==='paging')return pth(L.x)+'/paging';if(ty==='thr')return pth(L.x)+'/thresholds';if(ty==='alarm')return pth(L.x)+'/alarms/'+ALARMS[+a].r;
+    if(ty==='paging')return pth(L.x)+'/call-order';if(ty==='thr')return pth(L.x)+'/thresholds';if(ty==='alarm')return pth(L.x)+'/alarms/'+ALARMS[+a].r;
     if(ty==='inc'){var i=INC.filter(function(q){return q.id===a;})[0];return pth(i.c?i:null)+'/incidents/'+a;}
     if(ty==='person')return pth(L.x)+'/people/'+eSlug(per(a).n);if(ty==='mw')return pth(MW[+a])+'/maintenance/'+a;
     return (a&&a[0]==='~'?'/c/'+a.slice(1):pth(L.x))+(ty==='mwnew'?'/maintenance/new':'/people/new');}
@@ -2176,7 +2204,7 @@ function eUrlPath(){var pth=function(x){return x?'/c/'+x.c+(x.p?'/'+eSlug(x.p):'
     var u=pu(S.o);if(pt)u=u.replace('/c/'+P_CUST,'');var fq=pt?(x.p?eSlug(x.p)+(x.s?'/'+eSlug(x.s):''):''):x?x.c+(x.p?'/'+eSlug(x.p):'')+(x.s?'/'+eSlug(x.s):''):S.m==='1'?'mine':'';
     return {u:host+u,panel:1,f:fq?'?filter='+fq:''};}
   if(S.s==='settings')return {u:host+'/settings/msp-defaults'};
-  return {u:host+'/'+S.s+(pt?(x.p?'?filter='+eSlug(x.p)+(x.s?'/'+eSlug(x.s):''):''):x?'?filter='+x.c+(x.p?'/'+eSlug(x.p):'')+(x.s?'/'+eSlug(x.s):''):S.m==='1'?'?filter=mine':'')+(S.q?(x&&(!pt||x.p)||S.m==='1'?'&':'?')+'show='+S.q:'')};}
+  return {u:host+'/'+(S.s==='paging'?'call-order':S.s)+(pt?(x.p?'?filter='+eSlug(x.p)+(x.s?'/'+eSlug(x.s):''):''):x?'?filter='+x.c+(x.p?'/'+eSlug(x.p):'')+(x.s?'/'+eSlug(x.s):''):S.m==='1'?'?filter=mine':'')+(S.q?(x&&(!pt||x.p)||S.m==='1'?'&':'?')+'show='+S.q:'')};}
 function eUrl(){var r=eUrlPath();return r.u+(r.f||'')+(r.nf?'   · Not found. The address stays exactly as typed: same response for an ID that does not exist and one you may not see.':r.panel?(r.f?'   · path = the panel’s scope. ?filter= is your list filter: a reload keeps it, Copy link in the panel leaves it out.':'   · one scope in the URL: the panel’s.'):'');}
 function eRestore(){$$('[data-dk]').forEach(function(box){var d=DRAFT[box.getAttribute('data-dk')];if(!d)return;
     $$('[data-f]',box).forEach(function(i){var v=d.v[i.getAttribute('data-f')];if(v!=null){i.value=v;if(String(v)!==i.defaultValue)i.classList.add('chg');}});
@@ -2190,7 +2218,7 @@ function eLive(){var o=S.o,ty=eTy(o),p=$('#eprev'),s=$('#esent'),w=$('#ewarn');
   else if(ty==='alarm'){var a=ALARMS[+eArg(o)],nv=d.val!=null?String(d.val).trim():'';if(p)p.innerHTML=nv!==''&&a.th.replace(/[^0-9.]/g,'')!==nv?'<span class="mono">'+esc(a.th)+'</span> → <span class="mono b">'+esc(a.th.replace(/[0-9.]+/,nv))+'</span> · this resource only':'';}
   else if(ty==='mwnew'){var e=$('#ewhen');if(e)e.innerHTML=eWhen(d);if(w&&(d.why||'').trim())w.textContent='';}
   else if(ty==='personnew'){if(w&&(d.name||'').trim())w.textContent='';}}
-function eAfter(){document.body.classList.toggle('e-has-panel',S.v==='E'&&!!S.o);document.body.classList.toggle('e-plus',S.v==='E'&&ePk()==='x');eXLayout();eXAnim();window.ERH=S.v==='E'?location.hash:null;if(S.v!=='E'){EFOC=null;return;}
+function eAfter(){if(EED&&(!S.o||!eFound(S.o)||eDk(S.o)!==EED))EED=null;document.body.classList.toggle('e-has-panel',S.v==='E'&&!!S.o);document.body.classList.toggle('e-plus',S.v==='E'&&ePk()==='x');eXLayout();eXAnim();window.ERH=S.v==='E'?location.hash:null;if(S.v!=='E'){EFOC=null;return;}
   eLive();if(DLG)eDlgFocus();var tl=$('.e-tree .e-tr');if(tl&&TR.sy)tl.scrollTop=TR.sy;var ts=$('.e-tree.plus .e-trs');if(ts){ts.scrollTop=TX.sy||0;if(TX.rev){TX.rev=false;eXSee('.e-tn.on');}}
   var h1=$('.page h1');if(h1)h1.setAttribute('tabindex','-1');
   var f=EFOC;EFOC=null;if(!f||DLG)return;var el=null,pn_=$('.e-panel');
@@ -2217,9 +2245,14 @@ function eClick(e){var t=e.target,el,a,arg;
       eGuard(function(){EFOC='h1';ego({c:'',p:'',svc:'',m:'',o:'',q:arg});eToast('Filter removed · Monitoring now lists '+eAllN(),'Back to '+wml,function(){EFOC='h1';ego(wm);});});}
     else if(a==='open')eOpen(arg,!!closest(el,'.e-panel'));else if(a==='close')eClose();
     else if(a==='copylink'){var u=eUrlPath().u;try{navigator.clipboard.writeText('https://'+u);}catch(_){}eToast('Link copied · <span class="mono">'+esc(u)+'</span> · opens this panel. The reader keeps their own list filter.');}
-    else if(a==='lvl'){var q=ePg(S.o);if(q.lv!==arg)eGuard(function(){EFOC='panel';ego({o:'paging:'+key(q.org)+'@'+arg});});}
+    else if(a==='lvl'){var q=ePg(S.o);if(q.lv!==arg)eGuard(function(){var no='paging:'+key(q.org)+'@'+arg;EED=eDk(no);EFOC='panel';ego({o:no});});}
     else if(a==='widen')eWiden(arg);
-    else if(a==='mkown'){var dk=eDk(S.o),L=eOL(S.o);DRAFT[dk]={v:{},dirty:true,creating:true,o:S.o,path:L.path,kind:L.kind,t:'03:16'};eStore();EFOC='panel';render();}
+    else if(a==='edit'){if(!eFound(S.o)||ePt())return true;var r0=eTy(S.o)==='paging'?resolve(ePg(S.o).x):null;
+      if(r0&&!r0.own){var dk0=eDk(S.o),L0=eOL(S.o);DRAFT[dk0]={v:{},dirty:true,creating:true,o:S.o,path:L0.path,kind:L0.kind,t:'03:16'};eStore();}
+      EED=eDk(S.o);EFOC='panel';render();}
+    else if(a==='edcancel'){var dkc=eDk(S.o),back=function(){delete DRAFT[dkc];eStore();EED=null;EFOC='load';render();};
+      if(eDirty())eDlg({focus:1,t:'Discard changes for '+esc(eOL(S.o).path)+'?',b:'Your edit of the '+esc(eOL(S.o).kind)+' is not saved. The panel goes back to the read-only view.',a:[['Discard changes','danger',back],['Keep editing','',function(){}]]});else back();}
+    else if(a==='mkown'){var dk=eDk(S.o),L=eOL(S.o);EED=dk;DRAFT[dk]={v:{},dirty:true,creating:true,o:S.o,path:L.path,kind:L.kind,t:'03:16'};eStore();EFOC='panel';render();}
     else if(a==='rmown')eRmOwn();else if(a==='save')eSave();else if(a==='ack')eAck(arg);else if(a==='unack')eUnack(arg);
     else if(a==='resume')eResume(arg);else if(a==='dropdraft'){delete DRAFT[arg];eStore();render();}
     else if(a==='q')ego({q:arg},'replace');
@@ -2256,6 +2289,7 @@ function eKey(e){var t=e.target,save=(e.ctrlKey||e.metaKey)&&e.key==='Enter';
       if(SW.i<0||!SW.list.length){var am=$('.e-amb');if(am){am.style.outline='2px solid var(--amber)';}return;}eFilt(SW.list[SW.i]);}
     return;}
   if(save){var sb=$('.e-foot [data-e="save"]')||(S.s==='settings'&&!S.o?$('#emspb'):null);if(sb&&!sb.disabled){e.preventDefault();eSave();}return;}
+  if((e.key==='e'||e.key==='E')&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&S.o&&!SW.open&&!(t.matches&&t.matches('input,textarea,select,[role="tree"]'))){var eb=$('.e-panel [data-e="edit"]');if(eb){e.preventDefault();eb.click();}return;}
   if(e.key==='Enter'&&t.id==='egq'){var vis_=$$('.e-gc').filter(function(b){return !b.classList.contains('hide');});if(vis_.length===1)vis_[0].click();return;}
   if((e.key==='Enter'||e.key===' ')&&t.matches&&t.matches('[data-e][tabindex]')){e.preventDefault();t.click();return;}}
 
@@ -2306,7 +2340,7 @@ function eDdList(){var q=DD.q.trim().toLowerCase(),os=eOpts(DD.lv).filter(functi
   DD.i=Math.max(0,Math.min(os.length-1,DD.i));
   os.forEach(function(o,n){if(o.g&&o.g!==g){g=o.g;h+='<div class="v-sw-g">'+g+'</div>';}
     h+='<div class="e-opt'+(n===DD.i&&!DD.sheet?' cur':'')+(o.on?' on':'')+'" role="option" aria-selected="'+!!o.on+'" data-e="ddpick" data-a="'+esc(o.k)+'"><span class="ck">'+(o.on?'<span class="mk chk"></span>':'')+'</span><span class="x"><b>'+esc(o.t)+'</b>'+(o.sub?'<small>'+esc(o.sub)+'</small>':'')+'</span>'+
-      (o.st?(ePk()==='x'?eXStH(eXSt(parseKey(o.k)),o.more):eStatH(o.st)):'')+(DD.sheet&&o.more?'<span class="go">›</span>':'')+'</div>';});
+      (o.st?(ePk()==='x'?eXStH(eXSt(parseKey(o.k))):eStatH(o.st)):'')+(DD.sheet&&o.more?'<span class="go">›</span>':'')+'</div>';});
   return h;}
 function eDdHtml(){if(!DD)return '';var x=sc(),nm=LVN[DD.lv],ph='Search '+nm+'s'+(DD.lv==='p'?' of '+C(x.c).n:DD.lv==='s'?' of '+x.p:'')+'…';
   var body='<input id="ddq" class="q" placeholder="'+esc(ph)+'" aria-label="'+esc(ph)+'" autocomplete="off" value="'+esc(DD.q)+'"><div class="e-ddl" id="ddl" role="listbox" aria-label="'+nm+'s">'+eDdList()+'</div>'+(ePk()==='x'?eXLeg():ELEG);
@@ -2379,8 +2413,8 @@ function eTrKey(e){var ns=TR.list,i=-1,j,k=e.key;ns.forEach(function(n,q){if(n.k
 
 /* ---- E-2+ (default): tree on desktop (docked, or tucked into a rail), stepped sheet on phone ---- */
 var TX={q:'',o:{},op:{},oq:{},col:null,w:272,prob:false,pexp:false,lr:null,cur:null,ta:'',tat:0,sy:0,list:[],last:null,rev:true,hits:0,hitc:0,hit1:null,probN:0};
-try{var _tx=JSON.parse(sessionStorage.getItem('e-tree')||'null');if(_tx){TX.o=_tx.o||{};TX.op=_tx.op||{};TX.col=_tx.col==null?null:!!_tx.col;TX.w=_tx.w||272;TX.prob=!!_tx.prob;TX.leg=_tx.leg!==false;}}catch(_){}
-function eXStore(){try{sessionStorage.setItem('e-tree',JSON.stringify({o:TX.o,op:TX.op,col:TX.col,w:TX.w,prob:TX.prob,leg:TX.leg!==false}));}catch(_){}}
+try{var _tx=JSON.parse(sessionStorage.getItem('e-tree')||'null');if(_tx){TX.o=_tx.o||{};TX.op=_tx.op||{};TX.col=_tx.col==null?null:!!_tx.col;TX.w=_tx.w||272;TX.prob=!!_tx.prob;TX.leg=_tx.leg===true;}}catch(_){}
+function eXStore(){try{sessionStorage.setItem('e-tree',JSON.stringify({o:TX.o,op:TX.op,col:TX.col,w:TX.w,prob:TX.prob,leg:TX.leg===true}));}catch(_){}}
 /* The tree is always docked: expanded (TX.w px) or a 45px rail. It never floats over the list; the page reflows beside it (eXLayout).
    Rail when the user collapsed it, by default below 1101px, and automatically while a panel is open below 1408px. The user can expand it again beside the panel (TX.pexp, until the panel closes). */
 var XRAIL=45,XLAY={};
@@ -2411,27 +2445,25 @@ function eXAnim(){var a=!ePhone()&&$('.e-tree.plus'),r0=TX.lr;if(!a){TX.lr=null;
   var an=a.animate([{width:(r0?XRAIL:TX.w)+'px'},{width:(r?XRAIL:TX.w)+'px'}],{duration:180,easing:'cubic-bezier(.2,0,0,1)'});
   an.onfinish=an.oncancel=function(){a.classList.remove('anim');if(!$('.e-tree.plus.anim'))document.body.classList.remove('e-anim');};}
 function eXM(){return TX.q.trim()?TX.oq:TX.prob?TX.op:TX.o;}
-/* own = this node has its own call order in the sense of the Call order list ("Own steps": project or service level only; every customer has customer steps).
-   inown = own steps somewhere below it. th = thresholds to review (Monitoring). */
-function eXSt(x){var st=eStat(x),h=!x.p?health(C(x.c)):'ok',th=ePt()?0:st.th;
-  var inown=x.s?0:overrides(C(x.c)).filter(function(o){return !x.p||(o.p===x.p&&o.s);}).length;
-  return {inc:st.inc,hl:h==='ok'?'':h,th:th,own:!!x.p&&st.own.indexOf('own call-order steps')>=0,inown:inown,prob:st.inc>0||h!=='ok'||th>0};}
+/* The tree carries THREE kinds of tag and no more: open-incident count, one call-problem tag (UNREACHABLE or AT RISK, customer level), and "Own steps"
+   (this project or service has its own call order, same words as the Call order list; every customer has customer steps, so customers never carry it).
+   Thresholds to review are a Monitoring matter and are not shown or counted here. */
+function eXSt(x){var st=eStat(x),h=!x.p&&!ePt()?health(C(x.c)):'ok';
+  return {inc:st.inc,hl:h==='ok'?'':h,own:!!x.p&&st.own.indexOf('own call-order steps')>=0,prob:st.inc>0||h!=='ok'};}
 var XHN={unr:'Unreachable',ar:'At risk'};
 /* call health is a TEXT tag (same words as the Call order list), never a dot or triangle: those shapes mean incident status and severity in the lists */
 function eHLt(hl){return '<span class="e-hl e-tg '+hl+'" title="'+XHN[hl]+': '+HD[hl]+'">'+XHN[hl]+'</span>';}
-function eXStH(st,col){var h='<span class="e-stt">';
+function eXStH(st){var h='<span class="e-stt">';
   if(st.own)h+='<span class="e-own" title="Own steps: this level has its own call order, as in the Call order list">Own steps</span>';
-  if(st.inown&&col)h+='<span class="e-inown" role="img" aria-label="Contains own steps" title="Contains '+pl(st.inown,'level')+' with own steps. Expand to see."></span>';
   if(st.hl)h+=eHLt(st.hl);
-  if(st.th)h+='<span class="e-tg rv" title="'+pl(st.th,'threshold')+' to review in Monitoring"><span class="sr">thresholds to review: </span>Review'+(st.th>1?' '+st.th:'')+'</span>';
   if(st.inc)h+='<span class="e-ic" title="'+pl(st.inc,'open incident')+'"><span class="sr">open incidents: </span>'+st.inc+'</span>';
   return h+'</span>';}
-function eXLeg(){var pt=ePt(),op=TX.leg!==false,it=function(m,t,tip){return '<span class="it"'+(tip?' title="'+tip+'"':'')+'>'+m+' '+t+'</span>';};
-  return '<div class="e-leg e-legx"><button class="e-legt" data-e="xleg" aria-expanded="'+op+'" title="'+(op?'Hide':'Show')+' the legend">Legend<span aria-hidden="true">'+(op?'▾':'▸')+'</span></button>'+(op?'<div class="e-legl">'+
+/* legend: closed by default, one plain link. In the phone sheet it is closed every time the sheet opens and sits in the flow under the list (it never floats over it). */
+function eXLeg(){var pt=ePt(),sh=!!(DD&&DD.sheet),op=sh?!!DD.leg:TX.leg===true,it=function(m,t,tip){return '<span class="it"'+(tip?' title="'+tip+'"':'')+'>'+m+' '+t+'</span>';};
+  return '<div class="e-leg e-legx"><button class="e-legt" data-e="xleg" aria-expanded="'+op+'">What do these mean?<span aria-hidden="true" style="margin-left:4px">'+(op?'▾':'')+'</span></button>'+(op?'<div class="e-legl">'+
     it('<span class="e-ic">n</span>','open incidents','Incidents nobody has acknowledged yet, in that customer, project or service')+
-    (pt?'':it('<span class="e-hl e-tg unr">Unreachable</span>','nobody can be called',HD.unr)+it('<span class="e-hl e-tg ar">At risk</span>','first on shift has no verified phone',HD.ar)+
-      it('<span class="e-tg rv">Review</span>','thresholds to review','Alarms marked Needs review in Monitoring'))+
-    it('<span class="e-own">Own steps</span>','own call order','Same label as in the Call order list')+it('<span class="e-inown"></span>','own steps inside (collapsed)','')+'</div>':'')+'</div>';}
+    (pt?'':it('<span class="e-hl e-tg unr">Unreachable</span> <span class="e-hl e-tg ar">At risk</span>','call problem','Unreachable: '+HD.unr+' At risk: '+HD.ar))+
+    it('<span class="e-own">Own steps</span>','own call order','Same label as in the Call order list')+'</div>':'')+'</div>';}
 function eXHi(t){var tk=TX.q.trim().toLowerCase().split(/\s+/).filter(Boolean);if(!tk.length)return esc(t);
   return t.split(/(\s+)/).map(function(w){var lw=w.toLowerCase(),m=tk.filter(function(k){return lw.indexOf(k)===0;}).sort(function(a,b){return b.length-a.length;})[0];return m?'<mark>'+esc(w.slice(0,m.length))+'</mark>'+esc(w.slice(m.length)):esc(w);}).join('');}
 function eXNodes(){var q=TX.q.trim().toLowerCase(),x=sc(),o=[],pt=ePt(),pr=TX.prob&&!q,M=eXM(),hits=0,hitc=0,hit1=null,tk=q.split(/\s+/).filter(Boolean);
@@ -2445,9 +2477,9 @@ function eXNodes(){var q=TX.q.trim().toLowerCase(),x=sc(),o=[],pt=ePt(),pr=TX.pr
     var sub=ps.some(function(z){return z.pm||z.ss.length;});
     if(q&&!cm&&!sub)return;if(pr&&!st.prob&&!sel)return;
     if(q){var h0=hits;if(cm){hits++;hit1=ck;}ps.forEach(function(z){if(z.pm){hits++;hit1=key({c:c.id,p:z.p.n});}z.ss.forEach(function(s){hits++;hit1=key({c:c.id,p:z.p.n,s:s.n});});});if(hits>h0)hitc++;}
-    var e=ex(ck,q?sub:sel);arr.push({k:ck,t:c.n,d:0,kids:1,exp:e,st:st,on:sel&&!x.p,oni:sel&&!!x.p&&!e,hit:cm});if(!e)return;
+    var e=ex(ck,q?sub:sel);arr.push({k:ck,t:c.n,d:0,kids:1,exp:e,st:st,on:sel&&(!x.p||!e),hit:cm});if(!e)return;
     ps.forEach(function(z){var psel=sel&&x.p===z.p.n;if(q&&sub&&!z.pm&&!z.ss.length)return;if(pr&&!z.st.prob&&!psel)return;
-      var pk=key({c:c.id,p:z.p.n}),pe=ex(pk,q?z.ss.length>0:psel);arr.push({k:pk,t:z.p.n,d:1,kids:1,exp:pe,st:z.st,on:psel&&!x.s,oni:psel&&!!x.s&&!pe,hit:z.pm});if(!pe)return;
+      var pk=key({c:c.id,p:z.p.n}),pe=ex(pk,q?z.ss.length>0:psel);arr.push({k:pk,t:z.p.n,d:1,kids:1,exp:pe,st:z.st,on:psel&&(!x.s||!pe),hit:z.pm});if(!pe)return;
       (z.ss.length?z.ss:z.p.s).forEach(function(s){var ssel=psel&&x.s===s.n,ss_=eXSt({c:c.id,p:z.p.n,s:s.n});if(pr&&!ss_.prob&&!ssel)return;
         arr.push({k:key({c:c.id,p:z.p.n,s:s.n}),t:s.n,d:2,st:ss_,on:ssel,hit:!!q&&z.ss.length>0});});});}
   if(pt){cu(C(P_CUST),o);TX.hits=hits;TX.hitc=hitc;TX.hit1=hit1;return o;}
@@ -2456,33 +2488,32 @@ function eXNodes(){var q=TX.q.trim().toLowerCase(),x=sc(),o=[],pt=ePt(),pr=TX.pr
   o.push({k:'',t:'All customers',n:CUS().length,d:0,root:1,on:!x&&S.m!=='1'});
   [['~my','My customers',my],['~ot',my.length?'Other customers':'Customers',ot]].forEach(function(g){if(!g[2].length)return;var arr=[];g[2].forEach(function(c){cu(c,arr);});
     var shown=arr.filter(function(n){return n.d===0;}).length;if((q||pr)&&!shown)return;
-    var has=!!x&&g[2].some(function(c){return c.id===x.c;}),e=ex(g[0],g[0]==='~my'||!my.length||!!q||pr||has),ag={inc:0,hl:'',own:false,th:0,inown:0};
-    g[2].forEach(function(c){var s=eXSt({c:c.id});ag.inc+=s.inc;ag.th+=s.th;if(s.hl==='unr'||(s.hl&&!ag.hl))ag.hl=s.hl;});
-    o.push({k:g[0],t:g[1],n:g[2].length,shown:(q||pr)?shown:null,hdr:1,d:0,kids:1,exp:e,on:g[0]==='~my'&&!x&&S.m==='1',oni:has&&!e,agg:ag});
+    var has=!!x&&g[2].some(function(c){return c.id===x.c;}),e=ex(g[0],g[0]==='~my'||!my.length||!!q||pr||has),ag={inc:0,hl:'',own:false};
+    g[2].forEach(function(c){var s=eXSt({c:c.id});ag.inc+=s.inc;if(s.hl==='unr'||(s.hl&&!ag.hl))ag.hl=s.hl;});
+    o.push({k:g[0],t:g[1],n:g[2].length,shown:(q||pr)?shown:null,hdr:1,d:0,kids:1,exp:e,on:(g[0]==='~my'&&!x&&S.m==='1')||(has&&!e),agg:ag});
     if(e)o=o.concat(arr);});
   TX.hits=hits;TX.hitc=hitc;TX.hit1=hit1;return o;}
 function eXRow(n,i){var me=eMe().split(' ')[0],lab=n.hdr?esc(n.t)+' <span class="mut">· '+(n.shown!=null&&n.shown!==n.n?n.shown+' of '+n.n:n.n)+'</span>':(n.hit?eXHi(n.t):esc(n.t))+(n.root?' <span class="mut">· '+n.n+'</span>':'');
   var tip=n.k==='~my'?'Click to show only the '+n.n+' customers '+esc(me)+' covers':n.k==='~ot'?'Customers '+esc(me)+' does not cover':esc(n.t);
-  if(n.oni){tip='Your filter is inside: '+esc(lbl(sc()))+'. Expand to see it.';lab+='<span class="sr"> (your filter is inside)</span>';}
-  return '<div class="e-tn d'+n.d+(n.hdr?' hdr':'')+(n.root?' root':'')+(n.on?' on':'')+(n.oni?' oni':'')+(n.k===TX.cur?' cur':'')+'" id="xn'+i+'" role="treeitem" aria-level="'+(n.hdr||n.root?1:n.d+2)+'" aria-selected="'+!!n.on+'"'+(n.kids?' aria-expanded="'+!!n.exp+'"':'')+' data-e="xpick" data-a="'+esc(n.k)+'">'+
+  return '<div class="e-tn d'+n.d+(n.hdr?' hdr':'')+(n.root?' root':'')+(n.on?' on':'')+(n.k===TX.cur?' cur':'')+'" id="xn'+i+'" role="treeitem" aria-level="'+(n.hdr||n.root?1:n.d+2)+'" aria-selected="'+!!n.on+'"'+(n.kids?' aria-expanded="'+!!n.exp+'"':'')+' data-e="xpick" data-a="'+esc(n.k)+'">'+
     (n.kids?'<button class="tw" tabindex="-1" data-e="xtog" data-a="'+esc(n.k)+'" aria-label="'+(n.exp?'Collapse ':'Expand ')+esc(n.t)+'" title="'+(n.exp?'Collapse':'Expand')+' (does not change what is shown)">'+(n.exp?'▾':'▸')+'</button>':n.root?'':'<span class="tw"></span>')+
-    '<span class="x" title="'+tip+'">'+lab+'</span>'+(n.oni?'<span class="e-onit" aria-hidden="true">filter inside</span>':'')+(n.st?eXStH(n.st,n.kids&&!n.exp):n.agg&&!n.exp?eXStH(n.agg,1):'')+'</div>';}
+    '<span class="x" title="'+tip+'">'+lab+'</span>'+(n.st?eXStH(n.st):n.agg&&!n.exp?eXStH(n.agg):'')+'</div>';}
 function eXBody(){var ns=eXNodes(),q=TX.q.trim(),root='',rows='',hint='';TX.list=ns;
   if(!ns.some(function(n){return n.k===TX.cur;})){var c0=(q&&ns.filter(function(n){return n.hit;})[0])||ns.filter(function(n){return n.on;})[0]||ns[0];TX.cur=c0?c0.k:null;}
   ns.forEach(function(n,i){if(n.root)root+=eXRow(n,i);else rows+=eXRow(n,i);});
   var real=ns.filter(function(n){return !n.root&&!n.hdr;}).length;
-  if(!real)rows='<div class="v-sw-g" style="white-space:normal;line-height:1.4">'+(q?'No customer, project or service starts with “'+esc(TX.q)+'”':TX.prob?'No customer has an open incident, a call-order problem or a threshold to review.':'')+'</div>';
+  if(!real)rows='<div class="v-sw-g" style="white-space:normal;line-height:1.4">'+(q?'No customer, project or service starts with “'+esc(TX.q)+'”':TX.prob?'No customer has an open incident or a call problem.':'')+'</div>';
   if(q&&TX.hits)hint=TX.hits===1?'<b>1 match</b> · Enter selects it':'<b>'+TX.hits+' matches</b> in '+pl(TX.hitc,'customer')+' · nothing is selected until you choose one';
   return {root:root,rows:rows,hint:hint};}
 function eXBox(){var b=eXBody(),pt=ePt();
   return '<div class="e-trh"><span class="e-tqw"><input class="inp e-tq" placeholder="Find by name…" aria-label="Filter the tree by customer, project or service name" autocomplete="off" value="'+esc(TX.q)+'"><button class="e-tqx" data-e="xclrq" aria-label="Clear the search" title="Clear"'+(TX.q?'':' hidden')+'>×</button></span>'+
     '<button class="btn sm" data-e="xcol" title="Collapse the tree to a narrow rail" aria-label="Collapse the tree to a narrow rail" aria-expanded="true">«</button>'+'</div>'+
-    (pt?'':'<button class="e-trp" role="switch" aria-checked="'+TX.prob+'" data-e="xprob" title="Show only customers that have an open incident, a call-order health problem or a threshold to review"><span class="sw"><span class="mk chk"></span></span><span>Only with problems</span><span class="n">'+TX.probN+'</span></button>')+
+    (pt?'':'<button class="e-trp" role="switch" aria-checked="'+TX.prob+'" data-e="xprob" title="Show only customers that have an open incident or a call problem (Unreachable or At risk)"><span class="sw"><span class="mk chk"></span></span><span>Only with problems</span><span class="n">'+TX.probN+'</span></button>')+
     '<div class="e-trq" role="status">'+b.hint+'</div>'+
     '<div class="e-tr'+(TX.amb?' amb':'')+'" role="tree" tabindex="0" aria-label="Customers, projects and services"><div class="e-trr">'+b.root+'</div><div class="e-trs">'+b.rows+'</div></div>'+eXLeg();}
 var XICO='<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M3 2.5v9.5h4M3 6.5h4"/><rect x="8.5" y="4.5" width="5" height="4" fill="currentColor" stroke="none"/><rect x="8.5" y="10" width="5" height="4" fill="currentColor" stroke="none"/></svg>';
 function eXAside(){var x=sc(),k=x?key(x):S.m==='1'?'~my':'';
-  if(TX.last!==k){var first=TX.last===null;TX.last=k;TX.rev=true;if(x&&!first){[TX.o,TX.op].forEach(function(m){delete m[key({c:x.c})];if(x.p)delete m[key({c:x.c,p:x.p})];delete m[eMyC(C(x.c))?'~my':'~ot'];});eXStore();}}
+  if(TX.last!==k||TX.reveal){TX.last=k;TX.reveal=false;TX.rev=true;if(x){[TX.o,TX.op].forEach(function(m){delete m[key({c:x.c})];if(x.p)delete m[key({c:x.c,p:x.p})];delete m[eMyC(C(x.c))?'~my':'~ot'];});eXStore();}}   // the tree always opens down to the node you filtered to
   if(!eXRail()){return '<aside class="e-tree plus" style="width:'+TX.w+'px" aria-label="Customer tree">'+eXBox()+'<div class="e-trz" role="separator" aria-orientation="vertical" tabindex="0" aria-label="Resize the tree (arrow keys, 200 to 360 px)" title="Drag to resize"></div></aside>';}
   var ch='<span class="chain">›</span>',vt=x?'<b>'+esc(C(x.c).n)+'</b>'+(x.p?ch+esc(x.p):'')+(x.s?ch+esc(x.s):''):'<b>'+(S.m==='1'?'My customers':'All customers')+'</b>';
   return '<aside class="e-tree plus rail" aria-label="Customer tree, collapsed">'+
@@ -2521,8 +2552,8 @@ function eXClick(a,arg){
   if(a==='xpick')eXPick(arg);else if(a==='xtog')eXTog(arg);
   else if(a==='xprob'){TX.prob=!TX.prob;TX.cur=null;eXStore();eXSync();var b=$('.e-trp');if(b)b.focus();}
   else if(a==='xcol'){if(S.o&&innerWidth<1408&&TX.pexp)TX.pexp=false;else TX.col=true;eXStore();eXSync();var r=$('.e-rail');if(r)r.focus();}   // beside a panel below 1408 the expansion was temporary: collapsing it does not change what is remembered
-  else if(a==='xexp'){TX.col=false;if(S.o&&innerWidth<1408)TX.pexp=true;TX.cur=null;eXStore();eXSync();eXFocusTree();}
-  else if(a==='xleg'){TX.leg=TX.leg===false;eXStore();if(DD)renderOv();else eXSync();var lb=$('.e-legt');if(lb)lb.focus();}
+  else if(a==='xexp'){TX.col=false;TX.reveal=true;if(S.o&&innerWidth<1408)TX.pexp=true;TX.cur=null;eXStore();eXSync();eXFocusTree();}
+  else if(a==='xleg'){if(DD&&DD.sheet){DD.leg=!DD.leg;renderOv();}else{TX.leg=TX.leg!==true;eXStore();eXSync();}var lb=$('.e-legt');if(lb)lb.focus();}
   else if(a==='xclrq'){TX.q='';TX.oq={};TX.cur=null;TX.amb=false;var i=$('.e-tree.plus .e-tq');if(i){i.value='';i.focus();}eXRe();}
   else return false;
   return true;}

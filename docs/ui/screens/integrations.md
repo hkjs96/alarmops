@@ -2,9 +2,16 @@
 
 | 항목 | 내용 |
 |---|---|
-| 경로 | 고객 상세 `Integrations` 탭, 전체 목록 `/settings/integrations` |
+| 경로 | Customers 고객 상세 `Integrations` 탭(`/customers/{id}/integrations`), 전체 목록 `/settings/integrations` |
 | 목적 | CloudWatch(AWS 계정 + 역할 5개), Prometheus Alertmanager, Grafana 연동 상태와 첫/마지막 수신 |
 | 페르소나 | 민재 P4-1(연결 확인), 준호 |
+
+
+## 셸·범위 (D-33, `shell-scope.md`)
+- 트리 필터를 쓰지 않는다. 고객 상세 탭은 그 고객 하나, Settings › Integrations는 전 고객 목록(읽기)이다.
+- 읽기 먼저: 상태·토큰 접두는 읽기 전용. 변경 동작(Add, Rotate token, Check)은 버튼마다 고객 이름이 있는 확인(`Rotate token for Mirae Pay · Prometheus`).
+- 연동은 고객 하나에만 닿는다. 전 고객에 닿는 연동 설정은 없다.
+- 새 셸 시안은 아직 없다.
 
 ## 레이아웃
 | 영역 | 내용 |

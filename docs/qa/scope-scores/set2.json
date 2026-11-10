@@ -1,0 +1,377 @@
+{
+ "evaluator": "set2-ops",
+ "personas": [
+  "준호 - MSP ops lead, 12 of 34 customers, desktop 1440/1280, keyboard-first",
+  "민재 - alarm operator, desktop 1440, thresholds across customers"
+ ],
+ "scores": {
+  "A": {
+   "c1": {
+    "concept": 4,
+    "asbuilt": 4,
+    "why": "Scope bar plus 'Save for Mirae Pay' label; always visible, far from form"
+   },
+   "c2": {
+    "concept": 3,
+    "asbuilt": 2,
+    "why": "Sticky scope; MSP defaults editable inline at All; unsaved edit silently dropped"
+   },
+   "c3": {
+    "concept": 3,
+    "asbuilt": 3,
+    "why": "Ctrl+K palette and cascading segments; no problem badges to browse by"
+   },
+   "c4": {
+    "concept": 4,
+    "asbuilt": 2,
+    "why": "5 keys to switch, then focus lost: 19 Tabs; no save shortcut"
+   },
+   "c5": {
+    "concept": 3,
+    "asbuilt": 2,
+    "why": "Bar collapses to one row; 28-34px targets"
+   },
+   "c6": {
+    "concept": 3,
+    "asbuilt": 3,
+    "why": "All-customer lists work; flat 34-item palette; overview sorts problems first"
+   },
+   "c7": {
+    "concept": 4,
+    "asbuilt": 4,
+    "why": "One concept: a global bar; pins add little"
+   }
+  },
+  "B": {
+   "c1": {
+    "concept": 3,
+    "asbuilt": 3,
+    "why": "Customer select top-right plus scope box plus chip: three places to read"
+   },
+   "c2": {
+    "concept": 4,
+    "asbuilt": 3,
+    "why": "Gate blocks unscoped edits; no outside-scope warning; edits silently dropped"
+   },
+   "c3": {
+    "concept": 3,
+    "asbuilt": 3,
+    "why": "Gate cards browse well but carry no problem signals"
+   },
+   "c4": {
+    "concept": 3,
+    "asbuilt": 2,
+    "why": "Gate adds a step when unscoped; 20 Tabs after switching"
+   },
+   "c5": {
+    "concept": 3,
+    "asbuilt": 2,
+    "why": "Card gate fits phone; small targets"
+   },
+   "c6": {
+    "concept": 2,
+    "asbuilt": 2,
+    "why": "Maintenance and call order hidden until one customer chosen; no cross-customer view"
+   },
+   "c7": {
+    "concept": 3,
+    "asbuilt": 3,
+    "why": "Some screens gated, some not; rule is not obvious"
+   }
+  },
+  "C": {
+   "c1": {
+    "concept": 5,
+    "asbuilt": 4,
+    "why": "Coloured workspace band, monogram, /c/mirae URL; project level is a small dropdown"
+   },
+   "c2": {
+    "concept": 4,
+    "asbuilt": 3,
+    "why": "Workspace isolates; 'open in other customers' shown; no dirty guard, silent discard"
+   },
+   "c3": {
+    "concept": 3,
+    "asbuilt": 3,
+    "why": "Enter via palette or pins; home lists help; no badges"
+   },
+   "c4": {
+    "concept": 3,
+    "asbuilt": 2,
+    "why": "Mode switch for cross-customer work; 19 Tabs after Ctrl+K switch"
+   },
+   "c5": {
+    "concept": 4,
+    "asbuilt": 3,
+    "why": "Workspace header reads well at 390; small targets"
+   },
+   "c6": {
+    "concept": 3,
+    "asbuilt": 3,
+    "why": "Read-only home lists cover 34; no problem-customer shortcut"
+   },
+   "c7": {
+    "concept": 3,
+    "asbuilt": 3,
+    "why": "Two modes with different nav labels (On-call now vs Paging)"
+   }
+  },
+  "D": {
+   "c1": {
+    "concept": 4,
+    "asbuilt": 3,
+    "why": "Rows name customer; panel title names scope but small, covers chrome"
+   },
+   "c2": {
+    "concept": 4,
+    "asbuilt": 2,
+    "why": "Core filter shows only customer row; scrim click discards edit; no outside warning"
+   },
+   "c3": {
+    "concept": 3,
+    "asbuilt": 3,
+    "why": "Every customer visible as rows; scope chip via Ctrl+K"
+   },
+   "c4": {
+    "concept": 4,
+    "asbuilt": 2,
+    "why": "Row to editor in one click; rows not keyboard-focusable; modal panel"
+   },
+   "c5": {
+    "concept": 4,
+    "asbuilt": 3,
+    "why": "Full-screen panel works; small chips"
+   },
+   "c6": {
+    "concept": 4,
+    "asbuilt": 3,
+    "why": "Lists scale with chips; long ungrouped 34+ rows; modal blocks list"
+   },
+   "c7": {
+    "concept": 4,
+    "asbuilt": 4,
+    "why": "List, chips, panel: few concepts"
+   }
+  },
+  "E-1": {
+   "c1": {
+    "concept": 5,
+    "asbuilt": 4,
+    "why": "Three labelled levels always shown; panel band names edited level; filter vs panel differ"
+   },
+   "c2": {
+    "concept": 5,
+    "asbuilt": 5,
+    "why": "Dirty guard, per-scope drafts, before/after confirm, mismatch warning, MSP in Settings"
+   },
+   "c3": {
+    "concept": 4,
+    "asbuilt": 4,
+    "why": "Dropdowns with search and problem badges; browse step by step"
+   },
+   "c4": {
+    "concept": 4,
+    "asbuilt": 4,
+    "why": "Row-to-row 2-3 keys, Ctrl+Enter twice; deep scope needs three dropdowns"
+   },
+   "c5": {
+    "concept": 5,
+    "asbuilt": 5,
+    "why": "Stepped sheet, 44px targets, badges, full-screen editor"
+   },
+   "c6": {
+    "concept": 4,
+    "asbuilt": 4,
+    "why": "My/Other groups and badges, but only after opening the dropdown"
+   },
+   "c7": {
+    "concept": 3,
+    "asbuilt": 3,
+    "why": "Filter vs panel scope, drafts, outside-view line, two-scope URL"
+   }
+  },
+  "E-3": {
+   "c1": {
+    "concept": 4,
+    "asbuilt": 4,
+    "why": "Single segment until scoped; panel band carries level"
+   },
+   "c2": {
+    "concept": 5,
+    "asbuilt": 4,
+    "why": "Same guards as E; Enter-on-first-match slip; levels hidden while unscoped"
+   },
+   "c3": {
+    "concept": 3,
+    "asbuilt": 3,
+    "why": "Search needs names; flat list without problem badges"
+   },
+   "c4": {
+    "concept": 4,
+    "asbuilt": 4,
+    "why": "Ctrl+K 3 chars Enter Tab Enter = 7 keys; row-to-row 2-3"
+   },
+   "c5": {
+    "concept": 4,
+    "asbuilt": 4,
+    "why": "Search sheet with 44px rows; typing on phone, no badges"
+   },
+   "c6": {
+    "concept": 4,
+    "asbuilt": 4,
+    "why": "Lists and My-customers chip scale; picker gives no problem overview"
+   },
+   "c7": {
+    "concept": 4,
+    "asbuilt": 3,
+    "why": "Fewest picker parts in E; still drafts and two-scope URL"
+   }
+  },
+  "E-tree": {
+   "c1": {
+    "concept": 4,
+    "asbuilt": 4,
+    "why": "Tree highlight plus bar plus panel band; tree collapses at 1280 with panel"
+   },
+   "c2": {
+    "concept": 5,
+    "asbuilt": 5,
+    "why": "Same guards; tree shows level and own-settings before you open anything"
+   },
+   "c3": {
+    "concept": 5,
+    "asbuilt": 5,
+    "why": "Persistent tree, find-by-name, only-with-problems; browse without names"
+   },
+   "c4": {
+    "concept": 5,
+    "asbuilt": 4,
+    "why": "One-click or 2-3 key switch; list squeezed to 530px at 1440 with panel"
+   },
+   "c5": {
+    "concept": 5,
+    "asbuilt": 5,
+    "why": "Falls back to stepped sheet; 44px targets"
+   },
+   "c6": {
+    "concept": 5,
+    "asbuilt": 5,
+    "why": "My 12 / Other 22 groups, problems-only 34 to 5, badges on every screen"
+   },
+   "c7": {
+    "concept": 3,
+    "asbuilt": 2,
+    "why": "Tree, five badge types, legend, bar, panel, drafts: dense first sight"
+   }
+  }
+ },
+ "tasks": [
+  {
+   "task": "T1 edit call-order timing Mirae, Daon, Hanbit in a row; try wrong-customer save",
+   "results": {
+    "A": "partial - 5 keys + 19 Tab per switch (mouse 3 clicks); save Tab,Tab,Enter; wrong-customer save impossible but unsaved value dropped silently",
+    "B": "partial - 5 keys + 20 Tab; same silent drop",
+    "C": "partial - 5 keys + 19 Tab; same silent drop",
+    "D": "fail (keyboard) - rows not focusable in 120 Tabs; mouse 3 clicks (Close, row, field); scrim click drops edit",
+    "E-1": "pass - 2-3 keys (Esc/Tab/Enter) or 7 via Ctrl+K; mouse 1 click; save Ctrl+Enter x2; guard blocks wrong customer",
+    "E-3": "pass - same 2-3 / 7 keys; mouse 1 click; guard blocks",
+    "E-tree": "pass - same keys; mouse 1 click on row or tree; guard blocks"
+   }
+  },
+  {
+   "task": "T2 start Mirae edit, leave for Daon incident, come back",
+   "results": {
+    "A": "fail - edit lost on switch, no warning",
+    "B": "fail - edit lost, no warning",
+    "C": "fail - edit lost, no warning",
+    "D": "fail - edit lost when Ctrl+K opens or scrim clicked",
+    "E-1": "pass - dialog (Save/Keep draft/Discard/Cancel), draft banner + Resume, survives reload, Daon panel shows Daon values",
+    "E-3": "pass - same",
+    "E-tree": "pass - same; 'Different customer than your list filter' warning on resume"
+   }
+  },
+  {
+   "task": "T3 morning check across 34: open incidents, problem customers, active maintenance",
+   "results": {
+    "A": "pass - 3 screens; 4 of 34 affected tile; no per-customer problem list",
+    "B": "fail - maintenance and paging show nothing until one customer chosen",
+    "C": "partial - home lists read-only, must enter workspace to act",
+    "D": "pass - 3 screens, customer columns; no problem-customer filter",
+    "E-1": "pass - lists + badges inside dropdown (1 click to see)",
+    "E-3": "partial - lists only; picker shows no problem signals",
+    "E-tree": "pass - 'Only with problems' cuts 34 to 5 in 1 click on any screen"
+   }
+  },
+  {
+   "task": "T4 deep link Mirae Pay > Core call order; reload; back/forward",
+   "results": {
+    "A": "pass - ?customer=mirae&project=core; reload/back/forward keep state",
+    "B": "pass - same",
+    "C": "pass - /c/mirae/paging?project=core",
+    "D": "partial - Core filter lists only the customer row and opens customer-level editor; Core reachable only via in-panel tree",
+    "E-1": "pass - /c/mirae/core/paging?filter=...; reload/back/forward OK; URL carries two scopes",
+    "E-3": "pass - same",
+    "E-tree": "pass - same"
+   }
+  },
+  {
+   "task": "T5 find threshold problems across customers, change default for Mirae only",
+   "results": {
+    "A": "partial - Needs review tile, no filter; inline card says 'Mirae Pay, 4 of 6 alarms'; preview is a toast",
+    "B": "partial - same card; toast preview",
+    "C": "partial - same card inside workspace; toast preview",
+    "D": "partial - panel names Mirae; toast preview",
+    "E-1": "pass - Needs review chip; live diff names alarms; confirm lists 2 changed, 1 kept",
+    "E-3": "pass - same panel; finding relies on list chips only",
+    "E-tree": "pass - REVIEW badges in tree lead straight to customers; same panel"
+   }
+  },
+  {
+   "task": "T6 with project Core selected, change defaults: is customer-wide effect clear",
+   "results": {
+    "A": "partial - 'Scope note' is 4th line of a blue box, cites D-19; form still editable inline",
+    "B": "partial - same note",
+    "C": "partial - same note",
+    "D": "partial - note says no project layer but not that Core chip is only a filter",
+    "E-1": "pass - headline 'This changes all of Mirae Pay, not only Core.' and repeated in confirm",
+    "E-3": "pass - same",
+    "E-tree": "pass - same"
+   }
+  },
+  {
+   "task": "T7 at 1280 with edit open: is the list usable",
+   "results": {
+    "A": "partial - editor replaces the list; no list while editing",
+    "B": "partial - no list while editing",
+    "C": "partial - no list while editing",
+    "D": "fail - list dimmed, 3 of 6 columns covered, rows not clickable",
+    "E-1": "pass - 630px list, 3 columns, rows clickable",
+    "E-3": "pass - 630px list, 3 columns, rows clickable",
+    "E-tree": "pass - tree auto-collapses to rail, 597px list, rows clickable"
+   }
+  }
+ ],
+ "ranking_concept": [
+  "E-tree",
+  "E-1",
+  "E-3",
+  "D",
+  "C",
+  "A",
+  "B"
+ ],
+ "ranking_asbuilt": [
+  "E-tree",
+  "E-1",
+  "E-3",
+  "C",
+  "A",
+  "D",
+  "B"
+ ],
+ "best_for_each_persona": {
+  "준호": "E-tree (E-3 close second for pure keyboard use)",
+  "민재": "E-tree"
+ },
+ "notes": "Totals concept/asbuilt: A 24/20, B 21/18, C 25/21, D 27/20, E-1 30/29, E-3 28/26, E-tree 32/30. As-built tie A=D broken for keyboard-first use: D rows are unreachable by keyboard. Mockup has no Minjae persona; T5/T6 run as Junho. A-D lose unsaved edits silently on any switch; only E guards. A-C drop focus to body after Ctrl+K (19-20 Tabs). E saves need Ctrl+Enter twice. Phone (390) checked briefly only. Scored from Playwright runs and screenshots at 1440, 1280, 390."
+}

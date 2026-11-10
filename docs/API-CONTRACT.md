@@ -40,8 +40,11 @@ Slack ──▶ POST /api/slack/interactive        문자·음성 업체 ──�
 | 형식 | JSON, UTF-8, 필드 camelCase, 시각 ISO-8601 UTC(`Z`) |
 | 페이지네이션 | 커서 방식 `?limit=50&cursor=<opaque>`(limit 최대 200). 응답 `{ items, nextCursor }`. 정렬은 서버에서 한 뒤 자른다(known-bugs 9-1, 9-2) |
 | 필터 | `?customerId=&status=&severity=` 등. 빈 파라미터는 무시(9-6) |
+| 범위 필터 (D-33) | 범위가 있는 모든 목록은 slug 파라미터 `?customer=&project=&service=`와 `mine=1`을 같은 뜻으로 받는다(§8.0). `project`는 `customer`가, `service`는 `project`가 있어야 한다(없으면 400 `VALIDATION_FAILED`). slug 형식 `^[a-z0-9][a-z0-9-]{0,63}$`. **모르는 slug와 범위 밖 slug는 같은 404 `NOT_FOUND`, 같은 본문**(403 금지). slug 해석은 호출자 범위 안에서만 한다(범위 밖 고객을 먼저 찾고 나서 거부하는 순서 금지 — 응답 시간 차이). 기존 `customerId`는 그대로 받는다. `mine=1`은 서버가 **세션 사용자**로 계산한다(클라이언트가 보낸 사용자·연락처 id를 받지 않는다). `customer`와 함께 오면 `customer`가 이긴다 |
+| 조회 경로의 404 (D-33, security R-1·R-5) | **조회(GET) 경로에서 범위 밖은 언제나 404이고 403을 쓰지 않는다**: 단건(`/incidents/{id}`와 하위 `/timeline`·`/notifications`, `/resources/{id}`, `/contacts/{id}` 등), 범위 필터가 붙은 목록, `/scope-tree`. 없는 ID·없는 slug와 볼 수 없는 ID·slug는 **구별할 수 없어야 한다**: 같은 상태 코드 404, 같은 본문(`code: NOT_FOUND`, 같은 `message`, `details: {}`), 같은 헤더 집합, 리다이렉트·정규 경로 안내 없음. `requestId`만 다르다. 응답 시간으로도 구별되지 않게 범위 조건을 조회 쿼리 안에 넣는다(조회 후 비교 금지). 403은 **볼 수 있는 대상에 대한 쓰기**가 역할 부족일 때만 쓴다. MSP 직원·포털 사용자 모두에 적용되고, backend PR 관문 테스트로 고정한다: 같은 요청을 "다른 고객의 slug/ID"와 "없는 slug/ID"로 보내 본문이 `requestId`를 빼고 바이트 단위로 같아야 한다 |
+| 미매핑 계정은 내부 전용 (security R-2) | 미매핑(unmapped) 계정 인시던트, 목록 응답의 `unmapped[]` 배너, `outside.unmapped`, 항목의 `awsAccountIds`, `/unmapped-accounts/*`는 **INTERNAL(MSP) 사용자에게만** 준다. 고객(포털) 사용자에게는 각각 404 / 빈 배열 / 0 / 빈 배열이다. 미매핑 계정은 어느 고객 것인지 모르는 상태라 다른 고객의 계정 ID·알림 건수가 될 수 있다 |
 | ID in URL | 리소스 키처럼 `/`·`:`가 들어가는 값은 base64url(9-4) |
-| 범위 | 모든 조회에 서버가 구한 customerId 집합 적용. 범위 밖 단건은 **404**(존재를 드러내지 않음, org-tenant R3-3). 범위 안이지만 역할 부족은 403 |
+| 범위 | 모든 조회에 서버가 구한 customerId 집합(프로젝트·서비스 범위 사용자는 그 하위) 적용. 목록·수치(`counts`, `outside`, 트리의 `openIncidents`·`callHealth`)도 같은 범위로 계산한다. 범위 밖은 **404**(존재를 드러내지 않음, org-tenant R3-3, 위 "조회 경로의 404"). 범위 안 대상에 대한 쓰기가 역할 부족이면 403. MSP 직원의 범위는 전 고객이다(기본 보기 All customers, D-34) — `mine`은 권한이 아니라 필터다 |
 | 낙관적 잠금 | 수정 요청은 `If-Match: <version>` 필수인 리소스: Incident, ManagedAlarm, PagingConfig, ResponderTemplate, ThresholdDefault. 불일치 409 `VERSION_CONFLICT` |
 | 멱등 | 생성·상태 변경 POST는 `Idempotency-Key` 헤더 허용(24시간 보관). 같은 키 재요청은 첫 응답 재생 |
 | 감사 | 쓰기 요청은 모두 AuditLog 1행 |
@@ -57,6 +60,7 @@ Slack ──▶ POST /api/slack/interactive        문자·음성 업체 ──�
 | 401 | `UNAUTHENTICATED` | 세션·토큰·서명 없음/불일치 |
 | 403 | `FORBIDDEN`, `ROLE_REQUIRED`, `PORTAL_GRANT_REQUIRED`, `CAPABILITY_DISABLED` | 역할·포털 권한·고객 선택 기능(AlarmWriter 등) 꺼짐 |
 | 404 | `NOT_FOUND` | 없음 또는 범위 밖 |
+| 403 | `NOT_A_RESPONDER` | 연락처 열람: 그 고객의 Responder가 아님(D-35) |
 | 409 | `VERSION_CONFLICT`, `ALREADY_EXISTS`, `INVALID_TRANSITION`, `TAG_WINS` | 경합, 중복 생성(4b5b079), 상태 전이 불가, 리소스 태그가 값 결정(D-08) |
 | 413 | `PAYLOAD_TOO_LARGE` | 수집 본문 1MB 초과 |
 | 422 | `ROLE_UPDATE_REQUIRED` | 고객 스택이 옛 버전 |
@@ -213,25 +217,83 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 
 역할 표기: V = VIEWER 이상, O = OPERATOR 이상, A = ADMIN, P(grant) = 고객사 담당자 + portalGrant. 역할 체계 자체는 미결(Q-DM-02)이라 이 열은 임시.
 
+### 8.0 범위: 트리, 목록 필터, 필터 밖 수치 (D-33, D-34)
+
+콘솔 셸(`docs/ui/screens/shell-scope.md`)이 쓰는 계약이다. 필드 이름은 콘솔 구현(`apps/console/src/lib/api/types.ts`의 `ScopeTreeResponse`·`OutsideCounts`·`IncidentListQuery`·`OrgRef`, `packages/design-system/src/scope/model.ts`)과 같다.
+
+| 메서드 경로 | 설명 | 권한 |
+|---|---|---|
+| GET `/scope-tree?onlyProblems=` | 왼쪽 트리·휴대폰 시트·`Ctrl/⌘K`의 데이터. 한 번에 전부(페이지네이션 없음). `onlyProblems=true`(선택)는 열린 인시던트가 있거나 `callHealth != OK`인 고객만 — 생략하면 전부 주고 콘솔이 거른다 | V, P |
+
+```json
+{ "customers": [
+    { "id": "cus_…", "slug": "mirae", "name": "Mirae Pay", "mine": true,
+      "openIncidents": 1, "callHealth": "OK",
+      "projects": [
+        { "id": "prj_…", "slug": "core", "name": "Core", "openIncidents": 1, "ownSteps": false,
+          "services": [ { "id": "svc_…", "slug": "payments-api", "name": "Payments API", "openIncidents": 1, "ownSteps": false } ] },
+        { "id": "prj_…", "slug": "data-platform", "name": "Data platform", "openIncidents": 0, "ownSteps": true, "services": [] } ] } ] }
+```
+
+| 필드 | 뜻 |
+|---|---|
+| `openIncidents` | 그 노드 아래 열린 인시던트 수(TRIGGERED, 아직 아무도 확인하지 않음 — 메뉴 배지와 같은 정의). 상위 = 하위 합 |
+| `callHealth` | `OK \| AT_RISK \| UNREACHABLE`. 고객 단계만. `/customers/{id}/paging-health`의 `level`과 같은 계산(D-32) |
+| `ownSteps` | 그 프로젝트·서비스에 호출 순서 덮어쓰기(PagingOverride)가 있음. 고객 노드에는 없다 |
+| `mine` | 세션 사용자가 그 고객의 Responder(직접 또는 템플릿 경유). 서버가 계산 |
+| `slug` | 부모 안에서 유일, `^[a-z0-9][a-z0-9-]{0,63}$` |
+
+트리 표식은 3종뿐이라 필드도 이 셋이다. 임계치 검토 수(Needs review)는 넣지 않는다.
+
+**테넌트 규칙 (security R-1).** 콘솔은 받은 트리를 그대로 그리고 모든 화면의 페이로드로 브라우저에 내려보낸다. 격리는 이 응답이 전부다.
+1. 서버가 구한 customerId 집합 안의 고객만 준다. 프로젝트·서비스 범위(ContactScope PROJECT/SERVICE)인 사용자는 그 하위만.
+2. `openIncidents`·`callHealth`도 같은 범위로 계산한다. **범위 밖 노드는 개수 0이 아니라 아예 없다.**
+3. 포털(고객) 사용자: 자기 고객 하나. `callHealth`는 실제 값과 무관하게 `"OK"` 고정(MSP 내부 정보라 내보내지 않는다. 콘솔 타입에서 필수 필드라 빼지 않는다), `mine`은 `false`.
+4. 미매핑 계정은 트리에 없다(고객이 아니다).
+5. `ETag` / `If-None-Match` 지원(304). 콘솔은 30초마다, 그리고 Acknowledge·저장 뒤에 다시 부른다. ETag는 호출자 범위를 포함해 계산한다(다른 사용자의 트리와 같은 ETag 금지).
+6. slug 예약어(`incidents` `incident` `monitoring` `call-order` `people` `maintenance` `thresholds` `alarms` `resources` `settings` `new` `-`)는 프로젝트·서비스·고객 생성 시 접미사를 붙여 피한다(DATA-MODEL에 `slug` 컬럼 추가 필요 — 미결 Q-API-09).
+
+**목록의 범위 필터.** 아래 목록은 모두 `customer` · `project` · `service`(slug) · `mine=1`을 받는다(§2 "범위 필터"): `/incidents`, `/resources`, `/managed-alarms`, `/oncall/now`, `/contacts`, `/contacts/needs-action`, `/maintenance-windows`, `/threshold-changes`, `/remediation-requests`, `/rotations?scope=CUSTOMER`. 응답 항목의 `org.customer` · `org.project` · `org.service`(`OrgRef`)에는 `{ id, name, slug }`가 있다 — `slug`는 필수이고, 범위 안일 때만 나간다(단건이 404면 slug도 없다. 콘솔이 slug로 주소를 만들기 때문에 명시한다).
+
+| 목록 | 범위 필터의 뜻 |
+|---|---|
+| `/incidents`, `/resources`, `/managed-alarms` | 그 노드에 속한 것(하위 포함). 미매핑 계정 인시던트는 INTERNAL 사용자에게, 범위 필터가 없을 때와 `mine=1`일 때만 |
+| `/oncall/now` (Call order 목록) | 그 범위에 적용되는 호출 순서 행: 고객 행 + 범위 안에서 자기 단계를 가진 프로젝트·서비스 행 + 요청한 노드 자신의 행(물려받았으면 `inheritedFrom`) |
+| `/contacts` (People) | **그 범위에서 호출되거나 알림 받는 사람 전부**(직원 포함). 항목마다 `reach: { paged?: {stepIndex, atMin, via: PERSON\|ROTATION\|ALL_RESPONDERS, from: {level,id,name}}, notified?: {scope:{level,id,name}} }`. `/oncall/paging-path`와 같은 해석 함수여야 한다(사람 목록 = 호출 문장) |
+| `/maintenance-windows` | 범위가 그 노드와 겹치는 창(상위·하위 포함) |
+
+**필터 밖 수치 (`outside`).** 범위 필터(`customer`/`project`/`service`)나 `mine`이 걸린 요청의 응답에 서버가 넣는다. 필터가 없으면 `outside: null`. 상태·심각도·검색 필터는 이 값을 바꾸지 않는다.
+
+| 목록 | 필드 | 뜻 |
+|---|---|---|
+| GET `/incidents` | `outside: { open, unmapped, acknowledged }` | 범위 필터가 가린 건수. `open` = TRIGGERED(에스컬레이션 포함), `unmapped` = 그중 미매핑 계정 것(`open`에 포함), `acknowledged` = ACKNOWLEDGED. 불변식: 목록의 `counts.open` + `outside.open` = 필터 없는 요청의 `counts.open`(메뉴 배지) |
+| GET `/resources`, `/managed-alarms` | `outside: { needsReview, inAlarm }` | Monitoring 칩 줄의 `Outside this view: 2 need review · 3 in alarm` |
+
+- **`outside`는 호출자 범위 안의 인시던트만 센다.** 고객·포털 사용자에게 다른 테넌트의 건수가 섞이지 않는다. 불변식은 범위 안에서만 성립한다.
+- `outside.unmapped`와 `unmapped[]`는 고객 사용자에게 0 / 빈 배열(§2 "미매핑 계정은 내부 전용").
+- `counts`(배지 포함)도 범위를 적용한다.
+- 따로 엔드포인트를 두지 않는다(목록과 한 트랜잭션에서 세야 불변식이 맞는다).
+
 ### 8.1 인시던트·알림
 | 메서드 경로 | 설명 | 권한 |
 |---|---|---|
-| GET `/incidents` | 목록. 필터 status, severity, customerId, assignee=me, unmapped. 응답에 `counts`(같은 필터 기준, 9-5) | V |
-| GET `/incidents/{id}` | 상세: 구성원 알림, 담당 스냅샷, 에스컬레이션 진행, 억제 이유, RCA 자리(D-14) | V |
+| GET `/incidents` | 목록. 필터 status, severity, customerId, `customer`·`project`·`service`(slug), `mine`, assignee=me, unmapped, source, q. 응답 `{ items, nextCursor, counts, unmapped[], outside }`: `counts`(같은 필터 기준, 9-5), `unmapped[{awsAccountId, alertCount}]`(INTERNAL만), `outside`(§8.0). 범위 필터 없는 요청이 기본 보기다(D-34) | V |
+| GET `/incidents/{id}` | 범위 밖·없음은 같은 404(하위 `/timeline`·`/notifications` 포함, §2). 미매핑 계정 인시던트는 INTERNAL만. 상세: 구성원 알림, 담당 스냅샷, 에스컬레이션 진행, 억제 이유, RCA 자리(D-14) | V |
 | GET `/incidents/{id}/timeline` | IncidentEvent 커서 | V |
 | GET `/incidents/{id}/notifications` | NotificationLog(P3-2) | V |
-| POST `/incidents/{id}/ack` | TRIGGERED→ACKNOWLEDGED. If-Match | O |
+| POST `/incidents/{id}/ack` | TRIGGERED→ACKNOWLEDGED. **`If-Match: <version>` 필수**(없으면 400, 불일치 409 `VERSION_CONFLICT` — 오래된 목록에서 누른 Ack가 그 사이 재발화·에스컬레이션된 인시던트에 적용되지 않게, security R-3). 응답 `{ incident, undoToken }` — 목록 행·카드·패널의 Acknowledge는 이 엔드포인트를 쓴다. `undoToken`은 `/incidents/bulk/undo`에 그대로 쓴다(5분, Ack한 본인, 그 사이 다른 전이가 없을 때. 에스컬레이션은 멈췄던 단계부터 이어진다) | O |
 | POST `/incidents/{id}/resolve` | `{ kind?, note? }` → Resolution | O |
 | POST `/incidents/{id}/escalate` | 즉시 다음 단계 | O |
-| POST `/incidents/bulk` | `{ action: "ack"|"resolve", ids[], preview: true }` → 대상 목록 → `preview:false`로 실행, 응답 `undoToken` | O |
-| POST `/incidents/bulk/undo` | `{ undoToken }` (5분) | O |
+| POST `/incidents/bulk` | `{ action: "ack"|"resolve", items: [{ id, version }], preview: true }` → 대상 목록 → `preview:false`로 실행, 응답 `{ done[], conflicts[{id, code}], undoToken }`. **항목마다 `version` 필수**: 버전이 다른 항목은 건너뛰고 `conflicts`에 `VERSION_CONFLICT`로 돌려준다(나머지는 실행). 버전 없는 `ids[]`만 보내는 형식은 받지 않는다(R-3). 범위 밖 id는 `conflicts`에 `NOT_FOUND` | O |
+| POST `/incidents/bulk/undo` | `{ undoToken }` (5분) → `{ restored[] }`. 단건 Ack의 `undoToken`도 받는다 | O |
 | GET `/alerts/{id}` | 알림(지문) 상세, RawEvent 이력, 억제 판정 이력 | V |
 | POST `/alerts/{id}/ack` | 알림 단위 ack — **Ack 단위 미결(Q-DM-05)**, 결정 전까지 404 비활성 | O |
 
 ### 8.2 노이즈
 | 메서드 경로 | 설명 | 권한 |
 |---|---|---|
-| GET/POST `/maintenance-windows` | 목록/생성. 30일 상한, 과거 구간 400. SEV-1 예외 문구 고정 표시(D-17) | O, P(silences) |
+| GET/POST `/maintenance-windows` | 목록/생성. 목록은 범위 필터(§8.0). 생성 본문에 범위 `{customerId, projectId?, serviceId?}`(ID) 필수(미리 채우지 않는다, D-33 ⑦). 30일 상한, 과거 구간 400. SEV-1 예외 문구 고정 표시(D-17) | O, P(silences) |
+| POST `/maintenance-windows/preview` | 생성과 같은 본문 → `{ services[{id,name}], openIncidents: {muted, sev1KeepsPaging}, existing[{id, scope, window}] }`. 생성 패널의 `Applies to` · `Mutes` · `Already here` | O, P(silences) |
 | POST `/maintenance-windows/{id}/revoke` | | O, P(silences) |
 | GET/PUT `/settings/suppression` | SuppressionPolicy, 범위 검증 400 | A |
 | GET/PUT `/settings/severity-mapping` | 표 하나(D-18) | A |
@@ -244,13 +306,13 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 | POST `/schedules/{id}/overrides/{oid}/accept` | 대상자만. PENDING→ACCEPTED, 반영. 이미 처리됨 409 `OVERRIDE_NOT_PENDING` | O(대상자) |
 | POST `/schedules/{id}/overrides/{oid}/decline` | 대상자만. 본문 `{ note? }`. PENDING→DECLINED, 요청자에게 알림. 48시간 또는 시작 시각 경과 시 EXPIRED | O(대상자) |
 | POST `/schedules/{id}/overrides/{oid}/remind` | 요청자만. Slack 재전송(10분 1회 제한) | O |
-| GET `/oncall/now?customerId=&contactId=&style=` | 로테이션별 지금 당번 + 고객별 첫 호출 대상·단계 요약 — 알림 해석과 같은 함수(Leave·Override 적용) | V |
+| GET `/oncall/now?customerId=&customer=&project=&service=&mine=&contactId=&style=` | 로테이션별 지금 당번 + 고객별 첫 호출 대상·단계 요약 — 알림 해석과 같은 함수(Leave·Override 적용) | V |
 | GET `/oncall/paging-path?q=` 또는 `?resourceId=` / `?serviceId=` | "Who gets paged for…". 응답 `{ path: [{level:"RESOURCE"\|"SERVICE"\|"PROJECT"\|"CUSTOMER", id, name}], customer: {id,name}, inheritedFrom: {level, id, name}, style, plan, edited, pagingConfigId, version, steps: [{atMin, targetType:"PERSON"\|"ROTATION"\|"ALL_RESPONDERS", targetId?, nowIds[], names[], channels}], repeatCount, stopAtMin, sentence, customerNotified: [{contactId, name, scope:{level,id,name}}] }`(Notify only 고객 사람). `q`는 이름 접두 검색, 여러 건이면 `candidates[]` 반환. `/oncall/now`와 같은 해석 함수 | V |
 | GET/PUT `/customers/{id}/paging` | D-30 개정. `{ style: ALL_AT_ONCE\|CUSTOMER_ROTATION\|SHARED_ROTATION\|CUSTOM, plan: STANDARD\|URGENT\|QUIET, sharedRotationId?, steps[{atMin, targetType: PERSON\|ROTATION\|ALL_RESPONDERS, targetId?, channels[]}], repeatCount }` (If-Match). `plan`만 바꾸면 서버가 템플릿으로 단계 재생성(`edited=false`). 응답에 `sentence`(실명 미리보기) | A |
 | PUT/DELETE `/customers/{id}/paging-overrides/{scopeType}/{scopeId}` | PROJECT·SERVICE 덮어쓰기. 해석 service › project › customer | A |
 | GET `/customers/{id}/paging-health` | D-32. `{ level: OK\|AT_RISK\|UNREACHABLE, problems[{ code: NO_PAGEABLE_RESPONDER\|NO_VERIFIED_PHONE\|STEP_UNVERIFIED_ONLY\|ROTATION_GAP, stepIndex?, contactIds[], rotationId?, from?, to?, message }] }`. 서버가 Responders·단계·채널 검증·교대표(앞으로 14일)로 계산. 저장하지 않음 | A |
 | GET `/customers?pagingHealth=UNREACHABLE,AT_RISK` | 고객사 목록 필터. 목록 항목마다 `pagingHealth.level`과 `problems` 개수 포함. 정렬 기본: UNREACHABLE → AT_RISK → OK | A |
-| GET `/oncall/now?onlyProblems=true` | Now 화면. 고객사 10곳 초과 시 콘솔이 기본으로 켬 | A |
+| GET `/oncall/now?onlyProblems=true` | Call order 목록. ~~고객사 10곳 초과 시 콘솔이 기본으로 켬~~ → 트리의 `Only with problems`(`/scope-tree`)가 대신하고 기본은 꺼짐 | A |
 | GET/POST `/customers/{id}/responders`, PATCH/DELETE `/customers/{id}/responders/{contactId}` | `{contactId, role: PAGEABLE\|NOTIFY_ONLY}` 또는 새 고객 사람 `{name,email,phone,role,extras:[APPROVER,PORTAL_USER],scope, insertStep?:{afterIndex, atMin, channels}}`. 다른 고객 Contact는 422 `CROSS_CUSTOMER` | A |
 | GET/POST `/rotations?scope=&customerId=`, PATCH/DELETE `/rotations/{id}`, GET `/rotations/{id}/shifts?from=&to=`, GET `/rotations/{id}/usage` | Rotation(scope MSP\|CUSTOMER). usage = 참조 고객·단계 | A |
 | POST `/rotations/{id}/overrides`, POST `/overrides/{id}/accept\|decline` | COVER/SWAP, 상대 수락 후 반영(D-28) | O |
@@ -270,9 +332,10 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 | GET/POST `/customers/{id}/accounts`, PATCH/DELETE `/accounts/{id}` | 12자리 검증, ExternalId 발급, 역할 ARN, 선택 기능 토글 | A |
 | POST `/accounts/{id}/check` | `CHECK_CONNECTION` 발행 → `202 { commandId }` | A |
 | GET `/accounts/{id}/status` | 역할별 상태·첫/마지막 수신(P4-1) | V |
-| POST `/unmapped-accounts/{awsAccountId}/map` | `{ customerId, serviceId? }` 미매핑 복구(P2-3) | A |
+| POST `/unmapped-accounts/{awsAccountId}/map` | `{ customerId, serviceId? }` 미매핑 복구(P2-3). INTERNAL 전용(고객 사용자는 404) | A |
 | GET/POST `/assignments`, DELETE `/assignments/{id}`, PUT `/assignments/order` | | A |
-| GET/POST `/contacts`, PATCH/DELETE `/contacts/{id}` | `kind: INTERNAL\|CUSTOMER`(D-29). GET 쿼리 `kind`, `customerId`, `needsAction=true`(미확인·만료·미설정), `q`. 응답 항목에 `customerCount`(INTERNAL) 또는 `responderRole`·`scopes[]`(CUSTOMER), 채널별 `{status, via, at, expiresAt}`. CUSTOMER를 다른 고객이나 MSP 로테이션에 넣으면 422 `CROSS_CUSTOMER`, NOTIFY_ONLY를 단계·로테이션에 넣으면 422 `NOT_PAGEABLE` | A, P(contacts, 자기 고객 CUSTOMER만) |
+| GET/POST `/contacts`, PATCH/DELETE `/contacts/{id}` | `kind: INTERNAL\|CUSTOMER`(D-29). GET 쿼리 `kind`, `customerId`, `customer`·`project`·`service`(slug), `mine`(§8.0: 범위를 주면 그 범위에서 호출·알림 받는 사람), `needsAction=true`(미확인·만료·미설정), `q`. **목록·단건 응답의 전화·이메일은 항상 가린 값**(`phoneMasked: "010-••••-4821"`, `emailMasked: "y•••@mirae.example"`)이고 `canReveal: boolean`이 붙는다. 전체 값은 `/contacts/{id}/reveal`로만. 응답 항목에 `customerCount`(INTERNAL) 또는 `responderRole`·`scopes[]`(CUSTOMER), 채널별 `{status, via, at, expiresAt}`. CUSTOMER를 다른 고객이나 MSP 로테이션에 넣으면 422 `CROSS_CUSTOMER`, NOTIFY_ONLY를 단계·로테이션에 넣으면 422 `NOT_PAGEABLE` | A, P(contacts, 자기 고객 CUSTOMER만) |
+| POST `/contacts/{id}/reveal` | **연락처 전체 값 열람(D-35).** 본문 `{ channel: "PHONE"\|"EMAIL"\|"SLACK", reason? }` → `{ channel, value, revealedAt, auditId }`. `Cache-Control: no-store`. 허용: CUSTOMER 연락처는 **그 고객의 Responder인 MSP 직원**(직접 또는 템플릿 경유)과 그 고객의 포털 사용자(P contacts), INTERNAL 연락처는 같은 고객의 Responder인 직원. ADMIN 역할만으로는 안 된다. 아니면 403 `NOT_A_RESPONDER`(볼 수 있는 연락처에 대한 쓰기성 동작이라 403. 연락처가 범위 밖이면 없는 ID와 같은 404). **호출마다 AuditLog 1행**(`action: CONTACT_REVEAL`, 누가·누구의·어떤 채널·`customerId`·시각, 값 자체는 기록하지 않음). 감사 기록에 실패하면 값을 주지 않는다(500). 1인당 분당 30회 초과 429. GET이 아닌 이유: 프리페치·캐시·로그에 값이 남지 않게 | O(그 고객의 Responder), P(contacts) |
 | (삭제) `/customers/{id}/people` | Responders & paging 탭으로 통합(`/customers/{id}/responders`, ContactScope는 아래) | |
 | POST `/contacts/{id}/scopes`, DELETE `/contacts/{id}/scopes/{sid}` | `{ scopeType: CUSTOMER\|PROJECT\|SERVICE, scopeId, role: NOTIFY\|APPROVER\|PORTAL_USER }`. 중복 409 | A, P(contacts) |
 | POST `/contacts/verify-bulk` | `{ contactIds[] }` 또는 `{ kind?, customerId?, filter: "needsAction" }` → `{ sent, notSet[] }`. 미설정(NOT_SET) 채널은 링크 대상 아님 → `notSet`으로 반환해 "Ask to add" | A |
@@ -287,7 +350,7 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 ### 8.5 리소스·임계치 (D-08, D-16, D-19)
 | 메서드 경로 | 설명 | 권한 |
 |---|---|---|
-| GET `/resources?customerId=&type=&monitoringState=&coverage=missing` | 커버리지 빈틈(P4-2). `NEEDS_REVIEW` 필터(D-16) | V |
+| GET `/resources?customerId=&customer=&project=&service=&type=&monitoringState=&coverage=missing` | 커버리지 빈틈(P4-2). `NEEDS_REVIEW` 필터(D-16) | V |
 | GET `/resources/{id}` | 태그 사본, 알람, 값과 출처, 드리프트, 변경 이력 | V |
 | POST `/resources/{id}/monitoring` | `{ action: "tag_on" | "stop" | "keep" }` — tag_on은 TagWriter 필요(403 `CAPABILITY_DISABLED`), stop은 확인 필요 해제 | O |
 | GET `/resources/{id}/thresholds` | 지표별 `{ value, source: CODE|MSP|CUSTOMER|CONSOLE|TAG, layers: [...] , editable, lockedReason }` | V |
@@ -312,7 +375,18 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 | GET `/health` | DB, heartbeat 나이, DLQ 길이(가능하면) | 공개(값 최소화) |
 | GET `/audit-logs` | | A |
 
-콘솔 엔드포인트 수: 위 표 기준 메서드·경로 조합 약 100개.
+### 8.8 초안과 Undo (D-33)
+
+| 항목 | 결정 |
+|---|---|
+| 저장 안 한 편집의 초안 | **PoC에서는 클라이언트에만 둔다**(브라우저 `sessionStorage`, 키 = 화면 종류 + 범위 경로, 탭 단위). 서버에 초안 엔드포인트·테이블은 없다. 이유: 3~5인 팀, 기기 간 이어 쓰기 요구 없음, 서버 초안은 범위별 권한·만료·충돌 규칙이 따라온다. 잃는 것: 탭을 닫거나 다른 기기에서는 초안이 없다 |
+| 초안과 버전 | 초안에 편집을 시작한 때의 `version`을 같이 둔다. 저장은 평소처럼 `If-Match`. 그 사이 남이 바꿨으면 409 `VERSION_CONFLICT` → 콘솔이 "Someone else changed this" + 지금 값과 내 값을 나란히 보여 준다. 초안을 말없이 덮어쓰지 않는다 |
+| 민감 값 | 초안에 연락처 전체 값(reveal 결과)을 넣지 않는다 |
+| 서비스 하나짜리 저장의 `Undo` | 서버 버전 기록 없이 한다: 콘솔이 저장 직전 값을 들고 있다가 `Undo`를 누르면 **같은 엔드포인트에 이전 값을 다시 저장**한다(`If-Match` = 방금 저장이 돌려준 `version`). 그 사이 값이 또 바뀌었으면 409 → "Could not undo — changed again by …". 감사 기록은 저장 1행 + 되돌림 1행. 새로 만든 것(자기 단계, 점검 창)의 Undo는 DELETE / revoke |
+| 확인창을 거친 저장 | Undo 없음(서비스 둘 이상에 닿는 변경을 한 번에 되돌리는 계약은 PoC 이후) |
+| 서버 초안이 필요한 곳 | 고객 온보딩 마법사의 단계별 저장만(기존 미결, `customer-onboarding.md`) |
+
+콘솔 엔드포인트 수: 위 표 기준 메서드·경로 조합 약 103개.
 
 ## 9. Slack 인터랙티브 (B6)
 
@@ -347,7 +421,7 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 | 수집(EventBridge 규칙 1, 웹훅 2) | 3 |
 | SQS 큐(alert-events, alarm-commands; DLQ 제외) | 2 |
 | 내부 틱 | 1 |
-| 콘솔 REST(§8) | 약 100 |
+| 콘솔 REST(§8) | 약 103 (11/10: `/scope-tree`, `/contacts/{id}/reveal`, `/maintenance-windows/preview` 추가) |
 | Slack 인터랙티브 | 1 (action 7종) |
 | 확인 링크·업체 콜백·채널 확인 링크 | 3 |
 
@@ -363,4 +437,9 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 | Q-API-06 | 국내 문자·음성 업체 선정과 콜백 서명 방식 | 솔라피 후보 |
 | Q-API-07 | 고객 포털(소연) API를 같은 `/api/v1`에 역할로 나눌지, `/api/portal/v1`로 분리할지 | 같은 경로 + 범위 강제 |
 | Q-API-08 | Ack 단위 결정 전 `POST /alerts/{id}/ack` 노출 여부 | 비활성 |
+| Q-API-09 | Customer·Project·Service `slug` 컬럼과 예약어 처리(접미사 제안), 이름 변경 시 옛 주소 처리(404 vs 리다이렉트 — 포털은 리다이렉트 금지) | 미정, backend |
+| Q-API-10 | 프로젝트·서비스 단계의 `callHealth`를 계산해 트리에 줄지(지금은 고객 단계만) | 고객 단계만 |
+| Q-API-11 | `Undo`를 "이전 값 다시 저장"으로 할 때 알람 엔진 명령(`APPLY_THRESHOLD`)이 이미 나간 임계치 변경의 처리(두 번째 명령으로 덮어씀 vs 첫 명령 취소) | 두 번째 명령 |
+| Q-API-13 | 콘솔 주소 형식이 문서(`?filter=<c>/<p>/<s>`, `/c/…/incidents/<id>`, 미매핑 `/incidents/<id>`)와 콘솔 브랜치 구현(`?customer=&project=&service=`, `/c/…/incident/<id>`, 미매핑 `/c/-/incident/<id>`)이 다르다. API에는 영향 없음(API는 slug 파라미터) | 미정, 사용자 결정 |
+| Q-API-12 | 연락처 열람 규칙의 예외(그 고객에 Responder가 한 명도 없을 때 ADMIN 비상 열람 + 사유 필수) | 예외 없음, security 검토 |
 | (DATA-MODEL Q-DM-01~19) | | DATA-MODEL §9 |
