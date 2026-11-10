@@ -1,0 +1,365 @@
+{
+ "evaluator": "set1-oncall",
+ "personas": [
+  "하은 — on-call engineer, phone 390px touch, 3am, tired, covers 7 customers (Haeun toggle)",
+  "대타 당번 — colleague covering tonight's shift for the first time, phone 390 + laptop 1280, knows few customer names"
+ ],
+ "scores": {
+  "A": {
+   "c1": {
+    "concept": 4,
+    "asbuilt": 4,
+    "why": "Sticky scope bar on every screen; phone collapses to one segment; Save label omits customer"
+   },
+   "c2": {
+    "concept": 3,
+    "asbuilt": 2,
+    "why": "Elsewhere count good; dirty edit silently swapped by pin click; row tag opens customer-level editor"
+   },
+   "c3": {
+    "concept": 3,
+    "asbuilt": 2,
+    "why": "Picker lists only pinned/recent/my customers; no project drill on phone without typing"
+   },
+   "c4": {
+    "concept": 4,
+    "asbuilt": 4,
+    "why": "Two taps per switch; pins and Ctrl K on laptop"
+   },
+   "c5": {
+    "concept": 4,
+    "asbuilt": 3,
+    "why": "Works at 390 but Acknowledge is 99x26, chain links 15px tall"
+   },
+   "c6": {
+    "concept": 3,
+    "asbuilt": 2,
+    "why": "34 customers: picker hides non-covered ones; no problem flags"
+   },
+   "c7": {
+    "concept": 4,
+    "asbuilt": 4,
+    "why": "One concept, one bar; easy to learn"
+   }
+  },
+  "B": {
+   "c1": {
+    "concept": 3,
+    "asbuilt": 2,
+    "why": "Scope chip sits below tiles and scrolls away on phone lists"
+   },
+   "c2": {
+    "concept": 3,
+    "asbuilt": 2,
+    "why": "Gate blocks unscoped edits; filtered list gives no hidden-incident warning"
+   },
+   "c3": {
+    "concept": 3,
+    "asbuilt": 3,
+    "why": "Gate cards browse customers; others collapsed; project via small popover"
+   },
+   "c4": {
+    "concept": 3,
+    "asbuilt": 2,
+    "why": "Gate adds a step; chip unreachable after scrolling"
+   },
+   "c5": {
+    "concept": 3,
+    "asbuilt": 2,
+    "why": "Nothing sticky; small targets; gate fills first screen"
+   },
+   "c6": {
+    "concept": 3,
+    "asbuilt": 3,
+    "why": "Gate grid lists all 34 but no problem indicators"
+   },
+   "c7": {
+    "concept": 3,
+    "asbuilt": 3,
+    "why": "Lists filter, edit screens gate: two behaviours to learn"
+   }
+  },
+  "C": {
+   "c1": {
+    "concept": 5,
+    "asbuilt": 4,
+    "why": "Coloured sticky band with monogram; rows drop customer name inside workspace"
+   },
+   "c2": {
+    "concept": 4,
+    "asbuilt": 3,
+    "why": "Home read-only, elsewhere count; no unsaved guard; tag opens customer-level editor"
+   },
+   "c3": {
+    "concept": 3,
+    "asbuilt": 3,
+    "why": "Same my-customers-only picker; project/service popover works on phone"
+   },
+   "c4": {
+    "concept": 3,
+    "asbuilt": 3,
+    "why": "Jump plus pick is two taps; cross-customer triage needs leaving workspace"
+   },
+   "c5": {
+    "concept": 4,
+    "asbuilt": 3,
+    "why": "Band costs 100px yet clear; Acknowledge still 26px"
+   },
+   "c6": {
+    "concept": 3,
+    "asbuilt": 2,
+    "why": "Picker hides non-covered customers; no problem roll-up"
+   },
+   "c7": {
+    "concept": 3,
+    "asbuilt": 3,
+    "why": "Two modes; nav labels change between home and workspace"
+   }
+  },
+  "D": {
+   "c1": {
+    "concept": 4,
+    "asbuilt": 3,
+    "why": "Customer/project fields on every row, panel header; chips weak and clipped at 390"
+   },
+   "c2": {
+    "concept": 4,
+    "asbuilt": 3,
+    "why": "Edit bound to opened row; no outside-incident notice, no unsaved guard"
+   },
+   "c3": {
+    "concept": 4,
+    "asbuilt": 3,
+    "why": "All-customer lists browse well; picker still my-customers only"
+   },
+   "c4": {
+    "concept": 5,
+    "asbuilt": 4,
+    "why": "One click from list row straight to exact service editor"
+   },
+   "c5": {
+    "concept": 3,
+    "asbuilt": 3,
+    "why": "Long cards, clipped +Scope chip, 26px Acknowledge; panel fine"
+   },
+   "c6": {
+    "concept": 3,
+    "asbuilt": 3,
+    "why": "Flat long lists at 34; problems sorted first only"
+   },
+   "c7": {
+    "concept": 4,
+    "asbuilt": 4,
+    "why": "Lists plus panel; few concepts"
+   }
+  },
+  "E-1": {
+   "c1": {
+    "concept": 5,
+    "asbuilt": 5,
+    "why": "Three labelled levels always shown; panel band names level and full path"
+   },
+   "c2": {
+    "concept": 5,
+    "asbuilt": 4,
+    "why": "Outside-view line, scoped toast with Undo, draft guard; viewer is still an editor"
+   },
+   "c3": {
+    "concept": 4,
+    "asbuilt": 4,
+    "why": "Step-by-step browse with badges; all customers listed"
+   },
+   "c4": {
+    "concept": 3,
+    "asbuilt": 3,
+    "why": "Phone customer switch takes four taps; laptop one dropdown per level"
+   },
+   "c5": {
+    "concept": 4,
+    "asbuilt": 3,
+    "why": "44px targets; sheet reopens on project step, needs Done"
+   },
+   "c6": {
+    "concept": 4,
+    "asbuilt": 4,
+    "why": "Searchable list with open-incident badges; no problems-only filter"
+   },
+   "c7": {
+    "concept": 3,
+    "asbuilt": 3,
+    "why": "Three selectors plus outside line, panel, drafts: many parts"
+   }
+  },
+  "E-3": {
+   "c1": {
+    "concept": 4,
+    "asbuilt": 4,
+    "why": "Sticky Showing line and panel band; levels less explicit than cascade"
+   },
+   "c2": {
+    "concept": 5,
+    "asbuilt": 4,
+    "why": "Same guards and outside-view line; viewer is still an editor"
+   },
+   "c3": {
+    "concept": 4,
+    "asbuilt": 3,
+    "why": "Lists all customers but flat; Narrow button obscure; favours typing"
+   },
+   "c4": {
+    "concept": 5,
+    "asbuilt": 4,
+    "why": "Two taps per switch, Ctrl K; fastest picker"
+   },
+   "c5": {
+    "concept": 4,
+    "asbuilt": 4,
+    "why": "Fewest taps, 44px rows; Narrow popover is small"
+   },
+   "c6": {
+    "concept": 3,
+    "asbuilt": 3,
+    "why": "Flat 34-row list without problem badges; needs names"
+   },
+   "c7": {
+    "concept": 4,
+    "asbuilt": 3,
+    "why": "One search box is simple; rest of E still heavy"
+   }
+  },
+  "E-tree": {
+   "c1": {
+    "concept": 5,
+    "asbuilt": 4,
+    "why": "Bar path plus highlighted tree node; tree collapses to rail under panel"
+   },
+   "c2": {
+    "concept": 5,
+    "asbuilt": 4,
+    "why": "Same guards and outside-view line; viewer is still an editor"
+   },
+   "c3": {
+    "concept": 5,
+    "asbuilt": 4,
+    "why": "Tree browse without names; other customers collapsed by default"
+   },
+   "c4": {
+    "concept": 4,
+    "asbuilt": 4,
+    "why": "Laptop one click on tree; phone three taps per switch"
+   },
+   "c5": {
+    "concept": 4,
+    "asbuilt": 4,
+    "why": "Sheet opens on customer step; legend eats a fifth of sheet"
+   },
+   "c6": {
+    "concept": 5,
+    "asbuilt": 5,
+    "why": "Only-with-problems toggle, group roll-up badges, name filter"
+   },
+   "c7": {
+    "concept": 3,
+    "asbuilt": 2,
+    "why": "Five badge kinds, legend, rail, sheet, outside line: most to learn"
+   }
+  }
+ },
+ "tasks": [
+  {
+   "task": "T1 find Mirae Pay payments incident, state customer/project/service, acknowledge (phone)",
+   "results": {
+    "A": "pass 1 tap; 99x26 button, toast has no scope, row unchanged",
+    "B": "pass 1 tap; same small button and generic toast",
+    "C": "pass 1 tap; same small button and generic toast",
+    "D": "pass 1 tap; customer/project as labelled fields, small button",
+    "E-1": "pass 1 tap; 328x44 button, toast names scope + Undo",
+    "E-3": "pass 1 tap; 328x44 button, toast names scope + Undo",
+    "E-tree": "pass 1 tap; 328x44 button, toast names scope + Undo"
+   }
+  },
+  {
+   "task": "T2 with Mirae Pay scope active, find whether other customers have open incidents (phone)",
+   "results": {
+    "A": "pass 0 taps; red '3 elsewhere' in sticky bar",
+    "B": "fail; no indicator, only nav badge 4 vs 1 listed, must Clear",
+    "C": "pass 0 taps; '3 elsewhere' in band",
+    "D": "partial 1 tap; no indicator, must remove chip",
+    "E-1": "pass 0 taps; 'Outside this view: 3 open (1 unmapped), 3 acknowledged'",
+    "E-3": "pass 0 taps; same outside line",
+    "E-tree": "pass 0 taps; same outside line"
+   }
+  },
+  {
+   "task": "T3 without typing reach Daon Retail > Commerce > Checkout and say who gets called (phone)",
+   "results": {
+    "A": "partial 3 taps via Paging list only; picker cannot (my 7 only, no project level); names need scroll",
+    "B": "partial 4 taps; gate shows Daon only under Recent/collapsed Others",
+    "C": "pass 3 taps via On-call list then tree; names need scroll",
+    "D": "pass 3 taps via list then panel tree; names need scroll",
+    "E-1": "pass 3 taps via list or 4 via sheet; names Junho, Minjae, Soyeon shown",
+    "E-3": "pass 3 taps via list, 4 via picker+Narrow; names shown",
+    "E-tree": "pass 3 taps via list or 4 via sheet; names shown"
+   }
+  },
+  {
+   "task": "T4 switch between three customers quickly (phone, taps per switch)",
+   "results": {
+    "A": "partial 2 taps; only covered/pinned/recent customers without typing",
+    "B": "partial 2 taps; chip scrolls away, covered customers only",
+    "C": "partial 2 taps via Jump; covered customers only",
+    "D": "partial 2 taps; +Scope clipped at 390 with two chips",
+    "E-1": "pass 4 taps (bar, Customer tab, pick, Done)",
+    "E-3": "pass 2 taps",
+    "E-tree": "pass 3 taps (bar, pick, Use X only)"
+   }
+  },
+  {
+   "task": "T5 laptop 1280: open call-order edit for Hanbit > Fulfilment > Orders API, say what Save affects",
+   "results": {
+    "A": "partial 2 clicks; row tag first opens customer-level editor; no unsaved guard, pin click swapped editor to Mirae",
+    "B": "partial 4 clicks through gate; Hanbit under collapsed Others",
+    "C": "partial 2 clicks; first lands on customer-level 'Save for Hanbit Logistics'",
+    "D": "pass 1 click; 'Applies to ... 1 service'; no unsaved guard",
+    "E-1": "pass 1 click; 'Level: Service, pages for 1 service', full-path Save, guard dialog",
+    "E-3": "pass 1 click; same panel and guard",
+    "E-tree": "pass 1 click; same panel and guard, tree collapses to rail"
+   }
+  },
+  {
+   "task": "T6 return after 10 minutes to a scrolled, scoped screen: obvious what you are looking at?",
+   "results": {
+    "A": "pass; sticky scope bar with path",
+    "B": "fail on phone; nothing sticky, only row breadcrumbs",
+    "C": "pass; sticky coloured band, strongest",
+    "D": "partial; sticky chips, clipped at 390",
+    "E-1": "pass; sticky Showing path + outside line",
+    "E-3": "pass; sticky Showing path + outside line",
+    "E-tree": "pass; sticky Showing path + outside line"
+   }
+  }
+ ],
+ "ranking_concept": [
+  "E-tree",
+  "E-3",
+  "E-1",
+  "D",
+  "C",
+  "A",
+  "B"
+ ],
+ "ranking_asbuilt": [
+  "E-tree",
+  "E-1",
+  "E-3",
+  "D",
+  "C",
+  "A",
+  "B"
+ ],
+ "best_for_each_persona": {
+  "하은": "E-3 on phone (2-tap switch, 44px targets, outside-view line); E-tree close second",
+  "대타 당번": "E-tree (browse without names, problems-only toggle, level band while editing)"
+ },
+ "notes": "Driven with Playwright at 390 (touch) and 1280, Haeun toggle, 14 and 34 customers. Web fonts were blocked, so fallback fonts rendered; widths may differ slightly. A-D share one picker that lists only pinned, recent and covered customers; non-covered customers need typing or a list screen. A-D have no unsaved-edit guard; in A a pin click replaced a dirty Orders API edit with Mirae Pay's editor. E variants share lists, panel and guards; they differ only in the picker. In every candidate the who-gets-called view is a live editor. Haeun defaults to All customers everywhere."
+}
