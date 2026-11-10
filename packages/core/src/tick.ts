@@ -105,6 +105,8 @@ export interface IncidentCommit {
   jobs?: NotificationIntent[];
   resolution?: ResolutionInput;
   audit?: AuditInput;
+  /** D-24: an incident ack acknowledges every member alert (Alert.status FIRING → ACKNOWLEDGED); UNACK reverts that. */
+  memberEffect?: 'ACK' | 'UNACK';
 }
 
 export interface HeartbeatRow {

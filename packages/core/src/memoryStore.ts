@@ -40,8 +40,10 @@ export class MemoryTickStore implements TickRepository {
   members = new Map<string, GroupMember[]>();
   /** alertId → episode open (Alert.episodeOpen). */
   episodes = new Map<string, boolean>();
+  /** alertId → acknowledged through its incident (D-24). */
+  alertAcked = new Map<string, boolean>();
   incidents = new Map<string, IncidentRow>();
-  incidentAlerts = new Map<string, Map<string, { alertId: string; eventCount: number }>>();
+  incidentMembers = new Map<string, Map<string, { alertId: string; eventCount: number }>>();
   events: Array<IncidentEventInput & { id: string }> = [];
   jobs = new Map<string, NotificationJob>();
   logs: Array<DeliveryLog & { id: string }> = [];
@@ -89,7 +91,7 @@ export class MemoryTickStore implements TickRepository {
     return t ? structuredClone(t) : null;
   }
   async incidentIdExists(id: string) { return this.incidents.has(id); }
-  async incidentFingerprints(id: string) { return [...(this.incidentAlerts.get(id)?.keys() ?? [])]; }
+  async incidentFingerprints(id: string) { return [...(this.incidentMembers.get(id)?.keys() ?? [])]; }
   async orgForAccount(customerId: string, awsAccountId: string) {
     const a = this.accounts.get(awsAccountId);
     if (!a || a.customerId !== customerId || !a.serviceId) return null;
@@ -132,13 +134,13 @@ export class MemoryTickStore implements TickRepository {
         if (!cur || cur.version !== c.incident.expectedVersion) return 'CONFLICT' as const;
         this.incidents.set(row.id, { ...structuredClone(row), number: cur.number, version: cur.version + 1 });
       }
-      const set = this.incidentAlerts.get(row.id) ?? new Map<string, { alertId: string; eventCount: number }>();
+      const set = this.incidentMembers.get(row.id) ?? new Map<string, { alertId: string; eventCount: number }>();
       for (const m of c.members) {
         const known = set.get(m.fingerprint);
         if (known) known.eventCount += m.eventCount;
         else if (set.size < 200) set.set(m.fingerprint, { alertId: m.alertId, eventCount: m.eventCount });
       }
-      this.incidentAlerts.set(row.id, set);
+      this.incidentMembers.set(row.id, set);
     }
     this.insertEvents(c.events);
     this.insertJobs(c.jobs, c.deliveredAt);
@@ -149,7 +151,7 @@ export class MemoryTickStore implements TickRepository {
   async listAutoResolvable(limit: number) {
     return [...this.incidents.values()].filter((i) => {
       if (i.status === 'RESOLVED') return false;
-      const m = [...(this.incidentAlerts.get(i.id)?.values() ?? [])];
+      const m = [...(this.incidentMembers.get(i.id)?.values() ?? [])];
       return m.length > 0 && m.every((x) => !(this.episodes.get(x.alertId) ?? true));
     }).sort((a, b) => a.triggeredAt.getTime() - b.triggeredAt.getTime()).slice(0, limit).map((i) => structuredClone(i));
   }
@@ -175,6 +177,7 @@ export class MemoryTickStore implements TickRepository {
     this.incidents.set(next.id, next);
     this.insertEvents(c.events ?? []);
     this.insertJobs(c.jobs ?? [], new Date(Math.max(...(c.events ?? []).map((e) => e.at.getTime()), 0)));
+    if (c.memberEffect) for (const m of this.incidentMembers.get(next.id)?.values() ?? []) this.alertAcked.set(m.alertId, c.memberEffect === 'ACK');
     if (c.resolution) this.resolutions.push(c.resolution);
     if (c.audit) this.audits.push(c.audit);
     return structuredClone(next);
