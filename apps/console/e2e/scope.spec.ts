@@ -194,8 +194,8 @@ test.describe("filter", () => {
   test("the filter follows the user to the other screens, and the tree works there", async ({ page }) => {
     const errors = watchErrors(page);
     await signIn(page, "/incidents?customer=daon&project=commerce");
-    for (const name of ["Monitoring", "Call order", "People", "Maintenance"]) {
-      await page.getByRole("navigation", { name: "Main", exact: true }).getByRole("link", { name }).click();
+    for (const name of ["Customers", "Monitoring", "Call order", "People", "Maintenance"]) {
+      await page.getByRole("navigation", { name: "Main", exact: true }).getByRole("link", { name, exact: true }).click();
       await expect(page).toHaveURL(/customer=daon&project=commerce/);
       await expect(page.getByTestId("scope-echo")).toHaveText("Daon Retail › Commerce");
       await expect(page.locator(".stree")).toBeVisible();
@@ -536,7 +536,8 @@ test.describe("acknowledge from the row", () => {
     await row.getByRole("button", { name: /^Acknowledge/ }).click();
     await expect(page.locator(".toast")).toContainText("Acknowledged in Daon Retail › Platform › EKS prod");
     await expect(badge(page)).toContainText("3");
-    await expect(row.getByRole("button", { name: "Undo acknowledge" })).toBeVisible();
+    await expect(row.getByTestId("ack-label")).toHaveText("Acknowledged ✓ 03:16");
+    await expect(row.getByRole("button", { name: /^More for / })).toBeVisible(); // Undo is behind … and in the toast, not where Acknowledge was
     await expect(page.getByRole("treeitem", { name: /^Daon Retail$/ })).toBeVisible(); // no open count left on the row
     await page.waitForTimeout(700); // a toast's button is armed 600 ms after it appears (it may come up under a second tap)
     await page.locator(".toast").getByRole("button", { name: "Undo" }).click();

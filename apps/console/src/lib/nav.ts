@@ -13,7 +13,7 @@ export interface NavSection {
 export const NAV: NavSection[] = [
   { key: "incidents", label: "Incidents", href: "/incidents", match: ["incidents", "c"], sub: [] },
   {
-    key: "monitoring", label: "Monitoring", href: "/monitoring/alarms", match: ["monitoring"],
+    key: "monitoring", label: "Monitoring", short: "Monitor", href: "/monitoring/alarms", match: ["monitoring"],
     sub: [
       { label: "Alarms", href: "/monitoring/alarms" },
       { label: "Resources", href: "/monitoring/resources" },
@@ -25,6 +25,8 @@ export const NAV: NavSection[] = [
   { key: "call-order", label: "Call order", href: "/call-order", match: ["call-order"], sub: [] },
   { key: "people", label: "People", href: "/people", match: ["people"], sub: [] },
   { key: "maintenance", label: "Maintenance", short: "Maint.", href: "/maintenance", match: ["maintenance"], sub: [] },
+  // D-26: Customers is a top-level menu. The list is a stub for now; it lives in the shell like the others.
+  { key: "customers", label: "Customers", href: "/customers", match: ["customers"], sub: [] },
   {
     key: "settings", label: "Settings", href: "/settings/msp-defaults", match: ["settings"],
     sub: [

@@ -48,10 +48,10 @@ export async function resolveIncident(id: string, version: number) {
     return null;
   });
 }
-export async function escalateIncident(id: string) {
+export async function escalateIncident(id: string, version: number) {
   return run(async () => {
-    const i = assertId(id);
-    await (await getApi()).escalate(i);
+    const [i, v] = [assertId(id), assertVersion(version)];
+    await (await getApi()).escalate(i, v);
     return null;
   });
 }

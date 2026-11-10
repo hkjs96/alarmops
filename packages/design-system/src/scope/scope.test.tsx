@@ -317,6 +317,9 @@ describe("<ScopeTree>", () => {
     const sw = screen.getByRole("switch", { name: /Only with problems/ });
     expect(sw).toHaveAttribute("aria-checked", "false");
     expect(sw).toHaveTextContent("5");
+    // the number is explained to a screen reader and on hover (QA P3-B)
+    expect(sw).toHaveAccessibleName("Only with problems, 5 customers with problems");
+    expect(screen.getByTestId("problem-count")).toHaveAttribute("title", "5 customers with problems");
     fireEvent.click(sw);
     expect(sw).toHaveAttribute("aria-checked", "true");
     expect(screen.queryByRole("treeitem", { name: /Ara Games/ })).toBeNull();
@@ -465,6 +468,8 @@ describe("<ScopeSheet>", () => {
 describe("<Panel>", () => {
   it("header band: initials + full path, customer in bold; focus goes to the heading", () => {
     render(<Panel kind="Incident" path={["Mirae Pay", "Core", "Payments API"]} onClose={() => undefined}>body</Panel>);
+    // each › belongs to the name before it: a wrapped line never starts with a separator (QA P3-B)
+    expect(Array.from(screen.getByTestId("panel-path").children).map((c) => c.textContent)).toEqual(["Mirae Pay›", "Core›", "Payments API"]);
     const h = screen.getByRole("heading", { level: 2 });
     expect(h).toHaveTextContent("Mirae Pay›Core›Payments API");
     expect(h.querySelector("b")).toHaveTextContent("Mirae Pay");

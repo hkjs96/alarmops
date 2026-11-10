@@ -83,8 +83,8 @@ export async function IncidentsScreen({ sp, panel }: { sp: SP; panel?: PanelRout
         <div className="ph">
           <div>
             <h1 tabIndex={-1}>Incidents</h1>
-            <div className="desc" data-testid="inc-summary">{kstHeading(nowIso)}{c ? <> · {listed} listed · <b>{c.open} open</b> · {c.acknowledged} acknowledged</> : null}</div>
           </div>
+          <div className="desc inc-now">{kstHeading(nowIso)}</div>
         </div>
 
         {data?.unmapped.map((u) => (
@@ -98,7 +98,7 @@ export async function IncidentsScreen({ sp, panel }: { sp: SP; panel?: PanelRout
             <div className={cx("tile", c.open > 0 && "on")} data-testid="tile-open" title="Open = triggered or escalated, nobody has acknowledged it. The same meaning as the Incidents badge and the Outside this view line.">
               <div className="row"><span className="st trig"><Mark shape="dot" /></span><span className="ov">Open</span></div>
               <div className={cx("v", c.open > 0 && "red")}>{c.open}</div>
-              <div className="d">
+              <div className="d" title={`${c.triggered} triggered · ${c.escalated} escalated`}>
                 {c.triggered} triggered · {c.escalated} escalated{c.meta?.triggeredSev1 ? ` · ${c.meta.triggeredSev1} SEV-1` : ""}
                 {c.meta?.oldestTriggeredAt ? ` · oldest ${age(c.meta.oldestTriggeredAt, now)}` : ""}{c.meta?.escalatedNext ? ` · next step ${kstTime(c.meta.escalatedNext)}` : ""}
               </div>
@@ -152,6 +152,7 @@ export async function IncidentsScreen({ sp, panel }: { sp: SP; panel?: PanelRout
             nowMs={now}
             openId={inc?.id}
             listKey={listQuery}
+            summary={c ? <span data-testid="inc-summary">{listed} listed · <b>{c.open} open</b> · {c.acknowledged} acknowledged</span> : undefined}
             emptyKind={q.status === "RESOLVED" ? "resolved incidents in the last 24h" : q.status === "ACKNOWLEDGED" ? "acknowledged incidents" : "active incidents"}
             clearFiltersHref={hasFilters ? href({ severity: undefined, source: undefined, assignee: undefined, q: undefined }) : undefined}
             allCustomersHref={filtered ? "/incidents" + scopeQuery({}, params) : undefined}
@@ -159,7 +160,7 @@ export async function IncidentsScreen({ sp, panel }: { sp: SP; panel?: PanelRout
         )}
         {data ? (
           <div className="row sm mut" style={{ marginTop: 10 }}>
-            <span>Open a row to see the incident. Opening a row never changes what this list shows.</span>
+            <span>Open a row to see the incident. Rows keep their place until you re-sort, or change the tab, the filter or the search.</span>
             <span className="sp" />
             <span className="inc-keys"><span className="kbd">J</span> <span className="kbd">K</span> move · <span className="kbd">A</span> acknowledge</span>
           </div>

@@ -8,7 +8,7 @@ import {
 } from "@alarmops/design-system";
 import type { OutsideCounts } from "@/lib/api/types";
 import { clearLevel, isPanelPath, parseScopeParams, scopeQuery } from "@/lib/scope";
-import { ShellContext, type ShellApi, type ToastAction } from "./ShellContext";
+import { ShellContext, type LocalMark, type ShellApi, type ToastAction } from "./ShellContext";
 import { NotFoundBody } from "./NotFoundBody";
 import { TopNav } from "./TopNav";
 import { sectionFor } from "@/lib/nav";
@@ -45,6 +45,9 @@ export function ScopeShell({ customers, userName, openCount, children }: { custo
   const [sheet, setSheet] = useState(false);
   const [finder, setFinder] = useState(false);
   const [acks, setAcks] = useState<Record<string, string>>({});
+  const [marks, setMarks] = useState<Record<string, LocalMark>>({});
+  const listView = useRef<unknown>(null);
+  const shellRef = useRef<HTMLDivElement>(null);
   const [outside, setOutside] = useState<OutsideCounts | null>(null);
   const [toastState, setToast] = useState<Toast | null>(null);
   const focusTitle = useRef(false);
@@ -95,6 +98,26 @@ export function ScopeShell({ customers, userName, openCount, children }: { custo
     return n;
   }), []);
 
+  const mark = useCallback((id: string, m: LocalMark | null) => setMarks((a) => {
+    if ((a[id] ?? null) === m) return a;
+    const n = { ...a };
+    if (m) n[id] = m; else delete n[id];
+    return n;
+  }), []);
+  // the list keeps its order while the user stays in Incidents (list ↔ panel); leaving is a navigation: next time it is sorted
+  const inIncidents = sectionFor(pathname)?.key === "incidents";
+  useEffect(() => { if (!inIncidents) listView.current = null; }, [inIncidents]);
+  // on a phone the filter line sticks to the top; whatever sticks below it needs its height
+  useEffect(() => {
+    const line = shellRef.current?.querySelector<HTMLElement>(".sline");
+    if (!line || typeof ResizeObserver === "undefined") return;
+    const set = () => shellRef.current?.style.setProperty("--sline-h", `${Math.round(line.getBoundingClientRect().height)}px`);
+    const ro = new ResizeObserver(set);
+    ro.observe(line);
+    set();
+    return () => ro.disconnect();
+  }, [settings]);
+
   const setFilter = (next: ScopeSel, from: "tree" | "line" | "sheet" | "search") => {
     const n = normalizeSel(next);
     if (sameSel(n, sel) && valid) return; // choosing the filter that is already set leaves an open panel alone
@@ -114,8 +137,8 @@ export function ScopeShell({ customers, userName, openCount, children }: { custo
 
   const clearToast = useCallback(() => setToast(null), []);
   const api: ShellApi = useMemo(
-    () => ({ sel, label, filtered, totalCustomers: customers.length, toast, clearToast, setOutside, acks, setAck }),
-    [sel, label, filtered, customers.length, toast, clearToast, acks, setAck],
+    () => ({ sel, label, filtered, totalCustomers: customers.length, toast, clearToast, setOutside, acks, setAck, marks, mark, listView }),
+    [sel, label, filtered, customers.length, toast, clearToast, acks, setAck, marks, mark],
   );
 
   // Ctrl/⌘K opens "Filter to…" on every screen that has a filter; Esc with the focus in the tree closes an open panel
@@ -163,7 +186,7 @@ export function ScopeShell({ customers, userName, openCount, children }: { custo
 
   return (
     <ShellContext.Provider value={api}>
-      <div className={cx("shell", mounted && "mounted", ready && "ready", settings && "no-tree")} data-panel={panelOpen ? "1" : "0"} data-rail={rail ? "1" : "0"}>
+      <div ref={shellRef} className={cx("shell", mounted && "mounted", ready && "ready", settings && "no-tree")} data-panel={panelOpen ? "1" : "0"} data-rail={rail ? "1" : "0"}>
         <TopNav openCount={openCount} userName={userName} scopeQuery={scopeQuery(sel)} onOpenFinder={settings ? undefined : () => { setToast(null); setFinder(true); }} />
         {settings ? (
           <ScopeLine totalCustomers={customers.length} mineCustomers={mineCount} onClear={() => undefined} locked={<><b>MSP-wide settings</b> · all {customers.length} customers</>} />

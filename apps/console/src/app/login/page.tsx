@@ -1,10 +1,12 @@
 import { isMock } from "@/lib/api";
+import { safeNextPath } from "@/lib/safe-next";
 
 /** Google SSO placeholder (DECISIONS 이전 원칙 1: app-level Google SSO, no Supabase Auth). Not wired yet. */
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ next?: string }> }) {
   const { next } = await searchParams;
   const mock = isMock();
-  const devHref = "/auth/dev-login" + (next ? `?next=${encodeURIComponent(next)}` : "");
+  const safe = safeNextPath(next, ""); // anything that is not a path on this origin is dropped (security S-3)
+  const devHref = "/auth/dev-login" + (safe ? `?next=${encodeURIComponent(safe)}` : "");
   return (
     <div className="page" style={{ maxWidth: 420, paddingTop: 72 }}>
       <div className="card">

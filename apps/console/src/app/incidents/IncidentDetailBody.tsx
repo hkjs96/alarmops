@@ -177,7 +177,7 @@ export function IncidentDetailBody({ inc, timeline, notifs, now }: { inc: Incide
                 </div>
               ) : null}
             </div>
-            <HeroActions id={inc.id} title={inc.title} pathText={inc.org.customer ? orgChainParts(inc).join(" › ") : "an unmapped account"} status={inc.status} version={inc.version} canEscalate={Boolean(inc.escalation)} />
+            <HeroActions id={inc.id} title={inc.title} pathText={inc.org.customer ? orgChainParts(inc).join(" › ") : "an unmapped account"} status={inc.status} version={inc.version} canEscalate={Boolean(inc.escalation)} acknowledgedAt={inc.acknowledgedAt} />
           </div>
         </div>
       </section>

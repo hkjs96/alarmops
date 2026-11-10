@@ -150,9 +150,10 @@ export function createMockApi(store: Store = createStore(), clock: () => number 
       transition(i, "RESOLVED");
       return detail(i);
     },
-    async escalate(id) {
+    async escalate(id, version) {
       const i = find(id);
       if (!i) throw notFound();
+      checkVersion(i, version);
       if (i.status !== "TRIGGERED" || !i.escalation) throw new ApiError(409, "INVALID_TRANSITION", "Nothing to escalate.", `req_mock_${++reqSeq}`);
       i.escalated = true;
       i.version += 1;

@@ -92,7 +92,9 @@ describe("mock api", () => {
   it("R-3: an Acknowledge from a stale list does not land on an incident that changed meanwhile", async () => {
     const api = createMockApi(createStore(), () => NOW);
     const seen = (await api.listIncidents()).items.find((i) => i.id === openIncidents[0]!.id)!;
-    await api.escalate(seen.id); // it escalated after the list was loaded
+    await api.escalate(seen.id, seen.version); // it escalated after the list was loaded
+    // S-4: Escalate now from the same stale screen is refused too
+    await expect(api.escalate(seen.id, seen.version)).rejects.toMatchObject({ status: 409, code: "VERSION_CONFLICT" });
     await expect(api.ack(seen.id, seen.version)).rejects.toMatchObject({ status: 409, code: "VERSION_CONFLICT" });
     expect((await api.getIncident(seen.id)).status).toBe("TRIGGERED");
     // bulk: the stale item is skipped and reported, the others run

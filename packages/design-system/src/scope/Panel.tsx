@@ -54,7 +54,8 @@ export function Panel({ kind, path, pathLabel, note, onClose, onCopyLink, autoFo
           <div className="ov">{kind}</div>
           <h2 ref={head} tabIndex={-1} className="panel-path" data-testid="panel-path">
             {path ? path.map((p, n) => (
-              <span key={n}>{n > 0 ? <span className="chain" aria-hidden="true">›</span> : null}{n === 0 ? <b>{p}</b> : p}</span>
+              // the › stays with the name before it, so a wrapped line never starts with a separator
+              <span key={n}>{n === 0 ? <b>{p}</b> : p}{n < path.length - 1 ? <span className="chain" aria-hidden="true">›</span> : null}</span>
             )) : <b>{pathLabel ?? "—"}</b>}
           </h2>
           {note ? <div className="panel-note">{note}</div> : null}

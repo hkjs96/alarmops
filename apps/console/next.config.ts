@@ -31,6 +31,10 @@ export function securityHeaders(production: boolean): { key: string; value: stri
     { key: "X-Frame-Options", value: "DENY" },
     { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
     { key: "X-Content-Type-Options", value: "nosniff" },
+    // the console uses none of these; Copy link (clipboard-write) is allowed for the own origin by default
+    { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=(), usb=()" },
+    // production only: `next dev` and plain-http local runs must not pin a browser to https
+    ...(production ? [{ key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" }] : []),
   ];
 }
 

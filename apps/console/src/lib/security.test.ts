@@ -1,5 +1,6 @@
 import { apiBaseUrl, mockMode, NotConfiguredError } from "./mode";
 import { safeExternalUrl } from "./safe-url";
+import { safeNextPath } from "./safe-next";
 import { assertBulkItems, assertVersion, assertId, assertBulkAction, isId, isSlug, MAX_BULK_IDS } from "./validate";
 import { parsePanelRoute, parseScopeParams } from "./scope";
 import { ApiError, isHidden } from "./api/client";
@@ -143,5 +144,52 @@ describe("R-4 security response headers", () => {
     expect(d["form-action"]).toEqual(["'self'"]);
     expect(h(true)["Content-Security-Policy"]).not.toMatch(/unsafe-eval|\*|http:/);
     expect(h(false)["Content-Security-Policy"]).toContain("'unsafe-eval'"); // next dev only
+  });
+});
+
+describe("S-3 next= is a path on this origin, or it is dropped", () => {
+  it("keeps the console's own addresses", () => {
+    for (const ok of [
+      "/incidents", "/incidents?customer=mirae&project=core&status=ACKNOWLEDGED", "/c/mirae/core/payments-api/incident/inc-7f3a0c91b2d4-20261108181204?mine=1",
+      "/people?customer=hanbit", "/incidents?q=db%201", "/incidents?q=a%2Fb", "/settings/msp-defaults#x", "/",
+    ]) expect(safeNextPath(ok), ok).toBe(ok);
+  });
+  it("refuses other hosts, however they are spelled", () => {
+    for (const bad of [
+      "//evil.example", "/\\evil.example", "/\\/evil.example", "\\\\evil.example", "https://evil.example", "http:evil.example", "javascript:alert(1)", "evil.example", "",
+      "/%09/evil.example", "/\t/evil.example", "/%0A/evil.example", "/\n/evil.example", "/%0d/evil.example", "/\r/evil.example", "/ /evil.example".replace(" ", "\u0000"),
+      "/%2F%2Fevil.example", "/%2f/evil.example", "/%5Cevil.example", "/%5c%5cevil.example", "/%252F%252Fevil.example", "/%25252F%25252Fevil.example", "/%2509/evil.example",
+      "/incidents//evil.example", "/incidents?next=//evil.example", "/x%", "/%E0%A4%A", "/" + "a".repeat(2100), "/%25252525252Fx",
+      5, null, undefined, ["/incidents"],
+    ]) expect(safeNextPath(bad), String(bad)).toBe("/incidents");
+    expect(safeNextPath("//evil.example", "")).toBe("");
+  });
+  it("what it returns always resolves to the same origin", () => {
+    for (const raw of ["/%09/evil.example", "/incidents", "/\\evil.example", "/a/../b", "/./x"]) {
+      const u = new URL(safeNextPath(raw), "https://console.example");
+      expect(u.origin, raw).toBe("https://console.example");
+    }
+    expect(safeNextPath("/a/../b")).toBe("/b");
+  });
+});
+
+describe("S-4 If-Match on every write to one incident", () => {
+  it("ack, resolve and escalate send the version the user saw", async () => {
+    const f = vi.fn(async () => new Response("{}", { status: 200 }));
+    const api = createHttpApi({ baseUrl: "https://api.test", fetch: f as unknown as typeof fetch });
+    await api.ack("i1", 3); await api.resolve("i1", 4, {}); await api.escalate("i1", 5);
+    const sent = (f.mock.calls as unknown as [string, RequestInit][]).map(([u, init]) => [u.split("/").pop(), (init.headers as Record<string, string>)["If-Match"]]);
+    expect(sent).toEqual([["ack", "3"], ["resolve", "4"], ["escalate", "5"]]);
+  });
+});
+
+describe("transport and feature headers", () => {
+  const h = (prod: boolean) => Object.fromEntries(securityHeaders(prod).map((x) => [x.key, x.value]));
+  it("HSTS in production only", () => {
+    expect(h(true)["Strict-Transport-Security"]).toBe("max-age=31536000; includeSubDomains");
+    expect(h(false)["Strict-Transport-Security"]).toBeUndefined();
+  });
+  it("Permissions-Policy switches off what the console never uses", () => {
+    for (const p of [true, false]) expect(h(p)["Permissions-Policy"]).toBe("camera=(), microphone=(), geolocation=(), payment=(), usb=()");
   });
 });

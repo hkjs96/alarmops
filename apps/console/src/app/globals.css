@@ -111,6 +111,9 @@ body { overflow-x: hidden; }
 .shell-main .tiles { display: flex; flex-wrap: wrap; gap: 1px; background: var(--hair); }
 .shell-main .tile, .shell-main .tile:nth-child(n) { flex: 1 1 150px; border: 0; background: var(--surface); }
 .shell-main .tile.on { background: var(--red-t); }
+/* the tiles stand above the list: their height must not follow the counts (an Acknowledge shortens "… · 1 SEV-1 · next step 03:17"
+   by a line, which pulled every row up under the pointer). Always two lines. */
+.shell-main .tile .d { line-height: 1.4; height: 2.8em; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .t.inc td { overflow-wrap: break-word; }
 .t.inc .c-title { min-width: 150px; }
 .t.inc tbody tr { cursor: pointer; }
@@ -118,19 +121,54 @@ body { overflow-x: hidden; }
 .t.inc tr.cur td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 .t.inc .ttl { color: var(--ink); }
 .t.inc .c-sev, .t.inc .c-status, .t.inc .c-age, .t.inc .c-act { white-space: nowrap; }
-.t.inc .c-act { width: 1%; }
 .t.inc .c-age .lbl { display: none; }
 .inc-path { color: var(--ink2); }
 .inc-path b { color: var(--ink); font-weight: 700; }
 .inc-path .chain { margin: 0 5px; }
 .inc-path .sub { display: block; font-size: 12px; color: var(--mut); margin-top: 2px; }
 .t.inc .who { white-space: normal; }
-/* acknowledged-in-place / changed-since-loaded states of a row, and the same in the panel */
-.ack-state { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink2); }
-.ack-state .chain { margin: 0; }
-.ack-done { font-weight: 600; color: var(--ink); white-space: nowrap; }
-.ack-state.warn .ack-done { color: var(--amber); white-space: normal; max-width: 200px; text-align: left; line-height: 1.3; }
-.ack-state.big { flex: 1; justify-content: flex-end; min-height: 38px; font-size: 15px; }
+/* The action cell: one fixed width and one line, whatever it holds (Acknowledge, Acknowledging…, Acknowledged ✓ 03:16 + …,
+   Not acknowledged + Reload). A row changing state resizes nothing (QA P1-A, P2-B). The label stands where the button was;
+   the secondary control (… or Reload) is at the other end of the cell (QA P2-A). */
+.t.inc { table-layout: fixed; width: 100%; }
+/* Fixed layout: a column's width comes from here, never from what the rows hold. With the automatic layout, one row
+   losing its "escalated to …" note re-balanced every column and re-wrapped (and so resized) the other rows. */
+.t.inc th.c-sev { width: 98px; } .t.inc th.c-status { width: 124px; } .t.inc th.c-paged { width: 176px; } .t.inc th.c-age { width: 64px; }
+.t.inc .c-act { width: 228px; }
+.t.inc th.c-pathh { white-space: normal; line-height: 1.25; }
+.t.inc th { overflow: hidden; }
+.act { display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-height: 28px; min-width: 0; }
+.act-l { font-size: 13px; font-weight: 600; color: var(--ink); white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; outline: 0; }
+.act-l:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+.act-t { font-family: var(--mono); font-weight: 400; color: var(--ink2); }
+.act.warn .act-l { color: var(--amber); }
+.act .rmenu, .act .act-2 { margin-right: auto; flex: none; }
+.t.inc .org.warn { color: var(--amber); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.t.inc tr.dim .c-path, .t.inc tr.dim .c-path b, .t.inc tr.dim .ttl, .t.inc tr.dim .c-paged, .t.inc tr.dim .c-age { color: var(--mut); }
+.t.inc tr[data-lock] { height: var(--lock-h); }
+.rmenu { display: inline-flex; }
+.rmenu-b { min-width: 32px; padding: 0; justify-content: center; font-size: 16px; line-height: 1; }
+.rmenu-m { position: fixed; z-index: 60; width: 208px; padding: 4px; background: var(--surface); border: 1px solid var(--rule); box-shadow: var(--pop); display: grid; }
+.rmenu-i { min-height: 36px; padding: 0 10px; border: 0; background: none; color: var(--ink); font-size: 13px; text-align: left; cursor: pointer; }
+.rmenu-i:hover, .rmenu-i:focus-visible { background: var(--soft); }
+.rmenu-i:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* The bar above the list: always there, always one line of the same height. It says what is waiting to be sorted in. */
+.list-bar { display: flex; align-items: center; gap: 12px; height: 36px; margin-bottom: 8px; padding: 0 12px; border: 1px solid var(--rule); background: var(--soft); font-size: 13px; color: var(--ink2); white-space: nowrap; overflow: hidden; }
+.list-bar.on { position: sticky; top: 0; z-index: 5; background: var(--accent-t); border-color: var(--accent); color: var(--ink); }
+.list-bar-p { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
+.list-bar-t { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.list-bar-p .btn { flex: none; }
+.list-bar-s { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.list-bar.on .list-bar-s { margin-left: auto; }
+.inc-now { margin: 0 0 3px !important; }
+/* the panel's primary spot after Acknowledge: the size of the button it replaced, and it does nothing */
+.ack-spot { flex: 1; display: inline-flex; align-items: center; justify-content: center; min-height: 38px; padding: 0 18px; border: 1px dashed var(--rule); font-size: 15px; font-weight: 600; color: var(--ink); white-space: nowrap; outline: 0; }
+.ack-spot:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+.ack-spot-w { white-space: nowrap; }
+.ack-spot-t { font-family: var(--mono); font-weight: 400; color: var(--ink2); white-space: nowrap; }
+.hero-sub { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.lnk-btn { border: 0; background: none; padding: 0; min-height: 28px; font-size: 13px; color: var(--accent); text-decoration: underline; cursor: pointer; }
+.lnk-btn[disabled] { color: var(--faint); cursor: not-allowed; }
 .t.inc tr.stale td { background: var(--amber-t); }
 .paging-stopped { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink); line-height: 1.35; }
 .resolve-ask { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--rule); background: var(--soft); }
@@ -140,23 +178,25 @@ body { overflow-x: hidden; }
 .shell[data-panel="1"] .shell-main .tiles .tile:nth-child(n) { flex: none; display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 0 10px; border: 1px solid var(--rule); box-shadow: none; white-space: nowrap; }
 .shell[data-panel="1"] .shell-main .tiles .tile .v { font-size: 15px; line-height: 1; margin: 0; letter-spacing: 0; }
 .shell[data-panel="1"] .shell-main .tiles .tile .d { display: none; }
-.shell[data-panel="1"] .shell-main .tiles .tile.on .d { display: block; margin: 0; }
+.shell[data-panel="1"] .shell-main .tiles .tile.on .d { display: block; margin: 0; height: auto; }
 @container page (max-width: 899px) {
   .shell-main .tiles { flex-wrap: nowrap; overflow-x: auto; gap: 6px; background: none; border: 0; margin-bottom: 12px; scrollbar-width: thin; }
   .shell-main .tiles .tile:nth-child(n) { flex: none; display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 0 10px; border: 1px solid var(--rule); box-shadow: none; white-space: nowrap; }
   .shell-main .tiles .tile .v { font-size: 15px; line-height: 1; margin: 0; letter-spacing: 0; }
   .shell-main .tiles .tile .d { display: none; }
-  .shell-main .tiles .tile.on .d { display: block; margin: 0; }
+  .shell-main .tiles .tile.on .d { display: block; margin: 0; height: auto; }
 }
 /* column priority by list width: Paged first, then Age. Sev, Status, path, incident and Acknowledge always stay. */
 @container page (max-width: 999px) { .t.inc .c-paged { display: none; } }
-@container page (max-width: 799px) { .t.inc .c-age { display: none; } .inc-keys { display: none; } .t.inc th, .t.inc td { padding-left: 8px; padding-right: 8px; } }
+@container page (max-width: 799px) { .t.inc th.c-sev { width: 84px; } .t.inc th.c-status { width: 104px; } .t.inc .c-act { width: 176px; } .act-t { display: none; } .list-bar.on .list-bar-s { display: none; }
+  .t.inc .c-age { display: none; } .inc-keys { display: none; } .t.inc th, .t.inc td { padding-left: 8px; padding-right: 8px; } }
 /* below 690px the rows are cards (also every phone) */
 @container page (max-width: 689px) {
   .t.inc thead { display: none; }
   .t.inc, .t.inc tbody { display: block; }
   .t.inc tbody tr { display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 6px 12px; padding: 12px 14px; border-bottom: 1px solid var(--grid); align-items: center; }
   .t.inc tbody tr:last-child { border-bottom: 0; }
+  .t.inc tr[data-lock] { height: auto; min-height: var(--lock-h); align-content: start; }
   .t.inc td { padding: 0; border: 0; background: none !important; box-shadow: none !important; }
   .t.inc tr.hot { box-shadow: inset 3px 0 0 var(--red); }
   .t.inc tr.esc { box-shadow: inset 3px 0 0 var(--orange); }
@@ -167,6 +207,12 @@ body { overflow-x: hidden; }
   .t.inc .c-act { text-align: left; }
   .t.inc .c-act:empty { display: none; }
   .t.inc .c-act .btn { min-height: 44px; min-width: 132px; }
+  /* card: the label where Acknowledge was (left), … or Reload at the far right */
+  .act { justify-content: flex-start; min-height: 44px; }
+  .act .act-l { order: 1; min-width: 132px; }
+  .act .rmenu, .act .act-2 { order: 2; margin-right: 0; margin-left: auto; }
+  .t.inc .c-act .rmenu-b, .t.inc .c-act .act-2 { min-width: 44px; }
+  .act-t { display: inline; }
   .t.inc .ttl { display: flex; align-items: center; min-height: 44px; }
   .tw:has(.t.inc) { overflow-x: visible; }
 }
@@ -191,12 +237,12 @@ body { overflow-x: hidden; }
   .top .show-m-flex { display: inline-flex; }
   .top .btn { min-width: 44px; }
   .bnav {
-    display: grid; grid-template-columns: repeat(5, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+    display: grid; grid-template-columns: repeat(6, auto); justify-content: space-between; padding: 0 4px; position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
     background: var(--surface); border-top: 1px solid var(--rule); height: 56px;
   }
-  .bnav a { justify-content: center; padding: 0 2px; font-size: 13px; min-height: 44px; }
+  .bnav a { justify-content: center; padding: 0 1px; font-size: 13px; letter-spacing: -0.01em; min-height: 44px; min-width: 44px; }
   .bnav a.on { color: var(--ink); font-weight: 600; box-shadow: inset 0 2px 0 var(--ink); }
-  .bnav .cnt { margin-left: 3px; }
+  .bnav .cnt { margin-left: 2px; padding: 1px 3px; }
   main { padding-bottom: 56px; }
   .page, .shell-main > .page, .shell-main > .page:has(+ .panel) { padding: 16px 16px 48px; }
   .shell .stree { display: none; }
@@ -209,8 +255,15 @@ body { overflow-x: hidden; }
   .toast .btn { min-height: 44px; min-width: 44px; }
   .tap { display: inline-flex; align-items: center; min-height: 44px; }
   .ph { margin-bottom: 12px; }
-  .ack-state .btn, .t.inc .c-act .ack-state .btn { min-width: 64px; }
-  .ack-state.big { justify-content: flex-start; }
+  .list-bar { height: 44px; padding: 0 6px 0 12px; }
+  .list-bar.on { top: var(--sline-h, 0px); }
+  .list-bar-p { flex: 1; }
+  .list-bar-p .btn { margin-left: auto; min-width: 84px; }
+  .rmenu-i { min-height: 44px; }
+  .lnk-btn { min-height: 44px; min-width: 44px; }
+  .hero-sub { margin-top: 16px; }
+  .ack-spot { min-height: 44px; min-width: 0; padding: 0 6px; white-space: normal; text-align: center; line-height: 1.2; font-size: 14px; }
+  .inc-now { margin: 0 !important; }
   .resolve-ask .hero-actions .btn { flex: 1; }
   .ph h1 { font-size: 23px; }
   .g-main > *, .g-detail > * { min-width: 0; }

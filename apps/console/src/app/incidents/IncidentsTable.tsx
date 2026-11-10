@@ -1,32 +1,21 @@
 "use client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState, useTransition, type MouseEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import { Avatar, Banner, Button, EmptyState, SevBadge, StatusBadge, cx } from "@alarmops/design-system";
 import type { IncidentListItem } from "@/lib/api/types";
 import { displayStatus, orgChainParts } from "@/lib/incidents";
-import { age, groupDigits } from "@/lib/format";
+import { age, groupDigits, kstTime } from "@/lib/format";
+import { mergeView, pendingOf, pendingText, startView, type StableView } from "@/lib/stable-list";
+import { RowMenu } from "@/components/RowMenu";
 import { useShell } from "@/components/ShellContext";
 import { ackIncident, undoBulk } from "./actions";
 
 export type IncidentRow = IncidentListItem & { href: string };
 
-/** An acknowledged row stays where it is this long (or until the pointer leaves it, or the list changes). */
-export const HOLD_MS = 5000;
 /** A second press at the same spot this soon after an Acknowledge is a double tap, not a decision. */
 export const DOUBLE_MS = 600;
 const SAME_SPOT_PX = 24;
-
-/**
- * Order of the rows while one is held: the order on screen when Acknowledge was pressed. The server list sorts
- * acknowledged incidents below the open ones, which would slide the next incident's Acknowledge under the same
- * finger (QA P1-1). Rows that arrive meanwhile go to the end.
- */
-export function heldOrder<T extends { id: string }>(items: T[], frozen: string[] | null): T[] {
-  if (!frozen) return items;
-  const at = new Map(frozen.map((id, n) => [id, n]));
-  return [...items].sort((a, b) => (at.get(a.id) ?? Infinity) - (at.get(b.id) ?? Infinity));
-}
 
 function ScopePath({ i }: { i: IncidentListItem }) {
   if (i.unmapped || !i.org.customer) {
@@ -41,7 +30,8 @@ function ScopePath({ i }: { i: IncidentListItem }) {
   return (
     <span className="inc-path">
       <b>{customer}</b>
-      {rest.map((p, n) => <span key={n}><span className="chain" aria-hidden="true">›</span>{p}</span>)}
+      {/* a line may break after a ›, never before it; without the <wbr> the whole path is one unbreakable word and the table overflows beside a panel (QA P2-B) */}
+      {rest.map((p, n) => <span key={n}><span className="chain" aria-hidden="true">›</span><wbr />{p}</span>)}
     </span>
   );
 }
@@ -56,33 +46,107 @@ const pathText = (i: IncidentListItem) => (i.org.customer ? orgChainParts(i).joi
 /**
  * Incidents table. Every row states customer › project › service and opens one panel. Column priority when the list
  * gets narrow (container width, not viewport): Paged drops first, then Age; Sev, Status, the path, the incident and
- * Acknowledge always stay; below that the rows become cards (globals.css, `.t.inc`).
+ * the action always stay; below that the rows become cards (globals.css, `.t.inc`).
+ *
+ * Rows never move under the pointer (lib/stable-list.ts). Acknowledge, Undo, Resolve and any refresh change a row
+ * where it stands; the bar above the list says what is waiting ("2 acknowledged in place · Re-sort", "3 new · Show")
+ * and only its button — or a tab, filter or search change — sorts the list again. The action column has one fixed
+ * width and every state of it is one line high, so a row changing state does not resize the others either.
  */
-export function IncidentsTable({ items, nowMs, openId, emptyKind, listKey = "", clearFiltersHref, allCustomersHref }: {
+export function IncidentsTable({ items, nowMs, openId, emptyKind, listKey = "", summary, clearFiltersHref, allCustomersHref }: {
   items: IncidentRow[]; nowMs: number; openId?: string; emptyKind: string;
-  /** changes when the list shows something else (filter, tab, search): a held row is let go */
-  listKey?: string; clearFiltersHref?: string; allCustomersHref?: string;
+  /** changes when the list shows something else (filter, tab, search): the list is sorted again */
+  listKey?: string;
+  /** the counts line shown in the bar above the list */
+  summary?: ReactNode;
+  clearFiltersHref?: string; allCustomersHref?: string;
 }) {
   const router = useRouter();
   const shell = useShell();
   const acked = shell.acks;
   const [error, setError] = useState<string | null>(null);
-  const [hold, setHold] = useState<{ id: string; order: string[] } | null>(null);
   const [changed, setChanged] = useState<Record<string, number>>({}); // id → the version that was refused (409)
-  const [pending, start] = useTransition();
+  const [busy, setBusy] = useState<Record<string, "ack" | "undo">>({}); // per row: one row waiting never locks another
+  const [optim, setOptim] = useState<Record<string, number>>({}); // id → version acknowledged, until the list says so itself
   const tableRef = useRef<HTMLTableElement>(null);
   const lastAck = useRef<{ t: number; x: number; y: number } | null>(null);
-  const shown = heldOrder(items, hold?.order ?? null);
-  const shownRef = useRef(shown);
-  shownRef.current = shown;
+  const focusLabel = useRef<string | null>(null);
+  const barShownAt = useRef(0);
 
-  const release = useCallback(() => setHold(null), []);
+  const [stored, setView] = useState<StableView<IncidentRow>>(() => {
+    const kept = shell.listView.current as StableView<IncidentRow> | null;
+    return kept && kept.key === listKey ? mergeView(kept, items) : startView(items, listKey);
+  });
+  let view = stored;
+  if (view.key !== listKey) view = startView(items, listKey);
+  else if (view.src !== items) view = mergeView(view, items);
+  if (view !== stored) setView(view);
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  useEffect(() => { shell.listView.current = view; }, [shell.listView, view]);
+  useEffect(() => { setChanged({}); }, [listKey]);
+
+  // A row whose content changes (acknowledged: the "escalated to …" note goes away) must not get shorter and pull the
+  // rows below it up. Every row's height is remembered while it is unchanged; when its content changes it is held at
+  // that height until the list is sorted again or its width changes.
+  const seen = useRef<Record<string, { h: number; sig: string }>>({});
+  const [locks, setLocks] = useState<Record<string, number>>({});
+  const viewId = useRef<unknown>(null);
+  const sigOf = (r: { item: IncidentRow; gone: boolean }) => `${r.item.version}|${r.gone}|${busy[r.item.id] ?? ""}|${optim[r.item.id] ?? ""}|${changed[r.item.id] ?? ""}`;
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- measures after every render; it sets state only for a row not yet held, so it settles
+  useLayoutEffect(() => {
+    const table = tableRef.current;
+    if (!table) return;
+    if (viewId.current !== view.base) { // a new sort: start over
+      viewId.current = view.base;
+      seen.current = {};
+      if (Object.keys(locks).length) { setLocks({}); return; }
+    }
+    let next: Record<string, number> | null = null;
+    for (const r of view.rows) {
+      const id = r.item.id;
+      const sig = sigOf(r);
+      const was = seen.current[id];
+      if (locks[id] !== undefined) continue;
+      if (was && was.sig !== sig) (next ??= { ...locks })[id] = was.h;
+      else {
+        const el = table.querySelector<HTMLElement>(`tr[data-id="${CSS.escape(id)}"]`);
+        if (el) seen.current[id] = { h: el.getBoundingClientRect().height, sig };
+      }
+    }
+    if (next) setLocks(next);
+  });
+  useEffect(() => { void document.fonts?.ready.then(() => measure()); }, []);
+  /** the heights as they are on screen now (fonts may have arrived since the last render); called right before a row changes */
+  const measure = () => {
+    for (const el of tableRef.current?.querySelectorAll<HTMLElement>("tr[data-id]:not([data-lock])") ?? []) {
+      const was = seen.current[el.dataset.id!];
+      if (was) was.h = el.getBoundingClientRect().height;
+    }
+  };
   useEffect(() => {
-    if (!hold) return;
-    const t = setTimeout(release, HOLD_MS);
-    return () => clearTimeout(t);
-  }, [hold, release]);
-  useEffect(() => { setHold(null); setChanged({}); }, [listKey]);
+    const table = tableRef.current;
+    if (!table || typeof ResizeObserver === "undefined") return;
+    let w = table.getBoundingClientRect().width;
+    const ro = new ResizeObserver(() => {
+      const now = table.getBoundingClientRect().width;
+      if (Math.abs(now - w) < 1) return;
+      w = now; // the user resized, or opened or closed a panel: rows reflow anyway
+      seen.current = {};
+      setLocks({});
+    });
+    ro.observe(table);
+    return () => ro.disconnect();
+  }, [view.rows.length === 0]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const pending = pendingText(pendingOf(view));
+  const hasPending = Boolean(pending);
+  useEffect(() => { if (hasPending) barShownAt.current = performance.now(); }, [hasPending]);
+  const resort = (e: MouseEvent) => {
+    // the bar may have come up under a second tap
+    if (e.detail > 0 && performance.now() - barShownAt.current < DOUBLE_MS) return;
+    setView(startView(items, listKey));
+  };
 
   /** true = a pointer press at the spot where an Acknowledge was pressed a moment ago: ignore it */
   const doubleTap = (e?: MouseEvent) => {
@@ -90,42 +154,65 @@ export function IncidentsTable({ items, nowMs, openId, emptyKind, listKey = "", 
     return Boolean(e && g && e.detail > 0 && performance.now() - g.t < DOUBLE_MS
       && Math.abs(e.clientX - g.x) <= SAME_SPOT_PX && Math.abs(e.clientY - g.y) <= SAME_SPOT_PX);
   };
+  const setBusyFor = (id: string, v: "ack" | "undo" | null) => setBusy((b) => { const n = { ...b }; if (v) n[id] = v; else delete n[id]; return n; });
+  const rowEl = (id: string) => tableRef.current?.querySelector<HTMLElement>(`tr[data-id="${CSS.escape(id)}"]`);
+  /** the control that had the focus is about to be replaced: the focus goes to what replaces it, or to the row's title */
+  const keepFocus = (id: string) => { if (rowEl(id)?.querySelector(".c-act")?.contains(document.activeElement)) focusLabel.current = id; };
+  /** after Undo the focus waits for the row's Acknowledge button to come back with the refreshed list */
+  const wantButton = useRef<string | null>(null);
+  useEffect(() => {
+    const id = focusLabel.current;
+    if (!id) return;
+    const row = rowEl(id);
+    const active = document.activeElement;
+    // the user has moved on: leave the focus where they put it
+    if (active && active !== document.body && !row?.contains(active)) { focusLabel.current = null; wantButton.current = null; return; }
+    const button = row?.querySelector<HTMLElement>(".c-act button[aria-label^='Acknowledge'], .c-act .act-2");
+    const target = button ?? row?.querySelector<HTMLElement>(".c-act [data-focus]") ?? row?.querySelector<HTMLElement>("a.ttl");
+    if (target && target !== active) target.focus();
+    if (busy[id] || (wantButton.current === id && !button)) return;
+    focusLabel.current = null;
+    wantButton.current = null;
+  });
 
-  const undoAck = (i: IncidentListItem, token: string, e?: MouseEvent) => {
-    if (doubleTap(e)) return;
-    start(async () => {
-      const r = await undoBulk(token);
-      shell.setAck(i.id, null);
-      setHold(null);
-      if (!r.ok) setError(r.message);
-      else shell.toast(`Acknowledge undone in ${pathText(i)} · paging continues`);
-      router.refresh();
-    });
+  const undoAck = async (i: IncidentListItem, token: string, fromRow = false) => {
+    if (fromRow) focusLabel.current = i.id; // from the toast, the focus stays where it is
+    measure();
+    setBusyFor(i.id, "undo");
+    const r = await undoBulk(token);
+    shell.setAck(i.id, null);
+    setOptim((o) => { const n = { ...o }; delete n[i.id]; return n; });
+    setBusyFor(i.id, null);
+    if (!r.ok) setError(r.message);
+    else { if (focusLabel.current === i.id) wantButton.current = i.id; shell.mark(i.id, "REOPENED"); shell.toast(`Acknowledge undone in ${pathText(i)} · paging continues`); }
+    router.refresh();
   };
-  const doAck = (i: IncidentListItem, e?: MouseEvent) => {
-    if (doubleTap(e)) return;
+  const doAck = async (i: IncidentListItem, e?: MouseEvent) => {
+    if (busy[i.id] || doubleTap(e)) return;
     if (e && e.detail > 0) lastAck.current = { t: performance.now(), x: e.clientX, y: e.clientY };
-    // the row keeps its place from the moment of the press, before the server answers
-    setHold({ id: i.id, order: shownRef.current.map((x) => x.id) });
-    start(async () => {
-      const r = await ackIncident(i.id, i.version);
-      if (r.ok) {
-        const token = r.data.undoToken;
-        shell.setAck(i.id, token);
-        shell.toast(`Acknowledged in ${pathText(i)} · ${i.title}`, { label: "Undo", onAction: () => undoAck(i, token) });
-        router.refresh();
-      } else if (r.code === "VERSION_CONFLICT") {
-        // someone or something changed it since this list was loaded: nothing was acknowledged, the row says so
-        setHold(null);
-        setChanged((c) => ({ ...c, [i.id]: i.version }));
-      } else {
-        setHold(null);
-        setError(r.message);
-        router.refresh();
-      }
-    });
+    keepFocus(i.id);
+    measure();
+    setBusyFor(i.id, "ack");
+    const r = await ackIncident(i.id, i.version);
+    setBusyFor(i.id, null);
+    if (r.ok) {
+      const token = r.data.undoToken;
+      setOptim((o) => ({ ...o, [i.id]: i.version }));
+      shell.setAck(i.id, token);
+      shell.mark(i.id, null);
+      shell.toast(`Acknowledged in ${pathText(i)} · ${i.title}`, { label: "Undo", onAction: () => { void undoAck(i, token); } });
+      router.refresh();
+    } else if (r.code === "VERSION_CONFLICT") {
+      // someone or something changed it since this list was loaded: nothing was acknowledged, the row says so
+      setChanged((c) => ({ ...c, [i.id]: i.version }));
+    } else {
+      setError(r.message);
+      router.refresh();
+    }
   };
-  const reload = (id: string) => {
+  const reload = (id: string, e: MouseEvent) => {
+    if (doubleTap(e)) return;
+    focusLabel.current = id;
     setChanged((c) => { const n = { ...c }; delete n[id]; return n; });
     router.refresh();
   };
@@ -138,12 +225,12 @@ export function IncidentsTable({ items, nowMs, openId, emptyKind, listKey = "", 
     if (id) tableRef.current?.querySelector<HTMLElement>(`tr[data-id="${CSS.escape(id)}"] a.ttl`)?.focus();
   }, [openId]);
 
-  // J/K move between rows, A acknowledges the focused row. Not while typing or inside the tree, a panel or a dialog.
+  // J/K move between rows, A acknowledges the focused row. Not while typing or inside the tree, a panel, a menu or a dialog.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       const tgt = e.target as HTMLElement;
-      if (tgt.closest("input, select, textarea, [contenteditable], [role=tree], [role=dialog], [role=alertdialog], .panel")) return;
+      if (tgt.closest("input, select, textarea, [contenteditable], [role=tree], [role=dialog], [role=alertdialog], [role=menu], .panel")) return;
       const links = [...(tableRef.current?.querySelectorAll<HTMLAnchorElement>("a.ttl") ?? [])];
       if (!links.length) return;
       const idx = links.findIndex((l) => l === document.activeElement);
@@ -151,8 +238,8 @@ export function IncidentsTable({ items, nowMs, openId, emptyKind, listKey = "", 
         e.preventDefault();
         links[e.key === "j" ? Math.min(links.length - 1, idx + 1) : Math.max(0, idx - 1)]?.focus();
       } else if (e.key === "a" && idx >= 0) {
-        const it = shownRef.current[idx];
-        if (it && it.status === "TRIGGERED" && !it.unmapped) doAck(it);
+        const r = viewRef.current.rows[idx];
+        if (r && !r.gone && r.item.status === "TRIGGERED" && !r.item.unmapped && optim[r.item.id] !== r.item.version && changed[r.item.id] !== r.item.version) void doAck(r.item);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -160,7 +247,8 @@ export function IncidentsTable({ items, nowMs, openId, emptyKind, listKey = "", 
   });
 
   const rowClick = (e: MouseEvent<HTMLTableRowElement>, href: string) => {
-    if ((e.target as HTMLElement).closest("a, button, input")) return;
+    // the action cell is never part of the row link: a second press where Acknowledge was must do nothing at all
+    if ((e.target as HTMLElement).closest("a, button, input, [role=menu], .c-act")) return;
     if (window.getSelection()?.toString()) return;
     router.push(href);
   };
@@ -168,8 +256,18 @@ export function IncidentsTable({ items, nowMs, openId, emptyKind, listKey = "", 
   return (
     <>
       {error ? <Banner tone="red" action={<Button size="sm" onClick={() => setError(null)}>Dismiss</Button>}>{error}</Banner> : null}
+      {/* always here and always the same height: when it has something to say, nothing below it moves */}
+      <div className={cx("list-bar", pending && "on")} data-testid="list-bar">
+        {pending ? (
+          <span className="list-bar-p" role="status">
+            <span className="list-bar-t" data-testid="list-pending">{pending.text}</span>
+            <Button size="sm" onClick={resort} title="Sort the list again. Rows keep their place until you ask.">{pending.button}</Button>
+          </span>
+        ) : <span className="sr-only" role="status" />}
+        {summary ? <span className="list-bar-s">{summary}</span> : null}
+      </div>
       <div className="tw">
-        {items.length === 0 ? (
+        {view.rows.length === 0 ? (
           <EmptyState
             title={`No ${emptyKind} in ${shell.filtered ? shell.label : `all ${shell.totalCustomers} customers`}.`}
             action={clearFiltersHref || allCustomersHref ? (
@@ -184,51 +282,69 @@ export function IncidentsTable({ items, nowMs, openId, emptyKind, listKey = "", 
             <caption className="sr-only">Incidents</caption>
             <thead>
               <tr>
-                <th scope="col">Sev</th><th scope="col">Status</th><th scope="col">Customer › project › service</th><th scope="col">Incident</th>
+                <th scope="col" className="c-sev">Sev</th><th scope="col" className="c-status">Status</th><th scope="col" className="c-pathh">Customer › project › service</th><th scope="col">Incident</th>
                 <th scope="col" className="c-paged">Paged</th><th scope="col" className="r c-age">Age</th><th scope="col" className="c-act"><span className="sr-only">Action</span></th>
               </tr>
             </thead>
             <tbody>
-              {shown.map((i) => {
-                const ds = displayStatus(i);
+              {view.rows.map(({ item: i, gone }) => {
+                const m = gone ? shell.marks[i.id] : undefined;
+                // acknowledged here a moment ago and the list has not caught up: the row already says so
+                const ackedNow = !gone && i.status === "TRIGGERED" && optim[i.id] === i.version;
+                const status = m === "RESOLVED" ? "RESOLVED" : m === "REOPENED" ? "TRIGGERED" : ackedNow ? "ACKNOWLEDGED" : i.status;
+                const ds = displayStatus({ status, escalated: i.escalated });
                 const cur = i.id === openId;
-                const held = hold?.id === i.id;
-                const stale = changed[i.id] === i.version;
+                const stale = !gone && changed[i.id] === i.version;
+                const working = busy[i.id];
+                const inPlace = gone || status !== view.base[i.id];
+                const token = acked[i.id];
                 return (
                   <tr
                     key={i.id} data-id={i.id} data-testid="incident-row" aria-current={cur ? "true" : undefined}
-                    data-held={held ? "1" : undefined}
-                    className={cx(ds === "TRIGGERED" && "hot", ds === "ESCALATED" && "esc", cur && "cur", stale && "stale")}
+                    data-inplace={inPlace ? "1" : undefined} data-gone={gone ? "1" : undefined}
+                    data-lock={locks[i.id] !== undefined ? "1" : undefined} style={locks[i.id] !== undefined ? ({ "--lock-h": `${locks[i.id]}px` } as CSSProperties) : undefined}
+                    className={cx(ds === "TRIGGERED" && "hot", ds === "ESCALATED" && "esc", cur && "cur", stale && "stale", inPlace && status !== "TRIGGERED" && "dim")}
                     onClick={(e) => rowClick(e, i.href)}
-                    onPointerLeave={held ? (e) => { if (e.pointerType !== "touch") release(); } : undefined}
                   >
                     <td className="c-sev"><SevBadge severity={i.severity} hot /></td>
                     <td className="c-status"><StatusBadge status={ds} short /></td>
                     <td className="c-path" data-testid="row-path"><ScopePath i={i} /></td>
                     <td className="c-title">
                       <Link className="ttl" href={i.href}>{i.title}</Link>
-                      <div className="org">{what(i)}</div>
+                      {stale
+                        ? <div className="org warn" title="Changed since you loaded this list. It was not acknowledged.">Changed since loaded</div>
+                        : <div className="org">{what(i)}</div>}
                     </td>
                     <td className="c-paged">
                       {i.assignee ? (
-                        <span className="who"><Avatar name={i.assignee.name} active={i.status === "TRIGGERED"} />{i.assignee.name}</span>
+                        <span className="who"><Avatar name={i.assignee.name} active={status === "TRIGGERED"} />{i.assignee.name}</span>
                       ) : <span className="mut sm">No owner · not escalating</span>}
                       {i.assigneeNote ? <div className="org">{i.assigneeNote}</div> : null}
                     </td>
                     <td className="r mono sm c-age"><span className="lbl" aria-hidden="true">Age </span>{age(i.triggeredAt, nowMs)}</td>
                     <td className="r c-act">
                       {stale ? (
-                        <span className="ack-state warn" role="status">
-                          <span className="ack-done">Changed since you loaded this list · not acknowledged</span>
-                          <Button size="sm" onClick={() => reload(i.id)} aria-label={`Reload the list, ${i.title} changed`}>Reload</Button>
+                        <span className="act warn">
+                          <Button key="b" size="sm" className="act-2" onClick={(e) => reload(i.id, e)} aria-label={`Reload the list, ${i.title} changed`}>Reload</Button>
+                          <span key="l" className="act-l" role="status" title="Changed since you loaded this list. It was not acknowledged.">Not acknowledged</span>
                         </span>
-                      ) : i.status === "TRIGGERED" && !i.unmapped ? (
-                        <Button size="sm" onClick={(e) => doAck(i, e)} disabled={pending} aria-label={`Acknowledge ${i.title}`}>Acknowledge</Button>
-                      ) : acked[i.id] && i.status === "ACKNOWLEDGED" ? (
-                        <span className="ack-state">
-                          <span className="ack-done">Acknowledged <span aria-hidden="true">✓</span></span>
-                          <span className="chain" aria-hidden="true">·</span>
-                          <Button size="sm" onClick={(e) => undoAck(i, acked[i.id]!, e)} disabled={pending} aria-label={`Undo acknowledge of ${i.title}`}>Undo</Button>
+                      ) : gone ? (
+                        <span className="act"><span key="l" className="act-l" role="status" tabIndex={-1} data-focus>
+                          {m === "RESOLVED" ? <>Resolved <span aria-hidden="true">✓</span></> : m === "REOPENED" ? "Reopened · paging" : "Left this list"}
+                        </span></span>
+                      ) : working === "ack" ? (
+                        <span className="act"><span key="l" className="act-l" role="status" tabIndex={-1} data-focus data-testid="ack-label">Acknowledging…</span></span>
+                      ) : working === "undo" ? (
+                        <span className="act"><span key="l" className="act-l" role="status" tabIndex={-1} data-focus>Undoing…</span></span>
+                      ) : status === "TRIGGERED" && !i.unmapped ? (
+                        <span className="act"><Button key="a" size="sm" onClick={(e) => { void doAck(i, e); }} aria-label={`Acknowledge ${i.title}`}>Acknowledge</Button></span>
+                      ) : status === "ACKNOWLEDGED" && (token || inPlace) ? (
+                        <span className="act">
+                          {/* Undo is not where Acknowledge was (QA P2-A): it is behind "…", at the other end of the cell, and in the toast */}
+                          {token ? <RowMenu key="m" label={`More for ${i.title}`} items={[{ label: "Undo acknowledge", onSelect: () => { void undoAck(i, token, true); } }]} /> : null}
+                          <span key="l" className="act-l" role="status" tabIndex={-1} data-focus data-testid="ack-label">
+                            Acknowledged <span aria-hidden="true">✓</span>{i.acknowledgedAt && !ackedNow ? <span className="act-t"> {kstTime(i.acknowledgedAt)}</span> : null}
+                          </span>
                         </span>
                       ) : null}
                     </td>

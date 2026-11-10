@@ -4,7 +4,12 @@ import { test, expect, type Page } from "@playwright/test";
 
 const PAY_ID = "inc-7f3a0c91b2d4-20261108181204";
 const PAY = `/c/mirae/core/payments-api/incident/${PAY_ID}`;
-const signIn = (page: Page, next = "/incidents") => page.goto(`/auth/dev-login?next=${encodeURIComponent(next)}`);
+/** signs in and waits until the page has stopped changing by itself (fonts in, shell mounted): geometry is compared after this */
+const signIn = async (page: Page, next = "/incidents") => {
+  await page.goto(`/auth/dev-login?next=${encodeURIComponent(next)}`);
+  await page.waitForLoadState("networkidle");
+  await page.evaluate(() => document.fonts.ready.then(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(null))))));
+};
 function watchErrors(page: Page) {
   const errors: string[] = [];
   page.on("console", (m) => { if (m.type() === "error" && !/fonts\.(googleapis|gstatic)\.com/.test(m.location().url)) errors.push(m.text()); });
@@ -15,13 +20,29 @@ const rows = (page: Page) => page.getByTestId("incident-row");
 const rowTitles = (page: Page) => rows(page).evaluateAll((trs) => trs.map((tr) => tr.querySelector("a.ttl")!.textContent));
 /** the list row at a point (the toast may lie over it) */
 const rowAt = (page: Page, x: number, y: number) => page.evaluate(([px, py]) => document.elementsFromPoint(px!, py!).map((e) => e.closest("tr")).find(Boolean)?.getAttribute("data-id") ?? null, [x, y]);
+/** geometry of every row and of its Acknowledge button, by incident */
+const rowBoxes = (page: Page) => rows(page).evaluateAll((trs) => Object.fromEntries(trs.map((tr) => {
+  const q = (e: Element | null) => { if (!e) return null; const r = e.getBoundingClientRect(); return [r.x, r.y, r.width, r.height].map((v) => Math.round(v * 10) / 10); };
+  return [tr.getAttribute("data-id")!, { row: q(tr), act: q(tr.querySelector(".c-act")), ack: q(tr.querySelector(".c-act button[aria-label^='Acknowledge']")) }];
+})));
+const rowsOnly = (o: Record<string, { row: number[] | null }>) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, v.row]));
+const without = <T,>(o: Record<string, T>, ...ids: string[]) => Object.fromEntries(Object.entries(o).filter(([k]) => !ids.includes(k)));
+const idOf = (row: ReturnType<Page["locator"]>) => row.getAttribute("data-id").then((v) => v!);
+const label = (row: ReturnType<Page["locator"]>) => row.getByTestId("ack-label");
+/** Undo through the row's … menu (the only Undo on the row) */
+async function undoRow(page: Page, row: ReturnType<Page["locator"]>) {
+  await row.getByRole("button", { name: /^More for / }).click();
+  await page.getByRole("menuitem", { name: "Undo acknowledge" }).click();
+  await expect(row.getByRole("button", { name: /^Acknowledge / })).toBeVisible();
+}
+const overflow = (page: Page) => page.evaluate(() => { const tw = document.querySelector(".tw")!; return tw.scrollWidth - tw.clientWidth; });
 const center = async (l: ReturnType<Page["locator"]>) => { const b = (await l.boundingBox())!; return { x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2), b }; };
 
 test.describe("phone 390×740 — 하은 H3 / H4", () => {
   test.use({ viewport: { width: 390, height: 740 }, hasTouch: true });
   const badge = (page: Page) => page.locator(".bnav .cnt");
 
-  test("H3 list: a double tap acknowledges one incident; the row keeps its place; the toast fits; Undo restores", async ({ page }) => {
+  test("H3 list: a double tap acknowledges one incident; no row moves, then or later; Undo is not under the finger; the toast fits; Undo restores", async ({ page }) => {
     const errors = watchErrors(page);
     await signIn(page);
     await expect(badge(page)).toContainText("4");
@@ -30,22 +51,32 @@ test.describe("phone 390×740 — 하은 H3 / H4", () => {
     expect(before[1]).toBe("api-alb 5XX rate above 2%");
     const first = rows(page).first();
     const at = await center(first.getByRole("button", { name: /^Acknowledge/ }));
+    const boxes0 = await rowBoxes(page);
 
     // two taps on the same spot, 150 ms apart
     await page.touchscreen.tap(at.x, at.y);
     await page.waitForTimeout(150);
     await page.touchscreen.tap(at.x, at.y);
 
-    await expect(first.locator(".ack-done")).toHaveText("Acknowledged ✓");
+    await expect(label(first)).toHaveText("Acknowledged ✓ 03:16");
     await expect(badge(page)).toContainText("3");
-    // exactly one incident changed: the other three open ones still offer Acknowledge
+    // exactly one incident changed: the other open ones still offer Acknowledge
     await expect(page.getByRole("button", { name: /^Acknowledge / })).toHaveCount(2);
     await expect(rows(page).nth(1).getByRole("button", { name: "Acknowledge api-alb 5XX rate above 2%" })).toBeVisible();
-    // the acknowledged row is still where the finger is, in the same order as before
-    await expect(first).toHaveAttribute("data-held", "1");
+    // same order, and every other row is exactly where it was
     expect(await rowTitles(page)).toEqual(before);
     expect(await rowAt(page, at.x, at.y)).toBe(PAY_ID);
-    await expect(first.getByRole("button", { name: /^Undo acknowledge of payments-db-1/ })).toBeVisible();
+    expect(without(await rowBoxes(page), PAY_ID)).toEqual(without(boxes0, PAY_ID));
+    expect((await rowBoxes(page))[PAY_ID]!.row).toEqual(boxes0[PAY_ID]!.row);
+    // P2-A: what is under the finger now does nothing; Undo is behind … at the far side of the card
+    const under = await page.evaluate(([x, y]) => document.elementFromPoint(x!, y!)?.closest("button, a, [role=menuitem]")?.textContent ?? null, [at.x, at.y]);
+    expect(under).toBeNull();
+    await expect(first.getByRole("button", { name: /Undo/ })).toHaveCount(0);
+    const more = (await first.getByRole("button", { name: /^More for payments-db-1/ }).boundingBox())!;
+    expect(more.x).toBeGreaterThan(at.b.x + at.b.width + 100);
+    expect(Math.min(more.width, more.height)).toBeGreaterThanOrEqual(44);
+    // the bar says what is waiting; it was there before, the same size, so it pushed nothing
+    await expect(page.getByTestId("list-pending")).toHaveText("1 acknowledged in place");
 
     // P1-3 the toast: full width above the bottom menu, at most three lines, Undo at least 44px, never taller than 96px
     const toast = page.getByTestId("toast");
@@ -60,24 +91,64 @@ test.describe("phone 390×740 — 하은 H3 / H4", () => {
     expect(lines).toBeLessThanOrEqual(3);
     const undo = (await toast.getByRole("button", { name: "Undo" }).boundingBox())!;
     expect(Math.min(undo.width, undo.height)).toBeGreaterThanOrEqual(44);
-    await page.screenshot({ path: test.info().outputPath("h3-1-acked-held.png") });
+    await page.screenshot({ path: test.info().outputPath("h3-1-acked-in-place.png") });
 
-    // after 5 s the list sorts again: the acknowledged incident goes below the open ones and keeps its Undo
-    await expect(first).not.toHaveAttribute("data-held", "1", { timeout: 7000 });
-    await expect.poll(() => rowTitles(page)).toEqual([before[1], before[2], before[3], before[0], ...before.slice(4)]);
-    await page.screenshot({ path: test.info().outputPath("h3-2-resorted.png") });
+    // 6 s later (the old release time) nothing has moved, and a slow third tap on the same spot still does nothing
+    await page.waitForTimeout(6000);
+    expect(await rowTitles(page)).toEqual(before);
+    expect(without(await rowBoxes(page), PAY_ID)).toEqual(without(boxes0, PAY_ID));
+    await page.touchscreen.tap(at.x, at.y);
+    await page.waitForTimeout(300);
+    await expect(label(first)).toHaveText("Acknowledged ✓ 03:16");
+    await expect(badge(page)).toContainText("3");
+    await page.screenshot({ path: test.info().outputPath("h3-2-still-in-place.png") });
 
-    // Undo (the toast is still up: 9 s)
+    // Undo (the toast is still up: 9 s). The row goes back to Acknowledge where it stands.
     await toast.getByRole("button", { name: "Undo" }).tap();
     await expect(badge(page)).toContainText("4");
     await expect(page.getByTestId("toast")).toContainText("Acknowledge undone in Mirae Pay › Core › Payments API · paging continues");
-    await expect.poll(() => rowTitles(page)).toEqual(before);
     await expect(rows(page).first().getByRole("button", { name: /^Acknowledge payments-db-1/ })).toBeVisible();
+    expect(await rowTitles(page)).toEqual(before);
+    expect(await rowBoxes(page)).toEqual(boxes0);
+    await expect(page.getByTestId("list-pending")).toHaveCount(0);
     await page.screenshot({ path: test.info().outputPath("h3-3-undone.png") });
     expect(errors).toEqual([]);
   });
 
-  test("H4 panel: Acknowledge gives a toast with Undo, shows Acknowledged ✓ · Undo for 5 s, then Resolve… which asks first; paging says it stopped", async ({ page }) => {
+  for (const wait of [300, 700, 1500]) {
+    test(`P1-A touch: Acknowledge row 1, then row 2's button ${wait} ms later → row 2's incident is acknowledged`, async ({ page }) => {
+      await page.setViewportSize({ width: 390, height: 844 });
+      await signIn(page);
+      await page.evaluate(() => window.scrollTo(0, 300));
+      await page.waitForTimeout(200);
+      const [r1, r2, r3] = [rows(page).nth(0), rows(page).nth(1), rows(page).nth(2)];
+      const [id1, id2] = [await idOf(r1), await idOf(r2)];
+      const a1 = await center(r1.getByRole("button", { name: /^Acknowledge/ }));
+      const a2 = await center(r2.getByRole("button", { name: /^Acknowledge/ }));
+      const boxes0 = await rowBoxes(page);
+      await page.touchscreen.tap(a1.x, a1.y);
+      await page.waitForTimeout(wait);
+      // nothing moved while waiting: row 2's button is where the finger is going
+      expect(without(await rowBoxes(page), id1)).toEqual(without(boxes0, id1));
+      await page.touchscreen.tap(a2.x, a2.y);
+      await expect(label(r2)).toHaveText("Acknowledged ✓ 03:16");
+      await expect(label(r1)).toHaveText("Acknowledged ✓ 03:16");
+      await expect(r2).toContainText("api-alb 5XX rate above 2%");
+      await expect(r3.getByRole("button", { name: /^Acknowledge node-exporter/ })).toBeVisible(); // the third (Daon Retail) was not touched
+      await expect(badge(page)).toContainText("2");
+      expect(without(await rowBoxes(page), id1, id2)).toEqual(without(boxes0, id1, id2));
+      expect(rowsOnly(await rowBoxes(page))).toEqual(rowsOnly(boxes0)); // the acknowledged rows kept their size too
+      await expect(page.getByTestId("list-pending")).toHaveText("2 acknowledged in place");
+      if (wait === 700) await page.screenshot({ path: test.info().outputPath("h3b-390-two-in-place.png") });
+      await page.getByTestId("toast").getByRole("button", { name: "Dismiss" }).tap();
+      await undoRow(page, r2);
+      await undoRow(page, r1);
+      await expect(badge(page)).toContainText("4");
+      expect(await rowBoxes(page)).toEqual(boxes0);
+    });
+  }
+
+  test("H4 panel: Acknowledge gives a toast with Undo; the primary spot only says Acknowledged ✓ for 5 s, then Resolve… which asks first; Undo is a link below; paging says it stopped", async ({ page }) => {
     const errors = watchErrors(page);
     await signIn(page, PAY); // arriving from a Slack link
     await expect(page.getByTestId("panel-path")).toHaveText("Mirae Pay›Core›Payments API");
@@ -94,9 +165,33 @@ test.describe("phone 390×740 — 하은 H3 / H4", () => {
     await expect(toast.getByRole("button", { name: "Undo" })).toBeVisible();
     expect((await toast.boundingBox())!.height).toBeLessThanOrEqual(96);
     // still acknowledged (the second tap neither resolved nor undid it), and no Resolve under the finger
-    await expect(page.getByTestId("panel-acked")).toContainText("Acknowledged ✓");
-    await expect(page.getByTestId("panel-acked").getByRole("button", { name: "Undo acknowledge" })).toBeVisible();
+    const spot = page.getByTestId("panel-acked");
+    await expect(spot).toHaveText("Acknowledged ✓ 03:16");
+    await expect(spot.getByRole("button")).toHaveCount(0); // the primary spot does nothing
     await expect(page.getByRole("button", { name: /^Resolve/ })).toHaveCount(0);
+    // P2-A: Undo is a link on its own line below, at the other side; nowhere near the finger (touch slop included)
+    const undoLink = page.getByTestId("panel-undo");
+    await expect(undoLink).toHaveText("Undo acknowledge");
+    const ub = (await undoLink.boundingBox())!;
+    const sb = (await spot.boundingBox())!;
+    expect(ub.y).toBeGreaterThanOrEqual(sb.y + sb.height + 12); // on a phone the primary spot is the full width: the link is clearly below it
+    expect(Math.hypot(Math.max(ub.x - at.x, 0, at.x - (ub.x + ub.width)), Math.max(ub.y - at.y, 0, at.y - (ub.y + ub.height)))).toBeGreaterThan(48);
+    expect(ub.height).toBeGreaterThanOrEqual(44);
+    // Mute and Escalate kept their places (Escalate is off, not gone), so the primary spot did not slide sideways
+    await expect(page.getByRole("button", { name: "Escalate now" })).toBeDisabled();
+    expect(sb.x + 20).toBeLessThan(at.x);
+    expect(sb.x + sb.width - 20).toBeGreaterThan(at.x);
+    expect(Math.abs(sb.y - at.b.y)).toBeLessThanOrEqual(30); // the paged line above got shorter; the spot is still under the finger's row
+    const eb = (await page.getByRole("button", { name: "Escalate now" }).boundingBox())!;
+    expect(eb.x + eb.width + 24).toBeLessThan(at.x);
+    // the slow "did it take?" taps, 1.2 s and 2.4 s later, on the same spot: still acknowledged
+    for (let n = 0; n < 2; n++) {
+      await page.waitForTimeout(1200);
+      const now = await center(spot);
+      await page.touchscreen.tap(at.x, now.y);
+    }
+    await page.waitForTimeout(300);
+    await expect(page.getByTestId("paged-line")).toContainText("Paging stopped at 03:16");
     await expect(page.locator(".bnav .cnt")).toContainText("3");
     // paging: stopped, by whom, and no calls that will not happen
     await expect(page.getByTestId("paged-line")).toContainText("Paging stopped at 03:16 — acknowledged by Haeun");
@@ -130,11 +225,10 @@ test.describe("phone 390×740 — 하은 H3 / H4", () => {
     await page.getByRole("button", { name: "← Back to the list" }).tap();
     await expect(page).toHaveURL(/\/incidents$/);
     const row = rows(page).filter({ hasText: "payments-db-1" });
-    await expect(row.locator(".ack-done")).toHaveText("Acknowledged ✓");
+    await expect(label(row)).toHaveText("Acknowledged ✓ 03:16");
     await page.screenshot({ path: test.info().outputPath("h4-3-list-row.png") });
-    await row.getByRole("button", { name: /^Undo acknowledge of payments-db-1/ }).tap();
+    await undoRow(page, row);
     await expect(page.locator(".bnav .cnt")).toContainText("4");
-    await expect(row.getByRole("button", { name: /^Acknowledge payments-db-1/ })).toBeVisible();
     await page.goto(PAY);
     await expect(page.getByTestId("paged-line")).toContainText("call Yuna"); // paging continues
     await expect(page.getByRole("button", { name: "Acknowledge", exact: true })).toBeVisible();
@@ -242,26 +336,221 @@ test.describe("desktop 1440×900", () => {
   test.use({ viewport: { width: 1440, height: 900 } });
   const badge = (page: Page) => page.getByTestId("nav-badge");
 
-  test("P1-1 a double click acknowledges one incident; the row stays until the pointer leaves it", async ({ page }) => {
+  test("P1-1 a double click acknowledges one incident; the row stays when the pointer leaves, after 6 s, until Re-sort", async ({ page }) => {
     const errors = watchErrors(page);
     await signIn(page);
     const before = await rowTitles(page);
-    const at = await center(rows(page).first().getByRole("button", { name: /^Acknowledge/ }));
+    const first = rows(page).first();
+    const at = await center(first.getByRole("button", { name: /^Acknowledge/ }));
+    const boxes0 = await rowBoxes(page);
     await page.mouse.move(at.x, at.y);
     await page.mouse.dblclick(at.x, at.y, { delay: 40 });
-    await expect(rows(page).first().locator(".ack-done")).toHaveText("Acknowledged ✓");
+    await expect(label(first)).toHaveText("Acknowledged ✓ 03:16");
+    await expect(first).toHaveClass(/dim/);
     await expect(badge(page)).toContainText("3");
     await expect(page.getByRole("button", { name: /^Acknowledge / })).toHaveCount(2);
     expect(await rowTitles(page)).toEqual(before);
     expect(await rowAt(page, at.x, at.y)).toBe(PAY_ID);
-    // the pointer leaves the row: the list sorts again right away (well before the 5 s)
-    await page.mouse.move(at.x, 40);
-    await expect.poll(() => rowTitles(page), { timeout: 1500 }).toEqual([before[1], before[2], before[3], before[0], ...before.slice(4)]);
-    await page.waitForTimeout(700);
-    await page.getByTestId("toast").getByRole("button", { name: "Undo" }).click();
+    // the pointer leaves the row, wanders over the others, and time passes: nothing moves
+    for (const y of [40, at.y + 90, at.y + 180, 40]) { await page.mouse.move(at.x, y, { steps: 4 }); await page.waitForTimeout(150); }
+    await page.waitForTimeout(6000);
+    expect(await rowTitles(page)).toEqual(before);
+    expect(without(await rowBoxes(page), PAY_ID)).toEqual(without(boxes0, PAY_ID));
+    expect((await rowBoxes(page))[PAY_ID]!.row).toEqual(boxes0[PAY_ID]!.row);
+    // the bar: the same place and size as before it had anything to say; its button is far from the Acknowledge column
+    const bar = page.getByTestId("list-bar");
+    await expect(page.getByTestId("list-pending")).toHaveText("1 acknowledged in place");
+    await expect(page.getByTestId("inc-summary")).toHaveText("7 listed · 3 open · 4 acknowledged");
+    const resort = bar.getByRole("button", { name: "Re-sort" });
+    expect((await resort.boundingBox())!.x + 200).toBeLessThan(at.b.x);
+    await page.screenshot({ path: test.info().outputPath("p1a-1440-in-place.png") });
+    // only the user sorts
+    await resort.click();
+    await expect.poll(() => rowTitles(page)).toEqual([before[1], before[2], before[3], before[0], ...before.slice(4)]);
+    await expect(page.getByTestId("list-pending")).toHaveCount(0);
+    expect((await bar.boundingBox())!.height).toBe(36);
+    // Undo: the row becomes open again where it now stands (below the open ones); again only Re-sort moves it
+    const row = rows(page).filter({ hasText: "payments-db-1" });
+    await undoRow(page, row);
     await expect(badge(page)).toContainText("4");
+    expect((await rowTitles(page))[3]).toBe(before[0]);
+    await expect(page.getByTestId("list-pending")).toHaveText("1 reopened in place");
+    await page.waitForTimeout(700); // the bar's button is armed 600 ms after the bar speaks (it may come up under a second tap)
+    await bar.getByRole("button", { name: "Re-sort" }).click();
     await expect.poll(() => rowTitles(page)).toEqual(before);
     expect(errors).toEqual([]);
+  });
+
+  for (const wait of [300, 700, 1500]) {
+    test(`P1-A mouse: Acknowledge row 1, move to row 2's button, click ${wait} ms later → row 2's incident is acknowledged`, async ({ page }) => {
+      await signIn(page);
+      const [r1, r2, r3] = [rows(page).nth(0), rows(page).nth(1), rows(page).nth(2)];
+      const [id1, id2] = [await idOf(r1), await idOf(r2)];
+      await expect(r2).toContainText("Hanbit");
+      await expect(r3).toContainText("Daon Retail");
+      const a1 = await center(r1.getByRole("button", { name: /^Acknowledge/ }));
+      const a2 = await center(r2.getByRole("button", { name: /^Acknowledge/ }));
+      const boxes0 = await rowBoxes(page);
+      await page.mouse.move(a1.x, a1.y);
+      await page.mouse.click(a1.x, a1.y);
+      await page.mouse.move(a2.x, a2.y, { steps: 6 }); // the pointer leaves row 1 here
+      await page.waitForTimeout(wait);
+      expect(without(await rowBoxes(page), id1)).toEqual(without(boxes0, id1));
+      expect(await rowAt(page, a2.x, a2.y)).toBe(id2);
+      await page.mouse.click(a2.x, a2.y);
+      await expect(label(r2)).toHaveText("Acknowledged ✓ 03:16");
+      await expect(label(r1)).toHaveText("Acknowledged ✓ 03:16");
+      await expect(r2).toContainText("Hanbit"); // QA saw Daon Retail acknowledged here instead
+      await expect(r3.getByRole("button", { name: /^Acknowledge node-exporter/ })).toBeVisible();
+      await expect(badge(page)).toContainText("2");
+      expect(without(await rowBoxes(page), id1, id2)).toEqual(without(boxes0, id1, id2));
+      expect(rowsOnly(await rowBoxes(page))).toEqual(rowsOnly(boxes0)); // the acknowledged rows kept their size too
+      await expect(page.getByTestId("list-pending")).toHaveText("2 acknowledged in place");
+      if (wait === 700) await page.screenshot({ path: test.info().outputPath("h3b-1440-two-in-place.png") });
+      await undoRow(page, r2);
+      await undoRow(page, r1);
+      await expect(badge(page)).toContainText("4");
+      expect(await rowBoxes(page)).toEqual(boxes0);
+    });
+  }
+
+  test("P2-A the slow second click (0.7 s, 1.5 s) on the same spot does not undo; Undo is behind … at the other end of the cell", async ({ page }) => {
+    await signIn(page);
+    const first = rows(page).first();
+    const at = await center(first.getByRole("button", { name: /^Acknowledge/ }));
+    await page.mouse.click(at.x, at.y);
+    for (const wait of [700, 800]) {
+      await page.waitForTimeout(wait);
+      const under = await page.evaluate(([x, y]) => document.elementFromPoint(x!, y!)?.closest("button, a, [role=menuitem]")?.textContent ?? null, [at.x, at.y]);
+      expect(under).toBeNull();
+      await page.mouse.click(at.x, at.y);
+    }
+    await page.waitForTimeout(400);
+    await expect(label(first)).toHaveText("Acknowledged ✓ 03:16");
+    await expect(badge(page)).toContainText("3");
+    await expect(page).toHaveURL(/\/incidents$/); // the action cell is not part of the row link: a click on the label opens nothing
+    const more = first.getByRole("button", { name: /^More for payments-db-1/ });
+    const mb = (await more.boundingBox())!;
+    expect(mb.x + mb.width).toBeLessThan(at.b.x - 24); // left of where the button was
+    // a double click on … opens and closes the menu; it never lands on Undo
+    await page.mouse.dblclick(mb.x + mb.width / 2, mb.y + mb.height / 2, { delay: 60 });
+    await expect(page.getByRole("menu")).toHaveCount(0);
+    await more.click();
+    const item = (await page.getByRole("menuitem", { name: "Undo acknowledge" }).boundingBox())!;
+    expect(item.y).toBeGreaterThanOrEqual(mb.y + mb.height);
+    await page.screenshot({ path: test.info().outputPath("p2a-1440-menu.png") });
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("menu")).toHaveCount(0);
+    await undoRow(page, first);
+    await expect(badge(page)).toContainText("4");
+  });
+
+  for (const width of [1440, 1280]) {
+    test(`P2-B ${width} with the panel open: Acknowledge leaves the table inside its box, no button clipped, no row moved`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await signIn(page, PAY);
+      await expect(page.getByTestId("panel")).toBeVisible();
+      await page.waitForTimeout(300);
+      expect(await overflow(page)).toBe(0);
+      const boxes0 = await rowBoxes(page);
+      const row = rows(page).filter({ hasText: "payments-db-1" });
+      const fits = () => page.evaluate(() => {
+        const tw = document.querySelector(".tw")!.getBoundingClientRect();
+        return [...document.querySelectorAll(".t.inc .c-act button, .t.inc .c-act .act-l")].every((b) => { const r = b.getBoundingClientRect(); return r.left >= tw.left && r.right <= tw.right + 0.5 && (b as HTMLElement).scrollWidth <= (b as HTMLElement).clientWidth + 1; });
+      });
+      expect(await fits()).toBe(true);
+      // from the panel
+      await page.getByTestId("panel").getByRole("button", { name: "Acknowledge", exact: true }).click();
+      await expect(label(row)).toContainText("Acknowledged ✓");
+      await expect(page.getByTestId("panel-acked")).toHaveText("Acknowledged ✓ 03:16");
+      expect(await overflow(page)).toBe(0);
+      expect(await fits()).toBe(true);
+      expect(without(await rowBoxes(page), PAY_ID)).toEqual(without(boxes0, PAY_ID));
+      expect(await page.evaluate(() => document.querySelector(".tw")!.scrollLeft)).toBe(0);
+      // and one from the list while the panel is open
+      const r2 = rows(page).nth(1);
+      const id2 = await idOf(r2);
+      await r2.getByRole("button", { name: /^Acknowledge/ }).click();
+      await expect(label(r2)).toContainText("Acknowledged ✓");
+      expect(await overflow(page)).toBe(0);
+      expect(await fits()).toBe(true);
+      expect(without(await rowBoxes(page), PAY_ID, id2)).toEqual(without(boxes0, PAY_ID, id2));
+      await expect(r2.getByRole("button", { name: /^More for / })).toBeInViewport({ ratio: 1 });
+      await page.screenshot({ path: test.info().outputPath(`p2b-${width}-panel-acked.png`) });
+      // Resolve… comes to the primary spot after 5 s; the Undo link is below it on the other side
+      await expect(page.getByRole("button", { name: "Resolve…" })).toBeVisible({ timeout: 7000 });
+      const rb = (await page.getByRole("button", { name: "Resolve…" }).boundingBox())!;
+      const ub = (await page.getByTestId("panel-undo").boundingBox())!;
+      expect(ub.y).toBeGreaterThanOrEqual(rb.y + rb.height);
+      expect(ub.x + ub.width).toBeLessThan(rb.x);
+      await page.getByTestId("panel-undo").click();
+      await expect(page.getByTestId("panel").getByRole("button", { name: "Acknowledge", exact: true })).toBeVisible();
+      await undoRow(page, r2);
+      await expect(badge(page)).toContainText("4");
+      expect(await rowBoxes(page)).toEqual(boxes0);
+    });
+  }
+
+  test("P3-A keyboard: Enter on Acknowledge leaves the focus on the row's status label; in the panel on the primary spot, then on Resolve…", async ({ page }) => {
+    await signIn(page);
+    const first = rows(page).first();
+    await first.getByRole("button", { name: /^Acknowledge/ }).focus();
+    await page.keyboard.press("Enter");
+    await expect(label(first)).toHaveText("Acknowledged ✓ 03:16");
+    await expect(label(first)).toBeFocused();
+    // Enter or Space again do nothing; Tab goes on from the row, not from the top of the page
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Space");
+    await expect(badge(page)).toContainText("3");
+    await page.keyboard.press("Shift+Tab");
+    await expect(first.getByRole("button", { name: /^More for payments-db-1/ })).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("menuitem", { name: "Undo acknowledge" })).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(first.getByRole("button", { name: /^Acknowledge payments-db-1/ })).toBeFocused();
+    await expect(badge(page)).toContainText("4");
+
+    await page.goto(PAY);
+    const ack = page.getByTestId("panel").getByRole("button", { name: "Acknowledge", exact: true });
+    await ack.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("panel-acked")).toBeFocused();
+    await expect(page.getByRole("button", { name: "Resolve…" })).toBeFocused({ timeout: 7000 });
+    await page.getByTestId("panel-undo").click();
+    await expect(ack).toBeVisible();
+    await expect(badge(page)).toContainText("4");
+  });
+
+  test("a tab change sorts the list; opening and closing a panel does not", async ({ page }) => {
+    await signIn(page);
+    const before = await rowTitles(page);
+    const first = rows(page).first();
+    await first.getByRole("button", { name: /^Acknowledge/ }).click();
+    await expect(label(first)).toHaveText("Acknowledged ✓ 03:16");
+    // open another incident's panel and close it: the list still stands as it was
+    await rows(page).nth(2).locator("a.ttl").click();
+    await expect(page.getByTestId("panel")).toBeVisible();
+    expect(await rowTitles(page)).toEqual(before);
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("panel")).toHaveCount(0);
+    expect(await rowTitles(page)).toEqual(before);
+    await expect(page.getByTestId("list-pending")).toHaveText("1 acknowledged in place");
+    // the Acknowledged tab and back: sorted
+    await page.getByRole("group", { name: "Status" }).getByRole("link", { name: /^Acknowledged/ }).click();
+    await expect(page).toHaveURL(/status=ACKNOWLEDGED/);
+    await expect(rows(page)).toHaveCount(4);
+    // Undo here: the row leaves this tab's list, but stays where it is and says so
+    const row = rows(page).filter({ hasText: "payments-db-1" });
+    const titles = await rowTitles(page);
+    await row.getByRole("button", { name: /^More for / }).click();
+    await page.getByRole("menuitem", { name: "Undo acknowledge" }).click();
+    await expect(row.getByRole("status")).toHaveText("Reopened · paging");
+    expect(await rowTitles(page)).toEqual(titles);
+    await expect(page.getByTestId("list-pending")).toHaveText("1 no longer in this list");
+    await page.getByRole("group", { name: "Status" }).getByRole("link", { name: /^Active/ }).click();
+    await expect(page).toHaveURL(/\/incidents$/);
+    await expect.poll(() => rowTitles(page)).toEqual(before);
+    await expect(badge(page)).toContainText("4");
   });
 
   test("P2-1 tab order: skip link → menu → tree → content; the legend is the tree's last stop and collapsed", async ({ page }) => {
@@ -495,7 +784,58 @@ test("R-4 security headers on pages, the login page and redirects", async ({ req
     expect(csp, path).toContain("default-src 'self'");
     expect(csp, path).toContain("font-src 'self' https://fonts.gstatic.com");
     expect(csp, path).not.toContain("unsafe-eval");
+    expect(h["permissions-policy"], path).toBe("camera=(), microphone=(), geolocation=(), payment=(), usb=()");
+    expect(h["strict-transport-security"], path).toBe("max-age=31536000; includeSubDomains"); // this is a production build
   }
+});
+
+test("S-3 dev sign-in only ever redirects to a path on this origin", async ({ request, baseURL }) => {
+  for (const next of ["/%09/evil.example", "/%0A/evil.example", "/%0D/evil.example", "//evil.example", "/%5Cevil.example", "/\\evil.example", "/%2F%2Fevil.example", "/%252F%252Fevil.example", "https://evil.example", "/incidents//evil.example"]) {
+    const r = await request.get(`/auth/dev-login?next=${next}`, { maxRedirects: 0 });
+    expect(r.status(), next).toBe(307);
+    expect(r.headers()["location"], next).toBe(`${baseURL}/incidents`);
+  }
+  const ok = await request.get(`/auth/dev-login?next=${encodeURIComponent(`${PAY}?customer=mirae`)}`, { maxRedirects: 0 });
+  expect(ok.headers()["location"]).toBe(`${baseURL}${PAY}?customer=mirae`);
+});
+
+test("S-3 the login page does not pass a hostile next on to the dev sign-in link", async ({ page }) => {
+  await page.goto("/login?next=/%09/evil.example");
+  await expect(page.getByRole("link", { name: /sign in as Haeun Kim/ })).toHaveAttribute("href", "/auth/dev-login");
+  await page.goto(`/login?next=${encodeURIComponent("/people?customer=bora")}`);
+  await expect(page.getByRole("link", { name: /sign in as Haeun Kim/ })).toHaveAttribute("href", "/auth/dev-login?next=%2Fpeople%3Fcustomer%3Dbora");
+});
+
+test("D-26 Customers is in the menu and lives in the shell; P3-B the tree's problem count is explained; the panel path wraps after ›", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await signIn(page, "/incidents?customer=daon");
+  const main = page.getByRole("navigation", { name: "Main", exact: true });
+  await expect(main.getByRole("link")).toHaveText([/^Incidents/, "Monitoring", "Call order", "People", "Maintenance", "Customers", "Settings"]);
+  await main.getByRole("link", { name: "Customers", exact: true }).click();
+  await expect(page).toHaveURL(/\/customers\?customer=daon$/);
+  await expect(page.locator("#main h1")).toHaveText("Customers");
+  await expect(main.getByRole("link", { name: "Customers", exact: true })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("tree")).toBeVisible();
+  await expect(page.getByTestId("scope-echo")).toHaveText("Daon Retail");
+  const sw = page.getByRole("switch", { name: "Only with problems, 5 customers with problems" });
+  await expect(sw).toBeVisible();
+  await expect(page.getByTestId("problem-count")).toHaveAttribute("title", "5 customers with problems");
+  // phone: six items fit the bottom menu, each at least 44px, nothing cut
+  await page.setViewportSize({ width: 390, height: 740 });
+  const bnav = page.locator(".bnav");
+  await expect(bnav.getByRole("link")).toHaveText([/^Incidents/, "Monitor", "Call order", "People", "Maint.", "Customers"]);
+  expect(await bnav.evaluate((e) => e.scrollWidth - e.clientWidth)).toBe(0);
+  for (const a of await bnav.getByRole("link").all()) { const b = (await a.boundingBox())!; expect(b.width).toBeGreaterThanOrEqual(44); expect(b.x).toBeGreaterThanOrEqual(0); expect(b.x + b.width).toBeLessThanOrEqual(390); }
+  // panel title at 1024: a second line never starts with ›
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.goto("/incidents");
+  await rows(page).filter({ hasText: "api-alb" }).locator("a.ttl").click();
+  await expect(page.getByTestId("panel-path")).toHaveText("Hanbit Logistics›Tracking›Public API");
+  const starts = await page.getByTestId("panel-path").evaluate((h) => {
+    const segs = [...h.children] as HTMLElement[];
+    return segs.map((s, n) => ({ t: s.textContent, first: n === 0 || s.offsetTop > segs[n - 1]!.offsetTop }));
+  });
+  for (const s of starts) expect(s.t!.startsWith("›")).toBe(false);
 });
 
 test("R-4 the CSP does not break the app: no violation on the list, the panel or the dialogs", async ({ page }) => {

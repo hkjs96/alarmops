@@ -4,6 +4,7 @@ import type { ScopeSel } from "@alarmops/design-system";
 import type { OutsideCounts } from "@/lib/api/types";
 
 export interface ToastAction { label: string; href?: string; onAction?: () => void }
+export type LocalMark = "RESOLVED" | "REOPENED";
 export interface ShellApi {
   /** current list filter (empty when the address has none or it is not valid) */
   sel: ScopeSel;
@@ -17,6 +18,11 @@ export interface ShellApi {
   /** incidents acknowledged in this visit, id → undo token. The row, the card and the panel share it, so Undo is offered wherever the incident shows. */
   acks: Readonly<Record<string, string>>;
   setAck: (id: string, undoToken: string | null) => void;
+  /** what the user did in this visit to an incident that may have left the list: its row stays and says so */
+  marks: Readonly<Record<string, LocalMark>>;
+  mark: (id: string, m: LocalMark | null) => void;
+  /** the incidents list's on-screen order (lib/stable-list.ts). Kept here so opening or closing a panel does not re-sort it; dropped on leaving Incidents. */
+  listView: { current: unknown };
   setOutside: (o: OutsideCounts | null) => void;
 }
 

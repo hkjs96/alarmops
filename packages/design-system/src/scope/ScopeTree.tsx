@@ -127,6 +127,8 @@ export function ScopeTree(props: ScopeTreeProps) {
     [customers, value, query, problems, maps, mode],
   );
   const rows = view.rows;
+  // what the number beside "Only with problems" counts (QA P3-B)
+  const problemLabel = `${view.problemCount} customer${view.problemCount === 1 ? "" : "s"} with problems`;
 
   // when the filter changes, the chosen branch opens again even if it was collapsed by hand
   const vKey = selKey(value);
@@ -331,10 +333,11 @@ export function ScopeTree(props: ScopeTreeProps) {
       </div>
       <button
         type="button" className="stree-prob" role="switch" aria-checked={problems}
+        aria-label={`Only with problems, ${problemLabel}`}
         title="Show only customers that have an open incident or a call-order health problem"
         onClick={() => { setProblems((p) => !p); setCur(null); }}
       >
-        <span className="sw"><span className="mk chk" /></span><span>Only with problems</span><span className="n">{view.problemCount}</span>
+        <span className="sw"><span className="mk chk" /></span><span>Only with problems</span><span className="n" title={problemLabel} data-testid="problem-count">{view.problemCount}</span>
       </button>
       <div className={cx("stree-hint", refused && "warn")} role="status">{hint}</div>
       <div

@@ -30,7 +30,8 @@ export interface ConsoleApi {
   getNotifications(id: string, cursor?: string): Promise<Paginated<NotificationLogEntry>>;
   ack(id: string, version: number): Promise<AckResult>;
   resolve(id: string, version: number, body: { kind?: ResolveKind; note?: string }): Promise<IncidentDetail>;
-  escalate(id: string): Promise<IncidentDetail>;
+  /** If-Match like ack and resolve (security S-4): "Escalate now" pressed on a stale panel must not page the next step of an incident that changed */
+  escalate(id: string, version: number): Promise<IncidentDetail>;
   bulkPreview(action: "ack" | "resolve", items: BulkItem[]): Promise<BulkPreview>;
   bulkExecute(action: "ack" | "resolve", items: BulkItem[]): Promise<BulkResult>;
   bulkUndo(undoToken: string): Promise<{ restored: string[] }>;
@@ -82,7 +83,7 @@ export function createHttpApi(opts: { baseUrl: string; fetch?: typeof fetch; hea
     getNotifications: (id, cursor) => call("GET", `/incidents/${enc(id)}/notifications` + toQuery({ cursor })),
     ack: (id, version) => call("POST", `/incidents/${enc(id)}/ack`, {}, { "If-Match": String(version) }),
     resolve: (id, version, body) => call("POST", `/incidents/${enc(id)}/resolve`, body, { "If-Match": String(version) }),
-    escalate: (id) => call("POST", `/incidents/${enc(id)}/escalate`, {}),
+    escalate: (id, version) => call("POST", `/incidents/${enc(id)}/escalate`, {}, { "If-Match": String(version) }),
     bulkPreview: (action, items) => call("POST", "/incidents/bulk", { action, items, preview: true }),
     bulkExecute: (action, items) => call("POST", "/incidents/bulk", { action, items, preview: false }),
     bulkUndo: (undoToken) => call("POST", "/incidents/bulk/undo", { undoToken }),
