@@ -404,3 +404,98 @@
 **머지 가능 — P1 0건, P2 0건, [차단] 0건.** P1-A는 고쳐졌다: 1행 Ack 뒤 2행으로 옮겨 누르면 2행이 Ack되고(0.3/0.7/1.5초, 패널 열림, 스크롤, 필터, 세 건 연속 모두), Ack·Undo·Resolve 어느 구간에서도 행 상자가 움직이지 않았으며 재정렬은 Re-sort·탭·필터·검색 변경 때만 일어난다. P2-A(Undo가 Ack 자리와 떨어짐)·P2-B(패널 옆 넘침)도 통과, 새로 시도한 10가지 경로에서 엉뚱한 인시던트가 Ack/Undo/Resolve된 경우는 없었다. P3 5건은 백로그. 남은 관문은 사용자 승인.
 
 점검 한계: 목 서버에는 새 인시던트가 들어오는 자동 갱신이 없어 "N new · Show" 줄은 화면에서 못 봄(단위 테스트만 있음). 터치는 Playwright 에뮬레이션이고 폰 스크롤은 휠 입력으로 대신함. 대비 4.5:1은 눈으로만 확인. 샌드박스에서 Google Fonts가 막혀 Space Mono는 대체 글꼴로 렌더링됨.
+
+---
+
+## Console Call order 점검 — 2026-11-11
+
+대상: `apps/console` Call order 화면 (feat/console-call-order, 커밋 `7b636ae`). 만든 쪽과 무관한 독립 점검이며 제품 코드는 고치지 않았다. 빌드본을 직접 기동(`next build` → `E2E_ALLOW_MOCK=1 MOCK_API=1 next start -p 3120`, 시나리오 묶음마다 재기동해 목 상태 초기화, `/auth/dev-login`으로 로그인)하고 Playwright로 1440×900·1280×800(마우스·키보드), 390×844(터치)에서 밟았다. 판정은 화면과 캡처를 직접 보고 했다. 캡처: `docs/qa/shots/console-call-order-check/` (gitignore). 보안 검토는 `/home/claude/alarmops-security-review-callorder.md`.
+
+### 준호 (1440, 키보드 우선)
+
+| 시나리오 | 결과 | 클릭/키 | 관찰 |
+|---|---|---|---|
+| Mirae Pay의 호출 순서 읽기 (누가·어떻게·언제) | 통과 | 행 열기 1 | "Slack + call on shift in MSP night desk (Haeun now) now → Call Yuna Seo (Mirae Pay) at 10 min → Call everyone in Responders (5) at 15 min → repeat once." Paged (5)·Also notified (4) 이름까지 한 화면. Edit 전 입력 요소 0개 |
+| 인시던트 패널 Paged 줄과 일치 | 통과 (P2-A) | — | Mirae Pay › Core › Payments API 인시던트(03:12 발생): "Slack + call Haeun 03:12 ✓ → call Yuna 03:22 → call everyone in Responders (5) 03:27". 사람·수단·시각(0/10/15분) 모두 일치. 다만 플랜 이름이 다름: 인시던트 "CUSTOM STEPS · URGENT (EDITED)", Call order "Custom, started from Standard (edited)" |
+| Edit → 2단계 분 변경 → Save (Mirae Pay) | 통과 | 16키 (열린 패널에서는 4키) | Ctrl K, `mirae`, Enter, Tab×4, Enter, E(2단계 분에 바로 포커스·전체 선택), `8`, Ctrl+Enter, Enter. 확인 상자가 "step 2 10 → 8 min", 바뀌는 4개 서비스, "Not changed: Data platform (own steps)"를 보여 줌. 저장 뒤 패널 닫힘, 포커스는 Mirae Pay 행, 토스트 "Saved for Mirae Pay · step 2 10 → 8 min · 4 services" |
+| 이어서 Daon Retail, Hanbit Logistics | 통과 | 15키 / 17키 | 각각 자기 고객에만 저장(2→3, 2→4). 저장 버튼·확인 상자·토스트가 매번 고객 이름을 말함. 공유 로테이션을 쓰는 다른 고객 행은 변화 없음 |
+| 엉뚱한 고객에 저장 시도: 편집 중 트리로 다른 고객 | 통과 | — | "Unsaved changes for Mirae Pay" (Save for Mirae Pay / Keep draft and continue / Discard / Cancel). 네 선택 모두 Mirae Pay에만 적용되거나 아무것도 저장 안 됨. 가드가 뜬 상태의 Ctrl+Enter는 무시 |
+| 〃 Ctrl/⌘K로 다른 고객 | 통과 | — | 같은 가드. Save를 고르면 Mirae Pay에 저장한 뒤 Daon 목록으로 이동 |
+| 〃 목록에서 다른 고객 행 클릭 | 통과 | — | 같은 가드. Discard 뒤 열린 Daon 패널은 읽기 화면, Daon 값 변화 없음 |
+| 〃 편집 중 뒤로가기 | 통과 | — | 앱 안 이동이면 가드("Keep draft and go back"), 문서를 새로 불러온 이전 주소로 가면 묻지 않고 초안으로 남김. 어느 경우에도 다른 고객에 저장되지 않음 |
+| 〃 Mirae 초안을 둔 채 Daon 편집 | 통과 | — | Daon 편집기는 Daon 값(2분)으로 열리고 저장 버튼은 "Save for Daon Retail". Mirae 초안은 "Draft for Mirae Pay" 줄에 따로 남음 |
+| 편집 중 인시던트 Ack하고 돌아오기 (초안 이어가기) | 통과 | 클릭 5 | 메뉴 Incidents → Keep draft → Acknowledge → Call order → Resume. 2단계 6분이 그대로, 문장에 "at 6 min was 10 min". 새로고침 뒤에도 패널 안에 초안 줄이 남고 E로 이어짐. Call order 밖(Incidents)에서는 초안이 있다는 표시 없음(P3) |
+| 서비스 → 고객 전체로 넓히기 | 통과 | 클릭 3 | Orders API 편집 → "Edit the whole customer instead…" → 상자가 넓어지는 범위(2개 서비스), 닿지 않는 곳(Orders API, own steps)을 말하고 기본 포커스는 "Stay on …". 넓힌 뒤 헤더·저장 버튼이 "Hanbit Logistics", "← Back to Orders API" 있음. 저장 확인 상자에 "Wider than the row you opened". 서비스에서 고치던 값은 넘어가지 않고 그 서비스 초안으로 남음 |
+| 상속 서비스에 own steps 만들기 | 통과 | 3키 (E, 숫자, Ctrl+Enter) | Mirae Pay › Core › Checkout: 버튼 "Create own steps for …", 저장 버튼 "Save own steps for Mirae Pay › Core › Checkout". 서비스 1개라 확인 상자 없이 저장, 토스트에 Undo. 목록에 OWN STEPS 행이 생기고 고객 패널은 "used by 3 services (Core › Checkout, Data platform keep own steps)" |
+| own steps 제거 | 통과 | 클릭 3 | Edit → "Remove own steps of …" → 확인 상자(기본 포커스 "Keep them", "This has no Undo"). 제거 뒤 다시 Mirae Pay를 따름, 고객 단계는 변화 없음 |
+| 두 탭에서 같은 고객 편집 (409) | 통과 | — | 먼저 저장한 탭의 값(8분)만 남음. 두 번째 탭: "Changed — reload. Someone else changed the call order of Mirae Pay… Nothing was saved, and your draft is kept", 저장 버튼 비활성. Reload 뒤 NOW SAVED / YOUR DRAFT 두 문장을 나란히 보여 주고 Keep my draft / Discard 선택. 오래된 초안을 Resume해 저장해도 같은 409 |
+
+### 민재 (1440)
+
+| 시나리오 | 결과 | 클릭/키 | 관찰 |
+|---|---|---|---|
+| UNREACHABLE / AT RISK 고객 찾기 | 통과 | 0 (첫 화면) | 목록 맨 위 두 행이 Kumho Clinic(UNREACHABLE, 빨간 띠), Lumen Bank(AT RISK). 트리 "Other customers"에도 표시, "What do these mean?"에 뜻 설명. Only with problems를 켜면 목록도 5개 고객으로 줄고 "9 customers … are not listed · Show all customers" 안내 |
+| 패널에서 이유 이해 | 통과 (P3) | 클릭 1 | Kumho: "Nobody in Responders can be called or texted. Add a staff member or a Pageable customer person." + Paged (0). Lumen: 단계별로 "reaches only Kyungmin Oh, who has no verified …" 3줄 + "nobody on shift from Sat Nov 14 09:00 to Sun Nov 15 09:00 KST". 다만 Lumen 1단계는 "no verified Slack"이라는데 아래 Kyungmin 카드에는 SMS·Call만 not verified로 나옴 |
+| Pageable 응답자를 추가해 하나 고치기 | 통과 | 클릭 5 | Kumho 행 → Edit responders for Kumho Clinic → MSP staff 선택(2) → Add to Kumho Clinic. 배너가 바로 사라지고 Paged (3), 목록 행·트리 표시도 갱신, 토스트에 Undo. 고객 사람을 Pageable로 바꾸는 길(선택 상자)도 동작: 전화 없는 사람만 있으면 UNREACHABLE 유지 + 이유, 미확인 전화면 AT RISK |
+| Responders에서 사람 제거 | **P1-A** | 클릭 2 | Remove는 확인 없이 바로 실행되고 아래 사람이 같은 자리로 올라온다. 같은 자리를 한 번 더 누르면 다음 사람도 제거됨(아래 문제 목록) |
+
+### 하은 (390, 터치)
+
+| 시나리오 | 결과 | 클릭/키 | 관찰 |
+|---|---|---|---|
+| 타이핑 없이 Daon Retail › Commerce › Checkout에 누가 호출되는지 읽기 | 통과 | 탭 4 (+1로 패널) | SHOWING → Daon Retail → Commerce → Checkout. 목록에 "YOUR FILTER" 행: Junho, Minjae, Soyeon · Slack → 2 min SMS → 7 min call, "inherits from Daon Retail". 행을 누르면 패널에 문장과 Paged (3) 이름 |
+| 폰에서 작은 수정 | 통과 | 탭 3 + 숫자 1 | Create own steps… → 2단계 분(숫자 자판, 글자 16px) → Save own steps for Daon Retail › Commerce › Checkout. 저장 버튼은 화면 아래 고정, 전체 경로가 한 줄에 다 보임. 토스트에 Undo |
+| 폰에서 이탈 가드 | 통과 | — | 하단 메뉴·뒤로가기 모두 가드. 버튼 4개 전부 316×44 이상, 가로 넘침 없음. Keep draft 뒤 목록에 "Draft for …" 줄(Resume/Discard 44px), Resume하면 값 유지 |
+| 폰에서 고객 수준 확인 상자 · 넓히기 상자 · Responders 편집 | 통과 | — | 확인 상자 358×499, 넓히기 358×538로 화면 안, 버튼 44px. Responders 편집의 선택 상자·Remove·입력도 44px 이상 |
+
+### 신입 (1280)
+
+| 시나리오 | 결과 | 클릭/키 | 관찰 |
+|---|---|---|---|
+| "Inherited from" 이해 | 통과 | — | "INHERITED FROM Mirae Pay. Checkout has no steps of its own and follows it. Open the call order of Mirae Pay →", 아래 "Where steps come from" 트리에 inherits / OWN STEPS / CUSTOMER STEPS 표시. 바닥 글: "Read only. To change these steps for everything that follows them, open Mirae Pay." |
+| "Own steps" 이해 | 통과 (P3) | — | 편집 화면 맨 위 "Creating own steps for … Started from the steps of Mirae Pay. Nothing changes until you save… Mirae Pay itself is not changed." 다만 E 키로 들어가면 2단계 입력으로 스크롤되어 이 설명이 화면 위로 밀려남. 문장 "1 service of … stop following"은 어색 |
+| 순서 방식 4가지 | 통과 | — | 각 카드에 한 줄 설명, 쓸 수 없는 방식은 이유와 함께 비활성("Mirae Pay has no rotation of its own"). 방식을 바꾸면 문장이 바로 바뀌고 "was …"로 이전 값 표시. 플랜을 누르면 단계가 바뀌고 "Steps replaced with the Urgent plan. Put my steps back" |
+| 분이 늘어나지 않음 (7,7 / 9,7 / 0) | 통과 | — | "Step 3 (7 min) would not come after step 2 (9 min). Fix the minutes to save." 저장 시도하면 해당 입력으로 포커스, 저장 안 됨 |
+| 닿는 사람 없음 | 통과 | — | 채널 전부 끔: "Step n: choose at least one of Slack, SMS or Call." Responders 0명(Kumho): "Nobody would be called… add someone to Responders", 저장 안 됨 |
+| 단계 전부 지우기 | 통과 | — | 마지막 1단계의 ✕는 비활성. 1단계만 남긴 저장은 가능(확인 상자에 지워진 단계 표시) |
+| 13단계 | **P2-B** | — | + Add step이 끝없이 눌림. 15단계가 경고 없이 저장되고, 21단계는 "Could not save: Invalid steps."만 나옴(한도 20이라는 말도, 어느 단계인지도 없음) |
+| 반복 99 | 통과 | — | 입력이 한 자리로 잘려 "9", "Repeat must be a whole number from 0 to 5.", 저장 안 됨 |
+| 음수·큰 값·문자 붙여넣기 | 통과 (P3) | — | 숫자가 아닌 글자는 입력 단계에서 버려짐: `abc`·전각 `３` → 빈 칸(오류 표시), `99999` → `9999`(0–1440 오류), `12 minutes<script>` → `12`. 그런데 `-5` → `5`, `2.5` → `25`, `1e1` → `11`로 조용히 바뀜(문장의 "was"로만 알 수 있음) |
+
+### 공통 점검
+
+| 항목 | 폭 | 결과 | 관찰 |
+|---|---|---|---|
+| 저장 뒤 포인터 아래가 움직이지 않음 (단계 저장) | 1440·390 | 통과 | 저장하면 패널이 닫히고 목록 행 순서·y 좌표 유지(Mirae 287, Daon 287, Hanbit 287 그대로). 저장 버튼 자리에는 목록 셀(누르면 읽기 패널)만 옴. 서비스 저장 버튼 더블클릭 → 1번만 저장. 390에서는 토스트 글자가 그 자리에 옴(Undo 버튼은 옆) |
+| 〃 (Responders 변경) | 1440·390 | **P1-A** | Remove 뒤 다음 사람의 Remove가 같은 자리에 옴. Add 뒤에는 그 자리에 선택 상자가 옴(해 없음) |
+| 저장 라벨은 항상 전체 경로 | 전 폭 | 통과 | "Save for Mirae Pay", "Save for Hanbit Logistics › Fulfilment › Orders API", "Save own steps for Daon Retail › Commerce › Checkout". 확인 상자·가드·토스트·초안 줄도 같은 경로. 가드 안 버튼은 own steps 생성일 때도 "Save for …"(P3) |
+| 읽기 먼저 | 전 폭 | 통과 | 패널을 열면 입력 요소 0개. 링크·새로고침은 항상 읽기 화면. Responders도 "Edit responders for …"를 눌러야 입력이 나옴. 단 Responders 편집 중에도 바닥 글은 "Read only until you press Edit."(P3) |
+| 레이아웃 | 1440·1280·390 | 통과 (P3) | 가로 넘침 0(390 scrollWidth 390: 목록, 패널, 편집, 가드, 확인 상자, Responders 편집). 1280은 트리가 레일로 접히고 패널 492px. 1440 편집기의 1단계 선택 상자 글자가 "On shift in MSP night desk (Haeun no"에서 잘림 |
+| 터치 44px | 390 | 통과 | 패널·편집·가드·확인 상자·초안 줄·Responders 편집의 버튼·선택 상자·입력 모두 44px 이상(방식 라디오는 카드 전체가 누름 영역) |
+| 다크 모드 | 1440·390 | 통과 | 읽기·편집·확인 상자·UNREACHABLE/AT RISK 배너 모두 대비 정상(눈으로 확인) |
+| Incidents 화면과의 일관성 | 1440 | P2-A · P3 | 사람·수단·시각은 일치. 플랜 이름 불일치(P2-A). Incidents는 J/K로 행 이동, Call order는 J/K 없음(Tab만 — 페이지 맨 위에서 Mirae 행까지 23번, Ctrl K를 쓰면 4번). 확인 상자 기본 포커스: Incidents Resolve와 own steps 제거는 안전한 쪽, 단계 저장은 "Save for …" 쪽 |
+| 막다른 곳 | 전 폭 | 통과 (P3) | Rotations·Templates 탭은 "Not built yet" 스텁(메뉴·탭 유지). 없는 주소는 같은 Not found인데 Call order 주소에서도 버튼은 "Back to Incidents". 409·검증 오류·가드 모두 빠져나갈 길 있음 |
+| 콘솔 오류 | 전 폭 | 통과 | 앱 오류 0건(샌드박스에서 Google Fonts 요청만 실패) |
+
+### 문제 목록
+
+| 등급 | # | 문제 | 재현 |
+|---|---|---|---|
+| P1 | A | Responders의 Remove가 확인 없이 한 번에 실행되고, 지워진 줄 아래 사람이 같은 자리로 올라와 그 사람의 Remove가 포인터 아래에 온다. 같은 자리를 한 번 더 누르면(1.5초 뒤에도) 다음 사람까지 제거된다. 토스트 Undo는 마지막 한 건만 되돌리고 첫 번째 제거의 Undo는 사라진다. Daon Retail(열린 인시던트 있음)에서 두 번 누르면 MSP staff 0명, "UNREACHABLE … nobody for Daon Retail is reached"가 된다. 이전 Incidents P1-A(Ack 뒤 행이 포인터 아래로 올라옴)와 같은 종류 | 1440: `/c/daon/call-order` → Edit responders for Daon Retail → Junho Park의 Remove 클릭 → 같은 자리 다시 클릭 → Minjae Lee도 제거, Undo는 Minjae만. 390도 같은 배치 (P1-1440-after-first, P1-1440-after-second) |
+| P2 | A | 같은 Mirae Pay 단계를 인시던트 패널은 "CUSTOM STEPS · URGENT (EDITED)", Call order는 "Custom, started from Standard (edited)"(편집기에서도 Standard (edited) 선택)라고 한다. 어느 플랜에서 출발했는지 두 화면이 다르게 말함 | `/incidents?customer=mirae` → 인시던트 패널 PAGED 아래 줄 vs `/c/mirae/call-order`의 COMES FROM (A-mirae-incpanel-1440, A-mirae-read-1440) |
+| P2 | B | 단계 수 한도가 화면에 없다. + Add step이 계속 눌리고 15단계가 그대로 저장되며(목록 행·토스트가 매우 길어짐), 21단계부터는 "Could not save: Invalid steps."만 나와 무엇을 고쳐야 하는지 알 수 없다 | 1280: `/c/daon/call-order` → Edit → + Add step 12번 → 저장됨. `/c/hanbit/fulfilment/orders-api/call-order` → Edit → + Add step 19번 → Ctrl+Enter (V-15steps-list, V-21steps) |
+| P3 | C | 여러 서비스에 걸친 저장 확인 상자("This save has no Undo")의 기본 포커스가 "Save for …"라 Ctrl+Enter 뒤 Enter(또는 Enter를 누른 채)로 저장된다. 같은 화면의 own steps 제거와 Incidents Resolve는 기본이 안전한 쪽 | 1440: 고객 패널 E → 숫자 → Ctrl+Enter → Enter |
+| P3 | D | 분 입력이 `-5`→`5`, `2.5`→`25`, `1e1`→`11`로 조용히 바뀐다 | 1280: Edit → 2단계 분에 `2.5` 입력 |
+| P3 | E | Call order 목록에 J/K 행 이동이 없다(Incidents에는 있음). 바닥 안내도 "Enter open · E edit"뿐 | 1440: `/call-order`에서 J |
+| P3 | F | Responders를 편집하는 중에도 패널 바닥 글이 "Read only until you press Edit." / "Read only. An edit here reaches 3 services." | Edit responders for … 누른 상태 (H-resp-edit-390) |
+| P3 | G | 문구: 문장의 "(Haeun now) now →" 반복, "After saving, 1 service of … stop following Mirae Pay", 단계만 추가했는데 "Ordering switched from All at once to Custom, because you changed who a step calls", 플랜을 바꾼 뒤 문장이 "Call was Slack … was on shift in …"로 읽기 어려움 | 각 편집 화면 |
+| P3 | H | Lumen Bank 배너는 Kyungmin Oh에게 "no verified Slack"이라는데 Responders 카드에는 SMS·Call만 not verified로 나온다 | `/c/lumen/call-order` (M-lumen-1440) |
+| P3 | I | 상속 서비스에서 E 키로 편집에 들어가면 2단계 입력으로 스크롤되어 "Creating own steps for …" 설명이 보이지 않는다(저장 버튼 라벨로는 알 수 있음) | 1280: `/c/mirae/core/checkout/call-order` → E (N-inherited-edit-1280) |
+| P3 | J | 1440 편집기 1단계 선택 상자 글자 잘림("(Haeun no") | `/c/mirae/call-order` → Edit (A-mirae-edit-1440) |
+| P3 | K | Call order 주소의 Not found 버튼이 "Back to Incidents". 초안이 있어도 Call order 밖에서는 표시가 없음 | `/c/nope/call-order` |
+
+### 판정
+
+**머지 불가 — P1 1건, P2 2건. 보안 [차단] 0건.** 단계 편집의 핵심(읽기 먼저, 전체 경로 저장 라벨, 이탈 가드, 초안, 넓히기, own steps, 409)은 세 폭 모두에서 통과했고, 트리·Ctrl/⌘K·행 클릭·뒤로가기·초안 Resume 어느 경로로도 엉뚱한 고객에 단계가 저장되지 않았다. 막는 것은 Responders 편집의 Remove(P1-A)다: 확인 없이 실행되고 줄이 포인터 아래로 올라와 두 번 누르면 두 사람이 빠지며 고객이 UNREACHABLE이 될 수 있다. P1-A를 고치고(줄 자리를 유지하거나 확인을 받고, Undo를 건마다 남김) P2-A·B를 고치거나 사유와 함께 백로그로 넘긴 뒤 재점검 필요.
+
+점검 한계: 목 API 기준이라 백엔드의 실제 409·검증 문구는 다를 수 있다. 터치는 Playwright 에뮬레이션. 대비는 눈으로만 확인. 샌드박스에서 Google Fonts가 막혀 대체 글꼴로 렌더링됨. Rotations·Templates 탭은 스텁이라 점검 대상이 아님.
