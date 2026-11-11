@@ -58,3 +58,9 @@ export async function verifySession(token: string | undefined, secret: string | 
 }
 
 export const DEV_USER = { sub: "usr-haeun", email: "haeun.kim@example.com", name: "Haeun Kim" };
+/** Mock mode only: who /auth/dev-login?as=… signs in. The role belongs to the user in the (mock) API, not to the cookie. */
+export const DEV_USERS: Record<string, typeof DEV_USER> = {
+  admin: DEV_USER,
+  operator: { sub: "usr-minjae", email: "minjae.lee@example.com", name: "Minjae Lee" },
+  viewer: { sub: "usr-sora", email: "sora.yoon@example.com", name: "Sora Yoon" },
+};

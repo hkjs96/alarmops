@@ -3,7 +3,7 @@ import { mockMode } from "@/lib/mode";
 import { SESSION_COOKIE, sessionSecret, verifySession } from "@/lib/auth/session";
 
 /** Default deny (security review C-2): everything except /login and static assets needs a valid session. */
-const PUBLIC = [/^\/login(\/|$)/, /^\/auth\/dev-login$/];
+const PUBLIC = [/^\/login(\/|$)/, /^\/auth\/dev-login$/, /^\/auth\/sign-out$/];
 
 export async function middleware(req: NextRequest) {
   const { pathname, search } = req.nextUrl;

@@ -3,12 +3,13 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  OutsideLine, ScopeLine, ScopeSearch, ScopeSheet, ScopeTree, clampTreeWidth, cx, normalizeSel, readSession, resolveSel, sameSel, selKey, selLabel, writeSession,
+  OutsideLine, ScopeLine, ScopeSearch, ScopeSheet, ScopeTree, clampTreeWidth, cx, installSameSpotGuard, normalizeSel, readSession, resolveSel, sameSel, selKey, selLabel, writeSession,
   TREE_DEFAULT_WIDTH, type ScopeCustomerNode, type ScopeLevel, type ScopeSel,
 } from "@alarmops/design-system";
 import type { OutsideCounts } from "@/lib/api/types";
 import { clearLevel, isPanelPath, parseScopeParams, scopeQuery } from "@/lib/scope";
-import { ShellContext, type LeaveGuard, type LocalMark, type ShellApi, type ToastAction } from "./ShellContext";
+import { ShellContext, type LeaveGuard, type LocalMark, type ShellApi, type ShellUser, type ToastAction } from "./ShellContext";
+import { claimStorageFor } from "@/lib/user-storage";
 import { NotFoundBody } from "./NotFoundBody";
 import { TopNav } from "./TopNav";
 import { panelListPath, sectionFor } from "@/lib/nav";
@@ -19,7 +20,8 @@ interface Toast { id: number; text: string; action?: ToastAction; at: number }
 /** A toast's button does nothing this soon after the toast appeared: it may have come up under a second tap. */
 const TOAST_ARM_MS = 600;
 
-export function ScopeShell({ customers, userName, openCount, children }: { customers: ScopeCustomerNode[]; userName: string; openCount: number; children: ReactNode }) {
+export function ScopeShell({ customers, user, openCount, children }: { customers: ScopeCustomerNode[]; user: ShellUser; openCount: number; children: ReactNode }) {
+  const userName = user.name;
   const pathname = usePathname();
   const sp = useSearchParams();
   const router = useRouter();
@@ -59,6 +61,10 @@ export function ScopeShell({ customers, userName, openCount, children }: { custo
   const [toastState, setToast] = useState<Toast | null>(null);
   const focusTitle = useRef(false);
 
+  // One rule for every list (design-system list/same-spot): a second press where a row action was just pressed does nothing.
+  useEffect(() => installSameSpotGuard(), []);
+  // before anything reads sessionStorage (layout effects run before every effect): what another user left in this tab goes
+  useLayoutEffect(() => { claimStorageFor(user.id); }, [user.id]);
   useLayoutEffect(() => {
     const s = readSession<Prefs>(PREFS_KEY);
     if (s) setPrefs({ col: typeof s.col === "boolean" ? s.col : null, w: clampTreeWidth(Number(s.w) || TREE_DEFAULT_WIDTH) });
@@ -149,8 +155,8 @@ export function ScopeShell({ customers, userName, openCount, children }: { custo
 
   const clearToast = useCallback(() => setToast(null), []);
   const api: ShellApi = useMemo(
-    () => ({ sel, label, filtered, totalCustomers: customers.length, toast, clearToast, setOutside, acks, setAck, marks, mark, listView, customers, problemsOnly, callOrderView, requestLeave, setLeaveGuard }),
-    [sel, label, filtered, customers, toast, clearToast, acks, setAck, marks, mark, problemsOnly, requestLeave, setLeaveGuard],
+    () => ({ user, sel, label, filtered, totalCustomers: customers.length, toast, clearToast, setOutside, acks, setAck, marks, mark, listView, customers, problemsOnly, callOrderView, requestLeave, setLeaveGuard }),
+    [user, sel, label, filtered, customers, toast, clearToast, acks, setAck, marks, mark, problemsOnly, requestLeave, setLeaveGuard],
   );
 
   // Ctrl/⌘K opens "Filter to…" on every screen that has a filter; Esc with the focus in the tree closes an open panel
@@ -199,7 +205,7 @@ export function ScopeShell({ customers, userName, openCount, children }: { custo
   return (
     <ShellContext.Provider value={api}>
       <div ref={shellRef} className={cx("shell", mounted && "mounted", ready && "ready", settings && "no-tree")} data-panel={panelOpen ? "1" : "0"} data-rail={rail ? "1" : "0"}>
-        <TopNav openCount={openCount} userName={userName} scopeQuery={scopeQuery(sel)} onOpenFinder={settings ? undefined : () => { setToast(null); setFinder(true); }} />
+        <TopNav openCount={openCount} userName={userName} role={user.role} scopeQuery={scopeQuery(sel)} onOpenFinder={settings ? undefined : () => { setToast(null); setFinder(true); }} />
         {settings ? (
           <ScopeLine totalCustomers={customers.length} mineCustomers={mineCount} onClear={() => undefined} locked={<><b>MSP-wide settings</b> · all {customers.length} customers</>} />
         ) : (

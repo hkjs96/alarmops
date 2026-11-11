@@ -1,5 +1,7 @@
 /**
- * A list that never moves rows under the pointer.
+ * A list that never moves rows under the pointer. The one rule for every list in the console (Incidents, Call order,
+ * Responders, and whatever comes next): build the rows with `useStableRows` (./useStableRows) and guard the row
+ * actions with the same-spot guard (./same-spot). e2e: `assertNoRowShift` for every action that changes a list.
  *
  * The order on screen is fixed when the list is first shown and changes only when the user asks: the Re-sort / Show
  * button, a tab, filter or search change (a new `key`), or leaving the screen. Whatever arrives meanwhile — the
@@ -20,22 +22,26 @@ export interface StableView<T> {
   /** in the server list, not on screen yet */
   fresh: T[];
 }
-type Row = { id: string; status: string };
+export type StableItem = { id: string; status?: string };
+type Row = StableItem;
+/** "wait": rows that are new stay outside until the user asks (a feed). "append": they are added after the last row — nothing above them moves (a short list the user adds to). */
+export type FreshMode = "wait" | "append";
+const st = (i: Row) => i.status ?? "";
 
 export function startView<T extends Row>(items: readonly T[], key: string): StableView<T> {
-  return { key, src: items, rows: items.map((item) => ({ item, gone: false })), base: Object.fromEntries(items.map((i) => [i.id, i.status])), fresh: [] };
+  return { key, src: items, rows: items.map((item) => ({ item, gone: false })), base: Object.fromEntries(items.map((i) => [i.id, st(i)])), fresh: [] };
 }
 
-export function mergeView<T extends Row>(view: StableView<T>, items: readonly T[]): StableView<T> {
+export function mergeView<T extends Row>(view: StableView<T>, items: readonly T[], fresh: FreshMode = "wait"): StableView<T> {
   if (view.rows.length === 0) return startView(items, view.key); // nothing on screen: nothing can move
   const byId = new Map(items.map((i) => [i.id, i]));
   const shown = new Set(view.rows.map((r) => r.item.id));
-  return {
-    ...view,
-    src: items,
-    rows: view.rows.map((r) => { const now = byId.get(r.item.id); return now ? { item: now, gone: false } : { item: r.item, gone: true }; }),
-    fresh: items.filter((i) => !shown.has(i.id)),
-  };
+  const rows = view.rows.map((r) => { const now = byId.get(r.item.id); return now ? { item: now, gone: false } : { item: r.item, gone: true }; });
+  const added = items.filter((i) => !shown.has(i.id));
+  if (fresh === "append") {
+    return { ...view, src: items, rows: [...rows, ...added.map((item) => ({ item, gone: false }))], base: { ...view.base, ...Object.fromEntries(added.map((i) => [i.id, st(i)])) }, fresh: [] };
+  }
+  return { ...view, src: items, rows, fresh: added };
 }
 
 export interface Pending { acknowledged: number; reopened: number; changed: number; gone: number; fresh: number; reordered: boolean; any: boolean }
@@ -45,7 +51,7 @@ export function pendingOf<T extends Row>(view: StableView<T>): Pending {
   for (const r of view.rows) {
     const was = view.base[r.item.id];
     if (r.gone) gone++;
-    else if (r.item.status === was) continue;
+    else if (st(r.item) === was) continue;
     else if (r.item.status === "ACKNOWLEDGED") acknowledged++;
     else if (r.item.status === "TRIGGERED") reopened++;
     else changed++;

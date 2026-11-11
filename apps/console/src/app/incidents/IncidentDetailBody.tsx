@@ -4,6 +4,9 @@ import { safeExternalUrl } from "@/lib/safe-url";
 import type { IncidentDetail, IncidentEvent, NotificationLogEntry, RemediationStage } from "@/lib/api/types";
 import { displayStatus, orgChainParts } from "@/lib/incidents";
 import { isSlug } from "@/lib/validate";
+import { FAIL_REASON } from "@/lib/errors";
+import { howText } from "@/lib/call-order/model";
+import { snapshotPlanLabel } from "@/lib/call-order/plan-label";
 import { duration, groupDigits, kstDateTime, kstTime } from "@/lib/format";
 import { HeroActions } from "./[id]/HeroActions";
 
@@ -64,7 +67,8 @@ function Notifications({ items }: { items: NotificationLogEntry[] }) {
           <span className="sr-only">{n.status === "SENT" ? "Sent" : "Failed"}</span>
           <div style={{ flex: 1 }}>
             <div className="sm"><b>{CHANNEL[n.channel]}</b> → {n.targetSummary}</div>
-            <div className="xs mut">Step {n.escalationStep + 1}{n.error ? ` · ${n.error}` : ""}</div>
+            {/* why it failed is for everyone (`reason`); the provider's own words only when the API sends them (internal operators and admins) */}
+            <div className="xs mut">Step {n.escalationStep + 1}{n.attempt > 1 ? ` · attempt ${n.attempt}` : ""}{n.reason ? ` · ${FAIL_REASON[n.reason] ?? n.reason}` : ""}{n.error ? ` · ${n.error}` : ""}</div>
           </div>
           <time className="mono xs faint" dateTime={n.at}>{kstTime(n.at, true)}</time>
         </div>
@@ -88,7 +92,8 @@ function Escalation({ inc, now }: { inc: IncidentDetail; now: number }) {
   const snap = inc.assignmentSnapshot;
   const esc = inc.escalation;
   const stopped = pagingStopped(inc);
-  if (!snap || !esc) {
+  const plan = snapshotPlanLabel(snap);
+  if (!snap || esc.state === "NEVER_ESCALATING") {
     return (
       <Card title="Escalation">
         {stopped ? <Stopped text={stopped} /> : <div className="sm mut">{inc.unmapped ? "No owner — unmapped account, not escalating." : "No paging steps."}</div>}
@@ -107,7 +112,7 @@ function Escalation({ inc, now }: { inc: IncidentDetail; now: number }) {
           const at = new Date(base + s.atMin * 60_000).toISOString();
           const done = s.index < esc.step || (s.index === esc.step && inc.status !== "RESOLVED");
           const who = s.targetType === "ALL_RESPONDERS" ? (s.label ?? "everyone in Responders") : s.resolved.map((r) => `${r.name}${r.via ? ` (${r.via})` : ""}`).join(", ");
-          const chans = s.channels.includes("SLACK_BOT") && s.channels.includes("VOICE") ? "Slack + call" : s.channels.includes("VOICE") ? "call" : "Slack";
+          const chans = howText(s.channels, false); // the same words as the call-order sentence
           const isNext = s.index === esc.step + 1 && esc.nextAt && inc.status === "TRIGGERED";
           return (
             <div key={s.index}>
@@ -127,10 +132,10 @@ function Escalation({ inc, now }: { inc: IncidentDetail; now: number }) {
       <div className="xs mut" style={{ padding: "10px 16px", borderTop: "1px solid var(--grid)" }}>
         {stopped ? null : <div>Then repeats {snap.repeatCount === 1 ? "once" : `${snap.repeatCount} times`}.</div>}
         <div className="row" style={{ marginTop: 4, gap: 6 }}>
-          {snap.planLabel ? <span className="pill accent">{snap.planLabel}</span> : null}
+          {plan ? <span className="pill accent" data-testid="plan-label">{plan}</span> : null}
           {callOrderSlug ? <Link className="tap" href={`/call-order?customer=${callOrderSlug}`}>Call order for {customer}</Link> : null}
         </div>
-        {inc.severity === "SEV_1" ? <div style={{ marginTop: 4 }}>SEV-1 · pages through maintenance windows</div> : esc.mutedByMaintenance ? <div style={{ marginTop: 4 }}>Muted by maintenance ({inc.severity.replace("_", "-")})</div> : null}
+        {inc.severity === "SEV_1" ? <div style={{ marginTop: 4 }}>SEV-1 · pages through maintenance windows</div> : esc.mutedByMaintenance || esc.state === "MUTED" ? <div style={{ marginTop: 4 }}>Muted by maintenance ({inc.severity.replace("_", "-")})</div> : null}
       </div>
     </Card>
   );
@@ -173,7 +178,7 @@ export function IncidentDetailBody({ inc, timeline, notifs, now }: { inc: Incide
                     <span key={n}>{n > 0 ? <span className="faint" aria-hidden="true">→ </span> : null}<span style={{ color: "var(--accent)" }}><span className={p.done ? "b" : undefined}>{p.label}</span> <span className="mono">{kstTime(p.at)}</span>{p.done ? " ✓" : ""}</span></span>
                   ))}
                   {stopped ? <span className="b" style={{ flexBasis: "100%" }}>{stopped}</span> : null}
-                  {!stopped && inc.assignmentSnapshot?.planLabel ? <span className="pill accent">{inc.assignmentSnapshot.planLabel}</span> : null}
+                  {!stopped && snapshotPlanLabel(inc.assignmentSnapshot) ? <span className="pill accent" data-testid="paged-plan-label">{snapshotPlanLabel(inc.assignmentSnapshot)}</span> : null}
                   {inc.org.customer ? (
                     // who is paged is decided by the call order of this incident's own scope: one click to read it (and why)
                     <Link className="paged-co tap" data-testid="paged-call-order" href={`/c/${[inc.org.customer.slug, inc.org.project?.slug, inc.org.project ? inc.org.service?.slug : undefined].filter(Boolean).join("/")}/call-order`}
@@ -182,7 +187,7 @@ export function IncidentDetailBody({ inc, timeline, notifs, now }: { inc: Incide
                 </div>
               ) : null}
             </div>
-            <HeroActions id={inc.id} title={inc.title} pathText={inc.org.customer ? orgChainParts(inc).join(" › ") : "an unmapped account"} status={inc.status} version={inc.version} canEscalate={Boolean(inc.escalation)} acknowledgedAt={inc.acknowledgedAt} />
+            <HeroActions id={inc.id} title={inc.title} pathText={inc.org.customer ? orgChainParts(inc).join(" › ") : "an unmapped account"} status={inc.status} version={inc.version} canEscalate={inc.escalation.state === "PAGING" || inc.escalation.state === "UNREACHABLE"} escalateWhy={inc.escalation.state === "MUTED" ? "Muted by a maintenance window" : inc.escalation.state === "NEVER_ESCALATING" ? "No call order applies: there is nobody to escalate to" : inc.escalation.state === "STOPPED_EXHAUSTED" ? "Every step has been sent" : undefined} acknowledgedAt={inc.acknowledgedAt} />
           </div>
         </div>
       </section>

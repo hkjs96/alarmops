@@ -1,15 +1,18 @@
 "use client";
 import { useId, useState } from "react";
+import { LIMITS_TEXT, MAX_MINUTE, MAX_SENDS_PER_CYCLE, MAX_SENDS_PER_HOUR, MAX_STEPS, estimateSends } from "@/lib/call-order/limits";
 import { cx } from "@alarmops/design-system";
 import type { PagingConfigInput, PagingPlan, PagingStep, PagingStyle, StepChannel } from "@/lib/api/types";
 import {
-  CH_LABEL, MAX_REPEAT, PLAN_LABEL, STYLE_LABEL, addStep, firstName, firstOfStyle, isEdited, moveStep, pageableIds, planSteps, removeStep, repeatText,
+  CH_HINT, CH_LABEL, CH_ORDER, MAX_REPEAT, PLAN_LABEL, STYLE_LABEL, addStep, firstName, firstOfStyle, isEdited, moveStep, pageableIds, planSteps, removeStep, repeatText,
   type Directory, type Issue,
 } from "@/lib/call-order/model";
 
 const STYLES: PagingStyle[] = ["ALL_AT_ONCE", "CUSTOMER_ROTATION", "SHARED_ROTATION", "CUSTOM"];
 const PLANS: PagingPlan[] = ["STANDARD", "URGENT", "QUIET"];
-const CHANNELS: StepChannel[] = ["SLACK_DM", "SMS", "VOICE"];
+const CHANNELS: StepChannel[] = CH_ORDER;
+/** Only digits are a number here. "-5", "2.5", "1e1" are not quietly turned into another number: they are refused, and said (QA P3-D). */
+const WHOLE = /^\d*$/;
 const STYLE_HINT: Record<PagingStyle, string> = {
   ALL_AT_ONCE: "Everyone in Responders, at the same time",
   CUSTOMER_ROTATION: "Whoever is on shift in this customer's own rotation",
@@ -34,6 +37,30 @@ export function StepEditor({ value, onChange, dir, customerName, showErrors, iss
   const uid = useId();
   const [undo, setUndo] = useState<{ was: PagingConfigInput; what: string } | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  /** what was typed and not taken, per field: "step-2" / "repeat" */
+  const [refused, setRefused] = useState<Record<string, string>>({});
+  const refuse = (k: string, msg: string | null) => setRefused((r) => { const n = { ...r }; if (msg) n[k] = msg; else delete n[k]; return n; });
+  const atLimit = value.steps.length >= MAX_STEPS;
+  const sends = estimateSends(value.steps.map((s) => ({ ...s, atMin: Math.max(0, s.atMin) })), value.repeatCount, pageableIds(dir).length);
+  const typeMinutes = (i: number, raw: string) => {
+    const t = raw.trim();
+    const now = value.steps[i]!.atMin;
+    if (!WHOLE.test(t) || t.length > 4) {
+      refuse(`step-${i}`, `Step ${i + 1}: “${raw.slice(0, 24)}” was not entered — minutes are a whole number from 0 to ${MAX_MINUTE}, digits only.${now >= 0 ? ` It stays at ${now} min.` : ""}`);
+      return;
+    }
+    refuse(`step-${i}`, null);
+    patch(i, { atMin: t === "" ? -1 : Number(t) });
+  };
+  const typeRepeat = (raw: string) => {
+    const t = raw.trim();
+    if (!WHOLE.test(t) || t.length > 1) {
+      refuse("repeat", `“${raw.slice(0, 24)}” was not entered — repeat is a whole number from 0 to ${MAX_REPEAT}.${value.repeatCount >= 0 ? ` It stays at ${value.repeatCount}.` : ""}`);
+      return;
+    }
+    refuse("repeat", null);
+    onChange({ ...value, repeatCount: t === "" ? -1 : Number(t) });
+  };
   const msp = dir.rotations.filter((r) => r.scope === "MSP");
   const own = dir.rotations.filter((r) => r.scope === "CUSTOMER");
   const currentRot = value.steps.find((s) => s.targetType === "ROTATION")?.targetId;
@@ -54,10 +81,11 @@ export function StepEditor({ value, onChange, dir, customerName, showErrors, iss
     const list = style === "SHARED_ROTATION" ? msp : style === "CUSTOMER_ROTATION" ? own : [];
     regenerate(style, value.plan, list.find((r) => r.id === currentRot)?.id ?? list[0]?.id, `Steps rebuilt for ${STYLE_LABEL[style]}`);
   };
-  const setSteps = (steps: PagingStep[], targetChanged = false) => {
+  const setSteps = (steps: PagingStep[], targetChanged = false, why = "you changed who a step calls") => {
     setUndo(null);
+    setRefused({});
     if (targetChanged && value.style !== "CUSTOM") {
-      setNote(`Ordering switched from ${STYLE_LABEL[value.style]} to Custom, because you changed who a step calls.`);
+      setNote(`Ordering switched from ${STYLE_LABEL[value.style]} to Custom, because ${why}.`);
       onChange({ ...value, style: "CUSTOM", sharedRotationId: undefined, steps });
     } else onChange({ ...value, steps });
   };
@@ -124,7 +152,8 @@ export function StepEditor({ value, onChange, dir, customerName, showErrors, iss
                   <>
                     <input className={cx("inp num", bad(i, "atMin") && "bad")} type="text" inputMode="numeric" autoComplete="off" data-field="atMin" data-first-field={i === 1 ? "" : undefined}
                       aria-label={`Step ${i + 1} minutes`} aria-invalid={bad(i, "atMin") || undefined} value={s.atMin < 0 ? "" : String(s.atMin)}
-                      onChange={(e) => { const d = e.target.value.replace(/\D/g, "").slice(0, 4); patch(i, { atMin: d === "" ? -1 : Number(d) }); }} />
+                      aria-describedby={refused[`step-${i}`] ? `${uid}-ref-${i}` : undefined}
+                      onChange={(e) => typeMinutes(i, e.target.value)} />
                     <span className="sm mut">min</span>
                   </>
                 )}
@@ -148,25 +177,38 @@ export function StepEditor({ value, onChange, dir, customerName, showErrors, iss
               </select>
               <span className="co-chs" role="group" aria-label={`Step ${i + 1} is sent by`}>
                 {CHANNELS.map((c) => (
-                  <button key={c} type="button" data-field={c === CHANNELS[0] ? "channels" : undefined} className={cx("co-ch", s.channels.includes(c) && "on", bad(i, "channels") && "bad")} aria-pressed={s.channels.includes(c)} onClick={() => toggle(i, c)}>{CH_LABEL[c]}</button>
+                  <button key={c} type="button" data-field={c === CHANNELS[0] ? "channels" : undefined} className={cx("co-ch", s.channels.includes(c) && "on", bad(i, "channels") && "bad")} aria-pressed={s.channels.includes(c)} title={CH_HINT[c]} onClick={() => toggle(i, c)}>{CH_LABEL[c]}</button>
                 ))}
               </span>
               <span className="co-ops">
-                <button type="button" className="btn sm" aria-label={`Move step ${i + 1} up`} title="Move up: swaps who is called with the step above; the minutes stay" disabled={i === 0} onClick={() => setSteps(moveStep(value.steps, i, -1), true)}>↑</button>
-                <button type="button" className="btn sm" aria-label={`Move step ${i + 1} down`} title="Move down" disabled={i === value.steps.length - 1} onClick={() => setSteps(moveStep(value.steps, i, 1), true)}>↓</button>
-                <button type="button" className="btn sm danger" aria-label={`Remove step ${i + 1}`} disabled={value.steps.length <= 1} onClick={() => setSteps(removeStep(value.steps, i), true)}>✕</button>
+                <button type="button" className="btn sm" aria-label={`Move step ${i + 1} up`} title="Move up: swaps who is called with the step above; the minutes stay" disabled={i === 0} onClick={() => setSteps(moveStep(value.steps, i, -1), true, "you changed the order of the steps")}>↑</button>
+                <button type="button" className="btn sm" aria-label={`Move step ${i + 1} down`} title="Move down" disabled={i === value.steps.length - 1} onClick={() => setSteps(moveStep(value.steps, i, 1), true, "you changed the order of the steps")}>↓</button>
+                <button type="button" className="btn sm danger" aria-label={`Remove step ${i + 1}`} disabled={value.steps.length <= 1} onClick={() => setSteps(removeStep(value.steps, i), true, "you removed a step")}>✕</button>
               </span>
+              {refused[`step-${i}`] ? <span className="co-refused" role="alert" id={`${uid}-ref-${i}`} data-testid="co-refused">{refused[`step-${i}`]}</span> : null}
             </li>
           ))}
         </ol>
         <div className="row co-add">
-          <button type="button" className="btn" data-testid="co-add-step" onClick={() => setSteps(addStep(value.steps), true)}>+ Add step</button>
+          <span className="co-addw">
+            <button type="button" className="btn" data-testid="co-add-step" disabled={atLimit} aria-describedby={`${uid}-count`} onClick={() => setSteps(addStep(value.steps), true, "you added a step")}>+ Add step</button>
+            <span className={cx("sm", atLimit ? "co-atlimit" : "mut")} id={`${uid}-count`} data-testid="co-step-count">
+              {atLimit ? `${value.steps.length} of ${MAX_STEPS} steps — that is the limit. Remove a step to add another.` : `${value.steps.length} of ${MAX_STEPS} steps`}
+            </span>
+          </span>
           <label className="co-rep">
             <span className="sm">Then repeat the whole order</span>
             <input className={cx("inp num", issues.some((x) => x.field === "repeat") && "bad")} type="text" inputMode="numeric" data-field="repeat" aria-label="Repeat count" value={value.repeatCount < 0 ? "" : String(value.repeatCount)}
-              onChange={(e) => { const d = e.target.value.replace(/\D/g, "").slice(0, 1); onChange({ ...value, repeatCount: d === "" ? -1 : Number(d) }); }} />
+              aria-describedby={refused.repeat ? `${uid}-ref-rep` : undefined} onChange={(e) => typeRepeat(e.target.value)} />
             <span className="sm mut">time{value.repeatCount === 1 ? "" : "s"} (0–{MAX_REPEAT}) · {repeatText(value.repeatCount)}</span>
           </label>
+        </div>
+        {refused.repeat ? <div className="co-refused" role="alert" id={`${uid}-ref-rep`} data-testid="co-refused">{refused.repeat}</div> : null}
+        <div className="hint co-limits" data-testid="co-limits">
+          <div>Limits: {LIMITS_TEXT}.</div>
+          <div data-testid="co-sends" className={cx((sends.perCycle > MAX_SENDS_PER_CYCLE || sends.perHour > MAX_SENDS_PER_HOUR) && "co-atlimit")}>
+            These steps send up to <b>{sends.perCycle}</b> of {MAX_SENDS_PER_CYCLE} notifications per incident in one pass and <b>{sends.perHour}</b> of {MAX_SENDS_PER_HOUR} in an hour, with the Responders as they are now.
+          </div>
         </div>
       </fieldset>
     </div>

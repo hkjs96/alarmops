@@ -2,7 +2,7 @@ import type {
   AckResult, BulkItem, BulkPreview, BulkResult, IncidentDetail, IncidentEvent, IncidentListQuery, IncidentListResponse, Me,
   NotificationLogEntry, OncallNowEntry, Paginated, ResolveKind, ApiErrorBody, ScopeTreeResponse,
   AddResponderInput, CallOrderListQuery, CallOrderListResponse, CustomerPersonRole, PagingConfig, PagingConfigInput, PagingHealth, PagingPath, PagingPathQuery,
-  RespondersResponse, RotationSummary, StaffSummary,
+  RespondersResponse, RotationSummary, StaffSummary, ResponderWriteOptions, RespondersWriteResult, UndoResult,
 } from "./types";
 
 export class ApiError extends Error {
@@ -11,6 +11,8 @@ export class ApiError extends Error {
     public readonly code: string,
     message: string,
     public readonly requestId: string,
+    /** `error.details` of the contract: fields[] of VALIDATION_FAILED, the numbers of SEND_CAP_EXCEEDED, retryAfterSec … */
+    public readonly details: Record<string, unknown> = {},
   ) {
     super(message);
     this.name = "ApiError";
@@ -22,6 +24,11 @@ export class ApiError extends Error {
  * backend slips, "you may not see this" must not look different from "this does not exist".
  */
 export const isHidden = (e: unknown): boolean => e instanceof ApiError && (e.status === 404 || e.status === 403);
+/**
+ * "This belongs to another customer" is told to the user exactly like "this does not exist" (security review 권고 3):
+ * the console never confirms that an id of another tenant is real.
+ */
+export const isNotFoundLike = (e: unknown): boolean => e instanceof ApiError && (e.status === 404 || e.code === "CROSS_CUSTOMER");
 
 /** Typed surface of API-CONTRACT §8.1 the console uses (plus /me and /oncall/now for the list side panel). */
 export interface ConsoleApi {
@@ -36,7 +43,8 @@ export interface ConsoleApi {
   escalate(id: string, version: number): Promise<IncidentDetail>;
   bulkPreview(action: "ack" | "resolve", items: BulkItem[]): Promise<BulkPreview>;
   bulkExecute(action: "ack" | "resolve", items: BulkItem[]): Promise<BulkResult>;
-  bulkUndo(undoToken: string): Promise<{ restored: string[] }>;
+  /** POST /incidents/bulk/undo. An unknown, used, expired or foreign token is the one 404. */
+  bulkUndo(undoToken: string): Promise<UndoResult>;
   oncallNow(customerId?: string): Promise<OncallNowEntry[]>;
   /** GET /scope-tree (API-CONTRACT §8.0) */
   scopeTree(): Promise<ScopeTreeResponse>;
@@ -50,17 +58,17 @@ export interface ConsoleApi {
   /** PUT /customers/{id}/paging, If-Match */
   putPaging(customerId: string, body: PagingConfigInput, version: number): Promise<PagingConfig>;
   /**
-   * PUT /customers/{id}/paging-overrides/{scopeType}/{scopeId}. `version` is If-Match; null = creating own steps, sent
-   * as `If-None-Match: *` so a level that got steps meanwhile is not overwritten (PROPOSED: the contract names no
-   * version header for overrides).
+   * PUT /customers/{id}/paging-overrides/{scopeType}/{scopeId}. `version` is If-Match; 0 creates own steps (201) — a
+   * level that got steps meanwhile is at a higher version, so it is not overwritten (409 VERSION_CONFLICT).
    */
-  putPagingOverride(customerId: string, scopeType: "PROJECT" | "SERVICE", scopeId: string, body: PagingConfigInput, version: number | null): Promise<PagingConfig>;
+  putPagingOverride(customerId: string, scopeType: "PROJECT" | "SERVICE", scopeId: string, body: PagingConfigInput, version: number): Promise<PagingConfig>;
   deletePagingOverride(customerId: string, scopeType: "PROJECT" | "SERVICE", scopeId: string, version: number): Promise<void>;
   pagingHealth(customerId: string): Promise<PagingHealth>;
   getResponders(customerId: string): Promise<RespondersResponse>;
-  addResponder(customerId: string, input: AddResponderInput): Promise<{ contactId: string }>;
-  patchResponder(customerId: string, contactId: string, body: { role: CustomerPersonRole }): Promise<void>;
-  removeResponder(customerId: string, contactId: string): Promise<void>;
+  /** If-Match = the version of the Responders list the user saw (PROPOSED, see RespondersResponse) */
+  addResponder(customerId: string, input: AddResponderInput, opts: ResponderWriteOptions): Promise<RespondersWriteResult>;
+  patchResponder(customerId: string, contactId: string, body: { role: CustomerPersonRole }, opts: ResponderWriteOptions): Promise<RespondersWriteResult>;
+  removeResponder(customerId: string, contactId: string, opts: ResponderWriteOptions): Promise<RespondersWriteResult>;
   /** GET /rotations — read-only on this screen */
   listRotations(q?: { scope?: "MSP" | "CUSTOMER"; customerId?: string }): Promise<RotationSummary[]>;
   /** GET /staff?q= */
@@ -96,12 +104,13 @@ export function createHttpApi(opts: { baseUrl: string; fetch?: typeof fetch; hea
       } catch {
         /* non-JSON error */
       }
-      throw new ApiError(res.status, err.code, err.message, err.requestId);
+      throw new ApiError(res.status, err.code, err.message, err.requestId, err.details ?? {});
     }
     if (res.status === 204) return undefined as T;
     return (await res.json()) as T;
   }
   const enc = encodeURIComponent;
+  const unreachable = (o: ResponderWriteOptions) => toQuery({ confirmUnreachable: o.confirmUnreachable ? true : undefined });
 
   return {
     me: () => call("GET", "/me"),
@@ -122,13 +131,13 @@ export function createHttpApi(opts: { baseUrl: string; fetch?: typeof fetch; hea
     getPaging: (id) => call("GET", `/customers/${enc(id)}/paging`),
     putPaging: (id, body, version) => call("PUT", `/customers/${enc(id)}/paging`, body, { "If-Match": String(version) }),
     putPagingOverride: (id, scopeType, scopeId, body, version) =>
-      call("PUT", `/customers/${enc(id)}/paging-overrides/${scopeType}/${enc(scopeId)}`, body, version === null ? { "If-None-Match": "*" } : { "If-Match": String(version) }),
+      call("PUT", `/customers/${enc(id)}/paging-overrides/${scopeType}/${enc(scopeId)}`, body, { "If-Match": String(version) }),
     deletePagingOverride: (id, scopeType, scopeId, version) => call("DELETE", `/customers/${enc(id)}/paging-overrides/${scopeType}/${enc(scopeId)}`, undefined, { "If-Match": String(version) }),
     pagingHealth: (id) => call("GET", `/customers/${enc(id)}/paging-health`),
     getResponders: (id) => call("GET", `/customers/${enc(id)}/responders`),
-    addResponder: (id, input) => call("POST", `/customers/${enc(id)}/responders`, input),
-    patchResponder: (id, contactId, body) => call("PATCH", `/customers/${enc(id)}/responders/${enc(contactId)}`, body),
-    removeResponder: (id, contactId) => call("DELETE", `/customers/${enc(id)}/responders/${enc(contactId)}`),
+    addResponder: (id, input, o) => call("POST", `/customers/${enc(id)}/responders`, input, { "If-Match": String(o.version) }),
+    patchResponder: (id, contactId, body, o) => call("PATCH", `/customers/${enc(id)}/responders/${enc(contactId)}` + unreachable(o), body, { "If-Match": String(o.version) }),
+    removeResponder: (id, contactId, o) => call("DELETE", `/customers/${enc(id)}/responders/${enc(contactId)}` + unreachable(o), undefined, { "If-Match": String(o.version) }),
     listRotations: (q = {}) => call("GET", "/rotations" + toQuery({ ...q })),
     listStaff: (q) => call("GET", "/staff" + toQuery({ q })),
   };

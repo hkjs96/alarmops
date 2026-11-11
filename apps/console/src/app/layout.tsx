@@ -12,12 +12,12 @@ export const dynamic = "force-dynamic";
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   // /login renders without a session; everything else is gated by middleware.
-  let shell: { name: string; open: number; customers: Awaited<ReturnType<Awaited<ReturnType<typeof getApi>>["scopeTree"]>>["customers"] } | null = null;
+  let shell: { user: { id: string; name: string; role: "VIEWER" | "OPERATOR" | "ADMIN" }; open: number; customers: Awaited<ReturnType<Awaited<ReturnType<typeof getApi>>["scopeTree"]>>["customers"] } | null = null;
   if (await getSession()) {
     const api = await getApi();
     const [me, list, tree] = await Promise.all([api.me(), api.listIncidents({ status: "active" }), api.scopeTree()]);
     // badge = open in ALL customers, whatever the list filter is
-    shell = { name: me.name, open: list.counts.open, customers: tree.customers };
+    shell = { user: { id: me.id, name: me.name, role: me.role }, open: list.counts.open, customers: tree.customers };
   }
   return (
     <html lang="en" suppressHydrationWarning>
@@ -30,7 +30,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <body>
         <a href="#main" className="skip">Skip to content</a>
         {shell ? (
-          <ScopeShell customers={shell.customers} userName={shell.name} openCount={shell.open}>{children}</ScopeShell>
+          <ScopeShell customers={shell.customers} user={shell.user} openCount={shell.open}>{children}</ScopeShell>
         ) : (
           <main id="main">{children}</main>
         )}

@@ -1,6 +1,7 @@
 "use client";
-import { useEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useRef, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { cx } from "../cx";
+import { isSameSpot, markSpot } from "../list/same-spot";
 
 export interface ConfirmDialogProps {
   open: boolean;
@@ -9,8 +10,13 @@ export interface ConfirmDialogProps {
   /** the action, with the full path in it: "Save for Mirae Pay" */
   confirmLabel: string;
   cancelLabel?: string;
-  /** which button has the focus when the dialog opens. "cancel" for steps that widen or discard. */
+  /**
+   * which button has the focus when the dialog opens. The default is the safe choice ("cancel"): Enter held down, or
+   * pressed once too often, keeps things as they are. "confirm" only for a step that changes nothing by itself.
+   */
   defaultFocus?: "confirm" | "cancel";
+  /** shown first and loud: what this would break ("Nobody for Daon Retail would be reached") */
+  warning?: ReactNode;
   danger?: boolean;
   busy?: boolean;
   onConfirm: () => void;
@@ -21,7 +27,7 @@ export interface ConfirmDialogProps {
  * Confirmation for a change that reaches more than one thing, or that widens or discards (E6, E9): what changes,
  * before → after, the list it reaches. Tab stays inside, Esc cancels, focus returns to where it was.
  */
-export function ConfirmDialog({ open, title, children, confirmLabel, cancelLabel = "Cancel", defaultFocus = "confirm", danger, busy, onConfirm, onCancel }: ConfirmDialogProps) {
+export function ConfirmDialog({ open, title, children, confirmLabel, cancelLabel = "Cancel", defaultFocus = "cancel", warning, danger, busy, onConfirm, onCancel }: ConfirmDialogProps) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
@@ -30,6 +36,9 @@ export function ConfirmDialog({ open, title, children, confirmLabel, cancelLabel
     return () => prev?.focus?.();
   }, [open, defaultFocus]);
   if (!open) return null;
+  // The dialog closes on either button and whatever lies behind it comes up under the pointer: a second press at the
+  // same spot must not reach it (list/same-spot). The dialog itself may have come up under a double click too.
+  const press = (fn: () => void) => (e: MouseEvent) => { if (isSameSpot(e)) return; markSpot(e); fn(); };
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onCancel(); return; }
     if (e.key !== "Tab") { e.stopPropagation(); return; }
@@ -44,10 +53,13 @@ export function ConfirmDialog({ open, title, children, confirmLabel, cancelLabel
     <div className="dguard-scrim">
       <div ref={ref} className="dguard cdlg" role="alertdialog" aria-modal="true" aria-labelledby="cdlg-h" aria-describedby="cdlg-b" onKeyDown={onKey} data-testid="confirm-dialog">
         <h3 id="cdlg-h">{title}</h3>
-        <div id="cdlg-b" className="dguard-b cdlg-b">{children}</div>
+        <div id="cdlg-b" className="dguard-b cdlg-b">
+          {warning ? <div className="cdlg-warn" role="alert" data-testid="confirm-warning">{warning}</div> : null}
+          {children}
+        </div>
         <div className="dguard-acts">
-          <button type="button" data-role="confirm" className={cx("btn", danger ? "danger" : "pri")} disabled={busy} onClick={onConfirm}>{confirmLabel}</button>
-          <button type="button" data-role="cancel" className="btn" onClick={onCancel}>{cancelLabel}</button>
+          <button type="button" data-role="confirm" className={cx("btn", danger ? "danger" : "pri")} disabled={busy} onClick={press(onConfirm)}>{confirmLabel}</button>
+          <button type="button" data-role="cancel" className="btn" onClick={press(onCancel)}>{cancelLabel}</button>
         </div>
       </div>
     </div>

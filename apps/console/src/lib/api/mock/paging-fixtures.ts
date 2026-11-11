@@ -16,12 +16,21 @@ import { customers34, type FxCustomer } from "./scope-fixtures";
 type Ch = Partial<Record<ContactChannelKey, ChannelState>>;
 export interface FxContact { id: string; kind: "STAFF" | "CUSTOMER"; customerId?: string; name: string; title: string; channels: Ch; emailMasked?: string; phoneMasked?: string }
 export interface FxStoredConfig extends PagingConfigInput { id: string; scopeType: ScopeLevelName; scopeId: string; version: number; updatedByName: string | null; updatedAt: string | null }
+export interface FxPerson { contactId: string; role: CustomerPersonRole; extras: ("APPROVER" | "PORTAL_USER")[]; scope: LevelRef }
 export interface FxCustomerPaging {
   templateId: string | null;
   /** staff added directly (not through the template) */
   staff: string[];
-  people: { contactId: string; role: CustomerPersonRole; extras: ("APPROVER" | "PORTAL_USER")[]; scope: LevelRef }[];
-  config: FxStoredConfig;
+  people: FxPerson[];
+  /** null: no steps saved yet (GET answers version 0, the first PUT creates them) */
+  config: FxStoredConfig | null;
+  /** the version the next customer-level config continues from when the steps were deleted and made again */
+  configVersion: number;
+  /** version of the Responders list (PROPOSED If-Match on the Responders writes) */
+  respondersVersion: number;
+  /** customer people taken out of Responders, so that putting one back (Undo) restores scope and extras */
+  removedPeople: Record<string, FxPerson>;
+  slackChannel: ChannelState;
   overrides: FxStoredConfig[];
   /** problems the data here cannot produce (rotation gaps need a shift table) */
   extraProblems: PagingProblem[];
@@ -97,9 +106,11 @@ const SETUP: Record<string, [string | null, string[], PagingStyle, string?]> = {
   lumen: [null, ["ct_jiwoo"], "CUSTOMER_ROTATION", "rot_lumen"],
 };
 const CUSTOM_STEPS: Record<string, PagingStep[]> = {
-  mirae: [step(0, "rot_night", "SLACK_DM", "VOICE"), step(10, "ct_yuna", "VOICE"), step(15, "ALL", "VOICE")],
-  iruda: [step(0, "ct_junho", "VOICE"), step(5, "ct_dohyun", "SLACK_DM", "VOICE"), step(10, "ALL", "VOICE")],
+  mirae: [step(0, "rot_night", "SLACK_CHANNEL", "VOICE"), step(10, "ct_yuna", "VOICE"), step(15, "ALL", "VOICE")],
+  iruda: [step(0, "ct_junho", "VOICE"), step(5, "ct_dohyun", "SLACK_CHANNEL", "VOICE"), step(10, "ALL", "VOICE")],
 };
+/** the plan a customer's steps started from, when it is not Standard. Mirae Pay: Urgent, then edited — the incident panel says the same (QA P2-A). */
+const PLAN_OF: Record<string, PagingPlan> = { mirae: "URGENT" };
 const EDITED: Record<string, [string, string]> = { mirae: ["Minjae Lee", "2026-11-07T02:10:00Z"] };
 
 export function createPaging(customers: FxCustomer[] = customers34): FxPaging {
@@ -117,14 +128,14 @@ export function createPaging(customers: FxCustomer[] = customers34): FxPaging {
   customers.forEach((c, n) => {
     const extraIdx = n - Object.keys(SETUP).length;
     const [templateId, staff, style, rot] = SETUP[c.slug] ?? [extraIdx % 2 ? "night" : "data", [], "SHARED_ROTATION" as const, extraIdx % 2 ? "rot_night" : "rot_data"];
-    const plan: PagingPlan = "STANDARD";
+    const plan: PagingPlan = PLAN_OF[c.slug] ?? "STANDARD";
     const steps = CUSTOM_STEPS[c.slug] ?? planSteps(plan, rot ? { targetType: "ROTATION", targetId: rot } : { targetType: "ALL_RESPONDERS" });
     const cfg = (scopeType: ScopeLevelName, scopeId: string, v: PagingConfigInput, by: [string, string] | undefined): FxStoredConfig =>
       ({ ...v, id: `pc_${scopeId}`, scopeType, scopeId, version: 1, updatedByName: by?.[0] ?? null, updatedAt: by?.[1] ?? null });
     const overrides: FxStoredConfig[] = [];
     if (c.slug === "mirae") {
       const p = c.projects.find((x) => x.slug === "data-platform")!;
-      overrides.push(cfg("PROJECT", p.id, { style: "CUSTOM", plan: "QUIET", repeatCount: 0, steps: [step(0, "rot_data", "SLACK_DM"), step(15, "ALL", "SLACK_DM")] }, ["Taemin Jung", "2026-11-02T05:00:00Z"]));
+      overrides.push(cfg("PROJECT", p.id, { style: "CUSTOM", plan: "QUIET", repeatCount: 0, steps: [step(0, "rot_data", "SLACK_CHANNEL"), step(15, "ALL", "SLACK_CHANNEL")] }, ["Taemin Jung", "2026-11-02T05:00:00Z"]));
     }
     if (c.slug === "hanbit") {
       const s = c.projects.find((x) => x.slug === "fulfilment")!.services.find((x) => x.slug === "orders-api")!;
@@ -142,7 +153,7 @@ export function createPaging(customers: FxCustomer[] = customers34): FxPaging {
         extras: [...(roles.includes("approver") ? ["APPROVER" as const] : []), ...(roles.includes("portal") ? ["PORTAL_USER" as const] : [])], scope: ref(sc),
       })),
       config: cfg("CUSTOMER", c.id, { style, plan, ...(style === "SHARED_ROTATION" ? { sharedRotationId: rot } : {}), repeatCount: 1, steps }, EDITED[c.slug]),
-      overrides,
+      overrides, configVersion: 1, respondersVersion: 1, removedPeople: {}, slackChannel: "VERIFIED",
       extraProblems: c.slug === "lumen" ? [{
         code: "ROTATION_GAP", contactIds: [], rotationId: "rot_lumen", from: "2026-11-14T00:00:00Z", to: "2026-11-15T00:00:00Z",
         message: "Lumen on-call has nobody on shift from Sat Nov 14 09:00 to Sun Nov 15 09:00 KST. A page in that day goes straight to the next step.",

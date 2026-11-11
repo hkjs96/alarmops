@@ -1,21 +1,12 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { getApi } from "@/lib/api";
-import { ApiError } from "@/lib/api/client";
-import { requireSession, UnauthorizedError } from "@/lib/auth";
-import { NotConfiguredError } from "@/lib/mode";
-import { assertBulkAction, assertBulkItems, assertId, assertToken, assertVersion, InvalidInputError } from "@/lib/validate";
-import type { BulkItem, BulkPreview, BulkResult } from "@/lib/api/types";
+import { requireSession } from "@/lib/auth";
+import { assertBulkAction, assertBulkItems, assertId, assertToken, assertVersion } from "@/lib/validate";
+import type { BulkItem, BulkPreview, BulkResult, UndoResult } from "@/lib/api/types";
+import { fail, type ActionResult } from "@/lib/action-result";
 
-export type ActionResult<T = null> = { ok: true; data: T } | { ok: false; code: string; message: string; requestId: string };
-
-function fail(e: unknown): { ok: false; code: string; message: string; requestId: string } {
-  if (e instanceof ApiError) return { ok: false, code: e.code, message: e.message, requestId: e.requestId };
-  if (e instanceof UnauthorizedError || e instanceof InvalidInputError || e instanceof NotConfiguredError) {
-    return { ok: false, code: e.code, message: e.message, requestId: "" };
-  }
-  return { ok: false, code: "UNKNOWN", message: "Something went wrong.", requestId: "" };
-}
+export type { ActionResult };
 
 /** Session check first, then input validation, then the API call (security review C-2, C-5). */
 async function run<T>(fn: () => Promise<T>, revalidate = true): Promise<ActionResult<T>> {
@@ -67,10 +58,11 @@ export async function executeBulk(action: "ack" | "resolve", items: BulkItem[]):
     return (await getApi()).bulkExecute(a, list);
   });
 }
-export async function undoBulk(token: string) {
+/** `restored` / `skipped`: an incident someone touched since is not put back (VERSION_CONFLICT) and the caller says so. */
+export async function undoBulk(token: string): Promise<ActionResult<UndoResult>> {
   return run(async () => {
     const t = assertToken(token);
-    await (await getApi()).bulkUndo(t);
-    return null;
+    const r = await (await getApi()).bulkUndo(t);
+    return { restored: r.restored ?? [], skipped: r.skipped ?? [] };
   });
 }

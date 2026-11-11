@@ -1,9 +1,10 @@
 "use client";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { Banner, Button } from "@alarmops/design-system";
+import { Banner, Button, isSameSpot, markSpot } from "@alarmops/design-system";
 import type { IncidentStatus } from "@/lib/api/types";
-import { useShell } from "@/components/ShellContext";
+import { hasRole, roleReason, useShell } from "@/components/ShellContext";
+import { errorText } from "@/lib/errors";
 import { kstTime } from "@/lib/format";
 import { ackIncident, escalateIncident, resolveIncident, undoBulk } from "../actions";
 
@@ -16,7 +17,9 @@ export const ACK_SETTLE_MS = 5000;
  * (QA P1-2, P2-A): Mute and Escalate keep their places (Escalate is switched off, not removed), and Undo is a link on
  * its own line below, at the other side from the primary spot. It is also in the toast and in the list row's "…".
  */
-export function HeroActions({ id, title, pathText, status, version, canEscalate, acknowledgedAt }: {
+export function HeroActions({ id, title, pathText, status, version, canEscalate, escalateWhy, acknowledgedAt }: {
+  /** why Escalate is not offered (muted, nobody to escalate to) */
+  escalateWhy?: string;
   id: string; title: string;
   /** "Mirae Pay › Core › Payments API", or "an unmapped account" */
   pathText: string;
@@ -50,7 +53,9 @@ export function HeroActions({ id, title, pathText, status, version, canEscalate,
     if (el) { el.focus(); refocus.current = false; }
   });
 
-  const fail = (r: { code: string; message: string }) => setErr({ conflict: r.code === "VERSION_CONFLICT", msg: r.message || "Failed." });
+  const may = hasRole(shell.user, "OPERATOR");
+  const noRole = may ? undefined : roleReason(shell.user, "OPERATOR", "Acknowledging, escalating and resolving");
+  const fail = (r: { code: string; message: string; details?: Record<string, unknown> }) => setErr({ conflict: r.code === "VERSION_CONFLICT", msg: errorText(r, { what: "This action", where: pathText }) });
   const run = async (fn: () => Promise<void>) => {
     setPending(true);
     try { await fn(); } finally { setPending(false); }
@@ -60,7 +65,8 @@ export function HeroActions({ id, title, pathText, status, version, canEscalate,
     const r = await undoBulk(t);
     shell.setAck(id, null);
     setFresh(false);
-    if (!r.ok) fail(r);
+    if (!r.ok) fail(r.code === "NOT_FOUND" ? { ...r, code: "UNDO_GONE", message: "Undo is no longer available: it works once, for 5 minutes, for the person who acknowledged." } : r);
+    else if (!r.data.restored.includes(id)) fail({ code: "UNDO_SKIPPED", message: "Could not undo — this incident was changed again since you acknowledged it. It stays as it is now." });
     else { setErr(null); shell.mark(id, "REOPENED"); shell.toast(`Acknowledge undone in ${pathText} · paging continues`); }
   });
   const ack = () => {
@@ -99,7 +105,7 @@ export function HeroActions({ id, title, pathText, status, version, canEscalate,
           <div id="resolve-ask-t" className="b">Resolve this incident in {pathText}?</div>
           <div id="resolve-ask-d" className="sm mut">{title} · It leaves the active list for everyone. Paging does not start again unless the alarm fires again.</div>
           <div className="row hero-actions">
-            <Button variant="danger" onClick={() => { void resolve(); }} disabled={pending}>Resolve incident</Button>
+            <Button variant="danger" data-list-action="incident.panel-resolve" onClick={(e) => { if (isSameSpot(e)) return; markSpot(e); void resolve(); }} disabled={pending}>Resolve incident</Button>
             {/* where Resolve was: a second tap keeps the incident open */}
             <Button ref={keepRef} variant="primary" size="lg" onClick={() => setConfirm(false)} disabled={pending}>Keep it open</Button>
           </div>
@@ -108,25 +114,26 @@ export function HeroActions({ id, title, pathText, status, version, canEscalate,
         <>
           <div className="row hero-actions">
             <Button disabled title="Maintenance windows are not built yet">Mute 1h</Button>
-            <Button onClick={() => { void escalate(); }} disabled={pending || !canEscalate || acked} title={acked ? "Acknowledged: paging has stopped" : undefined}>Escalate now</Button>
+            <Button data-list-action="incident.panel-escalate" onClick={(e) => { if (isSameSpot(e)) return; markSpot(e); void escalate(); }} disabled={pending || !canEscalate || acked || !may} title={noRole ?? (acked ? "Acknowledged: paging has stopped" : escalateWhy)}>Escalate now</Button>
             {!acked ? (
-              <Button ref={ackRef} variant="primary" size="lg" onClick={() => { void ack(); }} disabled={pending}>Acknowledge</Button>
+              <Button ref={ackRef} variant="primary" size="lg" data-list-action="incident.panel-ack" onClick={(e) => { if (isSameSpot(e)) return; markSpot(e); void ack(); }} disabled={pending || !may} title={noRole}>Acknowledge</Button>
             ) : fresh ? (
               <span ref={spotRef} className="ack-spot" role="status" tabIndex={-1} data-testid="panel-acked">
                 <span><span className="ack-spot-w">Acknowledged <span aria-hidden="true">✓</span></span>{acknowledgedAt ? <> <span className="ack-spot-t">{kstTime(acknowledgedAt)}</span></> : null}</span>
               </span>
             ) : (
-              <Button ref={resolveRef} variant="primary" size="lg" onClick={() => { shell.clearToast(); setConfirm(true); }} disabled={pending} aria-haspopup="dialog">Resolve…</Button>
+              <Button ref={resolveRef} variant="primary" size="lg" onClick={() => { shell.clearToast(); setConfirm(true); }} disabled={pending || !may} title={noRole} aria-haspopup="dialog">Resolve…</Button>
             )}
           </div>
           {acked && token ? (
             <div className="hero-sub">
-              <button type="button" className="lnk-btn" onClick={() => { void undo(token); }} disabled={pending} data-testid="panel-undo">Undo acknowledge</button>
+              <button type="button" className="lnk-btn" data-list-action="incident.panel-undo-ack" onClick={() => { void undo(token); }} disabled={pending} data-testid="panel-undo">Undo acknowledge</button>
               <span className="sm mut">paging starts again</span>
             </div>
           ) : null}
         </>
       )}
+      {noRole ? <div className="sm mut" style={{ marginTop: 8 }} data-testid="hero-role">{noRole}</div> : null}
       {err ? (
         <div style={{ marginTop: 10 }}>
           <Banner tone="red" action={<Button size="sm" onClick={() => { setErr(null); router.refresh(); }}>Reload</Button>}>

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ShellContext, type LocalMark, type ShellApi } from "@/components/ShellContext";
 import { openIncidents } from "@/lib/api/mock/fixtures";
 import { sortIncidents } from "@/lib/incidents";
+import { clearSpot } from "@alarmops/design-system";
 import { DOUBLE_MS, IncidentsTable, type IncidentRow } from "./IncidentsTable";
 
 const refresh = vi.fn();
@@ -26,7 +27,7 @@ function Harness({ initial, listKey }: { initial: IncidentRow[]; listKey?: strin
   const [marks, setMarks] = useState<Record<string, LocalMark>>(marksNow);
   const listView = useRef<unknown>(null);
   const api: ShellApi = {
-    sel: {}, label: "All customers", filtered: false, totalCustomers: 14, toast, clearToast: () => undefined, setOutside: () => undefined, acks,
+    user: { id: "usr_haeun", name: "Haeun Kim", role: "ADMIN" }, sel: {}, label: "All customers", filtered: false, totalCustomers: 14, toast, clearToast: () => undefined, setOutside: () => undefined, acks,
     setAck: (id, t) => setAcks((a) => { const n = { ...a }; if (t) n[id] = t; else delete n[id]; return n; }),
     marks, mark: (id, m) => setMarks((a) => { const n = { ...a }; if (m) n[id] = m; else delete n[id]; return n; }), listView,
     customers: [], problemsOnly: false, callOrderView: { current: null }, requestLeave: (go) => go(), setLeaveGuard: () => undefined,
@@ -45,7 +46,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   marksNow = {};
   ackIncident.mockResolvedValue({ ok: true, data: { undoToken: "undo_1" } });
-  undoBulk.mockResolvedValue({ ok: true, data: null });
+  undoBulk.mockImplementation(async () => ({ ok: true, data: { restored: openIncidents.map((i) => i.id), skipped: [] } }));
+  clearSpot();
 });
 
 describe("rows never move under the pointer (QA P1-1, P1-A)", () => {

@@ -2,30 +2,13 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
-import { Mark, customerHasProblem, cx } from "@alarmops/design-system";
+import { Mark, customerHasProblem, cx, useStableRows } from "@alarmops/design-system";
 import type { CallOrderRow, PagingPathStep } from "@/lib/api/types";
 import { STYLE_LABEL, callOrderPath, firstName, howText, parseScopeKey, partsText, repeatText, targetParts } from "@/lib/call-order/model";
 import { setEditIntent, takeFocusRow } from "@/lib/call-order/flags";
 import { useShell } from "@/components/ShellContext";
 
-interface View { key: string; order: string[] }
-
-/** Keeps every row where it is while the user stays in Call order: a save changes what a row says, never where it is. */
-function stableOrder(rows: readonly CallOrderRow[], view: View | null, key: string): string[] {
-  const now = rows.map((r) => r.key);
-  if (!view || view.key !== key) return now;
-  const have = new Set(now);
-  const order = view.order.filter((k) => have.has(k));
-  for (const k of now) {
-    if (order.includes(k)) continue;
-    // a new level (own steps just created) goes under the last row of its customer; nothing above it moves
-    const cust = k.split("/")[0];
-    let at = -1;
-    order.forEach((o, n) => { if (o.split("/")[0] === cust) at = n; });
-    order.splice(at < 0 ? order.length : at + 1, 0, k);
-  }
-  return order;
-}
+type Row = CallOrderRow & { id: string };
 
 const HEALTH = { UNREACHABLE: { cls: "unr", label: "Unreachable" }, AT_RISK: { cls: "ar", label: "At risk" } } as const;
 
@@ -64,15 +47,35 @@ export function CallOrderTable({ rows, listQuery, openKey, filterKey }: { rows: 
   const [showAll, setShowAll] = useState(false);
   const body = useRef<HTMLTableSectionElement>(null);
 
-  const order = useMemo(() => stableOrder(rows, shell.callOrderView.current as View | null, listQuery), [rows, listQuery, shell.callOrderView]);
-  useEffect(() => { shell.callOrderView.current = { key: listQuery, order } satisfies View; }, [order, listQuery, shell.callOrderView]);
+  // The console's one rule for lists (design-system list/): while the user stays in Call order a save changes what a
+  // row says, never where it is. A level whose own steps were removed stays in place and says so; a level that just
+  // got own steps waits in the bar above ("1 new · Show") instead of pushing the rows below it down.
+  const items = useMemo<Row[]>(() => rows.map((r) => ({ ...r, id: r.key })), [rows]);
+  const stable = useStableRows(items, listQuery, { keep: shell.callOrderView });
 
   const problems = useMemo(() => new Set(shell.customers.filter(customerHasProblem).map((c) => c.slug)), [shell.customers]);
-  const byKey = new Map(rows.map((r) => [r.key, r]));
-  const all = order.map((k) => byKey.get(k)).filter((r): r is CallOrderRow => Boolean(r));
+  const all = stable.rows;
   const onlyProblems = shell.problemsOnly && !showAll && !shell.sel.customer;
-  const shown = onlyProblems ? all.filter((r) => problems.has(r.key.split("/")[0]!)) : all;
-  const hiddenCustomers = new Set(all.filter((r) => !shown.includes(r)).map((r) => r.key.split("/")[0])).size;
+  const shown = onlyProblems ? all.filter((r) => problems.has(r.item.key.split("/")[0]!)) : all;
+  const hiddenCustomers = new Set(all.filter((r) => !shown.includes(r)).map((r) => r.item.key.split("/")[0])).size;
+  const fresh = stable.view.fresh.length;
+  const gone = all.filter((r) => r.gone).length;
+
+  // J/K move between rows like in Incidents (QA P3-E). Not while typing or inside the tree, a panel, a menu or a dialog.
+  useEffect(() => {
+    const onKeyDown = (e: globalThis.KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey || (e.key !== "j" && e.key !== "k")) return;
+      const tgt = e.target as HTMLElement;
+      if (tgt.closest("input, select, textarea, [contenteditable], [role=tree], [role=dialog], [role=alertdialog], [role=menu], .panel")) return;
+      const links = [...(body.current?.querySelectorAll<HTMLAnchorElement>("a[data-key]") ?? [])];
+      if (!links.length) return;
+      const idx = links.findIndex((l) => l === document.activeElement);
+      e.preventDefault();
+      links[e.key === "j" ? Math.min(links.length - 1, idx + 1) : Math.max(0, idx - 1)]?.focus();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   // after a save or a close the focus is back on the row that was open (E18)
   useEffect(() => {
@@ -105,18 +108,31 @@ export function CallOrderTable({ rows, listQuery, openKey, filterKey }: { rows: 
           <button type="button" className="btn sm" onClick={() => setShowAll((v) => !v)}>{showAll ? "Only with problems" : "Show all customers"}</button>
         </div>
       ) : null}
+      {/* always here and always the same height: when it has something to say, nothing below it moves */}
+      <div className={cx("list-bar", stable.pending && "on")} data-testid="co-list-bar">
+        {stable.pending ? (
+          <span className="list-bar-p" role="status">
+            <span className="list-bar-t" data-testid="co-list-pending">
+              {[fresh ? `${fresh} new level${fresh === 1 ? "" : "s"} with own steps` : "", gone ? `${gone} no longer ${gone === 1 ? "has" : "have"} own steps` : ""].filter(Boolean).join(" · ") || stable.pending.text}
+            </span>
+            <button type="button" className="btn sm" title="Take the list as it is now. Rows keep their place until you ask." onClick={(e) => stable.resort(e)}>{fresh ? "Show" : "Refresh list"}</button>
+          </span>
+        ) : <span className="sr-only" role="status" />}
+        <span className="list-bar-s">{shown.filter((r) => !r.gone).length} listed</span>
+      </div>
       <div className="tw co-tw">
         <table className="t co" data-testid="co-table">
           <thead>
             <tr><th className="c-path">Customer › project › service</th><th className="c-style">Order</th><th className="c-first">Called first now</th><th className="c-then">Then</th><th className="c-reach">Reach</th></tr>
           </thead>
           <tbody ref={body}>
-            {shown.map((r) => {
+            {shown.map(({ item: r, gone: left }) => {
               const h = r.health && r.health.level !== "OK" ? HEALTH[r.health.level] : null;
               const customer = r.org.customer?.name ?? "";
               const label = [customer, r.org.project?.name, r.org.service?.name].filter(Boolean).join(" › ");
               return (
-                <tr key={r.key} data-testid="co-row" data-key={r.key} className={cx(r.health?.level === "UNREACHABLE" && "hot", r.health?.level === "AT_RISK" && "amb", openKey === r.key && "cur")} onClick={(e) => onRow(e, r.key)}>
+                <tr key={r.key} data-testid="co-row" data-key={r.key} data-row-key={r.key} data-gone={left ? "1" : undefined}
+                  className={cx(!left && r.health?.level === "UNREACHABLE" && "hot", !left && r.health?.level === "AT_RISK" && "amb", openKey === r.key && "cur", left && "dim")} onClick={(e) => onRow(e, r.key)}>
                   <td className="c-path">
                     <Link href={callOrderPath(parseScopeKey(r.key)) + listQuery} data-key={r.key} className="co-path" data-testid="co-path" aria-current={openKey === r.key ? "true" : undefined}
                       aria-label={`Call order for ${label}`} onKeyDown={(e) => onKey(e, r.key)}>
@@ -130,7 +146,8 @@ export function CallOrderTable({ rows, listQuery, openKey, filterKey }: { rows: 
                   <td className="c-style" data-l="Order">
                     <div>
                       <span data-testid="co-style">{STYLE_LABEL[r.style]}</span>
-                      {r.level !== "CUSTOMER" && r.own ? <span className="pill accent co-own">Own steps</span> : null}
+                      {left ? <span className="pill co-own" data-testid="co-row-gone">Own steps removed</span> : r.level !== "CUSTOMER" && r.own ? <span className="pill accent co-own">Own steps</span> : null}
+                      {left ? <div className="org">follows the level above again · open it to read</div> : null}
                       {!r.own && r.inheritedFrom ? <div className="org">inherits from {r.inheritedFrom.level === "CUSTOMER" ? customer : `${customer} › ${r.inheritedFrom.name}`}</div> : null}
                     </div>
                   </td>
@@ -158,7 +175,7 @@ export function CallOrderTable({ rows, listQuery, openKey, filterKey }: { rows: 
       </div>
       <div className="sm mut co-foot">
         Projects and services with their own steps have their own row. Open a row to read its order; editing is inside the panel, for exactly the row you opened.
-        <span className="co-keys"> <span className="kbd">Enter</span> open · <span className="kbd">E</span> edit</span>
+        <span className="co-keys"> <span className="kbd">J</span> <span className="kbd">K</span> move · <span className="kbd">Enter</span> open · <span className="kbd">E</span> edit</span>
       </div>
     </>
   );

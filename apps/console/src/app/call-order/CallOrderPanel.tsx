@@ -5,14 +5,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Banner, ConfirmDialog, DirtyGuard, Mark, Panel, cx } from "@alarmops/design-system";
 import type { PagingConfigInput, PagingStep } from "@/lib/api/types";
 import {
-  PLAN_LABEL, STYLE_LABEL, callOrderPath, depthOf, diffConfig, labelOf, levelOf, pagedNow, parseScopeKey, partsText, pathOf, plural, reachOf, reachText,
+  callOrderPath, depthOf, diffConfig, labelOf, levelOf, pagedNow, parseScopeKey, partsText, pathOf, planLabel, planSteps, plural, reachOf, reachText,
   resolveStep, sameConfig, scopeKey, sentenceParts, sourceOf, targetParts, toInput, validateConfig, namesOf, howText, repeatText,
   type CoScope, type Directory, type ScopeNames,
 } from "@/lib/call-order/model";
 import { announceDrafts, clearDraft, loadDraft, saveDraft, type CallOrderDraft } from "@/lib/call-order/draft-store";
 import { setBackGuard, setEditIntent, setFocusRow, takeBackGuard, takeEditIntent } from "@/lib/call-order/flags";
 import { scopeQuery } from "@/lib/scope";
-import { useShell } from "@/components/ShellContext";
+import { hasRole, roleReason, useShell } from "@/components/ShellContext";
+import { errorLine } from "@/lib/errors";
 import type { PanelData } from "./CallOrderScreen";
 import { removeOwnSteps, saveCallOrder } from "./actions";
 import { Sentence } from "./Sentence";
@@ -54,6 +55,11 @@ const typing = (t: EventTarget | null) => t instanceof HTMLElement && (t.isConte
 export function CallOrderPanel({ data, listHref, listQuery }: { data: PanelData; listHref: string; listQuery: string }) {
   const { scope, path, health, responders, rotations, staff } = data;
   const shell = useShell();
+  const uid = shell.user.id;
+  const admin = hasRole(shell.user, "ADMIN");
+  const noEdit = admin ? null : roleReason(shell.user, "ADMIN", "Changing the call order");
+  /** nothing is configured anywhere up the chain: nobody is paged until steps are saved (the first save goes with If-Match 0) */
+  const noOrder = path.steps.length === 0;
   const router = useRouter();
   const key = scopeKey(scope);
   const node = shell.customers.find((c) => c.slug === scope.customer);
@@ -64,11 +70,14 @@ export function CallOrderPanel({ data, listHref, listQuery }: { data: PanelData;
   }), [path]);
   const label = labelOf(names);
   const level = levelOf(scope).toLowerCase();
-  const dir: Directory = useMemo(() => ({ customerName: names.customer, staff: responders.staff, people: responders.people, rotations, allStaff: staff }), [names.customer, responders, rotations, staff]);
+  const dir: Directory = useMemo(() => ({ customerName: names.customer, staff: responders.staff, people: responders.people, rotations, allStaff: staff, slackChannel: responders.slackChannel }), [names.customer, responders, rotations, staff]);
   const reach = useMemo(() => (node ? reachOf(node, scope) : { services: [], kept: [] }), [node, scope]);
   const source = node ? sourceOf(node, scope) : scope;
   const sourceLabel = node ? labelOf(namesOf(node, source) ?? names) : names.customer;
-  const base: PagingConfigInput = useMemo(() => toInput({ style: path.style, plan: path.plan, sharedRotationId: path.sharedRotationId, repeatCount: path.repeatCount, steps: path.steps }), [path]);
+  const base: PagingConfigInput = useMemo(() => (path.steps.length === 0
+    // no steps yet: the editor starts from the Standard plan to everyone — a suggestion, saved only when the user saves
+    ? { style: "ALL_AT_ONCE", plan: "STANDARD", repeatCount: 1, steps: planSteps("STANDARD", { targetType: "ALL_RESPONDERS" }) }
+    : toInput({ style: path.style ?? "CUSTOM", plan: path.plan ?? "STANDARD", sharedRotationId: path.sharedRotationId, repeatCount: path.repeatCount, steps: path.steps })), [path]);
 
   const [mode, setMode] = useState<"read" | "edit">("read");
   const [value, setValue] = useState<PagingConfigInput>(base);
@@ -83,10 +92,11 @@ export function CallOrderPanel({ data, listHref, listQuery }: { data: PanelData;
   const [error, setError] = useState<string | null>(null);
   const [conflict, setConflict] = useState(false);
   const [tried, setTried] = useState(false);
+  const [respEditing, setRespEditing] = useState(false);
   const focusField = useRef(false);
 
   const editing = mode === "edit";
-  const dirty = editing && !sameConfig(value, base);
+  const dirty = editing && (noOrder || !sameConfig(value, base));
   const stale = editing && !busy && (meta.creating ? path.own : !path.own || meta.baseVersion !== path.version);
   const check = useMemo(() => validateConfig(value, dir), [value, dir]);
   const before = useMemo(() => ({ steps: path.steps, repeatCount: path.repeatCount }), [path]);
@@ -97,46 +107,49 @@ export function CallOrderPanel({ data, listHref, listQuery }: { data: PanelData;
   const wide = reach.services.length > 1 || Boolean(meta.widenedFrom);
   const describe = useCallback((s: PagingStep) => partsText(targetParts(resolveStep(s, dir), names.customer)), [dir, names.customer]);
   const changes = diffConfig(base, value, describe);
-  const saveLabel = `${meta.creating ? "Save own steps for" : "Save for"} ${label}`;
+  const saveLabel = `${noOrder ? "Save the call order for" : meta.creating ? "Save own steps for" : "Save for"} ${label}`;
 
   /* ---- entering and leaving the editor ---- */
   const enterEdit = useCallback((widenedFrom?: string) => {
-    const d = loadDraft(key);
+    if (noEdit) return;
+    const d = loadDraft(uid, key);
     if (d) { setValue(d.value); setMeta({ creating: d.creating, widenedFrom: d.widenedFrom ?? widenedFrom, baseVersion: d.baseVersion }); }
     else { setValue(base); setMeta({ creating: !path.own, widenedFrom, baseVersion: path.own ? path.version : null }); }
     setError(null); setConflict(false); setTried(false);
     focusField.current = true;
     setMode("edit");
-  }, [key, base, path.own, path.version]);
-  const toRead = useCallback(() => { setMode("read"); setKept(loadDraft(key)); }, [key]);
+  }, [uid, key, base, path.own, path.version, noEdit]);
 
   // a row's E key, "Resume", and the widen step arrive here as a one-shot note; otherwise the panel opens to read
   useEffect(() => {
     const intent = takeEditIntent(key);
-    if (takeBackGuard(key) && loadDraft(key)) {
+    if (takeBackGuard(key) && loadDraft(uid, key)) {
       // Back was pressed over an unsaved edit and the editor stepped forward again: same editor, same question
       nav.restoringUntil = 0;
       enterEdit();
       setGuard({ proceed: () => window.history.back(), leavingTo: "go back" });
     } else if (intent) enterEdit(intent.widenedFrom);
-    else setKept(loadDraft(key));
+    else setKept(loadDraft(uid, key));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
+  }, [key, uid]);
   useEffect(() => {
     if (!editing || !focusField.current) return;
     focusField.current = false;
     const el = document.querySelector<HTMLInputElement>(".co-panel [data-first-field]") ?? document.querySelector<HTMLInputElement>(".co-panel .co-edit input");
-    el?.focus();
+    // creating own steps: the explanation at the top ("Creating own steps for …") stays in view (QA P3-I)
+    el?.focus({ preventScroll: meta.creating });
     el?.select?.();
+    if (meta.creating) document.querySelector(".co-panel [data-testid=co-level]")?.scrollIntoView({ block: "start" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editing]);
 
   // the draft is written as it is typed: a reload, a crash or "Keep draft" all find it under this scope, and only this scope
   useEffect(() => {
     if (!editing) return;
-    if (dirty) saveDraft({ scope: key, label, baseVersion: meta.baseVersion, creating: meta.creating, widenedFrom: meta.widenedFrom, value }, Date.now());
-    else clearDraft(key);
+    if (dirty) saveDraft({ user: uid, scope: key, label, baseVersion: meta.baseVersion, creating: meta.creating, widenedFrom: meta.widenedFrom, value }, Date.now());
+    else clearDraft(uid, key);
     announceDrafts();
-  }, [editing, dirty, key, label, meta, value]);
+  }, [editing, dirty, uid, key, label, meta, value]);
 
   const leaveNow = useCallback((proceed: () => void) => {
     nav.bypassUntil = Date.now() + 1500;
@@ -182,24 +195,26 @@ export function CallOrderPanel({ data, listHref, listQuery }: { data: PanelData;
   const doSave = async (after?: () => void) => {
     setBusy(true); setError(null);
     const wasCreating = meta.creating;
-    const res = await saveCallOrder(scope, value, wasCreating ? null : meta.baseVersion);
+    // If-Match: the version the edit started from; 0 creates the steps of a level that has none (API-CONTRACT §8.3)
+    const res = await saveCallOrder(scope, value, wasCreating ? 0 : meta.baseVersion ?? 0);
     if (!res.ok) {
       setBusy(false);
       // the draft stays exactly as typed; nothing is overwritten on either side
       if (res.code === "VERSION_CONFLICT" || res.code === "ALREADY_EXISTS") setConflict(true);
-      else setError(res.message + (res.requestId ? ` (requestId ${res.requestId})` : ""));
+      // every refusal says what to change (lib/errors.ts): which step, which limit, which role
+      else setError(errorLine(res, { what: "Changing the call order", where: label }));
       return;
     }
     const newVersion = res.data.version;
-    clearDraft(key); announceDrafts();
+    clearDraft(uid, key); announceDrafts();
     setMode("read");
     const text = `${wasCreating ? "Own steps created for" : "Saved for"} ${label} · ${changes.length ? changes.join(", ") : "same steps"} · ${reachText(reach)}`;
     // Undo only for a save that was applied without a confirmation (one service): store the previous value again (API-CONTRACT §8.8)
-    const undo = wide ? undefined : {
+    const undo = wide || (wasCreating && !scope.project) ? undefined : {
       label: "Undo",
       onAction: async () => {
         const r = wasCreating ? await removeOwnSteps(scope, newVersion) : await saveCallOrder(scope, base, newVersion);
-        shell.toast(r.ok ? `Undone · ${label} is back to how it was` : r.code === "VERSION_CONFLICT" ? `Could not undo — ${label} was changed again` : `Could not undo — ${r.message}`);
+        shell.toast(r.ok ? `Undone · ${label} is back to how it was` : r.code === "VERSION_CONFLICT" ? `Could not undo — ${label} was changed again` : `Could not undo — ${errorLine(r, { what: "Changing the call order", where: label })}`);
       },
     };
     setFocusRow(key);
@@ -221,11 +236,11 @@ export function CallOrderPanel({ data, listHref, listQuery }: { data: PanelData;
   };
 
   const stateRef = useRef({ editing, modal: false, attemptSave, enterEdit });
-  stateRef.current = { editing, modal: Boolean(guard || confirm || widen || askCancel || askRemove), attemptSave, enterEdit };
+  stateRef.current = { editing, modal: Boolean(guard || confirm || widen || askCancel || askRemove || respEditing), attemptSave, enterEdit };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const s = stateRef.current;
-      if (s.modal || document.querySelector(".ssearch, .ssheet")) return;
+      if (s.modal || document.querySelector(".ssearch, .ssheet, [role=alertdialog]")) return;
       if (s.editing && e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); s.attemptSave(); return; }
       if (!s.editing && e.key.toLowerCase() === "e" && !e.ctrlKey && !e.metaKey && !e.altKey && !typing(e.target) && !e.defaultPrevented) { e.preventDefault(); s.enterEdit(); }
     };
@@ -233,8 +248,8 @@ export function CallOrderPanel({ data, listHref, listQuery }: { data: PanelData;
     return () => document.removeEventListener("keydown", onKey);
   }, []);
 
-  const cancelEdit = () => { if (dirty) setAskCancel(true); else { clearDraft(key); announceDrafts(); toRead(); } };
-  const discard = () => { clearDraft(key); announceDrafts(); setMode("read"); setKept(null); };
+  const cancelEdit = () => { if (dirty && !sameConfig(value, base)) setAskCancel(true); else { clearDraft(uid, key); announceDrafts(); setMode("read"); setKept(null); } };
+  const discard = () => { clearDraft(uid, key); announceDrafts(); setMode("read"); setKept(null); };
 
   /* ---- widening: a separate, explained step (E6) ---- */
   const origin = meta.widenedFrom ? parseScopeKey(meta.widenedFrom) : null;
@@ -251,8 +266,8 @@ export function CallOrderPanel({ data, listHref, listQuery }: { data: PanelData;
     setBusy(true);
     const r = await removeOwnSteps(scope, path.version);
     setBusy(false); setAskRemove(false);
-    if (!r.ok) { if (r.code === "VERSION_CONFLICT") setConflict(true); else setError(r.message); return; }
-    clearDraft(key); announceDrafts(); setMode("read"); setFocusRow(parentKey);
+    if (!r.ok) { if (r.code === "VERSION_CONFLICT") setConflict(true); else setError(errorLine(r, { what: "Changing the call order", where: label })); return; }
+    clearDraft(uid, key); announceDrafts(); setMode("read"); setFocusRow(parentKey);
     leaveNow(() => router.push(listHref));
     shell.toast(`Own steps removed for ${label} · it follows ${parentLabel} again`);
   };
@@ -279,12 +294,18 @@ export function CallOrderPanel({ data, listHref, listQuery }: { data: PanelData;
     </>
   ) : (
     <>
-      <span className="sm mut co-ro">{path.own
-        ? (reach.services.length > 1 ? `Read only. An edit here reaches ${plural(reach.services.length, "service")}.` : "Read only until you press Edit.")
-        : `Read only. To change these steps for everything that follows them, open ${sourceLabel}.`}</span>
+      <span className="sm mut co-ro" data-testid="co-footnote">{respEditing
+        // the steps are read-only; the Responders above are being changed, and each change applies at once (QA P3-F)
+        ? `Editing Responders of ${names.customer}: each change applies at once. The steps stay as they are until you press Edit.`
+        : noEdit ? `Read only. ${noEdit}`
+          : noOrder ? `No steps yet: nobody is paged for ${label}.`
+            : path.own
+              ? (reach.services.length > 1 ? `Read only. An edit here reaches ${plural(reach.services.length, "service")}.` : "Read only until you press Edit.")
+              : `Read only. To change these steps for everything that follows them, open ${sourceLabel}.`}</span>
       <span className="sp" />
-      <button type="button" className="btn co-editbtn" data-testid="co-edit" aria-keyshortcuts="E" onClick={() => enterEdit()}>
-        <span className="co-save-t">{path.own ? `Edit call order for ${label}` : `Create own steps for ${label}…`}</span><span className="kbd hide-m" aria-hidden="true">E</span>
+      <button type="button" className="btn co-editbtn" data-testid="co-edit" aria-keyshortcuts="E" disabled={Boolean(noEdit) || respEditing}
+        title={noEdit ?? (respEditing ? "Press Done in Responders first" : undefined)} onClick={() => enterEdit()}>
+        <span className="co-save-t">{noOrder ? `Set up the call order for ${label}…` : path.own ? `Edit call order for ${label}` : `Create own steps for ${label}…`}</span><span className="kbd hide-m" aria-hidden="true">E</span>
       </button>
     </>
   );
@@ -303,7 +324,13 @@ export function CallOrderPanel({ data, listHref, listQuery }: { data: PanelData;
             </div>
           ) : null}
 
-          {health.level !== "OK" ? (
+          {noOrder && !editing ? (
+            <Banner tone="red">
+              <div data-testid="co-no-order"><span className="stag unr">No call order</span> <b>Nobody is paged for {label}: no steps are saved for {names.customer} yet.</b>
+                <div className="sm">{noEdit ?? "Press “Set up the call order” below; nothing is saved until you save."}</div></div>
+            </Banner>
+          ) : null}
+          {health.level !== "OK" && !(noOrder && !editing) ? (
             <Banner tone={problemTone}>
               <div data-testid="co-health">
                 <div><span className={cx("stag", health.level === "UNREACHABLE" ? "unr" : "ar")}>{health.level === "UNREACHABLE" ? "Unreachable" : "At risk"}</span>{" "}
@@ -344,7 +371,7 @@ export function CallOrderPanel({ data, listHref, listQuery }: { data: PanelData;
             <div className="co-inh" data-testid="co-creating">
               <div className="b">Creating own steps for {label}</div>
               <div>Started from the steps of {sourceLabel}. Nothing changes until you save. After saving, {reach.services.length
-                ? <><b>{reachText(reach)}</b> of {label} stop following {sourceLabel}</>
+                ? <><b>{reachText(reach)}</b> of {label} {reach.services.length === 1 ? "stops" : "stop"} following {sourceLabel}</>
                 : <><b>no service changes right now</b></>}. {sourceLabel} itself is not changed.</div>
             </div>
           ) : null}
@@ -410,7 +437,7 @@ export function CallOrderPanel({ data, listHref, listQuery }: { data: PanelData;
               <dl className={cx("co-from", !path.own && "inh")} data-testid="co-from">
                 <dt>{path.own ? "Comes from" : "Inherited from"}</dt>
                 <dd>{path.own ? (
-                  <><b>{label}</b> · {scope.project ? "own steps" : "customer steps"} · {STYLE_LABEL[path.style]}, started from {PLAN_LABEL[path.plan]}{path.edited ? " (edited)" : ""} · used by {reachText(reach)}
+                  <><b>{label}</b> · {scope.project ? "own steps" : "customer steps"} · <span data-testid="co-plan-label">{path.style && path.plan ? planLabel({ style: path.style, plan: path.plan, edited: path.edited }) : "no plan"}</span> · used by {reachText(reach)}
                     {path.updatedByName ? ` · edited by ${path.updatedByName}${path.updatedAt ? `, ${shortDate(path.updatedAt)}` : ""}` : ""}.</>
                 ) : (
                   <><b>{sourceLabel}</b>. {names.service ?? names.project} has no steps of its own and follows it.{" "}
@@ -447,7 +474,9 @@ export function CallOrderPanel({ data, listHref, listQuery }: { data: PanelData;
             </div>
           ) : null}
 
-          <RespondersCard customer={scope.customer} customerName={names.customer} responders={responders} staff={staff} steps={path.steps} canEdit={!editing} />
+          <RespondersCard customer={scope.customer} customerName={names.customer} services={node ? node.projects.reduce((n, p) => n + p.services.length, 0) : 0}
+            responders={responders} staff={staff} steps={path.steps} customerSteps={data.customerSteps} customerRepeat={data.customerRepeat} rotations={rotations}
+            blocked={editing ? "Save or cancel the step edit above before changing Responders." : null} onEditingChange={setRespEditing} />
 
           {editing && path.own && scope.project && !meta.creating ? (
             <div className="row co-rm">

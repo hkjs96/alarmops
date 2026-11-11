@@ -19,7 +19,11 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           </button>
           <p id="sso-note" className="xs mut" style={{ marginTop: 12 }}>
             Google SSO is not connected in this build.{" "}
-            {mock ? <>Mock mode: <a href={devHref}>sign in as Haeun Kim (dev) →</a></> : "Sign-in is unavailable until SSO is configured."}
+            {mock ? (
+              <>Mock mode: <a href={devHref}>sign in as Haeun Kim (dev) →</a>{" "}
+                <span className="mut">or as{" "}
+                  <a href={devHref + (safe ? "&" : "?") + "as=operator"}>an operator</a> / <a href={devHref + (safe ? "&" : "?") + "as=viewer"}>a viewer</a></span></>
+            ) : "Sign-in is unavailable until SSO is configured."}
           </p>
         </div>
       </div>

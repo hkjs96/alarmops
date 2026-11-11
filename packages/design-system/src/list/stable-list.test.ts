@@ -28,6 +28,14 @@ describe("stable list", () => {
     expect(pendingText(pendingOf(mergeView(m, [r("a"), r("b", "ACKNOWLEDGED")])))).toBeNull();
     expect(pendingText(pendingOf(mergeView(v, [r("b", "ACKNOWLEDGED"), r("a")])))?.text).toBe("Order changed");
   });
+  it("append mode: a row the user added goes after the last row; a removed row stays as gone; nothing above moves", () => {
+    const v = startView([{ id: "a" }, { id: "b" }], "k");
+    const m = mergeView(v, [{ id: "n" }, { id: "b" }], "append");
+    expect(m.rows.map((x) => [x.item.id, x.gone])).toEqual([["a", true], ["b", false], ["n", false]]);
+    expect(pendingOf(m).fresh).toBe(0);
+    // the removed row comes back (Undo): the same place
+    expect(mergeView(m, [{ id: "a" }, { id: "n" }, { id: "b" }], "append").rows.map((x) => [x.item.id, x.gone])).toEqual([["a", false], ["b", false], ["n", false]]);
+  });
   it("an empty list takes whatever arrives", () => {
     expect(mergeView(startView<{ id: string; status: string }>([], "k"), [r("a")]).rows).toHaveLength(1);
   });

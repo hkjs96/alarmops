@@ -10,13 +10,14 @@ import { useShell } from "@/components/ShellContext";
 export function DraftsLine({ listQuery, openKey }: { listQuery: string; openKey?: string }) {
   const router = useRouter();
   const shell = useShell();
+  const user = shell.user.id;
   const [drafts, setDrafts] = useState<CallOrderDraft[]>([]);
   useEffect(() => {
-    const read = () => setDrafts(listDrafts());
+    const read = () => setDrafts(listDrafts(user));
     read();
     window.addEventListener(DRAFTS_EVENT, read);
     return () => window.removeEventListener(DRAFTS_EVENT, read);
-  }, []);
+  }, [user]);
   const list = drafts.filter((d) => d.scope !== openKey);
   if (list.length === 0) return null;
   return (
@@ -26,7 +27,7 @@ export function DraftsLine({ listQuery, openKey }: { listQuery: string; openKey?
           <span className="co-draft-t"><b>Draft for {d.label}</b> · not saved, kept in this tab only</span>
           <span className="co-draft-a">
             <button type="button" className="btn sm" onClick={() => shell.requestLeave(() => { setEditIntent({ scope: d.scope, widenedFrom: d.widenedFrom }); router.push(callOrderPath(parseScopeKey(d.scope)) + listQuery); }, "continue")}>Resume</button>
-            <button type="button" className="btn sm ghost" aria-label={`Discard the draft for ${d.label}`} onClick={() => { clearDraft(d.scope); announceDrafts(); shell.toast(`Draft for ${d.label} discarded`); }}>Discard</button>
+            <button type="button" className="btn sm ghost" aria-label={`Discard the draft for ${d.label}`} onClick={() => { clearDraft(user, d.scope); announceDrafts(); shell.toast(`Draft for ${d.label} discarded`); }}>Discard</button>
           </span>
         </div>
       ))}

@@ -1,11 +1,22 @@
 "use client";
 import { createContext, useContext, useLayoutEffect } from "react";
 import type { ScopeCustomerNode, ScopeSel } from "@alarmops/design-system";
-import type { OutsideCounts } from "@/lib/api/types";
+import type { OutsideCounts, Role } from "@/lib/api/types";
 
 export interface ToastAction { label: string; href?: string; onAction?: () => void }
 export type LocalMark = "RESOLVED" | "REOPENED";
+export interface ShellUser { id: string; name: string; role: Role }
+const RANK: Record<Role, number> = { VIEWER: 0, OPERATOR: 1, ADMIN: 2 };
+/** What the console offers follows GET /me; what is allowed is decided by the API (a 403 is worded by lib/errors.ts). */
+export const hasRole = (user: Pick<ShellUser, "role">, min: Role): boolean => RANK[user.role] >= RANK[min];
+/** Why an action is not offered: "Changing the call order needs the Admin role. You are signed in as Operator." */
+export function roleReason(user: Pick<ShellUser, "role">, min: Role, what: string): string {
+  const n: Record<Role, string> = { ADMIN: "Admin", OPERATOR: "Operator", VIEWER: "Viewer" };
+  return `${what} needs the ${n[min]} role. You are signed in as ${n[user.role]}.`;
+}
 export interface ShellApi {
+  /** the signed-in user (GET /me): id for what is kept per user in the browser, role for what to offer */
+  user: ShellUser;
   /** current list filter (empty when the address has none or it is not valid) */
   sel: ScopeSel;
   /** "Mirae Pay › Core", "My customers" or "All customers" */

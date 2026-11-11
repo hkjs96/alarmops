@@ -1,15 +1,17 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Avatar, cx } from "@alarmops/design-system";
+import { cx } from "@alarmops/design-system";
+import type { Role } from "@/lib/api/types";
 import { NAV, sectionFor } from "@/lib/nav";
 import { ThemeToggle } from "./ThemeToggle";
+import { AccountMenu } from "./AccountMenu";
 
 /**
  * Top menu. The Incidents badge is one number: open incidents in all customers (triggered or escalated, nobody
  * acknowledged). It does not change with the filter. Links carry the list filter so it follows the user across screens.
  */
-export function TopNav({ openCount, userName, scopeQuery, onOpenFinder }: { openCount: number; userName: string; scopeQuery: string; onOpenFinder?: () => void }) {
+export function TopNav({ openCount, userName, role, scopeQuery, onOpenFinder }: { openCount: number; userName: string; role: Role; scopeQuery: string; onOpenFinder?: () => void }) {
   const pathname = usePathname();
   const active = sectionFor(pathname)?.key;
   const item = (s: (typeof NAV)[number], short = false) => (
@@ -38,7 +40,7 @@ export function TopNav({ openCount, userName, scopeQuery, onOpenFinder }: { open
           ) : null}
           <Link href={settings.href + scopeQuery} className={cx("btn ghost show-m-flex", active === "settings" && "on")}>Settings</Link>
           <ThemeToggle />
-          <Avatar name={userName} active />
+          <AccountMenu name={userName} role={role} />
         </div>
       </header>
       <nav className="bnav" aria-label="Main (mobile)">{NAV.filter((s) => s.key !== "settings").map((s) => item(s, true))}</nav>

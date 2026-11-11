@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { Card } from "@alarmops/design-system";
 import { getApi } from "@/lib/api";
 import { ApiError, isHidden } from "@/lib/api/client";
-import type { CallOrderListResponse, PagingHealth, PagingPath, RespondersResponse, RotationSummary, StaffSummary } from "@/lib/api/types";
+import type { CallOrderListResponse, PagingHealth, PagingPath, PagingStep, RespondersResponse, RotationSummary, StaffSummary } from "@/lib/api/types";
 import type { SP } from "@/lib/query";
 import { parseScopeParams, scopeQuery } from "@/lib/scope";
 import { namesOf, scopeKey, type CoScope } from "@/lib/call-order/model";
@@ -19,6 +19,9 @@ export interface PanelData {
   responders: RespondersResponse;
   rotations: RotationSummary[];
   staff: StaffSummary[];
+  /** the customer-level steps: paging health is worked out from these, whatever level the panel shows (D-32) */
+  customerSteps: PagingStep[];
+  customerRepeat: number;
 }
 
 /**
@@ -39,7 +42,8 @@ export async function CallOrderScreen({ sp, panel }: { sp: SP; panel?: CoScope }
       const [path, health, responders, rotations, staff] = await Promise.all([
         api.pagingPath(panel), api.pagingHealth(node.id), api.getResponders(node.id), api.listRotations({ customerId: node.id }), api.listStaff(),
       ]);
-      open = { scope: panel, path, health, responders, rotations, staff };
+      const top = panel.project ? await api.pagingPath({ customer: panel.customer }) : path;
+      open = { scope: panel, path, health, responders, rotations, staff, customerSteps: top.steps, customerRepeat: top.repeatCount };
     } catch (e) {
       if (isHidden(e)) notFound();
       throw e;

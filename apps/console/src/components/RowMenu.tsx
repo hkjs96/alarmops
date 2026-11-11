@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 
-export interface RowMenuItem { label: string; onSelect: () => void }
+export interface RowMenuItem { label: string; onSelect: () => void; /** name of the list action, for the e2e rule (assertNoRowShift) */ action?: string }
 
 /**
  * "…" on a row: the secondary actions (Undo acknowledge). It sits away from the row's primary button, and the menu
@@ -60,7 +60,7 @@ export function RowMenu({ label, items, disabled }: { label: string; items: RowM
         <div ref={menu} className="rmenu-m" role="menu" aria-label={label} onClick={(e) => e.stopPropagation()}
           style={{ left: open.x, top: open.up ? undefined : open.y, bottom: open.up ? window.innerHeight - open.y : undefined }}>
           {items.map((it) => (
-            <button key={it.label} type="button" role="menuitem" className="rmenu-i" onClick={() => { setOpen(null); it.onSelect(); }}>{it.label}</button>
+            <button key={it.label} type="button" role="menuitem" className="rmenu-i" data-list-action={it.action} onClick={() => { setOpen(null); it.onSelect(); }}>{it.label}</button>
           ))}
         </div>
       ) : null}

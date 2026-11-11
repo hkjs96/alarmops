@@ -7,13 +7,14 @@ import {
   addStep, computeHealth, diffConfig, firstOfStyle, isEdited, moveStep, pagedNow, partsText, planSteps, reachOf, reachText, removeStep, repeatText, resolveStep,
   resolveStored, sameConfig, scopeKey, parseScopeKey, sentenceParts, sentenceText, sourceOf, toInput, validateConfig, callOrderPath, type Directory,
 } from "./model";
+import { howText } from "./model";
 import { assertAddResponder, assertPagingInput, assertScope } from "./input";
 
 const store = createStore();
 const cust = (slug: string) => store.customers.find((c) => c.slug === slug)!;
 const dirOf = (slug: string): Directory => directoryOf(store.paging, cust(slug));
 const cfgOf = (slug: string) => store.paging.byCustomer[cust(slug).id]!;
-const steps = (slug: string) => cfgOf(slug).config.steps.map((s) => resolveStep(s, dirOf(slug)));
+const steps = (slug: string) => cfgOf(slug).config!.steps.map((s) => resolveStep(s, dirOf(slug)));
 async function tree(slug: string): Promise<ScopeCustomerNode> {
   return (await createMockApi(createStore()).scopeTree()).customers.find((c) => c.slug === slug)!;
 }
@@ -31,7 +32,9 @@ describe("sentence builder", () => {
   it("names a customer person with the customer, a staff member without", () => {
     const d = dirOf("mirae");
     expect(partsText(sentenceParts([resolveStep({ atMin: 0, targetType: "PERSON", targetId: "ct_yuna", channels: ["VOICE"] }, d)], 0, "Mirae Pay"))).toBe("Call Yuna Seo (Mirae Pay) now → no repeat.");
-    expect(sentenceText([resolveStep({ atMin: 0, targetType: "PERSON", targetId: "ct_minjae", channels: ["SMS", "SLACK_DM"] }, d)], 2, "Mirae Pay")).toBe("Slack + SMS Minjae Lee now → repeat twice.");
+    expect(sentenceText([resolveStep({ atMin: 0, targetType: "PERSON", targetId: "ct_minjae", channels: ["SMS", "SLACK_DM"] }, d)], 2, "Mirae Pay")).toBe("Slack DM + SMS Minjae Lee now → repeat twice.");
+    // the server's words: "Slack" is the customer's channel, "Slack DM" the person, and the order is fixed
+    expect(howText(["EMAIL", "VOICE", "SLACK_CHANNEL", "SMS", "SLACK_DM"])).toBe("Slack + Slack DM + SMS + call + email");
   });
   it("repeat wording", () => {
     expect([0, 1, 2, 3].map(repeatText)).toEqual(["no repeat", "repeat once", "repeat twice", "repeat 3 times"]);
@@ -73,12 +76,12 @@ describe("inheritance resolution (service › project › customer, first with o
     const m = cfgOf("mirae"), h = cfgOf("hanbit");
     const dp = cust("mirae").projects.find((p) => p.slug === "data-platform")!;
     const core = cust("mirae").projects.find((p) => p.slug === "core")!;
-    expect(resolveStored(m.config, m.overrides, { projectId: dp.id, serviceId: dp.services[0]!.id }).scopeType).toBe("PROJECT");
-    expect(resolveStored(m.config, m.overrides, { projectId: core.id, serviceId: core.services[0]!.id }).scopeType).toBe("CUSTOMER");
+    expect(resolveStored(m.config!, m.overrides, { projectId: dp.id, serviceId: dp.services[0]!.id }).scopeType).toBe("PROJECT");
+    expect(resolveStored(m.config!, m.overrides, { projectId: core.id, serviceId: core.services[0]!.id }).scopeType).toBe("CUSTOMER");
     const ful = cust("hanbit").projects.find((p) => p.slug === "fulfilment")!;
-    expect(resolveStored(h.config, h.overrides, { projectId: ful.id, serviceId: ful.services[0]!.id }).scopeType).toBe("SERVICE");
-    expect(resolveStored(h.config, h.overrides, { projectId: ful.id }).scopeType).toBe("CUSTOMER");
-    expect(resolveStored(h.config, h.overrides, {}).scopeType).toBe("CUSTOMER");
+    expect(resolveStored(h.config!, h.overrides, { projectId: ful.id, serviceId: ful.services[0]!.id }).scopeType).toBe("SERVICE");
+    expect(resolveStored(h.config!, h.overrides, { projectId: ful.id }).scopeType).toBe("CUSTOMER");
+    expect(resolveStored(h.config!, h.overrides, {}).scopeType).toBe("CUSTOMER");
   });
   it("sourceOf follows the tree's ownSteps flags", async () => {
     const m = await tree("mirae");
@@ -125,7 +128,7 @@ describe("inheritance resolution (service › project › customer, first with o
 });
 
 describe("validation", () => {
-  const base = (slug: string): PagingConfigInput => toInput(cfgOf(slug).config);
+  const base = (slug: string): PagingConfigInput => toInput(cfgOf(slug).config!);
   const withMin = (c: PagingConfigInput, i: number, atMin: number): PagingConfigInput => ({ ...c, steps: c.steps.map((s, n) => (n === i ? { ...s, atMin } : s)) });
   it("the stored fixtures are valid", () => {
     for (const slug of ["mirae", "daon", "hanbit", "ara", "lumen"]) expect(validateConfig(base(slug), dirOf(slug)).errors).toEqual([]);
@@ -155,8 +158,8 @@ describe("validation", () => {
   it("at least one reachable target: only unverified contacts on every step blocks the save", () => {
     const c: PagingConfigInput = { style: "CUSTOM", plan: "URGENT", repeatCount: 1, steps: [{ atMin: 0, targetType: "PERSON", targetId: "ct_soyeon", channels: ["VOICE", "SMS"] }] };
     const v = validateConfig(c, dirOf("daon"));
-    expect(v.errors.map((e) => e.message)).toEqual(["Nobody would be reached: no step has a person with a verified Slack, SMS or phone for the way it calls."]);
-    expect(validateConfig(toInput(cfgOf("kumho").config), dirOf("kumho")).errors[0]!.message).toMatch(/Nobody would be called/);
+    expect(v.errors.map((e) => e.message)).toEqual(["Nobody would be reached: no step has a person with a verified Slack, SMS, phone or email for the way it calls."]);
+    expect(validateConfig(toInput(cfgOf("kumho").config!), dirOf("kumho")).errors[0]!.message).toMatch(/Nobody would be called/);
   });
   it("warns, without blocking, when one step targets only unverified contacts", () => {
     const c: PagingConfigInput = { style: "CUSTOM", plan: "URGENT", repeatCount: 1, steps: [
@@ -175,17 +178,20 @@ describe("validation", () => {
 });
 
 describe("paging health (D-32)", () => {
-  const health = (slug: string) => computeHealth(cfgOf(slug).config.steps, dirOf(slug), cfgOf(slug).extraProblems);
+  const health = (slug: string) => computeHealth(cfgOf(slug).config!.steps, dirOf(slug), cfgOf(slug).extraProblems);
   it("the problem customers of the mockup", () => {
     expect(health("kumho")).toMatchObject({ level: "UNREACHABLE", problems: [{ code: "NO_PAGEABLE_RESPONDER" }] });
     const l = health("lumen");
     expect(l.level).toBe("AT_RISK");
-    expect(l.problems.map((p) => p.code)).toEqual(["STEP_UNVERIFIED_ONLY", "STEP_UNVERIFIED_ONLY", "STEP_UNVERIFIED_ONLY", "ROTATION_GAP"]);
-    expect(l.problems[0]!.message).toBe("Step 1 (Slack, first) reaches only Kyungmin Oh, who has no verified Slack.");
+    // step 1 is a post in the customer's Slack channel (connected): it is not a problem, and nobody is said to lack "Slack" (QA P3-H)
+    expect(l.problems.map((p) => p.code)).toEqual(["STEP_UNVERIFIED_ONLY", "STEP_UNVERIFIED_ONLY", "ROTATION_GAP"]);
+    expect(l.problems[0]!.message).toBe("Step 2 (SMS at 2 min) reaches only Kyungmin Oh, who has no verified SMS.");
+    // … and it is one when the channel is not connected
+    expect(computeHealth(cfgOf("lumen").config!.steps, { ...dirOf("lumen"), slackChannel: "NOT_SET" }).problems[0]!.message).toBe("Step 1 (Slack, first) reaches only Kyungmin Oh, who has no verified Slack.");
   });
   it("every other fixture customer is OK, so the tree keeps its five problem customers", async () => {
     const s34 = createStore({ customers: 34 });
-    const bad = s34.customers.filter((c) => computeHealth(s34.paging.byCustomer[c.id]!.config.steps, directoryOf(s34.paging, c), s34.paging.byCustomer[c.id]!.extraProblems).level !== "OK").map((c) => c.slug);
+    const bad = s34.customers.filter((c) => computeHealth(s34.paging.byCustomer[c.id]!.config!.steps, directoryOf(s34.paging, c), s34.paging.byCustomer[c.id]!.extraProblems).level !== "OK").map((c) => c.slug);
     expect(bad).toEqual(["kumho", "lumen"]);
     const t = (await createMockApi(createStore()).scopeTree()).customers;
     expect(t.filter((c) => c.callHealth !== "OK").map((c) => [c.slug, c.callHealth])).toEqual([["kumho", "UNREACHABLE"], ["lumen", "AT_RISK"]]);
@@ -201,20 +207,20 @@ describe("paging health (D-32)", () => {
 describe("plans, steps and diffs", () => {
   it("plan templates (DATA-MODEL): the last step goes to everyone; All at once leaves it out", () => {
     expect(planSteps("STANDARD", { targetType: "ROTATION", targetId: "rot_night" }).map((s) => [s.atMin, s.targetType, s.channels.join("+")])).toEqual(
-      [[0, "ROTATION", "SLACK_DM"], [2, "ROTATION", "SMS"], [7, "ROTATION", "VOICE"], [12, "ALL_RESPONDERS", "VOICE"]]);
+      [[0, "ROTATION", "SLACK_CHANNEL"], [2, "ROTATION", "SMS"], [7, "ROTATION", "VOICE"], [12, "ALL_RESPONDERS", "VOICE"]]);
     expect(planSteps("STANDARD", { targetType: "ALL_RESPONDERS" }).map((s) => s.atMin)).toEqual([0, 2, 7]);
     expect(planSteps("URGENT", { targetType: "ROTATION", targetId: "r" }).map((s) => [s.atMin, s.targetType])).toEqual([[0, "ROTATION"], [5, "ALL_RESPONDERS"]]);
-    expect(planSteps("QUIET", { targetType: "ALL_RESPONDERS" })).toEqual([{ atMin: 0, targetType: "ALL_RESPONDERS", channels: ["SLACK_DM"] }]);
+    expect(planSteps("QUIET", { targetType: "ALL_RESPONDERS" })).toEqual([{ atMin: 0, targetType: "ALL_RESPONDERS", channels: ["SLACK_CHANNEL"] }]);
   });
   it("firstOfStyle and isEdited", () => {
     expect(firstOfStyle("ALL_AT_ONCE", undefined, [])).toEqual({ targetType: "ALL_RESPONDERS" });
     expect(firstOfStyle("SHARED_ROTATION", undefined, [])).toBeNull();
     expect(firstOfStyle("SHARED_ROTATION", "rot_night", [])).toEqual({ targetType: "ROTATION", targetId: "rot_night" });
-    expect(isEdited(toInput(cfgOf("hanbit").config))).toBe(false);
-    expect(isEdited(toInput(cfgOf("mirae").config))).toBe(true);
+    expect(isEdited(toInput(cfgOf("hanbit").config!))).toBe(false);
+    expect(isEdited(toInput(cfgOf("mirae").config!))).toBe(true);
   });
   it("add, remove and move keep the minutes in order", () => {
-    const s = toInput(cfgOf("mirae").config).steps;
+    const s = toInput(cfgOf("mirae").config!).steps;
     expect(addStep(s).map((x) => x.atMin)).toEqual([0, 10, 15, 20]);
     expect(removeStep(s, 0).map((x) => x.atMin)).toEqual([0, 15]);
     const moved = moveStep(s, 1, -1);
@@ -223,7 +229,7 @@ describe("plans, steps and diffs", () => {
     expect(moveStep(s, 0, -1)).toEqual(s);
   });
   it("diffConfig says what changed in words; sameConfig ignores channel order", () => {
-    const a = toInput(cfgOf("mirae").config);
+    const a = toInput(cfgOf("mirae").config!);
     const b: PagingConfigInput = { ...a, repeatCount: 0, steps: a.steps.map((s, n) => (n === 1 ? { ...s, atMin: 8 } : s)).slice(0, 2) };
     expect(diffConfig(a, b, () => "x")).toEqual(["step 2 10 → 8 min", "step 3 removed", "repeat once → no repeat"]);
     expect(diffConfig(a, a, () => "x")).toEqual([]);
@@ -240,7 +246,7 @@ describe("server action input checks", () => {
     expect(() => assertScope(null)).toThrow();
   });
   it("paging input: enums, whole minutes, known channels, ids", () => {
-    const ok = toInput(cfgOf("mirae").config);
+    const ok = toInput(cfgOf("mirae").config!);
     expect(assertPagingInput(ok)).toEqual(ok);
     expect(() => assertPagingInput({ ...ok, style: "NOPE" })).toThrow();
     expect(() => assertPagingInput({ ...ok, steps: [] })).toThrow();
@@ -269,15 +275,15 @@ describe("mock API contract semantics", () => {
     await expect(api.putPaging(c.id, toInput(cur), cur.version)).rejects.toMatchObject({ status: 409, code: "VERSION_CONFLICT" });
     expect((await api.getPaging(c.id)).steps[1]!.atMin).toBe(5);
   });
-  it("own steps: create (no version), 409 when they exist already, update with If-Match, delete → inherits again; the tree follows", async () => {
+  it("own steps: create (If-Match 0), 409 when they exist already, update with If-Match, delete → inherits again; the tree follows", async () => {
     const api = createMockApi(createStore());
     const c = (await api.scopeTree()).customers.find((x) => x.slug === "mirae")!;
     const svc = c.projects[0]!.services[2]!; // Core › Checkout
     const inh = await api.pagingPath({ customer: "mirae", project: "core", service: "checkout" });
-    const body = toInput(inh);
-    const made = await api.putPagingOverride(c.id, "SERVICE", svc.id, body, null);
+    const body = toInput({ ...inh, style: inh.style!, plan: inh.plan! });
+    const made = await api.putPagingOverride(c.id, "SERVICE", svc.id, body, 0);
     expect(made.version).toBe(1);
-    await expect(api.putPagingOverride(c.id, "SERVICE", svc.id, body, null)).rejects.toMatchObject({ status: 409, code: "ALREADY_EXISTS" });
+    await expect(api.putPagingOverride(c.id, "SERVICE", svc.id, body, 0)).rejects.toMatchObject({ status: 409, code: "VERSION_CONFLICT", details: { currentVersion: 1 } });
     expect((await api.pagingPath({ customer: "mirae", project: "core", service: "checkout" })).own).toBe(true);
     expect((await api.scopeTree()).customers.find((x) => x.slug === "mirae")!.projects[0]!.services[2]!.ownSteps).toBe(true);
     expect((await api.callOrderList({ customer: "mirae" })).rows.map((r) => r.key)).toEqual(["mirae", "mirae/core/checkout", "mirae/data-platform"]);
@@ -311,17 +317,22 @@ describe("mock API contract semantics", () => {
     }
     expect(JSON.stringify(r)).not.toMatch(/\d{3}-\d{3,4}-\d{4}|"email"|"phone"/);
     expect(r.people.find((p) => p.name === "Yuna Seo")).toMatchObject({ role: "PAGEABLE", phoneMasked: expect.stringMatching(/^010-••••-\d{4}$/), emailMasked: "y•••@mirae.example" });
-    await expect(api.removeResponder(mirae, "ct_yuna")).rejects.toMatchObject({ status: 409, code: "IN_USE" });
-    await expect(api.patchResponder(mirae, "ct_yuna", { role: "NOTIFY_ONLY" })).rejects.toMatchObject({ code: "IN_USE" });
-    await expect(api.removeResponder(mirae, "ct_haeun")).rejects.toMatchObject({ code: "FROM_TEMPLATE" });
-    await expect(api.addResponder(daon, { contactId: "ct_yuna" })).rejects.toMatchObject({ status: 422, code: "CROSS_CUSTOMER" });
-    await api.patchResponder(mirae, "ct_seojun", { role: "PAGEABLE" });
+    const v = { version: r.version };
+    await expect(api.removeResponder(mirae, "ct_yuna", v)).rejects.toMatchObject({ status: 409, code: "IN_USE" });
+    await expect(api.patchResponder(mirae, "ct_yuna", { role: "NOTIFY_ONLY" }, v)).rejects.toMatchObject({ code: "IN_USE" });
+    await expect(api.removeResponder(mirae, "ct_haeun", v)).rejects.toMatchObject({ code: "FROM_TEMPLATE" });
+    // another customer's contact is the same 404 as an id that does not exist (security review 권고 3)
+    const dv = { version: (await api.getResponders(daon)).version };
+    const [other, none] = await Promise.all([api.addResponder(daon, { contactId: "ct_yuna" }, dv).catch((e) => e), api.addResponder(daon, { contactId: "ct_nobody" }, dv).catch((e) => e)]);
+    expect([other.status, other.code, other.message]).toEqual([404, "NOT_FOUND", "Not found."]);
+    expect([none.status, none.code, none.message]).toEqual([other.status, other.code, other.message]);
+    await api.patchResponder(mirae, "ct_seojun", { role: "PAGEABLE" }, v);
     expect((await api.pagingPath({ customer: "mirae" })).steps[2]!.nowIds).toHaveLength(6);
-    const added = await api.addResponder(daon, { name: "Ari Go", email: "ari@daon.example", phone: "010-1234-5678", role: "NOTIFY_ONLY" });
+    const added = await api.addResponder(daon, { name: "Ari Go", email: "ari@daon.example", phone: "010-1234-5678", role: "NOTIFY_ONLY" }, dv);
     const person = (await api.getResponders(daon)).people.find((p) => p.contactId === added.contactId)!;
     expect(person).toMatchObject({ name: "Ari Go", emailMasked: "a•••@daon.example", phoneMasked: "010-••••-5678" });
     expect(JSON.stringify(person)).not.toContain("1234");
-    await api.removeResponder(daon, added.contactId);
+    await api.removeResponder(daon, added.contactId, { version: added.version });
     expect((await api.getResponders(daon)).people.some((p) => p.contactId === added.contactId)).toBe(false);
   });
   it("a step may not name a contact or a rotation of another customer", async () => {

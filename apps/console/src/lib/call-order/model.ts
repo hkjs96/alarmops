@@ -10,6 +10,11 @@ import type {
   ChannelState, ContactChannelKey, CustomerPersonResponder, PagingConfigInput, PagingHealth, PagingPathStep, PagingPlan, PagingProblem,
   PagingStep, PagingStyle, RotationSummary, ScopeLevelName, StaffResponder, StaffSummary, StepChannel,
 } from "../api/types";
+import { MAX_CHANNELS, MAX_MINUTE, MAX_REPEAT, MAX_STEPS, capText, capViolation } from "./limits";
+import { STYLE_LABEL } from "./plan-label";
+
+export { MAX_MINUTE, MAX_REPEAT, MAX_STEPS };
+export { PLAN_LABEL, STYLE_LABEL, planLabel } from "./plan-label";
 
 /* ---------------- scope ---------------- */
 export interface CoScope { customer: string; project?: string; service?: string }
@@ -94,6 +99,8 @@ export interface Directory {
   rotations: RotationSummary[];
   /** every MSP staff member, for a step that names someone who is not a responder of this customer */
   allStaff?: StaffSummary[];
+  /** the customer's Slack channel, which a SLACK_CHANNEL step posts to. Not told (undefined) = taken as connected */
+  slackChannel?: ChannelState;
 }
 export const pageableIds = (d: Directory) => [...d.staff.map((s) => s.contactId), ...d.people.filter((p) => p.role === "PAGEABLE").map((p) => p.contactId)];
 const contactOf = (d: Directory, id: string) => d.staff.find((s) => s.contactId === id) ?? d.people.find((p) => p.contactId === id);
@@ -118,9 +125,15 @@ export function resolveStep(step: PagingStep, d: Directory): PagingPathStep {
 
 /* ---------------- sentence ---------------- */
 export interface Part { t: string; k?: "b" | "new" | "old" }
-const CH_WORD: Record<StepChannel, string> = { SLACK_DM: "Slack", SMS: "SMS", VOICE: "call" };
-const CH_ORDER: StepChannel[] = ["SLACK_DM", "SMS", "VOICE"];
-export const CH_LABEL: Record<StepChannel, string> = { SLACK_DM: "Slack", SMS: "SMS", VOICE: "Call" };
+/** the server's words (packages/core paging.ts): "Slack" is the customer's channel, "Slack DM" the person */
+const CH_WORD: Record<StepChannel, string> = { SLACK_CHANNEL: "Slack", SLACK_DM: "Slack DM", SMS: "SMS", VOICE: "call", EMAIL: "email" };
+export const CH_ORDER: StepChannel[] = ["SLACK_CHANNEL", "SLACK_DM", "SMS", "VOICE", "EMAIL"];
+export const CH_LABEL: Record<StepChannel, string> = { SLACK_CHANNEL: "Slack", SLACK_DM: "Slack DM", SMS: "SMS", VOICE: "Call", EMAIL: "Email" };
+export const CH_HINT: Record<StepChannel, string> = {
+  SLACK_CHANNEL: "A post in the customer's Slack channel", SLACK_DM: "A Slack direct message to the person", SMS: "A text message to the person",
+  VOICE: "A phone call to the person", EMAIL: "An email to the person",
+};
+export const isStepChannel = (c: unknown): c is StepChannel => CH_ORDER.includes(c as StepChannel);
 export const sortChannels = (c: readonly StepChannel[]) => CH_ORDER.filter((x) => c.includes(x));
 export function howText(channels: readonly StepChannel[], capital = true): string {
   const s = sortChannels(channels).map((c) => CH_WORD[c]).join(" + ") || "nothing";
@@ -187,12 +200,11 @@ export function pagedNow(steps: readonly PagingPathStep[]): { id: string; name: 
 }
 
 /* ---------------- starting plans (DATA-MODEL EscalationStep: code constants) ---------------- */
-export const STYLE_LABEL: Record<PagingStyle, string> = { ALL_AT_ONCE: "All at once", CUSTOMER_ROTATION: "Customer rotation", SHARED_ROTATION: "Shared rotation", CUSTOM: "Custom" };
-export const PLAN_LABEL: Record<PagingPlan, string> = { STANDARD: "Standard", URGENT: "Urgent", QUIET: "Quiet" };
+/** the server's templates (packages/core paging.ts templateSteps): the same steps, so "edited" means the same on both sides */
 const PLAN: Record<PagingPlan, { at: number; all?: boolean; ch: StepChannel[] }[]> = {
-  STANDARD: [{ at: 0, ch: ["SLACK_DM"] }, { at: 2, ch: ["SMS"] }, { at: 7, ch: ["VOICE"] }, { at: 12, all: true, ch: ["VOICE"] }],
+  STANDARD: [{ at: 0, ch: ["SLACK_CHANNEL"] }, { at: 2, ch: ["SMS"] }, { at: 7, ch: ["VOICE"] }, { at: 12, all: true, ch: ["VOICE"] }],
   URGENT: [{ at: 0, ch: ["VOICE"] }, { at: 5, all: true, ch: ["VOICE"] }],
-  QUIET: [{ at: 0, ch: ["SLACK_DM"] }, { at: 15, all: true, ch: ["SLACK_DM"] }],
+  QUIET: [{ at: 0, ch: ["SLACK_CHANNEL"] }, { at: 15, all: true, ch: ["SLACK_CHANNEL"] }],
 };
 type First = Pick<PagingStep, "targetType" | "targetId">;
 /**
@@ -221,14 +233,13 @@ export function isEdited(cfg: PagingConfigInput): boolean {
   const first = cfg.steps[0];
   return !first || !sameSteps(cfg.steps, planSteps(cfg.plan, { targetType: first.targetType, targetId: first.targetId }));
 }
-export const MAX_REPEAT = 5;
-export const MAX_MINUTE = 1440;
 
 /* ---------------- reachability, validation, health (D-32) ---------------- */
-const CH_KEY: Record<StepChannel, ContactChannelKey> = { SLACK_DM: "SLACK", SMS: "SMS", VOICE: "VOICE" };
+const CH_KEY: Record<Exclude<StepChannel, "SLACK_CHANNEL">, ContactChannelKey> = { SLACK_DM: "SLACK", SMS: "SMS", VOICE: "VOICE", EMAIL: "EMAIL" };
 const channelsOf = (d: Directory, id: string) =>
   contactOf(d, id)?.channels ?? d.rotations.find((r) => r.onShift?.contactId === id)?.onShift?.channels ?? d.allStaff?.find((s) => s.contactId === id)?.channels ?? {};
-const stateOf = (d: Directory, id: string, ch: StepChannel): ChannelState => channelsOf(d, id)[CH_KEY[ch]] ?? "NOT_SET";
+/** SLACK_CHANNEL is a channel, not a person: everyone the step names is reached through it when the customer's channel is connected (server: health.ts reachableVia). */
+const stateOf = (d: Directory, id: string, ch: StepChannel): ChannelState => (ch === "SLACK_CHANNEL" ? d.slackChannel ?? "VERIFIED" : channelsOf(d, id)[CH_KEY[ch]] ?? "NOT_SET");
 /** A contact is reached by a step when one of the step's channels is verified for them. */
 export const reachable = (d: Directory, id: string, channels: readonly StepChannel[]) => channels.some((c) => stateOf(d, id, c) === "VERIFIED");
 
@@ -239,6 +250,7 @@ export function validateConfig(cfg: PagingConfigInput, d: Directory): Validation
   const errors: Issue[] = [];
   const warnings: Issue[] = [];
   if (cfg.steps.length === 0) errors.push({ message: "Add at least one step. Without steps nobody is called." });
+  if (cfg.steps.length > MAX_STEPS) errors.push({ stepIndex: MAX_STEPS, field: "atMin", message: `A call order has at most ${MAX_STEPS} steps; this one has ${cfg.steps.length}. Remove ${plural(cfg.steps.length - MAX_STEPS, "step")} to save.` });
   if (!Number.isInteger(cfg.repeatCount) || cfg.repeatCount < 0 || cfg.repeatCount > MAX_REPEAT) errors.push({ field: "repeat", message: `Repeat must be a whole number from 0 to ${MAX_REPEAT}.` });
   if ((cfg.style === "SHARED_ROTATION" || cfg.style === "CUSTOMER_ROTATION") && !cfg.steps.some((s) => s.targetType === "ROTATION")) {
     errors.push({ field: "style", message: `${STYLE_LABEL[cfg.style]} needs a rotation. Choose one, or pick another ordering.` });
@@ -250,7 +262,8 @@ export function validateConfig(cfg: PagingConfigInput, d: Directory): Validation
     else if (i > 0 && s.atMin <= cfg.steps[i - 1]!.atMin) {
       errors.push({ stepIndex: i, field: "atMin", message: `Step ${n} (${s.atMin} min) would not come after step ${i} (${cfg.steps[i - 1]!.atMin} min). Fix the minutes to save.` });
     }
-    if (s.channels.length === 0) errors.push({ stepIndex: i, field: "channels", message: `Step ${n}: choose at least one of Slack, SMS or Call.` });
+    if (s.channels.length === 0) errors.push({ stepIndex: i, field: "channels", message: `Step ${n}: choose at least one way to send it — Slack, Slack DM, SMS, Call or Email.` });
+    else if (s.channels.length > MAX_CHANNELS || new Set(s.channels).size !== s.channels.length || !s.channels.every(isStepChannel)) errors.push({ stepIndex: i, field: "channels", message: `Step ${n}: each way to send (Slack, Slack DM, SMS, Call, Email) can be chosen once.` });
     if (s.targetType === "PERSON" && !s.targetId) errors.push({ stepIndex: i, field: "target", message: `Step ${n}: choose a person.` });
     else if (s.targetType === "PERSON" && d.people.some((p) => p.contactId === s.targetId && p.role !== "PAGEABLE")) {
       errors.push({ stepIndex: i, field: "target", message: `Step ${n}: ${nameOf(d, s.targetId!)} is Notify only and cannot be called. Make them Pageable in Responders first.` });
@@ -258,12 +271,15 @@ export function validateConfig(cfg: PagingConfigInput, d: Directory): Validation
     if (s.targetType === "ROTATION" && !d.rotations.some((r) => r.id === s.targetId)) errors.push({ stepIndex: i, field: "target", message: `Step ${n}: choose a rotation.` });
   });
   if (errors.length) return { errors, warnings };
+  // the send limits of the API (422 SEND_CAP_EXCEEDED / RESPONDER_LIMIT_EXCEEDED), said here before the save is tried
+  const cap = capViolation(cfg.steps, cfg.repeatCount, pageableIds(d).length);
+  if (cap) { errors.push({ ...(cap.code === "RESPONDER_LIMIT_EXCEEDED" ? { stepIndex: cap.stepIndex, field: "target" as const } : { field: "repeat" as const }), message: capText(cap) }); return { errors, warnings }; }
   const res = cfg.steps.map((s) => resolveStep(s, d));
   const ok = res.map((s) => s.nowIds.some((id) => reachable(d, id, s.channels)));
   if (!ok.some(Boolean)) {
     errors.push({ message: pageableIds(d).length === 0 && res.every((s) => s.nowIds.length === 0)
       ? "Nobody would be called: no step reaches a person right now. Name a person or a rotation, or add someone to Responders."
-      : "Nobody would be reached: no step has a person with a verified Slack, SMS or phone for the way it calls." });
+      : "Nobody would be reached: no step has a person with a verified Slack, SMS, phone or email for the way it calls." });
     return { errors, warnings };
   }
   res.forEach((s, i) => {
@@ -276,8 +292,9 @@ export function validateConfig(cfg: PagingConfigInput, d: Directory): Validation
 }
 
 /** D-32. UNREACHABLE: no step reaches a verified contact. AT_RISK: some step depends on unverified contacts only. */
-export function computeHealth(steps: readonly PagingStep[], d: Directory, extra: readonly PagingProblem[] = []): PagingHealth {
+export function computeHealth(steps: readonly PagingStep[], d: Directory, extra: readonly PagingProblem[] = [], repeatCount = 0): PagingHealth {
   const problems: PagingProblem[] = [];
+  if (steps.length === 0) return { level: "UNREACHABLE", problems: [{ code: "STEP_UNVERIFIED_ONLY", contactIds: [], message: "No paging steps are configured. Nobody is called." }] };
   const res = steps.map((s) => resolveStep(s, d));
   const ok = res.map((s) => s.nowIds.some((id) => reachable(d, id, s.channels)));
   if (pageableIds(d).length === 0 && !ok.some(Boolean)) {
@@ -295,6 +312,9 @@ export function computeHealth(steps: readonly PagingStep[], d: Directory, extra:
       : `Step ${i + 1} (${howText(s.channels, false)}${s.atMin ? ` at ${s.atMin} min` : ", first"}) reaches only ${s.names.join(", ")}, who ${s.names.length > 1 ? "have" : "has"} no verified ${howText(s.channels, false)}.` });
   });
   problems.push(...extra);
+  // inside the send limits when it was saved; responders added since can push it over (the engine then cuts the incident down)
+  const cap = capViolation(steps, repeatCount, pageableIds(d).length);
+  if (cap) problems.push({ code: "SEND_CAP_EXCEEDED", contactIds: [], ...(cap.code === "RESPONDER_LIMIT_EXCEEDED" ? { stepIndex: cap.stepIndex } : {}), message: capText(cap) });
   return { level: problems.length ? "AT_RISK" : "OK", problems };
 }
 
@@ -319,7 +339,9 @@ export function diffConfig(before: PagingConfigInput, after: PagingConfigInput, 
 }
 
 /* ---------------- step list edits ---------------- */
+/** Adds a step 5 minutes after the last one. At the limit (12 steps) nothing is added — the editor says why. */
 export function addStep(steps: readonly PagingStep[]): PagingStep[] {
+  if (steps.length >= MAX_STEPS) return [...steps];
   const last = steps[steps.length - 1];
   return [...steps, { atMin: last ? last.atMin + 5 : 0, targetType: "ALL_RESPONDERS", channels: ["VOICE"] }];
 }
@@ -339,5 +361,5 @@ export function moveStep(steps: readonly PagingStep[], i: number, dir: -1 | 1): 
 }
 export const toInput = (c: PagingConfigInput): PagingConfigInput => ({
   style: c.style, plan: c.plan, ...(c.sharedRotationId ? { sharedRotationId: c.sharedRotationId } : {}), repeatCount: c.repeatCount,
-  steps: c.steps.map((s) => ({ atMin: s.atMin, targetType: s.targetType, ...(s.targetType !== "ALL_RESPONDERS" && s.targetId ? { targetId: s.targetId } : {}), channels: sortChannels(s.channels) })),
+  steps: c.steps.map((s) => ({ atMin: s.atMin, targetType: s.targetType, ...(s.targetType !== "ALL_RESPONDERS" && s.targetId ? { targetId: s.targetId } : {}), channels: sortChannels(s.channels) })), // sorted and one of each kind
 });
