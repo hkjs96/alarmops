@@ -1,8 +1,5 @@
 /* App shell + screen layout. Only design-system tokens (var(--…)) — no raw colors. */
-@font-face {
-  font-family: "Pretendard"; font-weight: 45 920; font-display: swap;
-  src: url("/fonts/PretendardVariable.woff2") format("woff2");
-}
+/* Fonts: src/app/fonts.ts (self-hosted, font-display: optional — a late font never moves a row). */
 body { overflow-x: hidden; }
 .skip { position: absolute; left: -999px; top: 0; background: var(--surface); padding: 8px 12px; z-index: 100; }
 .skip:focus { left: 8px; }

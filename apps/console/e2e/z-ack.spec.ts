@@ -17,7 +17,7 @@ const signIn = async (page: Page, next = "/incidents") => {
 };
 function watchErrors(page: Page) {
   const errors: string[] = [];
-  page.on("console", (m) => { if (m.type() === "error" && !/fonts\.(googleapis|gstatic)\.com/.test(m.location().url)) errors.push(m.text()); });
+  page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
   page.on("pageerror", (e) => errors.push(String(e)));
   return errors;
 }
@@ -41,7 +41,21 @@ async function undoRow(page: Page, row: ReturnType<Page["locator"]>) {
   await expect(row.getByRole("button", { name: /^Acknowledge / })).toBeVisible();
 }
 const overflow = (page: Page) => page.evaluate(() => { const tw = document.querySelector(".tw")!; return tw.scrollWidth - tw.clientWidth; });
-const center = async (l: ReturnType<Page["locator"]>) => { const b = (await l.boundingBox())!; return { x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2), b }; };
+/**
+ * The centre of a control, for a press by coordinates — and the control must be what a press there reaches. On a
+ * phone the bottom menu lies over the end of the page: when the control is under it (text is a few pixels wider on
+ * another machine, a line wraps, everything below is 50px lower) the page is scrolled until it is clear, as a
+ * person would. Before this check the press went to the menu, which opened another screen (CI, 2026-11-11).
+ */
+const center = async (l: ReturnType<Page["locator"]>) => {
+  const reached = () => l.evaluate((el) => { const r = el.getBoundingClientRect(); const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return Boolean(top && (top === el || el.contains(top))); });
+  if (!(await reached())) {
+    await l.evaluate((el) => new Promise((done) => { el.scrollIntoView({ block: "center", behavior: "instant" }); requestAnimationFrame(() => requestAnimationFrame(() => done(null))); }));
+  }
+  expect(await reached(), "a press at the centre of the control reaches the control").toBe(true);
+  const b = (await l.boundingBox())!;
+  return { x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2), b };
+};
 
 test.describe("phone 390×740 — 하은 H3 / H4", () => {
   test.use({ viewport: { width: 390, height: 740 }, hasTouch: true });
@@ -333,7 +347,9 @@ test.describe("phone 390×740 — 하은 H3 / H4", () => {
     await page.route("**/_next/static/chunks/**", (r) => r.abort());
     await page.goto("/incidents?customer=mirae", { waitUntil: "domcontentloaded" });
     await expect(page.getByTestId("outside-pending")).toBeVisible();
-    expect((await page.locator(".sline").boundingBox())!.height).toBe(hydrated);
+    // the same height: at most half a pixel apart (a font that is there for one paint and not for the other rounds differently)
+    await page.evaluate(() => document.fonts.ready);
+    expect(Math.abs((await page.locator(".sline").boundingBox())!.height - hydrated)).toBeLessThanOrEqual(0.5);
   });
 });
 
@@ -787,7 +803,10 @@ test("R-4 security headers on pages, the login page and redirects", async ({ req
     const csp = h["content-security-policy"] ?? "";
     expect(csp, path).toContain("frame-ancestors 'none'");
     expect(csp, path).toContain("default-src 'self'");
-    expect(csp, path).toContain("font-src 'self' https://fonts.gstatic.com");
+    // fonts are the console's own files: no other origin is allowed for anything
+    expect(csp.split("; "), path).toContain("font-src 'self'");
+    expect(csp.split("; "), path).toContain("style-src 'self' 'unsafe-inline'");
+    expect(csp, path).not.toMatch(/https?:/);
     expect(csp, path).not.toContain("unsafe-eval");
     expect(h["permissions-policy"], path).toBe("camera=(), microphone=(), geolocation=(), payment=(), usb=()");
     expect(h["strict-transport-security"], path).toBe("max-age=31536000; includeSubDomains"); // this is a production build

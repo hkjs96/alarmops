@@ -1,12 +1,17 @@
 import { test, expect, type Page } from "@playwright/test";
+import { appReady } from "./helpers/ready";
 
 const PAY_ID = "inc-7f3a0c91b2d4-20261108181204";
 const PAY = `/c/mirae/core/payments-api/incident/${PAY_ID}`;
-const signIn = (page: Page, next = "/incidents") => page.goto(`/auth/dev-login?next=${encodeURIComponent(next)}`);
+/** signs in and waits until the app has taken the page over (helpers/ready.ts) */
+const signIn = async (page: Page, next = "/incidents") => {
+  await page.goto(`/auth/dev-login?next=${encodeURIComponent(next)}`);
+  await appReady(page);
+};
 
 function watchErrors(page: Page) {
   const errors: string[] = [];
-  page.on("console", (m) => { if (m.type() === "error" && !/fonts\.(googleapis|gstatic)\.com/.test(m.location().url)) errors.push(m.text()); });
+  page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
   page.on("pageerror", (e) => errors.push(String(e)));
   return errors;
 }
