@@ -24,12 +24,19 @@ if (v.status !== 0) {
   } else process.exit(1);
 }
 
-const d = spawnSync(process.execPath, ['scripts/migrate-diff-offline.mjs', 'prisma/schema.prisma'], { cwd: root, encoding: 'utf8' });
+// The real Prisma CLI when its engine is there (CI, a normal PC); the WASM engine only where the download is blocked.
+// Node < 22.19 needs a flag to import the .wasm file.
+const wasmFlag = process.allowedNodeEnvironmentFlags.has('--experimental-wasm-modules') ? ['--experimental-wasm-modules'] : [];
+const d = v.status === 0
+  ? spawnSync('npx', ['prisma', 'migrate', 'diff', '--from-empty', '--to-schema-datamodel', 'prisma/schema.prisma', '--script'], { cwd: root, env, encoding: 'utf8', shell: process.platform === 'win32' })
+  : spawnSync(process.execPath, [...wasmFlag, 'scripts/migrate-diff-offline.mjs', 'prisma/schema.prisma'], { cwd: root, encoding: 'utf8' });
 if (d.status !== 0) { console.error(d.stderr); process.exit(1); }
-const generated = d.stdout.replace(/^-- CreateSchema\nCREATE SCHEMA IF NOT EXISTS "public";\n\n/, '').trimEnd();
+const generated = d.stdout.replace(/\r\n/g, '\n').replace(/^-- CreateSchema\nCREATE SCHEMA IF NOT EXISTS "public";\n\n/, '').trimEnd();
 const migration = fs.readFileSync(path.join(root, 'prisma/migrations/0001_init/migration.sql'), 'utf8');
 if (!migration.startsWith(generated)) {
   console.error('migration.sql is out of sync with schema.prisma. Regenerate (see db/README.md).');
+  const g = generated.split('\n'), m = migration.split('\n'), i = g.findIndex((line, n) => line !== m[n]);
+  console.error(`first difference at line ${i + 1}:\n  schema:    ${g[i]}\n  migration: ${m[i]}`);
   process.exit(1);
 }
 console.log('migration 0001_init in sync with schema.prisma');
