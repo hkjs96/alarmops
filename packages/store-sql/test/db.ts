@@ -12,6 +12,7 @@ import { pgClient, pgliteClient, type SqlClient } from '../src/index.js';
 
 export const MIGRATION = readFileSync(new URL('../../../db/prisma/migrations/0001_init/migration.sql', import.meta.url), 'utf8');
 export const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL || '';
+export const TEST_PG_POOLER: 'direct' | 'transaction' = process.env.TEST_PG_POOLER === 'transaction' ? 'transaction' : 'direct';
 
 export interface TestDb {
   client: SqlClient;
@@ -44,7 +45,9 @@ export async function openTestDb(): Promise<TestDb> {
     } finally {
       await admin.end();
     }
-    const client = pgClient({ connectionString: TEST_DATABASE_URL, schema, max: 12 });
+    // TEST_PG_POOLER=transaction runs every suite the way the store talks through a transaction-mode pooler:
+    // no startup options, every single statement in its own short transaction (drivers/pg.ts).
+    const client = pgClient({ connectionString: TEST_DATABASE_URL, schema, max: 12, pooler: TEST_PG_POOLER });
     const tables = await tablesOf(client, schema);
     return {
       client, label: 'sql:postgres', concurrent: true,

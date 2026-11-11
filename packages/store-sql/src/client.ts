@@ -14,9 +14,11 @@ export interface SqlExecutor {
 
 export interface SqlClient extends SqlExecutor {
   /**
-   * One transaction (READ COMMITTED). The driver sets `statement_timeout` and `lock_timeout` with SET LOCAL at its
-   * start (N-33: below STORE_CALL_TIMEOUT_MS), so the limit holds behind a transaction pooler too.
-   * A throw rolls back and is re-thrown.
+   * One transaction, isolation level READ COMMITTED — set explicitly at its start, not inherited from the server
+   * (the claim relies on it: after the lane's advisory lock is granted, the next statement must see what the
+   * previous holder committed). The driver also sets `statement_timeout`, `lock_timeout` and
+   * `idle_in_transaction_session_timeout` with SET LOCAL (N-33: below STORE_CALL_TIMEOUT_MS), so the limits hold
+   * behind a transaction pooler too. A throw rolls back and is re-thrown.
    */
   transaction<T>(fn: (tx: SqlExecutor) => Promise<T>): Promise<T>;
   /**
@@ -32,8 +34,22 @@ export interface SqlClient extends SqlExecutor {
 export const STATEMENT_TIMEOUT_MS = 4_500;
 /** A row lock that is not granted in this time fails the statement instead of holding the tick. */
 export const LOCK_TIMEOUT_MS = 3_000;
-export const txPreamble = (statementMs = STATEMENT_TIMEOUT_MS, lockMs = LOCK_TIMEOUT_MS): string =>
-  `SET LOCAL statement_timeout = ${Math.floor(statementMs)}; SET LOCAL lock_timeout = ${Math.floor(lockMs)}`;
+/** A transaction whose process froze between two statements is ended by the server after this long; its row locks go with it (R-3). */
+export const IDLE_IN_TX_TIMEOUT_MS = 15_000;
+/** Waiting for a pooled connection (or for the TCP/TLS connect) gives up after this long instead of queueing without end (R-3). */
+export const CONNECT_TIMEOUT_MS = 3_000;
+/**
+ * Client-side limit of one statement: when the server does not answer at all (network gone — `statement_timeout`
+ * is enforced by the server and cannot help), the call fails here and the connection is thrown away (R-3).
+ * Above STATEMENT_TIMEOUT_MS so that a slow statement is cancelled by the server first.
+ */
+export const QUERY_TIMEOUT_MS = 5_000;
+/**
+ * First statements of every transaction. `SET TRANSACTION` must come before any query; everything is SET LOCAL
+ * (transaction-scoped), so nothing here relies on session state — safe behind a transaction-mode pooler.
+ */
+export const txPreamble = (statementMs = STATEMENT_TIMEOUT_MS, lockMs = LOCK_TIMEOUT_MS, idleMs = IDLE_IN_TX_TIMEOUT_MS): string =>
+  `SET TRANSACTION ISOLATION LEVEL READ COMMITTED; SET LOCAL statement_timeout = ${Math.floor(statementMs)}; SET LOCAL lock_timeout = ${Math.floor(lockMs)}; SET LOCAL idle_in_transaction_session_timeout = ${Math.floor(idleMs)}`;
 
 /** Postgres error codes the repositories react to. */
 export const PG = { UNIQUE: '23505', QUERY_CANCELED: '57014', LOCK_NOT_AVAILABLE: '55P03', SERIALIZATION: '40001', DEADLOCK: '40P01' } as const;

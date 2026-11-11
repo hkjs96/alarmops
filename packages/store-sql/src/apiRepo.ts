@@ -243,7 +243,7 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
        ON CONFLICT ("token") DO UPDATE SET "userId" = EXCLUDED."userId", "action" = EXCLUDED."action", "expiresAt" = EXCLUDED."expiresAt", "items" = EXCLUDED."items"`,
       [tokenHash(rec.token), rec.userId, rec.action, iso(rec.expiresAt), js(rec.items)],
     );
-    await this.sql.query(`DELETE FROM "UndoRecord" WHERE "expiresAt" < ${this.sql.now()} - interval '1 day'`);
+    // Expired records of every user are removed by the tick (`purgeExpired`).
   }
   /** Single use: DELETE … RETURNING — two callers cannot both get the record. */
   async takeUndo(token: string): Promise<UndoRecord | null> {
@@ -256,6 +256,8 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
   // ───────────────────────────── paging ─────────────────────────────
 
   async savePagingConfig(cfg: PagingConfig, expectedVersion: number | null, audit: AuditInput): Promise<PagingConfig | 'CONFLICT'> {
+    // R-6: a write without a customer is refused before any SQL runs (a call order always belongs to one customer).
+    if (typeof cfg.customerId !== 'string' || !cfg.customerId || audit.customerId !== cfg.customerId) throw new Error('savePagingConfig: customerId is required and must be the audited customer');
     try {
       return await this.sql.transaction(async (tx) => {
         const [cur] = await tx.query(`SELECT "id", "version", "customerId" FROM "PagingConfig" WHERE "scopeType" = $1::"ScopeType" AND "scopeId" = $2 FOR UPDATE`, [cfg.scopeType, cfg.scopeId]);
@@ -293,10 +295,12 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
   }
 
   async deletePagingConfig(id: string, expectedVersion: number, audit: AuditInput): Promise<'OK' | 'CONFLICT'> {
+    // R-6: the customer of the audit record (the customer the caller was authorised for) is part of the WHERE, and
+    // it is REQUIRED. Without it nothing is deleted (it used to mean "any customer").
+    if (typeof audit.customerId !== 'string' || !audit.customerId) return 'CONFLICT';
     return this.sql.transaction(async (tx) => {
-      // The customer of the audit record (the customer the caller was authorised for) is part of the WHERE.
       const [gone] = await tx.query(
-        `DELETE FROM "PagingConfig" WHERE "id" = $1 AND "version" = $2 AND "customerId" IS NOT DISTINCT FROM COALESCE($3, "customerId") RETURNING "customerId", "scopeType", "scopeId", "version"`,
+        `DELETE FROM "PagingConfig" WHERE "id" = $1 AND "version" = $2 AND "customerId" = $3 RETURNING "customerId", "scopeType", "scopeId", "version"`,
         [id, expectedVersion, audit.customerId]);
       if (!gone) return 'CONFLICT' as const;
       await tx.query(
@@ -340,6 +344,7 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
    * entries beyond `maxPerOwner − 1`, then store this one as the newest. Other owners' rows are never touched (N-19).
    */
   async putIdempotent(key: string, entry: IdempotentEntry, expiresAt: Date, cap: { owner: string; maxPerOwner: number }): Promise<void> {
+    if (typeof cap.owner !== 'string' || !cap.owner) throw new Error('putIdempotent: owner is required');
     const now = this.sql.now();
     await this.sql.transaction(async (tx) => {
       await tx.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`idem:${cap.owner}`]);

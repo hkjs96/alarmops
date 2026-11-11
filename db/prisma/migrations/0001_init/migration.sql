@@ -1570,10 +1570,15 @@ CREATE UNIQUE INDEX "Alert_customerId_fingerprint_key" ON "Alert"("customerId", 
 ALTER TABLE "RemediationRequest" ADD CONSTRAINT "RemediationRequest_decided_chk"
   CHECK ("status" NOT IN ('APPROVED', 'EXECUTING', 'SUCCEEDED', 'FAILED') OR ("decidedBy" IS NOT NULL AND "decidedAt" IS NOT NULL));
 
--- slug format (D-33). Uniqueness is in the generated part; reserved words are checked in the service layer.
+-- slug format (D-33). Uniqueness is in the generated part.
 ALTER TABLE "Customer" ADD CONSTRAINT "Customer_slug_chk" CHECK ("slug" ~ '^[a-z0-9][a-z0-9-]{0,63}$');
 ALTER TABLE "Project" ADD CONSTRAINT "Project_slug_chk" CHECK ("slug" ~ '^[a-z0-9][a-z0-9-]{0,63}$');
 ALTER TABLE "Service" ADD CONSTRAINT "Service_slug_chk" CHECK ("slug" ~ '^[a-z0-9][a-z0-9-]{0,63}$');
+-- slug reserved words (security review SQL, N-7): a slug is a path segment of the console, so it must not be a word
+-- the router or the API owns. Same list as RESERVED_SLUGS in packages/api/src/slug.ts (a test compares the two).
+ALTER TABLE "Customer" ADD CONSTRAINT "Customer_slug_reserved_chk" CHECK ("slug" NOT IN ('new', 'api', 'admin', 'all', 'unmapped', 'auth', 'c', 'incident', 'call-order', 'people', 'monitoring', 'maintenance', 'settings', 'customers', 'login', '-'));
+ALTER TABLE "Project" ADD CONSTRAINT "Project_slug_reserved_chk" CHECK ("slug" NOT IN ('new', 'api', 'admin', 'all', 'unmapped', 'auth', 'c', 'incident', 'call-order', 'people', 'monitoring', 'maintenance', 'settings', 'customers', 'login', '-'));
+ALTER TABLE "Service" ADD CONSTRAINT "Service_slug_reserved_chk" CHECK ("slug" NOT IN ('new', 'api', 'admin', 'all', 'unmapped', 'auth', 'c', 'incident', 'call-order', 'people', 'monitoring', 'maintenance', 'settings', 'customers', 'login', '-'));
 
 -- Tick ③: incidents the escalation phase must look at (listEscalationDue) — only rows with something scheduled.
 CREATE INDEX "Incident_nextEscalationAt_due_idx" ON "Incident"("nextEscalationAt", "id")
@@ -1589,3 +1594,34 @@ ALTER TABLE "NotificationJob" ADD CONSTRAINT "NotificationJob_counters_chk" CHEC
 -- ContactRevealLog: an EMERGENCY reveal must say why (D-35)
 ALTER TABLE "ContactRevealLog" ADD CONSTRAINT "ContactRevealLog_emergency_reason_chk"
   CHECK ("mode" <> 'EMERGENCY' OR length(btrim("reason")) > 0);
+
+-- Housekeeping (security review SQL, R-7): the tick deletes expired rows of every owner (purgeExpired).
+CREATE INDEX "IdempotencyKey_expiresAt_idx" ON "IdempotencyKey"("expiresAt");
+-- (UndoRecord already has its expiresAt index in the generated part.)
+CREATE INDEX "TickClaim_claimedAt_idx" ON "TickClaim"("claimedAt");
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Supabase Data API (security review SQL, R-4). On Supabase the roles `anon` and `authenticated` are what the
+-- REST / GraphQL endpoints (PostgREST) run as, and by default they may read and write every table of `public`
+-- that has no row-level security. This application never uses the Data API: it connects with its own database
+-- role through `packages/store-sql`, and authorisation is done in the API layer (DATA-MODEL: no RLS policies).
+-- So those roles get nothing here — on the objects this migration created and, through the default privileges
+-- of the role running the migration, on objects later migrations create. Guarded by role existence: on a plain
+-- Postgres (local, CI) the roles do not exist and this block does nothing.
+-- This is the second barrier. The first one is a project setting a person must check before the first deploy:
+-- Data API off, or `public` removed from its exposed schemas (db/README.md "Before the first deploy").
+-- ─────────────────────────────────────────────────────────────────────────────
+DO $$
+DECLARE r text;
+BEGIN
+  FOREACH r IN ARRAY ARRAY['anon', 'authenticated'] LOOP
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) THEN
+      EXECUTE format('REVOKE ALL ON ALL TABLES IN SCHEMA %I FROM %I', current_schema(), r);
+      EXECUTE format('REVOKE ALL ON ALL SEQUENCES IN SCHEMA %I FROM %I', current_schema(), r);
+      EXECUTE format('REVOKE ALL ON ALL FUNCTIONS IN SCHEMA %I FROM %I', current_schema(), r);
+      EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA %I REVOKE ALL ON TABLES FROM %I', current_schema(), r);
+      EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA %I REVOKE ALL ON SEQUENCES FROM %I', current_schema(), r);
+      EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA %I REVOKE ALL ON FUNCTIONS FROM %I', current_schema(), r);
+    END IF;
+  END LOOP;
+END $$;

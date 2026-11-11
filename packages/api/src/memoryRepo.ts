@@ -141,6 +141,14 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     return { rows: all.slice(start, start + page.limit), hasMore: all.length > start + page.limit, total: all.length };
   }
   async saveUndo(rec: UndoRecord) { this.undo.set(rec.token, structuredClone(rec)); }
+  /** Tick housekeeping (R-7): expired Idempotency-Key entries and undo records of every user, on the store clock. */
+  override async purgeExpired(): Promise<number> {
+    let n = await super.purgeExpired();
+    const now = this.clock().getTime();
+    for (const [k, v] of this.idempotent) if (v.expiresAt.getTime() <= now) { this.idempotent.delete(k); n++; }
+    for (const [k, v] of this.undo) if (v.expiresAt.getTime() < now - 86_400_000) { this.undo.delete(k); n++; }
+    return n;
+  }
   async takeUndo(token: string) {
     const r = this.undo.get(token) ?? null;
     this.undo.delete(token);
@@ -148,6 +156,7 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
   }
 
   async savePagingConfig(cfg: PagingConfig, expectedVersion: number | null, audit: AuditInput) {
+    if (typeof cfg.customerId !== 'string' || !cfg.customerId || audit.customerId !== cfg.customerId) throw new Error('savePagingConfig: customerId is required and must be the audited customer');
     const i = this.configs.findIndex((c) => c.customerId === cfg.customerId && c.scopeType === cfg.scopeType && c.scopeId === cfg.scopeId);
     if (expectedVersion === null ? i >= 0 : i < 0 || this.configs[i]!.version !== expectedVersion) return 'CONFLICT' as const;
     const key = `${cfg.customerId}|${cfg.scopeType}|${cfg.scopeId}`;
@@ -157,7 +166,8 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     return structuredClone(stored);
   }
   async deletePagingConfig(id: string, expectedVersion: number, audit: AuditInput) {
-    const i = this.configs.findIndex((c) => c.id === id);
+    // R-6: the audited customer is required and must own the row (the SQL store has it in the WHERE).
+    const i = this.configs.findIndex((c) => c.id === id && audit.customerId != null && c.customerId === audit.customerId);
     if (i < 0 || this.configs[i]!.version !== expectedVersion) return 'CONFLICT' as const;
     const [gone] = this.configs.splice(i, 1);
     this.configTombstones.set(`${gone!.customerId}|${gone!.scopeType}|${gone!.scopeId}`, gone!.version);

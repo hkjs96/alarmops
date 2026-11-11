@@ -350,6 +350,127 @@ export function apiContract(make: MakeApiFixture): void {
     });
   });
 
+  describe('security review SQL: input hygiene, fail-closed writes, housekeeping', () => {
+    const cur = (v: unknown): string => Buffer.from(JSON.stringify(v), 'utf8').toString('base64url');
+    const bad = async (r: Promise<ApiResponse>, label: string): Promise<void> => {
+      const res = await r;
+      expect([res.status, body(res).error?.code], label).toEqual([400, 'VALIDATION_FAILED']);
+    };
+
+    it('R-5: NUL bytes, malformed cursors and malformed ids are a 400 before the store is asked — never a 500; the same for an id that exists, one of another customer and one that does not exist', async () => {
+      await open();
+      const before = await w.snapshot();
+      const NUL = String.fromCharCode(0);
+      const calls: Array<[string, Promise<ApiResponse>]> = [
+        ['q = NUL', w.call(USERS.yuna, 'GET', '/incidents', { query: { q: NUL } })],
+        ['q = a NUL b', w.call(USERS.yuna, 'GET', '/incidents', { query: { q: `a${NUL}b` } })],
+        ['cursor t garbage', w.call(USERS.yuna, 'GET', '/incidents', { query: { cursor: cur({ t: 'garbage', id: 'x' }) } })],
+        ['cursor t sql', w.call(USERS.yuna, 'GET', '/incidents', { query: { cursor: cur({ t: "2026'; select pg_sleep(3)--", id: 'x' }) } })],
+        ['cursor t not an instant', w.call(USERS.yuna, 'GET', '/incidents', { query: { cursor: cur({ t: '2026-13-45T99:00:00.000Z', id: 'x' }) } })],
+        ['cursor t date only', w.call(USERS.yuna, 'GET', '/incidents', { query: { cursor: cur({ t: '2026-11-09', id: 'x' }) } })],
+        ['cursor id NUL', w.call(USERS.yuna, 'GET', '/incidents', { query: { cursor: cur({ t: T0.toISOString(), id: `a${NUL}` }) } })],
+        ['cursor id too long', w.call(USERS.yuna, 'GET', '/incidents', { query: { cursor: cur({ t: T0.toISOString(), id: 'x'.repeat(201) }) } })],
+        ['cursor not json', w.call(USERS.yuna, 'GET', '/incidents', { query: { cursor: '!!!' } })],
+        ['cursor wrong shape', w.call(USERS.yuna, 'GET', '/incidents', { query: { cursor: cur([1, 2]) } })],
+        ['timeline cursor', w.call(USERS.yuna, 'GET', `/incidents/${w.ids.mirae}/timeline`, { query: { cursor: cur({ t: 'x', id: `e${NUL}` }) } })],
+        ['notifications cursor', w.call(USERS.haeun, 'GET', `/incidents/${w.ids.mirae}/notifications`, { query: { cursor: cur({ t: T0.toISOString(), id: `l${NUL}` }) } })],
+        ['path own id + NUL', w.call(USERS.yuna, 'GET', `/incidents/${w.ids.mirae}%00`)],
+        ['path other customer id + NUL', w.call(USERS.yuna, 'GET', `/incidents/${w.ids.hanbit}%00`)],
+        ['path unknown id + NUL', w.call(USERS.yuna, 'GET', '/incidents/inc%00x')],
+        ['path timeline', w.call(USERS.yuna, 'GET', '/incidents/inc%00x/timeline')],
+        ['path notifications', w.call(USERS.haeun, 'GET', '/incidents/inc%00x/notifications')],
+        ['path newline', w.call(USERS.yuna, 'GET', '/incidents/inc%0Ax')],
+        ['path too long', w.call(USERS.yuna, 'GET', `/incidents/${'x'.repeat(201)}`)],
+        ['path bad escape', w.call(USERS.yuna, 'GET', '/incidents/%E0%A4%A')],
+        ['customer path', w.call(USERS.haeun, 'GET', '/customers/cus_mirae%00/paging')],
+        ['ack path', w.call(USERS.haeun, 'POST', `/incidents/${w.ids.mirae}%00/ack`, { headers: { 'If-Match': '1' } })],
+        ['body id', w.call(USERS.haeun, 'POST', '/incidents/bulk', { body: { action: 'ack', preview: false, items: [{ id: `${w.ids.mirae}${NUL}`, version: 1 }] } })],
+        ['body nested text', w.call(USERS.haeun, 'POST', `/incidents/${w.ids.mirae}/resolve`, { headers: { 'If-Match': '1' }, body: { kind: 'OTHER', note: `done${NUL}` } })],
+        ['body key', w.call(USERS.haeun, 'POST', '/incidents/bulk', { body: { action: 'ack', [`x${NUL}`]: 1, items: [] } })],
+        ['undo token', w.call(USERS.haeun, 'POST', '/incidents/bulk/undo', { body: { undoToken: `undo_${NUL}` } })],
+        ['idempotency key header', w.call(USERS.haeun, 'POST', `/incidents/${w.ids.mirae}/ack`, { headers: { 'If-Match': '1', 'Idempotency-Key': `k${NUL}` } })],
+        ['assignee filter', w.call(USERS.haeun, 'GET', '/incidents', { query: { assignee: `ct_${NUL}` } })],
+      ];
+      for (const [label, r] of calls) await bad(r, label);
+      // the three "id + NUL" answers are the same bytes: nothing about existence leaks
+      const same = await Promise.all([w.ids.mirae, w.ids.hanbit, 'inc-nope'].map((id) => w.call(USERS.yuna, 'GET', `/incidents/${id}%00`, { requestId: 'req_same' })));
+      expect(new Set(same.map((r) => JSON.stringify(r))).size).toBe(1);
+      expect(await w.snapshot()).toBe(before);
+      // well-formed input still works: a valid cursor of an unknown row, a search with SQL-looking text
+      const page = await w.call(USERS.haeun, 'GET', '/incidents', { query: { cursor: cur({ t: at(-1).toISOString(), id: 'inc-nope' }) } });
+      expect(page.status).toBe(200);
+      expect((await w.call(USERS.haeun, 'GET', '/incidents', { query: { q: "x'); DROP TABLE \"Incident\";--" } })).status).toBe(200);
+      expect((await w.call(USERS.yuna, 'GET', `/incidents/${w.ids.hanbit}`)).status).toBe(404);
+    });
+
+    it('R-6: deletePagingConfig needs the audited customer — null or another customer deletes nothing; savePagingConfig refuses a config without one', async () => {
+      await open();
+      const { configs } = await w.fx.repo.pagingContext('cus_hanbit');
+      const cfg = configs[0]!;
+      const audit = (customerId: string | null) => ({ at: w.sim.now, customerId, actorType: 'USER' as const, actorId: 'usr_haeun', action: 'paging.delete', targetType: 'PagingConfig', targetId: cfg.id });
+      expect(await w.fx.repo.deletePagingConfig(cfg.id, cfg.version, audit(null))).toBe('CONFLICT');
+      expect(await w.fx.repo.deletePagingConfig(cfg.id, cfg.version, audit(undefined as unknown as null))).toBe('CONFLICT');
+      expect(await w.fx.repo.deletePagingConfig(cfg.id, cfg.version, audit(''))).toBe('CONFLICT');
+      expect(await w.fx.repo.deletePagingConfig(cfg.id, cfg.version, audit('cus_mirae'))).toBe('CONFLICT');
+      expect((await w.fx.repo.pagingContext('cus_hanbit')).configs.map((c) => c.id)).toContain(cfg.id);
+      expect((await w.fx.audits()).filter((a) => a.action === 'paging.delete')).toHaveLength(0);
+      await expect(w.fx.repo.savePagingConfig({ ...cfg, customerId: null as unknown as string }, cfg.version, audit(null))).rejects.toThrow(/customerId/);
+      await expect(w.fx.repo.savePagingConfig(cfg, cfg.version, audit('cus_mirae'))).rejects.toThrow(/customerId/);
+      expect((await w.fx.repo.pagingContext('cus_hanbit')).configs.find((c) => c.id === cfg.id)!.version).toBe(cfg.version);
+      expect(await w.fx.repo.deletePagingConfig(cfg.id, cfg.version, audit('cus_hanbit'))).toBe('OK');
+      expect((await w.fx.repo.pagingContext('cus_hanbit')).configs.map((c) => c.id)).not.toContain(cfg.id);
+    });
+
+    it('R-7: the undo token never reaches the idempotency store; a replay has none; the first token still works once', async () => {
+      await open();
+      const stored: string[] = [];
+      const put = w.fx.repo.putIdempotent.bind(w.fx.repo);
+      w.fx.repo.putIdempotent = async (key, entry, exp, cap) => { stored.push(JSON.stringify(entry)); return put(key, entry, exp, cap); };
+      const opts = { headers: { 'If-Match': '1', 'Idempotency-Key': 'k-undo' } };
+      const first = await w.call(USERS.haeun, 'POST', `/incidents/${w.ids.mirae}/ack`, opts);
+      const bulk = await w.call(USERS.haeun, 'POST', '/incidents/bulk', { headers: { 'Idempotency-Key': 'k-bulk' }, body: { action: 'ack', preview: false, items: [{ id: w.ids.hanbit, version: 1 }] } });
+      const tokens = [body(first).undoToken, body(bulk).undoToken] as string[];
+      expect(tokens.every((t) => /^undo_.{20,}/.test(t))).toBe(true);
+      expect(stored).toHaveLength(2);
+      for (const text of stored) { expect(text).not.toContain('undo_'); for (const t of tokens) expect(text).not.toContain(t); }
+      const replay = await w.call(USERS.haeun, 'POST', `/incidents/${w.ids.mirae}/ack`, opts);
+      expect(replay.status).toBe(200);
+      expect('undoToken' in body(replay)).toBe(false);
+      expect(body(replay).incident.id).toBe(w.ids.mirae);
+      const undo = await w.call(USERS.haeun, 'POST', '/incidents/bulk/undo', { body: { undoToken: tokens[0] } });
+      expect(body(undo).restored).toEqual([w.ids.mirae]);
+      expect((await w.call(USERS.haeun, 'POST', '/incidents/bulk/undo', { body: { undoToken: tokens[0] } })).status).toBe(404);
+    });
+
+    it('R-7: the tick removes expired Idempotency-Key entries and undo records of EVERY user (not only of users who write again), and old tick claims — never live ones', async () => {
+      await open();
+      const entry = (n: number) => ({ fingerprint: `fp${n}`, res: { status: 200, headers: {}, body: { n } } });
+      const cap = (owner: string) => ({ owner, maxPerOwner: IDEMPOTENCY_MAX_PER_USER });
+      const soon = new Date(w.sim.now.getTime() + 60_000);
+      const later = new Date(w.sim.now.getTime() + 3 * 86_400_000);
+      for (let i = 0; i < 4; i++) await w.fx.repo.putIdempotent(`u1:${i}`, entry(i), soon, cap('usr_gone'));
+      await w.fx.repo.putIdempotent('u2:keep', entry(9), later, cap('usr_haeun'));
+      const item = { id: w.ids.mirae, versionAfter: 2, prev: { status: 'TRIGGERED' as const, acknowledgedAt: null, acknowledgedBy: null, mttaSec: null } };
+      await w.fx.repo.saveUndo({ token: 'undo_old', userId: 'usr_gone', action: 'ack', expiresAt: soon, items: [item] });
+      await w.fx.repo.saveUndo({ token: 'undo_live', userId: 'usr_haeun', action: 'ack', expiresAt: later, items: [item] });
+      // nothing has expired yet: a purge removes nothing
+      expect(await w.fx.repo.purgeExpired()).toBe(0);
+      // two days and a bit later the tick runs; usr_gone never writes again
+      w.sim.now = at(2 * 24 * 60 + 10);
+      expect(await w.fx.repo.claimTick('2026-11-11T03:09Z', w.sim.now)).toBe(true);
+      await w.sim.tick(); // claims 03:10 and purges
+      const peek = new Date(T0.getTime()); // "now" for the read: before every expiry, so only deletion can hide a row
+      expect(await Promise.all([0, 1, 2, 3].map((i) => w.fx.repo.getIdempotent(`u1:${i}`, peek)))).toEqual([null, null, null, null]);
+      expect(await w.fx.repo.getIdempotent('u2:keep', peek)).toEqual(entry(9));
+      expect(await w.fx.repo.takeUndo('undo_old')).toBeNull();
+      expect((await w.fx.repo.takeUndo('undo_live'))?.userId).toBe('usr_haeun');
+      // the minute of the first tick (T0, two days ago) is gone and could be claimed again; today's minutes are still held
+      expect(await w.fx.repo.claimTick('2026-11-11T03:09Z', w.sim.now)).toBe(false);
+      expect(await w.fx.repo.claimTick('2026-11-11T03:10Z', w.sim.now)).toBe(false);
+      expect(await w.fx.repo.claimTick('2026-11-09T03:00Z', w.sim.now)).toBe(true);
+    });
+  });
+
   describe('Idempotency-Key', () => {
     it('the same key and request replays the first response and does not act twice; the same key with another request is 422', async () => {
       await open();
@@ -359,7 +480,11 @@ export function apiContract(make: MakeApiFixture): void {
       const audits = (await w.fx.audits()).length;
       const replay = await w.call(USERS.haeun, 'POST', `/incidents/${w.ids.mirae}/ack`, opts);
       expect(replay.status).toBe(200);
-      expect(JSON.stringify(replay.body)).toBe(JSON.stringify(first.body)); // without the key this would be 409 INVALID_TRANSITION
+      // without the key this would be 409 INVALID_TRANSITION. R-7: the replay is the first response WITHOUT the undo token.
+      const { undoToken, ...rest } = body(first);
+      expect(undoToken).toMatch(/^undo_/);
+      expect(JSON.stringify(replay.body)).toBe(JSON.stringify(rest));
+      expect(JSON.stringify(replay.body)).not.toContain('undo_');
       expect((await w.fx.audits()).length).toBe(audits);
       const other = await w.call(USERS.haeun, 'POST', `/incidents/${w.ids.hanbit}/ack`, { headers: { 'If-Match': '1', 'Idempotency-Key': 'k-1' } });
       expect([other.status, body(other).error.code]).toEqual([422, 'IDEMPOTENCY_KEY_REUSED']);

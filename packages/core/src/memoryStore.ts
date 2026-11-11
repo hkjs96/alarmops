@@ -86,7 +86,10 @@ export class MemoryTickStore implements TickRepository {
   }
   async loadPolicy() { return this.policy; }
 
-  async listGroupsToClose(now: Date, limit: number) {
+  /** A "due" list never looks past the store's own now (R-2). */
+  protected dueLimit(now: Date): number { return this.ownClock ? Math.min(now.getTime(), this.ownClock().getTime()) : now.getTime(); }
+  async listGroupsToClose(asked: Date, limit: number) {
+    const now = new Date(this.dueLimit(asked));
     return [...this.groups.values()].filter((g) => g.status === 'OPEN' && g.closeAt.getTime() <= now.getTime())
       .sort((a, b) => a.closeAt.getTime() - b.closeAt.getTime()).slice(0, limit).map((g) => structuredClone(g));
   }
@@ -96,7 +99,8 @@ export class MemoryTickStore implements TickRepository {
     g.status = 'CLOSED'; g.closedAt = at; g.version++;
     return true;
   }
-  async listGroupsToDeliver(closedBefore: Date, limit: number) {
+  async listGroupsToDeliver(asked: Date, limit: number) {
+    const closedBefore = new Date(this.dueLimit(asked));
     return [...this.groups.values()]
       .filter((g) => g.status === 'CLOSED' && !g.deliveredAt && (g.closedAt ?? g.closeAt).getTime() <= closedBefore.getTime())
       .sort((a, b) => a.openedAt.getTime() - b.openedAt.getTime()).slice(0, limit).map((g) => structuredClone(g));
@@ -174,7 +178,8 @@ export class MemoryTickStore implements TickRepository {
       return m.length > 0 && m.every((x) => !(this.episodes.get(x.alertId) ?? true));
     }).sort((a, b) => a.triggeredAt.getTime() - b.triggeredAt.getTime()).slice(0, limit).map((i) => structuredClone(i));
   }
-  async listEscalationDue(now: Date, limit: number, excludeIds: string[] = []) {
+  async listEscalationDue(asked: Date, limit: number, excludeIds: string[] = []) {
+    const now = new Date(this.dueLimit(asked));
     return [...this.incidents.values()]
       .filter((i) => !excludeIds.includes(i.id) && i.status !== 'RESOLVED' && i.nextEscalationAt != null && i.nextEscalationAt.getTime() <= now.getTime())
       .sort((a, b) => a.nextEscalationAt!.getTime() - b.nextEscalationAt!.getTime() || a.id.localeCompare(b.id))
@@ -313,6 +318,8 @@ export class MemoryTickStore implements TickRepository {
 
   async writeHeartbeat(hb: HeartbeatWrite) {
     const prev = this.heartbeats.get(hb.name);
+    const cap = (d: Date | null): Date | null => (d ? new Date(this.dueLimit(d)) : null); // never later than the store's now (R-2)
+    hb = { ...hb, lastStartedAt: cap(hb.lastStartedAt), lastFinishedAt: cap(hb.lastFinishedAt) };
     this.heartbeats.set(hb.name, { ...hb, consecutiveFailures: hb.lastStatus !== 'OK' ? (prev?.consecutiveFailures ?? 0) + 1 : 0 });
   }
   async readHeartbeats() { return [...this.heartbeats.values()]; }

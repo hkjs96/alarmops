@@ -573,6 +573,101 @@ export function tickContract(make: MakeFixture): void {
         for (const j of got) expect(after.get(j.idempotencyKey)).toMatchObject({ status: 'QUEUED', attempts: all.find((x) => x.idempotencyKey === j.idempotencyKey)!.attempts, dueAt: j.dueAt, nextAttemptAt: j.dueAt });
       }
       expect(all.length).toBeGreaterThan(30);
+      // R-24 (security review SQL, R-1): a rotated claim takes the customers after the cursor first — WHICH jobs
+      // are taken follows `selectForClaim(due, limit, cursor)`, and they still come back in fair order.
+      await fx.putJob(pageOf(base.get(0)!, 'nocust', at(0, 20), { customerId: null }));
+      all.push(pageOf(base.get(0)!, 'nocust', at(0, 20), { customerId: null }));
+      for (const cursor of ['', 'cus_t3', 'cus_t5', 'cus_t5x', 'cus_t8', 'zzz']) {
+        for (const limit of [4, 10, 23, 200]) {
+          const due = all.filter((j) => j.nextAttemptAt.getTime() <= sim.now.getTime());
+          const expected = selectForClaim(due, limit, cursor).map((j) => j.idempotencyKey);
+          const got = await fx.repo.claimDueJobs(limit, { kinds: ['SMS'], rotateAfter: cursor });
+          expect(got.map((j) => j.idempotencyKey), `cursor ${cursor} limit ${limit}`).toEqual(expected);
+          for (const j of got) expect(await fx.repo.releaseJob(j.id, j.claimSeq)).toBe(true);
+        }
+      }
+      // what a rotation changes: with limit 10 and cursor cus_t5 the first round holds cus_t6 … and not cus_t0
+      const rotated = selectForClaim(all.filter((j) => j.nextAttemptAt.getTime() <= sim.now.getTime()), 5, 'cus_t5');
+      expect(new Set(rotated.map((j) => j.customerId)).has('cus_t6')).toBe(true);
+    });
+
+    it('R-2: times handed in by a caller are bounded by the store clock — a caller 10 min or 3 days ahead cannot park a page, hold one for days, see due work early or fake a fresh heartbeat', async () => {
+      const sim = await open(tenantSeed(1));
+      const base = await openTenants(sim, 1);
+      sim.now = at(1);
+      const inc = (await fx.incidents())[0]!;
+      const intent = (tag: string) => { const { id: _i, status: _s, attempts: _a, claimSeq: _c, nextAttemptAt: _n, dueAt: _d, lastError: _l, providerMessageId: _p, createdAt: _r, ...rest } = base.get(0)!; return { ...rest, idempotencyKey: `${rest.idempotencyKey}#${tag}` }; };
+      const ev = (when: Date) => [{ incidentId: inc.id, customerId: inc.customerId, at: when, kind: 'NOTE' as const, actorType: 'SYSTEM' as const, actorId: null, message: 'x' }];
+      let version = inc.version;
+      const commit = async (tag: string, when: Date | null) => {
+        const r = await fx.repo.commitIncident({ row: inc, expectedVersion: version, bump: true, jobs: [intent(tag)], events: when ? ev(when) : [] });
+        expect(r, tag).not.toBe('CONFLICT');
+        version = (r as IncidentRow).version;
+        return (await fx.jobs()).find((j) => j.idempotencyKey.endsWith(`#${tag}`))!;
+      };
+      const MIN10 = 10 * 60_000; const DAYS3 = 3 * 86_400_000;
+      // a new page: LEAST(caller time, store now); no event → store now, never 1970
+      expect(await commit('ahead10', new Date(at(1).getTime() + MIN10))).toMatchObject({ dueAt: at(1), nextAttemptAt: at(1), createdAt: at(1) });
+      expect(await commit('ahead3d', new Date(at(1).getTime() + DAYS3))).toMatchObject({ dueAt: at(1), nextAttemptAt: at(1) });
+      expect(await commit('behind10', new Date(at(1).getTime() - MIN10))).toMatchObject({ dueAt: new Date(at(1).getTime() - MIN10) });
+      expect(await commit('noevent', null)).toMatchObject({ dueAt: at(1), nextAttemptAt: at(1), createdAt: at(1) });
+      // all four can be claimed NOW
+      const claimed = await fx.repo.claimDueJobs(50, lane());
+      expect(claimed.map((j) => j.idempotencyKey.split('#')[1]).sort()).toEqual(['ahead10', 'ahead3d', 'behind10', 'noevent']);
+      // a hold: as asked up to store now + 10 min, never beyond; a plain release keeps the due time
+      const byTag = (t: string) => claimed.find((j) => j.idempotencyKey.endsWith(`#${t}`))!;
+      expect(await fx.repo.releaseJob(byTag('ahead10').id, 1, { notBefore: new Date(at(1).getTime() + 2 * 86_400_000), note: 'deferred_by_maintenance' })).toBe(true);
+      expect(await fx.repo.releaseJob(byTag('ahead3d').id, 1, { notBefore: at(4), note: 'deferred_by_maintenance' })).toBe(true);
+      expect(await fx.repo.releaseJob(byTag('behind10').id, 1)).toBe(true);
+      const after = new Map((await fx.jobs()).map((j) => [j.idempotencyKey.split('#')[1], j]));
+      expect(after.get('ahead10')).toMatchObject({ status: 'QUEUED', dueAt: at(11), nextAttemptAt: at(11), lastError: 'deferred_by_maintenance' });
+      expect(after.get('ahead3d')).toMatchObject({ status: 'QUEUED', dueAt: at(4), nextAttemptAt: at(4) });
+      expect(after.get('behind10')).toMatchObject({ status: 'QUEUED', dueAt: new Date(at(1).getTime() - MIN10), nextAttemptAt: new Date(at(1).getTime() - MIN10) });
+      // an undo restores "due now", not "due when the caller's clock says"
+      await fx.patchJob(`${base.get(0)!.idempotencyKey}#noevent`, { status: 'SKIPPED', lastError: 'acknowledged' });
+      const cur = (await fx.incidents())[0]!;
+      const noevent = after.get('noevent')!;
+      expect(await fx.repo.commitIncident({ row: cur, expectedVersion: cur.version, bump: true, restoreAckSkipped: { stepIndex: noevent.stepIndex, repeat: noevent.repeat, at: new Date(at(1).getTime() + DAYS3) } })).not.toBe('CONFLICT');
+      expect((await fx.jobs()).find((j) => j.idempotencyKey.endsWith('#noevent'))).toMatchObject({ status: 'QUEUED', dueAt: at(1), nextAttemptAt: at(1) });
+      // "due" lists: an escalation due in 8 minutes and a group closing in 8 minutes are NOT due for a caller 10 minutes ahead
+      const now2 = (await fx.incidents())[0]!;
+      await fx.repo.commitIncident({ row: { ...now2, nextEscalationAt: at(9) }, expectedVersion: now2.version, bump: false });
+      const ahead = new Date(at(1).getTime() + MIN10);
+      expect(await fx.repo.listEscalationDue(ahead, 50)).toEqual([]);
+      expect(await fx.repo.listEscalationDue(new Date(at(1).getTime() + DAYS3), 50)).toEqual([]);
+      await fx.addGroup({ id: 'g_soon', groupKey: 'cus_t0#x', customerId: 'cus_t0', severity: 'SEV_2', status: 'OPEN', openedAt: at(0), groupWaitSec: 30, closeAt: at(9), closedAt: null, pauseUntil: null, staleAfter: at(30), deliveredAt: null, version: 1 }, []);
+      await fx.addGroup({ id: 'g_closed', groupKey: 'cus_t0#y', customerId: 'cus_t0', severity: 'SEV_2', status: 'CLOSED', openedAt: at(0), groupWaitSec: 30, closeAt: at(9), closedAt: at(9), pauseUntil: null, staleAfter: at(30), deliveredAt: null, version: 1 }, []);
+      expect((await fx.repo.listGroupsToClose(ahead, 50)).map((g) => g.id)).not.toContain('g_soon');
+      expect((await fx.repo.listGroupsToDeliver(ahead, 50)).map((g) => g.id)).not.toContain('g_closed');
+      sim.now = at(9);
+      expect((await fx.repo.listEscalationDue(at(9), 50)).map((i) => i.id)).toEqual([inc.id]);
+      expect((await fx.repo.listGroupsToClose(at(9), 50)).map((g) => g.id)).toContain('g_soon');
+      expect((await fx.repo.listGroupsToDeliver(at(9), 50)).map((g) => g.id)).toContain('g_closed');
+      // a heartbeat written with a clock 3 days ahead is stamped with the store's time: it goes stale when it should
+      await fx.repo.writeHeartbeat({ name: 'notify', lastStartedAt: new Date(at(9).getTime() + DAYS3), lastFinishedAt: new Date(at(9).getTime() + DAYS3), lastStatus: 'OK', lastDurationMs: 5, lastStats: {} });
+      expect((await fx.repo.readHeartbeats()).find((h) => h.name === 'notify')).toMatchObject({ lastStartedAt: at(9), lastFinishedAt: at(9) });
+      expect(heartbeatHealth(await fx.repo.readHeartbeats(), at(13), { jobs: ['notify'] }).stale).toBe(true);
+    });
+
+    it('R-9: the store masks NotificationLog.error itself, whatever the caller passed (same rule as lastError)', async () => {
+      const sim = await open(tenantSeed(1));
+      const base = await openTenants(sim, 1);
+      await fx.putJob(pageOf(base.get(0)!, 'raw', at(0, 30)));
+      sim.now = at(1);
+      const [j] = await fx.repo.claimDueJobs(50, lane());
+      expect(await fx.repo.beginSend(j!.id, j!.claimSeq)).toBe(1);
+      const raw = `rejected: to=+82 10-1234-5678 kim.haeun@example.test api_key=sk_live_abcdefgh1234 ${'x'.repeat(500)}`;
+      expect(await fx.repo.completeJob(j!.id, j!.claimSeq, { status: 'FAILED', error: raw, errorCode: 'PROVIDER_REJECTED' }, {
+        at: at(1), customerId: j!.customerId, incidentId: j!.incidentId, jobId: j!.id, channel: j!.channel, status: 'FAILED', targetSummary: 'P0', targetKind: 'STAFF', contactId: j!.contactId,
+        escalationStep: 0, attempt: 1, providerMessageId: null, error: raw, errorCode: 'PROVIDER_REJECTED', warnings: [],
+      })).toBe(true);
+      const log = (await fx.logs()).find((l) => l.jobId === j!.id)!;
+      const job = (await fx.jobs()).find((x) => x.id === j!.id)!;
+      for (const text of [log.error!, job.lastError!]) {
+        expect(text).not.toMatch(/1234|5678|example\.test|sk_live|abcdefgh/);
+        expect(text.length).toBeLessThanOrEqual(300);
+      }
+      expect(log.error).toBe(job.lastError);
     });
 
     it('a claim takes only its lane; other lanes’ pages stay', async () => {
@@ -742,13 +837,20 @@ export function tickContract(make: MakeFixture): void {
       sim.now = at(1);
       const runners = [fx.repo, fx.secondRunner(), fx.secondRunner(), fx.secondRunner()];
       const seen = new Map<string, number>();
+      // Security review SQL, B-1: a runner that loses the race must not come back EMPTY while pages are due.
+      // 120 due, 4 × 25 per round → round 1 takes exactly 100 (25 each), round 2 the last 20, then nothing is left.
+      const perRound: number[] = [];
       for (let round = 0; round < 4; round++) {
+        const left = 120 - seen.size;
         const claims = await Promise.all(runners.map((r) => r.claimDueJobs(25, lane())));
         for (const c of claims) for (const j of c) seen.set(j.id, (seen.get(j.id) ?? 0) + 1);
-        expect(claims.flat().length).toBeLessThanOrEqual(100);
+        perRound.push(claims.flat().length);
+        expect(claims.flat().length, `round ${round}`).toBe(Math.min(100, left));
+        if (left >= 100) expect(claims.map((c) => c.length)).toEqual([25, 25, 25, 25]);
       }
+      expect(perRound).toEqual([100, 20, 0, 0]);
       expect([...seen.values()].filter((v) => v > 1)).toEqual([]); // no double claim
-      expect(seen.size).toBe(120); // and nothing was left behind after four rounds
+      expect(seen.size).toBe(120);
       expect((await fx.jobs()).filter((j) => j.status === 'SENDING' && j.claimSeq !== 1)).toEqual([]);
     });
 

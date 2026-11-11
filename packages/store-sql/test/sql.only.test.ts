@@ -63,8 +63,8 @@ describe('store clock = the database clock (R-14, N-40)', () => {
     expect(retry!.s).toBeLessThanOrEqual(30);
     expect(retry!.same).toBe(true);
     expect(await store.outboxBacklog()).toMatchObject({ dueUnattempted: 0 });
-    expect(await store.claimTick('2026-11-09T03:00Z')).toBe(true);
-    expect(await store.claimTick('2026-11-09T03:00Z')).toBe(false);
+    expect(await store.claimTick('2026-11-09T03:00Z', new Date())).toBe(true);
+    expect(await store.claimTick('2026-11-09T03:00Z', new Date())).toBe(false);
   });
 });
 
@@ -74,6 +74,9 @@ describe('timeouts (N-33: every statement ends well before STORE_CALL_TIMEOUT_MS
     expect(LOCK_TIMEOUT_MS).toBeLessThan(STATEMENT_TIMEOUT_MS);
     const shown = await db.client.transaction(async (tx) => [(await tx.query('SHOW statement_timeout'))[0]!.statement_timeout, (await tx.query('SHOW lock_timeout'))[0]!.lock_timeout]);
     expect(shown).toEqual(['4500ms', '3s']);
+    // R-3: the isolation level is pinned and a frozen transaction is ended by the server
+    const more = await db.client.transaction(async (tx) => [(await tx.query('SHOW transaction_isolation'))[0]!.transaction_isolation, (await tx.query('SHOW idle_in_transaction_session_timeout'))[0]!.idle_in_transaction_session_timeout]);
+    expect(more).toEqual(['read committed', '15s']);
   });
 
   server('server: a statement that does not come back is cancelled by the database after 4.5 s — in a transaction and outside one', async () => {
@@ -124,17 +127,16 @@ describe('row locks', () => {
     expect((await store.claimDueJobs(50, { kinds: ['SMS'] })).map((j) => j.id).sort()).toEqual([...held].sort());
   }, 20_000);
 
-  server('server: 8 runners × 5 rounds claiming at once over a pool: 400 pages, each claimed exactly once', async () => {
+  server('server: 8 runners claiming at once over a pool: 400 pages, each claimed exactly once, in one round', async () => {
     for (let c = 0; c < 4; c++) {
       await db.client.query(`INSERT INTO "Customer"("id", "name", "slug", "updatedAt") VALUES ($1, $1, $2, now()) ON CONFLICT DO NOTHING`, [`cus_c${c}`, `c${c}`]);
       await pages(`cus_c${c}`, 100);
     }
     const seen = new Map<string, number>();
-    for (let round = 0; round < 12; round++) {
-      const claims = await Promise.all(Array.from({ length: 8 }, () => new SqlTickStore(db.client).claimDueJobs(50, { kinds: ['SMS'] })));
-      for (const j of claims.flat()) seen.set(j.id, (seen.get(j.id) ?? 0) + 1);
-      if (seen.size === 400) break;
-    }
+    // B-1 (security review SQL): ONE round — 8 × 50 = 400. (This test used to allow 12 rounds, which hid empty claims.)
+    const claims = await Promise.all(Array.from({ length: 8 }, () => new SqlTickStore(db.client).claimDueJobs(50, { kinds: ['SMS'] })));
+    for (const j of claims.flat()) seen.set(j.id, (seen.get(j.id) ?? 0) + 1);
+    expect(claims.map((c) => c.length)).toEqual(Array(8).fill(50));
     expect(seen.size).toBe(400);
     expect([...seen.values()].every((n) => n === 1)).toBe(true);
     const [r] = await db.client.query(`SELECT count(*)::int AS "n", max("claimSeq") AS "maxSeq" FROM "NotificationJob" WHERE "status" = 'SENDING'`);

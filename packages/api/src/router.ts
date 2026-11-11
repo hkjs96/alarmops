@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { IDEMPOTENCY_MAX_PER_USER } from '@alarmops/core';
 import { strictApiConfig, type ApiConfig } from './audience.js';
 import { requireAuth, scopeKey } from './auth.js';
-import { ApiError, errorResponse, header, isRecord, notFound, type ApiRequest, type ApiResponse } from './http.js';
+import { ApiError, assertCleanInput, errorResponse, header, isRecord, notFound, type ApiRequest, type ApiResponse } from './http.js';
 import { actOnIncident, bulkIncidents, getIncident, getNotifications, getTimeline, listIncidents, undoIncidents } from './incidents.js';
 import { deletePagingOverride, getCustomerPaging, getPagingPath, putCustomerPaging, putPagingOverride } from './pagingApi.js';
 import type { ApiRepository } from './repo.js';
@@ -26,7 +26,14 @@ export interface ApiDeps {
 type Handler = (req: ApiRequest, deps: { repo: ApiRepository; now: () => Date; config: ApiConfig }, p: string[]) => Promise<ApiResponse>;
 interface Route {
   method: ApiRequest['method']; pattern: string[]; run: Handler;
-  /** false → the response is never stored for Idempotency-Key replay (read-only requests, N-19). */
+  /**
+   * false → the response is never stored for Idempotency-Key replay.
+   * - read-only requests (N-19: a bulk preview);
+   * - CONVENTION (security review SQL, R-7): ANY route whose response carries contact details — a phone number, an
+   *   e-mail address, a Slack id (the contact reveal of D-35, contact lists and exports) — MUST be registered with
+   *   `() => false`. `IdempotencyKey.response` is a plain copy of the body kept for 24 h; contact details live in
+   *   `Contact` only. A second call of such a route runs again (and is audited again) instead of being replayed.
+   */
   replayable?: (req: ApiRequest) => boolean;
 }
 
@@ -69,6 +76,15 @@ function match(method: string, path: string): { route: Route; params: string[]; 
 }
 
 const IDEMPOTENCY_TTL_MS = 24 * 3600_000;
+/**
+ * Body fields that are never written to the idempotency store (R-7). `undoToken` is a bearer secret for 5 minutes
+ * and `UndoRecord` keeps only its SHA-256; a plain copy in `IdempotencyKey.response` for 24 h would undo that.
+ * A REPLAYED response therefore has no `undoToken`: the client keeps the token of the first answer; a client that
+ * lost it cannot undo through a replay (it can still act on the incident with the version it sees).
+ */
+export const NEVER_STORED_FIELDS: readonly string[] = ['undoToken'];
+const storable = (body: unknown): unknown =>
+  isRecord(body) && NEVER_STORED_FIELDS.some((f) => f in body) ? Object.fromEntries(Object.entries(body).filter(([k]) => !NEVER_STORED_FIELDS.includes(k))) : body;
 const sha = (s: string): string => createHash('sha256').update(s).digest('hex');
 /** Stable JSON (sorted keys) so the same body hashes the same whatever the key order. */
 const stable = (v: unknown): string =>
@@ -81,6 +97,7 @@ export function createApi(deps: ApiDeps) {
   async function handle(req: ApiRequest): Promise<ApiResponse> {
     try {
       const auth = requireAuth(req); // every console route needs a session (401 before anything else)
+      assertCleanInput(req); // R-5: NUL bytes and malformed path ids are a 400 here, never an error from the database
       const m = match(req.method, req.path);
       if (!m) throw notFound();
       // Idempotency-Key (§2): the same key from the same user for the same request replays the first response for 24h.
@@ -103,7 +120,7 @@ export function createApi(deps: ApiDeps) {
       }
       const res = await m.route.run(req, inner, m.params);
       if (idemKey && res.status >= 200 && res.status < 300) {
-        await inner.repo.putIdempotent(idemKey, { fingerprint, res: { status: res.status, headers: res.headers, body: res.body } }, new Date(inner.now().getTime() + IDEMPOTENCY_TTL_MS), { owner: auth.userId, maxPerOwner: IDEMPOTENCY_MAX_PER_USER });
+        await inner.repo.putIdempotent(idemKey, { fingerprint, res: { status: res.status, headers: res.headers, body: storable(res.body) } }, new Date(inner.now().getTime() + IDEMPOTENCY_TTL_MS), { owner: auth.userId, maxPerOwner: IDEMPOTENCY_MAX_PER_USER });
       }
       return res;
     } catch (err) {

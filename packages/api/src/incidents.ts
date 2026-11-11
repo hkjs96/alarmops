@@ -10,7 +10,7 @@ import {
 import { DEFAULT_API_CONFIG, serializerFor, type ApiConfig, type EventCtx, type IncidentSerializer, type UserInfo } from './audience.js';
 import { requireAuth, requireRole, scopeOf, type AuthContext, type ScopeFilter } from './auth.js';
 import {
-  ApiError, decodeCursor, encodeCursor, ifMatch, invalid, invalidTransition, isRecord, limitOf, notFound, ok, q, rateLimited, validation, versionConflict,
+  ApiError, decodeCursor, encodeCursor, ifMatch, invalid, invalidTransition, isCleanId, isIsoInstant, isRecord, limitOf, notFound, ok, q, rateLimited, validation, versionConflict,
   type ApiRequest, type ApiResponse,
 } from './http.js';
 import type { ApiRepository, IncidentFilter, NodeFilter, OrgTree, UndoRecord } from './repo.js';
@@ -21,7 +21,8 @@ export interface Deps { repo: ApiRepository; now: () => Date; config?: ApiConfig
 const UNDO_TTL_MS = 5 * 60_000;
 const BULK_MAX = 200;
 type Cursor = { t: string; id: string };
-const isCursor = (v: unknown): v is Cursor => isRecord(v) && typeof v.t === 'string' && typeof v.id === 'string';
+/** R-5: a cursor is client input. `t` must be an instant as `toISOString` writes it, `id` a plain id — anything else is a 400, before the store sees it. */
+const isCursor = (v: unknown): v is Cursor => isRecord(v) && isIsoInstant(v.t) && isCleanId(v.id);
 
 // ───────────────────────────── views ─────────────────────────────
 

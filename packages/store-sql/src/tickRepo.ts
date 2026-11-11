@@ -3,8 +3,11 @@
  * the shared contract suite (packages/core/test/contract) runs against both.
  *
  * Rules kept in every statement:
- * - CLOCK (R-14): due / lease / retry decisions of the outbox use the store clock `sql.now()` (the database's
- *   `now()`), never a time handed in by the runner.
+ * - CLOCK (R-14; security review SQL R-2): due / lease / retry decisions of the outbox use the store clock
+ *   `sql.now()` (the database's `now()`), never a time handed in by the runner. Where a caller's time is stored it
+ *   is bounded by the store clock: a new or restored page is due at LEAST(caller time, now); a held page at most
+ *   RELEASE_HOLD_MAX_SEC ahead; "due" lists (groups, escalation) never look past now; `claimTick` refuses a caller
+ *   whose clock is more than CLOCK_SKEW_LIMIT_MS away.
  * - CLAIMS: rows are taken with `FOR UPDATE SKIP LOCKED` and every later write of a claimed job carries
  *   `WHERE status = 'SENDING' AND "claimSeq" = ?` (R-2).
  * - VERSIONS: incident / group writes are `UPDATE … WHERE version = ?`; zero rows = CONFLICT.
@@ -12,7 +15,7 @@
  * - TIMEOUT (N-33): every transaction starts with SET LOCAL statement_timeout (client.ts), below 5 s.
  */
 import {
-  CLAIM_LEASE_SEC, LANE_CHANNELS, MAX_ATTEMPTS, NON_SEV1_RESERVE_PCT, RETRY_DELAYS_SEC, policyFromRow, sanitizeProviderError,
+  CLAIM_LEASE_SEC, CLOCK_SKEW_LIMIT_MS, LANE_CHANNELS, LANES, MAX_ATTEMPTS, RELEASE_HOLD_MAX_SEC, RETRY_DELAYS_SEC, claimReserve, policyFromRow, sanitizeProviderError,
   type AuditInput, type Contact, type DeliveryLog, type DeliveryReason, type GroupDeliveryCommit, type GroupMember, type GroupRow, type HeartbeatRow,
   type HeartbeatWrite, type IncidentCommit, type IncidentEventInput, type IncidentRow, type Leave, type MaintenanceWindow, type NotificationIntent,
   type NotificationJob, type Override, type PagingConfig, type PagingWorld, type ResolutionInput, type Responder, type Rotation, type SenderKind,
@@ -44,14 +47,37 @@ export class SqlTickStore implements TickRepository {
 
   // ───────────────────────────── tick claim · policy ─────────────────────────────
 
-  async claimTick(minuteKey: string): Promise<boolean> {
-    // One row per claimed minute; the same statement drops rows older than two days.
-    const rows = await this.sql.query(
-      `WITH gone AS (DELETE FROM "TickClaim" WHERE "minute" < $1::timestamptz - interval '2 days')
-       INSERT INTO "TickClaim"("minute", "claimedAt") VALUES ($1::timestamptz, ${this.sql.now()}) ON CONFLICT ("minute") DO NOTHING RETURNING "minute"`,
-      [minuteKey],
+  async now(): Promise<Date> {
+    const [r] = await this.sql.query(`SELECT ${this.sql.now()} AS "now"`);
+    return dReq(r!.now);
+  }
+
+  /**
+   * One row per claimed minute. R-2: `at` (the caller's clock) more than CLOCK_SKEW_LIMIT_MS from the store clock →
+   * nothing is claimed and the answer is 'CLOCK_SKEW'. Old rows are removed by `purgeExpired`, by the time they
+   * were CLAIMED on the store clock — a caller with a wrong clock cannot make this statement delete live rows.
+   */
+  async claimTick(minuteKey: string, at?: Date): Promise<boolean | 'CLOCK_SKEW'> {
+    const now = this.sql.now();
+    const [r] = await this.sql.query(
+      `WITH ok AS (SELECT ($2::timestamptz IS NULL OR abs(extract(epoch FROM ($2::timestamptz - ${now}))) * 1000 <= ${CLOCK_SKEW_LIMIT_MS}) AS v),
+            ins AS (INSERT INTO "TickClaim"("minute", "claimedAt") SELECT $1::timestamptz, ${now} FROM ok WHERE ok.v ON CONFLICT ("minute") DO NOTHING RETURNING 1)
+       SELECT ok.v AS "inSync", EXISTS (SELECT 1 FROM ins) AS "claimed" FROM ok`,
+      [minuteKey, iso(at)],
     );
-    return rows.length > 0;
+    return !r!.inSync ? 'CLOCK_SKEW' : r!.claimed === true;
+  }
+
+  /** R-7: expired rows of every owner, on the store clock, at most 5 000 per table and call. */
+  async purgeExpired(): Promise<number> {
+    const now = this.sql.now();
+    const [r] = await this.sql.query(
+      `WITH t AS (DELETE FROM "TickClaim" WHERE "minute" IN (SELECT "minute" FROM "TickClaim" WHERE "claimedAt" < ${now} - interval '2 days' AND "minute" < ${now} - interval '2 days' LIMIT 5000) RETURNING 1),
+            i AS (DELETE FROM "IdempotencyKey" WHERE "key" IN (SELECT "key" FROM "IdempotencyKey" WHERE "expiresAt" <= ${now} LIMIT 5000) RETURNING 1),
+            u AS (DELETE FROM "UndoRecord" WHERE "token" IN (SELECT "token" FROM "UndoRecord" WHERE "expiresAt" < ${now} - interval '1 day' LIMIT 5000) RETURNING 1)
+       SELECT ((SELECT count(*) FROM t) + (SELECT count(*) FROM i) + (SELECT count(*) FROM u))::int AS "n"`,
+    );
+    return r?.n ?? 0;
   }
 
   async loadPolicy(): Promise<SuppressionPolicy> {
@@ -62,7 +88,7 @@ export class SqlTickStore implements TickRepository {
   // ───────────────────────────── ① groups ─────────────────────────────
 
   async listGroupsToClose(now: Date, limit: number): Promise<GroupRow[]> {
-    return (await this.sql.query(`SELECT ${GROUP_COLS} FROM "AlertGroup" WHERE "status" = 'OPEN' AND "closeAt" <= $1::timestamptz ORDER BY "closeAt", "id" LIMIT $2`, [iso(now), limit])).map(toGroup);
+    return (await this.sql.query(`SELECT ${GROUP_COLS} FROM "AlertGroup" WHERE "status" = 'OPEN' AND "closeAt" <= LEAST($1::timestamptz, ${this.sql.now()}) ORDER BY "closeAt", "id" LIMIT $2`, [iso(now), limit])).map(toGroup);
   }
   async closeGroup(groupId: string, at: Date): Promise<boolean> {
     const rows = await this.sql.query(`UPDATE "AlertGroup" SET "status" = 'CLOSED', "closedAt" = $2::timestamptz, "version" = "version" + 1 WHERE "id" = $1 AND "status" = 'OPEN' RETURNING "id"`, [groupId, iso(at)]);
@@ -70,7 +96,7 @@ export class SqlTickStore implements TickRepository {
   }
   async listGroupsToDeliver(closedBefore: Date, limit: number): Promise<GroupRow[]> {
     return (await this.sql.query(
-      `SELECT ${GROUP_COLS} FROM "AlertGroup" WHERE "status" = 'CLOSED' AND "deliveredAt" IS NULL AND COALESCE("closedAt", "closeAt") <= $1::timestamptz ORDER BY "openedAt", "id" LIMIT $2`,
+      `SELECT ${GROUP_COLS} FROM "AlertGroup" WHERE "status" = 'CLOSED' AND "deliveredAt" IS NULL AND COALESCE("closedAt", "closeAt") <= LEAST($1::timestamptz, ${this.sql.now()}) ORDER BY "openedAt", "id" LIMIT $2`,
       [iso(closedBefore), limit],
     )).map(toGroup);
   }
@@ -216,7 +242,7 @@ export class SqlTickStore implements TickRepository {
   async listEscalationDue(now: Date, limit: number, excludeIds: string[] = []): Promise<IncidentRow[]> {
     return (await this.sql.query(
       `SELECT ${incidentCols()} FROM "Incident"
-        WHERE "status" <> 'RESOLVED' AND "nextEscalationAt" IS NOT NULL AND "nextEscalationAt" <= $1::timestamptz AND NOT ("id" = ANY($3::text[]))
+        WHERE "status" <> 'RESOLVED' AND "nextEscalationAt" IS NOT NULL AND "nextEscalationAt" <= LEAST($1::timestamptz, ${this.sql.now()}) AND NOT ("id" = ANY($3::text[]))
         ORDER BY "nextEscalationAt", "id" LIMIT $2`,
       [iso(now), limit, excludeIds],
     )).map(toIncident);
@@ -244,11 +270,12 @@ export class SqlTickStore implements TickRepository {
       if (!saved) return 'CONFLICT' as const;
       const events = c.events ?? [];
       await this.insertEvents(tx, events);
-      await this.insertJobs(tx, c.jobs ?? [], new Date(Math.max(...events.map((e) => e.at.getTime()), 0)));
+      // No event → no time from the caller: the pages are due at the store's now (never 1970).
+      await this.insertJobs(tx, c.jobs ?? [], events.length ? new Date(Math.max(...events.map((e) => e.at.getTime()))) : null);
       if (c.restoreAckSkipped) {
         const r = c.restoreAckSkipped;
         await tx.query(
-          `UPDATE "NotificationJob" SET "status" = 'QUEUED', "lastError" = NULL, "nextAttemptAt" = $4::timestamptz, "dueAt" = $4::timestamptz
+          `UPDATE "NotificationJob" SET "status" = 'QUEUED', "lastError" = NULL, "nextAttemptAt" = LEAST($4::timestamptz, ${this.sql.now()}), "dueAt" = LEAST($4::timestamptz, ${this.sql.now()})
             WHERE "incidentId" = $1 AND "status" = 'SKIPPED' AND "lastError" = 'acknowledged' AND "purpose" <> 'RENOTIFY' AND "stepIndex" = $2 AND "repeat" = $3`,
           [saved.id, r.stepIndex, r.repeat, iso(r.at)],
         );
@@ -317,15 +344,20 @@ export class SqlTickStore implements TickRepository {
     );
   }
 
-  /** INSERT … ON CONFLICT (idempotencyKey) DO NOTHING: the same page is never queued twice. */
-  protected async insertJobs(tx: SqlExecutor, intents: NotificationIntent[], at: Date): Promise<void> {
+  /**
+   * INSERT … ON CONFLICT (idempotencyKey) DO NOTHING: the same page is never queued twice.
+   * Due at LEAST(at, store now) (R-2): a new page means "send now", so a caller whose clock is ahead cannot park
+   * it in the future; a clock that is behind only makes it due in the past, which is harmless. `at` null → now.
+   */
+  protected async insertJobs(tx: SqlExecutor, intents: NotificationIntent[], at: Date | null): Promise<void> {
     if (!intents.length) return;
+    const due = `LEAST(COALESCE($2::timestamptz, ${this.sql.now()}), ${this.sql.now()})`;
     const rows = intents.map((i) => ({ ...i, id: newId('job') }));
     await tx.query(
       `INSERT INTO "NotificationJob"("id", "idempotencyKey", "customerId", "incidentId", "purpose", "channel", "targetRef", "status", "attempts", "nextAttemptAt", "dueAt",
          "createdAt", "payload", "stepIndex", "repeat", "contactId", "contactName")
        SELECT t.x->>'id', t.x->>'idempotencyKey', t.x->>'customerId', t.x->>'incidentId', (t.x->>'purpose')::"NotificationPurpose", (t.x->>'channel')::"NotificationChannelType",
-              t.x->>'targetRef', 'QUEUED', 0, $2::timestamptz, $2::timestamptz, $2::timestamptz, t.x->'payload', (t.x->>'stepIndex')::int, (t.x->>'repeat')::int,
+              t.x->>'targetRef', 'QUEUED', 0, ${due}, ${due}, ${due}, t.x->'payload', (t.x->>'stepIndex')::int, (t.x->>'repeat')::int,
               (SELECT c."id" FROM "Contact" c WHERE c."id" = t.x->>'contactId'), t.x->>'contactName'
          FROM jsonb_array_elements($1::jsonb) WITH ORDINALITY AS t(x, ord) ORDER BY t.ord
        ON CONFLICT ("idempotencyKey") DO NOTHING`,
@@ -345,21 +377,33 @@ export class SqlTickStore implements TickRepository {
 
   /**
    * One transaction:
+   * 0. `pg_advisory_xact_lock` for every lane of the claim, in a fixed order (security review SQL, B-1). Claims of
+   *    one lane therefore run one after the other: the second runner's statements start after the first one
+   *    committed (READ COMMITTED: a new snapshot per statement), see its rows as SENDING with a lease, and choose
+   *    among what is left. Without it both runners ranked the same first rows, one locked them, and the other
+   *    skipped them WITHOUT taking others — an empty claim while pages were due. The lock is transaction-scoped
+   *    (nothing to release, nothing kept on a pooled connection), is held for the few milliseconds of the claim,
+   *    and waits at most `lock_timeout` (3 s). Other lanes are not affected.
    * 1. due jobs that already used every attempt → FAILED + a NotificationLog row (GAVE_UP);
    * 2. the claim. The ORDER is `selectForClaim` of core, as SQL: per-customer round-robin
    *    (`ROW_NUMBER() OVER (PARTITION BY customer ORDER BY sev1 DESC, tried, dueAt, createdAt, seq)`), rounds ordered
    *    by `rn, sev1 DESC, tried, dueAt, createdAt`, and NON_SEV1_RESERVE_PCT of the claim kept for the oldest
-   *    non-SEV-1 jobs the fair order did not reach. The chosen rows are then LOCKED with FOR UPDATE SKIP LOCKED
-   *    (the due condition is re-checked under the lock) and updated: SENDING, claimSeq + 1, lease from the store clock.
+   *    non-SEV-1 jobs the fair order did not reach. With `rotateAfter` (R-24) the rows are CHOSEN on rotated rounds
+   *    (`rn`, customers after the cursor first, customer key in byte order) and still returned in fair order.
+   *    The chosen rows are LOCKED with FOR UPDATE SKIP LOCKED (kept as a second guard: the due condition is
+   *    re-checked under the lock) and updated: SENDING, claimSeq + 1, lease from the store clock.
    *    `attempts` and `dueAt` are not touched.
-   * Two runners at once: the second one skips the rows the first has locked and re-checks the ones already
-   * committed, so no job is ever claimed twice; it may get fewer than `limit` in that tick.
    */
-  async claimDueJobs(limit: number, opts: { kinds?: readonly SenderKind[] } = {}): Promise<NotificationJob[]> {
+  async claimDueJobs(limit: number, opts: { kinds?: readonly SenderKind[]; rotateAfter?: string | null } = {}): Promise<NotificationJob[]> {
+    const kinds = [...new Set(opts.kinds ?? LANES)].sort();
     const channels = opts.kinds ? opts.kinds.flatMap((k) => LANE_CHANNELS[k]) : ALL_CHANNELS;
-    const reserve = limit >= 5 ? Math.max(1, Math.floor((limit * NON_SEV1_RESERVE_PCT) / 100)) : 0;
+    const reserve = claimReserve(limit);
     const now = this.sql.now();
+    const rotate = opts.rotateAfter != null;
+    // `sel`: the position that decides WHICH rows are taken; `pos` (fair order) is what the result is sorted by.
+    const sel = rotate ? `ROW_NUMBER() OVER (ORDER BY rn, (ck COLLATE "C" <= $4::text COLLATE "C"), ck COLLATE "C")` : `ROW_NUMBER() OVER (ORDER BY rn, sev1 DESC, tried, "dueAt", "createdAt", cseq)`;
     return this.tx(async (tx) => {
+      await tx.query(`SELECT pg_advisory_xact_lock(hashtext('alarmops:outbox-claim'), hashtext(k)) FROM unnest($1::text[]) AS t(k)`, [kinds]); // `kinds` is sorted: every runner takes the locks in the same order
       const gone = await tx.query(
         `UPDATE "NotificationJob" SET "status" = 'FAILED', "lastError" = COALESCE("lastError", 'gave up after a send that never finished')
           WHERE "status" IN ('QUEUED', 'SENDING') AND "nextAttemptAt" <= ${now} AND "attempts" >= ${MAX_ATTEMPTS} AND "channel" = ANY($1::text[]::"NotificationChannelType"[])
@@ -382,15 +426,15 @@ export class SqlTickStore implements TickRepository {
          ), ranked AS (
            SELECT due.*, ROW_NUMBER() OVER (PARTITION BY ck ORDER BY sev1 DESC, tried, "dueAt", "createdAt", "seq") AS rn, MIN("seq") OVER (PARTITION BY ck) AS cseq FROM due
          ), ordered AS (
-           SELECT ranked.*, ROW_NUMBER() OVER (ORDER BY rn, sev1 DESC, tried, "dueAt", "createdAt", cseq) AS pos, COUNT(*) OVER () AS total FROM ranked
+           SELECT ranked.*, ROW_NUMBER() OVER (ORDER BY rn, sev1 DESC, tried, "dueAt", "createdAt", cseq) AS pos, ${sel} AS sel, COUNT(*) OVER () AS total FROM ranked
          ), head AS (
-           SELECT "id" FROM ordered WHERE total <= $2 OR pos <= $2 - $3
+           SELECT "id" FROM ordered WHERE total <= $2 OR sel <= $2 - $3
          ), low AS (
-           SELECT "id" FROM ordered WHERE total > $2 AND pos > $2 - $3 AND NOT sev1 ORDER BY "dueAt", "createdAt", pos LIMIT $3
+           SELECT "id" FROM ordered WHERE total > $2 AND sel > $2 - $3 AND NOT sev1 ORDER BY "dueAt", "createdAt", sel LIMIT $3
          ), chosen AS (
            SELECT "id" FROM head UNION ALL SELECT "id" FROM low
          ), fill AS (
-           SELECT "id" FROM ordered WHERE "id" NOT IN (SELECT "id" FROM chosen) ORDER BY pos LIMIT GREATEST(0, $2 - (SELECT count(*) FROM chosen))
+           SELECT "id" FROM ordered WHERE "id" NOT IN (SELECT "id" FROM chosen) ORDER BY sel LIMIT GREATEST(0, $2 - (SELECT count(*) FROM chosen))
          ), picked AS (
            SELECT o."id", o.pos FROM ordered o WHERE o."id" IN (SELECT "id" FROM chosen UNION ALL SELECT "id" FROM fill)
          ), locked AS (
@@ -401,7 +445,7 @@ export class SqlTickStore implements TickRepository {
          UPDATE "NotificationJob" j SET "status" = 'SENDING', "claimSeq" = j."claimSeq" + 1, "nextAttemptAt" = ${now} + make_interval(secs => ${CLAIM_LEASE_SEC})
            FROM locked, picked WHERE j."id" = locked."id" AND picked."id" = j."id"
          RETURNING ${jobCols('j')}, picked.pos AS "pos"`,
-        [channels, limit, reserve],
+        rotate ? [channels, limit, reserve, opts.rotateAfter] : [channels, limit, reserve],
       );
       return rows.sort((a, b) => Number(a.pos) - Number(b.pos)).map(toJob);
     });
@@ -423,7 +467,8 @@ export class SqlTickStore implements TickRepository {
     const run = async (q: SqlExecutor): Promise<boolean> => {
       const rows = await q.query(
         `UPDATE "NotificationJob" SET "status" = 'QUEUED',
-                "dueAt" = COALESCE($3::timestamptz, "dueAt"), "nextAttemptAt" = COALESCE($3::timestamptz, "dueAt"),
+                "dueAt" = CASE WHEN $3::timestamptz IS NULL THEN "dueAt" ELSE LEAST($3::timestamptz, ${this.sql.now()} + make_interval(secs => ${RELEASE_HOLD_MAX_SEC})) END,
+                "nextAttemptAt" = CASE WHEN $3::timestamptz IS NULL THEN "dueAt" ELSE LEAST($3::timestamptz, ${this.sql.now()} + make_interval(secs => ${RELEASE_HOLD_MAX_SEC})) END,
                 "lastError" = CASE WHEN $4::boolean THEN $5 ELSE "lastError" END
           WHERE "id" = $1 AND "status" = 'SENDING' AND "claimSeq" = $2 RETURNING "id"`,
         [jobId, claimSeq, iso(opts.notBefore), opts.note !== undefined, opts.note ?? null],
@@ -502,10 +547,13 @@ export class SqlTickStore implements TickRepository {
 
   // ───────────────────────────── ⑤ heartbeat ─────────────────────────────
 
+  /** Start and finish times are bounded by the store clock (R-2): a runner whose clock is ahead cannot make the heartbeat look fresh for longer. */
   async writeHeartbeat(hb: HeartbeatWrite): Promise<void> {
+    const now = this.sql.now();
     await this.sql.query(
       `INSERT INTO "TickHeartbeat"("name", "lastStartedAt", "lastFinishedAt", "lastStatus", "lastDurationMs", "lastStats", "consecutiveFailures")
-       VALUES ($1, $2::timestamptz, $3::timestamptz, $4::"TickStatus", $5, $6::jsonb, CASE WHEN $4 <> 'OK' THEN 1 ELSE 0 END)
+       VALUES ($1, CASE WHEN $2::timestamptz IS NULL THEN NULL ELSE LEAST($2::timestamptz, ${now}) END, CASE WHEN $3::timestamptz IS NULL THEN NULL ELSE LEAST($3::timestamptz, ${now}) END,
+               $4::"TickStatus", $5, $6::jsonb, CASE WHEN $4 <> 'OK' THEN 1 ELSE 0 END)
        ON CONFLICT ("name") DO UPDATE SET "lastStartedAt" = EXCLUDED."lastStartedAt", "lastFinishedAt" = EXCLUDED."lastFinishedAt", "lastStatus" = EXCLUDED."lastStatus",
          "lastDurationMs" = EXCLUDED."lastDurationMs", "lastStats" = EXCLUDED."lastStats",
          "consecutiveFailures" = CASE WHEN EXCLUDED."lastStatus" <> 'OK' THEN "TickHeartbeat"."consecutiveFailures" + 1 ELSE 0 END`,
@@ -525,9 +573,13 @@ export function toWindow(r: SqlRow): MaintenanceWindow {
   return { id: r.id, customerId: r.customerId ?? null, scopeType: r.scopeType, scopeId: r.scopeId ?? null, resourceType: r.resourceType ?? null, startsAt: dReq(r.startsAt), endsAt: dReq(r.endsAt), revokedAt: d(r.revokedAt) };
 }
 
-/** NotificationLog rows (append-only). `at` null in a row → `nowSql` (the store clock). */
+/**
+ * NotificationLog rows (append-only). `at` null in a row → `nowSql` (the store clock).
+ * R-9: `error` is masked HERE (`sanitizeProviderError`, the rule of `NotificationJob.lastError`), whatever the
+ * caller did before — the table can never hold a provider's raw text. Masking twice only ever masks more.
+ */
 export async function insertLogs(tx: SqlExecutor, logs: Array<Record<string, unknown>>, nowSql: string | null): Promise<void> {
-  const rows = logs.map((l) => ({ ...l, id: newId('log') }));
+  const rows = logs.map((l) => ({ ...l, error: l.error == null ? null : sanitizeProviderError(l.error), id: newId('log') }));
   await tx.query(
     `INSERT INTO "NotificationLog"("id", "at", "customerId", "incidentId", "jobId", "channel", "status", "targetSummary", "escalationStep", "providerMessageId", "error",
        "attempt", "warnings", "errorCode", "targetKind", "contactId")
