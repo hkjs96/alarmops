@@ -470,9 +470,9 @@
 | 〃 (Responders 변경) | 1440·390 | **P1-A** | Remove 뒤 다음 사람의 Remove가 같은 자리에 옴. Add 뒤에는 그 자리에 선택 상자가 옴(해 없음) |
 | 저장 라벨은 항상 전체 경로 | 전 폭 | 통과 | "Save for Mirae Pay", "Save for Hanbit Logistics › Fulfilment › Orders API", "Save own steps for Daon Retail › Commerce › Checkout". 확인 상자·가드·토스트·초안 줄도 같은 경로. 가드 안 버튼은 own steps 생성일 때도 "Save for …"(P3) |
 | 읽기 먼저 | 전 폭 | 통과 | 패널을 열면 입력 요소 0개. 링크·새로고침은 항상 읽기 화면. Responders도 "Edit responders for …"를 눌러야 입력이 나옴. 단 Responders 편집 중에도 바닥 글은 "Read only until you press Edit."(P3) |
-| 레이아웃 | 1440·1280·390 | 통과 (P3) | 가로 넘침 0(390 scrollWidth 390: 목록, 패널, 편집, 가드, 확인 상자, Responders 편집). 1280은 트리가 레일로 접히고 패널 492px. 1440 편집기의 1단계 선택 상자 글자가 "On shift in MSP night desk (Haeun no"에서 잘림 |
-| 터치 44px | 390 | 통과 | 패널·편집·가드·확인 상자·초안 줄·Responders 편집의 버튼·선택 상자·입력 모두 44px 이상(방식 라디오는 카드 전체가 누름 영역) |
-| 다크 모드 | 1440·390 | 통과 | 읽기·편집·확인 상자·UNREACHABLE/AT RISK 배너 모두 대비 정상(눈으로 확인) |
+| 레이아웃 | 1440·1280·390 | 통과 (P3) | 가로 넘침 0(390 scrollWidth 390: 목록, 패널, 편집, 가드, 확인 상자, Responders 편집). 1280은 패널을 열면 트리가 레일로 접힘. 1440 편집기의 1단계 선택 상자 글자가 "On shift in MSP night desk (Haeun no"에서 잘림 |
+| 터치 44px | 390 | 통과 | 패널·편집·가드·확인 상자·초안 줄·Responders 편집의 버튼·선택 상자·입력 모두 44px 이상(방식 라디오 자체는 13px이고 카드 영역의 누름 범위는 재지 않음) |
+| 다크 모드 | 1440·390 | 통과 | 읽기·편집·UNREACHABLE/AT RISK 배너 대비 정상(눈으로 확인, 확인 상자는 캡처만 하고 판정에 쓰지 않음) |
 | Incidents 화면과의 일관성 | 1440 | P2-A · P3 | 사람·수단·시각은 일치. 플랜 이름 불일치(P2-A). Incidents는 J/K로 행 이동, Call order는 J/K 없음(Tab만 — 페이지 맨 위에서 Mirae 행까지 23번, Ctrl K를 쓰면 4번). 확인 상자 기본 포커스: Incidents Resolve와 own steps 제거는 안전한 쪽, 단계 저장은 "Save for …" 쪽 |
 | 막다른 곳 | 전 폭 | 통과 (P3) | Rotations·Templates 탭은 "Not built yet" 스텁(메뉴·탭 유지). 없는 주소는 같은 Not found인데 Call order 주소에서도 버튼은 "Back to Incidents". 409·검증 오류·가드 모두 빠져나갈 길 있음 |
 | 콘솔 오류 | 전 폭 | 통과 | 앱 오류 0건(샌드박스에서 Google Fonts 요청만 실패) |
