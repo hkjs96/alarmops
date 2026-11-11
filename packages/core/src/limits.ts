@@ -41,6 +41,11 @@ export const CLAIM_LEASE_SEC = 60;
  * down when the two together would not, and gives up waiting for the outbox at budget + send timeout.
  */
 export const TICK_RESPONSE_LIMIT_MS = 60_000;
+/**
+ * N-33: a store call outside the phases (claimTick, loadPolicy, outboxBacklog, writeHeartbeat) is given up after
+ * this long (less near the end of the tick). The SQL adapter should set a `statement_timeout` below it.
+ */
+export const STORE_CALL_TIMEOUT_MS = 5_000;
 /** Part of the tick budget the earlier phases may not use, so the outbox is always drained (capped at budget / 4). */
 export const NOTIFY_RESERVE_MS = 10_000;
 

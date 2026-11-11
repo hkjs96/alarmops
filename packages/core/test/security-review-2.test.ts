@@ -92,35 +92,38 @@ describe('R-11: a provider that hangs does not delay the healthy channels', () =
     expect(t.voiceAt).toHaveLength(20);
     expect(Math.max(...t.voiceAt)).toBeLessThan(2); // inside the tick that queued them
     expect(r.notify).toMatchObject({ sent: 20, unanswered: ['SMS'] });
-    // review 3 (R-17): no breaker. A lane that got no answer keeps ONE call in flight: 45 s budget / 10 s timeout = 5
-    // calls in the tick, one after the other; the rest went back untouched.
-    const PROBES = 5;
-    expect(t.sms.calls).toHaveLength(PROBES);
+    // review 3 (R-17): no breaker. review 4 (R-22): a lane that got no answer probes up to 5 DIFFERENT numbers at
+    // once; what the budget did not reach went back untouched. The exact count per tick is asserted on an exact
+    // clock in security-review-4.lanes.test.ts ("what a dead provider costs"); this trace's clock is coarse.
+    const PROBES = t.sms.calls.length;
+    expect(PROBES).toBeGreaterThanOrEqual(5);
+    expect(PROBES).toBeLessThanOrEqual(20);
+    expect(new Set(t.sms.calls.map((x) => x.contactId)).size).toBe(PROBES); // nobody twice
     expect(r.notify.timeouts).toBe(PROBES);
     expect(r.notify.released).toBe(20 - PROBES);
     const sms = t.store.jobList().filter((j) => j.channel === 'SMS');
-    expect(sms.filter((j) => j.attempts === 0).map((j) => [j.status, j.dueAt, j.nextAttemptAt])).toEqual(Array.from({ length: 15 }, () => ['QUEUED', at(1), at(1)])); // original due time kept
+    expect(sms.filter((j) => j.attempts === 0).map((j) => [j.status, j.dueAt, j.nextAttemptAt])).toEqual(Array.from({ length: 20 - PROBES }, () => ['QUEUED', at(1), at(1)])); // original due time kept
     expect(sms.filter((j) => j.attempts === 1)).toHaveLength(PROBES);
     expect(r.durationMs).toBeLessThanOrEqual(45_000 + 10_000); // budget + one timeout
   });
 
-  it('while SMS stays down: at most 5 calls per tick, never the same job twice in a row, voice keeps flowing; SMS recovers → the lane drains at once', async () => {
+  it('while SMS stays down: at most 25 calls per tick (5 at once), never the same job twice in a row, voice keeps flowing; SMS recovers → the lane drains at once', async () => {
     const t = trace();
     for (let m = 1; m <= 3; m++) {
       const before = t.sms.calls.length;
       const r = await tick(t, m, { SMS: t.sms, VOICE: t.voice });
-      expect(t.sms.calls.length - before).toBeLessThanOrEqual(5);
+      expect(t.sms.calls.length - before).toBeLessThanOrEqual(25);
       expect(r.notify.unanswered).toEqual(['SMS']);
     }
-    // fresh pages go before retries: 15 different people were tried in the three ticks, nobody twice
-    expect(new Set(t.sms.calls.map((x) => x.contactId)).size).toBe(t.sms.calls.length);
+    // fresh pages go before retries: nobody is tried a second time before all 20 people were tried once
+    expect(new Set(t.sms.calls.slice(0, 20).map((x) => x.contactId)).size).toBe(Math.min(20, t.sms.calls.length));
     expect(t.store.jobList().filter((j) => j.channel === 'SMS' && j.status === 'FAILED')).toHaveLength(0);
     // the provider is back: the first call is answered and the lane goes to full width in that same tick
     const sms = new FakeSender('sms');
     const r4 = await tick(t, 4, { SMS: sms, VOICE: t.voice });
     expect(r4.notify.unanswered).toEqual([]);
-    expect(sms.sent.length).toBeGreaterThanOrEqual(19); // everything that is due (one retry is due 10 s after the tick started)
-    await tick(t, 5, { SMS: sms, VOICE: t.voice });
+    expect(sms.sent.length).toBeGreaterThanOrEqual(10); // everything that is due now; pages tried twice while it was down are in their 60 s backoff
+    for (let m = 5; m <= 7; m++) await tick(t, m, { SMS: sms, VOICE: t.voice });
     expect(sms.sent).toHaveLength(20);
     expect(new Set(sms.sent.map((x) => x.contactId)).size).toBe(20);
   });

@@ -12,11 +12,11 @@
  * - Bounded: each phase takes at most `batch` rows and stops at the time budget; the rest waits for the next tick.
  * - One incident/group/job failing never stops the others (I-6 "한 인시던트의 오류가 틱 전체를 막지 않는다").
  */
-import { buildSnapshot, clampMessage, incidentMute, planEscalation, scheduleNext, snapshotSummary, unownedInitialIntent, type NotificationIntent } from './escalation.js';
+import { MSP_DEFAULT_TARGET, buildSnapshot, clampMessage, incidentMute, planEscalation, scheduleNext, snapshotSummary, unownedInitialIntent, type NotificationIntent } from './escalation.js';
 import { GROUP_GRACE_SEC, representative, type GroupRow } from './grouping.js';
 import { addMember, mergeOrOpen, newIncident, incidentId, resolve, type IncidentRow } from './incident.js';
 import { protectUnlessFalse } from './config.js';
-import { LANE_CONCURRENCY, NOTIFY_RESERVE_MS, SEND_TIMEOUT_MS, TICK_RESPONSE_LIMIT_MS } from './limits.js';
+import { LANE_CONCURRENCY, NOTIFY_RESERVE_MS, SEND_TIMEOUT_MS, STORE_CALL_TIMEOUT_MS, TICK_RESPONSE_LIMIT_MS } from './limits.js';
 import type { MaintenanceWindow } from './maintenance.js';
 import {
   dispatchJob, LANES, MAX_ATTEMPTS, NOTIFY_BATCH, sanitizeProviderError,
@@ -283,15 +283,39 @@ const DEFAULT_BATCH = 200;
 const DEFAULT_BUDGET_MS = 45_000;
 /** Time allowed for writing results after the last provider call was abandoned. */
 const RESULT_WRITE_GRACE_MS = 1_000;
+/** N-33: the tick aims to be finished this long before TICK_RESPONSE_LIMIT_MS. */
+const HARD_STOP_MARGIN_MS = 500;
+/** N-33: kept after the outbox for the backlog read and the notify heartbeat. */
+const TAIL_RESERVE_MS = 1_500;
+/** N-33: of that, kept for the heartbeat write while the backlog is read. */
+const HEARTBEAT_KEEP_MS = 1_000;
+/** N-33: an outbox that starts with less than this left does not send (a provider call needs time to answer). */
+const LATE_OUTBOX_MIN_MS = 2_000;
+/** N-33: a guard is never shorter than this (two guards after the hard stop still end before the limit). */
+const MIN_GUARD_MS = 200;
 
 export async function runTick(input: TickInput, deps: TickDeps): Promise<TickResult> {
   const clock = deps.now ?? (() => new Date());
   const started = clock();
   const scheduledAt = input.scheduledAt ?? started;
   const key = minuteKey(scheduledAt);
-  if (!(await deps.repo.claimTick(key, started))) return { skipped: 'duplicate', scheduledAt: key };
-
   const jobs = new Set<TickJob>(input.jobs?.length ? input.jobs : TICK_JOBS);
+  // N-33: every store call of the tick is under a time guard, these four included. Whatever the store does, the
+  // call answers within TICK_RESPONSE_LIMIT_MS.
+  const hardStop = started.getTime() + TICK_RESPONSE_LIMIT_MS - HARD_STOP_MARGIN_MS;
+  /** Guard for one store call outside the phases: at most STORE_CALL_TIMEOUT_MS, less when the tick is nearly over. */
+  const guardMs = (keepMs = 0): number => Math.max(MIN_GUARD_MS, Math.min(STORE_CALL_TIMEOUT_MS, hardStop - clock().getTime() - keepMs));
+  const firstJob = TICK_JOBS.find((j) => jobs.has(j)) ?? 'group';
+  const claimed = await guarded(deps.repo.claimTick(key, started), guardMs());
+  if (claimed.timedOut) {
+    // Nobody knows whether the minute was claimed. Nothing runs and no heartbeat is written: the heartbeat goes
+    // stale (D-10) and the next minute's tick is a separate call.
+    const message = `claimTick did not answer within ${STORE_CALL_TIMEOUT_MS} ms; this tick did nothing`;
+    deps.log?.('error', 'tick_item_failed', { phase: firstJob, id: 'claimTick', message });
+    return { ...emptySummary(key), errors: [{ phase: firstJob, id: 'claimTick', message }], truncated: true, durationMs: Math.max(0, clock().getTime() - started.getTime()) };
+  }
+  if (!claimed.value) return { skipped: 'duplicate', scheduledAt: key };
+
   const batch = deps.batch ?? DEFAULT_BATCH;
   // N-21: the call answers within budget + one send timeout (+ a second for the result writes), and that sum never
   // exceeds TICK_RESPONSE_LIMIT_MS — a larger budget or timeout is cut down here, not trusted.
@@ -299,15 +323,11 @@ export async function runTick(input: TickInput, deps: TickDeps): Promise<TickRes
   const budget = Math.max(0, Math.min(deps.budgetMs ?? DEFAULT_BUDGET_MS, TICK_RESPONSE_LIMIT_MS - sendTimeoutMs - RESULT_WRITE_GRACE_MS));
   const deadline = started.getTime() + budget;
   const softDeadline = deadline - Math.min(NOTIFY_RESERVE_MS, Math.floor(budget / 4));
-  const sum: TickSummary = {
-    scheduledAt: key,
-    group: { closed: 0, delivered: 0, opened: 0, merged: 0, empty: 0, paused: 0, conflicts: 0 },
-    reconcile: { checked: 0, resolved: 0 },
-    escalation: { checked: 0, escalated: 0, muted: 0, renotified: 0, done: 0, conflicts: 0 },
-    notify: { sent: 0, failed: 0, retried: 0, skipped: 0, deferred: 0, released: 0, timeouts: 0, unanswered: [], dueUnattempted: 0, dueSev1Unattempted: 0 },
-    errors: [], truncated: false, durationMs: 0,
-  };
-  const ctx: Ctx = { ...deps, sendTimeoutMs, clock, batch, deadline, softDeadline, sum, policy: await deps.repo.loadPolicy() };
+  const sum = emptySummary(key);
+  // N-33: the outbox does not need the policy. When it cannot be read in time the three phases that do are skipped
+  // (heartbeat ERROR) and the pages that are already queued still go out.
+  const policy = await guarded(deps.repo.loadPolicy(), guardMs());
+  const ctx: Ctx = { ...deps, sendTimeoutMs, clock, batch, deadline, softDeadline, sum, policy: policy.timedOut ? null : policy.value };
 
   const phases: Array<[TickJob, () => Promise<void>, () => Record<string, unknown>]> = [
     ['group', () => groupPhase(ctx), () => sum.group],
@@ -322,13 +342,24 @@ export async function runTick(input: TickInput, deps: TickDeps): Promise<TickRes
     const errorsBefore = sum.errors.length;
     let degraded = false;
     try {
-      if (name === 'notify') {
+      if (name !== 'notify' && ctx.policy === null) {
+        sum.truncated = true;
+        sum.errors.push({ phase: name, id: 'policy', message: `loadPolicy did not answer within ${STORE_CALL_TIMEOUT_MS} ms; phase skipped, the outbox goes ahead` });
+      } else if (name === 'notify') {
         // N-12: the outbox always gets its reserved share, counted from when it starts — even when an earlier
-        // phase ran past the whole budget.
-        ctx.deadline = Math.max(deadline, t0.getTime() + reserve);
+        // phase ran past the whole budget. N-33: but never so late that the call could not answer in time.
+        const latestStart = hardStop - sendTimeoutMs - RESULT_WRITE_GRACE_MS - TAIL_RESERVE_MS;
+        ctx.deadline = Math.min(Math.max(deadline, t0.getTime() + reserve), latestStart);
+        if (t0.getTime() >= latestStart) {
+          // The outbox starts too late for a call with the full timeout (an earlier phase held the process, or the
+          // store was slow on every call). It still pages, with what is left: calls may start during the first half
+          // of the remaining time and are abandoned after the second half. Below LATE_OUTBOX_MIN_MS it does not run.
+          const room = hardStop - t0.getTime() - RESULT_WRITE_GRACE_MS - TAIL_RESERVE_MS;
+          if (room >= LATE_OUTBOX_MIN_MS) { ctx.sendTimeoutMs = Math.floor(room / 2); ctx.deadline = t0.getTime() + Math.floor(room / 2); }
+        }
         // No new call starts after the deadline and each call is abandoned at the send timeout, so the phase is
         // over by then. If it is not (a store call that hangs), stop waiting: the leases bring the jobs back.
-        if ((await withinBudget(run(), ctx.deadline - t0.getTime() + sendTimeoutMs + RESULT_WRITE_GRACE_MS)) === 'TIMED_OUT') {
+        if ((await withinBudget(run(), Math.max(0, ctx.deadline - t0.getTime()) + ctx.sendTimeoutMs + RESULT_WRITE_GRACE_MS)) === 'TIMED_OUT') {
           sum.truncated = true;
           sum.errors.push({ phase: name, id: '*', message: 'outbox did not finish within budget + send timeout; left running, claimed jobs come back when their lease ends' });
         }
@@ -349,11 +380,17 @@ export async function runTick(input: TickInput, deps: TickDeps): Promise<TickRes
     if (name === 'notify') {
       // N-12: "ran without an error" is not "paged". Count what is due and was never tried.
       try {
-        const backlog = await deps.repo.outboxBacklog();
-        sum.notify.dueUnattempted = backlog.dueUnattempted;
-        sum.notify.dueSev1Unattempted = backlog.dueSev1Unattempted;
-        degraded = backlog.dueSev1Unattempted > 0;
-        if (backlog.dueUnattempted > 0) sum.truncated = true;
+        const read = await guarded(deps.repo.outboxBacklog(), guardMs(HEARTBEAT_KEEP_MS));
+        if (read.timedOut) {
+          // Unknown is not "nothing is waiting": the heartbeat is ERROR.
+          sum.errors.push({ phase: name, id: 'backlog', message: 'outboxBacklog did not answer in time; what is still due is unknown' });
+        } else {
+          const backlog = read.value;
+          sum.notify.dueUnattempted = backlog.dueUnattempted;
+          sum.notify.dueSev1Unattempted = backlog.dueSev1Unattempted;
+          degraded = backlog.dueSev1Unattempted > 0;
+          if (backlog.dueUnattempted > 0) sum.truncated = true;
+        }
       } catch (err) {
         sum.errors.push({ phase: name, id: 'backlog', message: errMsg(err) });
       }
@@ -361,10 +398,12 @@ export async function runTick(input: TickInput, deps: TickDeps): Promise<TickRes
     const t1 = clock();
     const failed = sum.errors.length > errorsBefore;
     try {
-      await deps.repo.writeHeartbeat({
+      const wrote = await guarded(deps.repo.writeHeartbeat({
         name, lastStartedAt: t0, lastFinishedAt: t1, lastStatus: failed ? 'ERROR' : degraded ? 'DEGRADED' : 'OK',
         lastDurationMs: Math.max(0, t1.getTime() - t0.getTime()), lastStats: { ...stats(), errors: sum.errors.length - errorsBefore },
-      });
+      }), guardMs());
+      // Not written → the row goes stale and the health check says so (D-10).
+      if (wrote.timedOut) sum.errors.push({ phase: name, id: 'heartbeat', message: 'writeHeartbeat did not answer in time' });
     } catch (err) {
       sum.errors.push({ phase: name, id: 'heartbeat', message: errMsg(err) });
     }
@@ -372,6 +411,24 @@ export async function runTick(input: TickInput, deps: TickDeps): Promise<TickRes
   for (const e of sum.errors) deps.log?.('error', 'tick_item_failed', { ...e });
   sum.durationMs = Math.max(0, clock().getTime() - started.getTime());
   return sum;
+}
+
+const emptySummary = (key: string): TickSummary => ({
+  scheduledAt: key,
+  group: { closed: 0, delivered: 0, opened: 0, merged: 0, empty: 0, paused: 0, conflicts: 0 },
+  reconcile: { checked: 0, resolved: 0 },
+  escalation: { checked: 0, escalated: 0, muted: 0, renotified: 0, done: 0, conflicts: 0 },
+  notify: { sent: 0, failed: 0, retried: 0, skipped: 0, deferred: 0, released: 0, timeouts: 0, unanswered: [], dueUnattempted: 0, dueSev1Unattempted: 0 },
+  errors: [], truncated: false, durationMs: 0,
+});
+
+/** `withinBudget` for a call whose value is needed. A rejection stays a rejection. */
+function guarded<T>(p: Promise<T>, ms: number): Promise<{ timedOut: false; value: T } | { timedOut: true }> {
+  return new Promise((done, fail) => {
+    const timer = setTimeout(() => done({ timedOut: true }), ms);
+    (timer as { unref?: () => void }).unref?.();
+    p.then((value) => { clearTimeout(timer); done({ timedOut: false, value }); }, (err) => { clearTimeout(timer); fail(err); });
+  });
 }
 
 /** Real-time guard (not the injectable clock): resolves 'TIMED_OUT' when `p` is still pending after `ms`. */
@@ -390,8 +447,15 @@ interface Ctx extends TickDeps {
   /** Deadline of every phase before the outbox. */
   softDeadline: number;
   sum: TickSummary;
-  policy: SuppressionPolicy;
+  /** Per provider call in this tick (the caller's value, cut to the bound; shorter when the outbox starts late). */
+  sendTimeoutMs: number;
+  /** null: the policy could not be read in time (N-33); only the outbox runs. */
+  policy: SuppressionPolicy | null;
 }
+const policyOf = (c: Ctx): SuppressionPolicy => {
+  if (!c.policy) throw new Error('suppression policy was not loaded');
+  return c.policy;
+};
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 const overBudget = (c: Ctx, phase: TickJob = 'group'): boolean => {
   if (c.clock().getTime() < (phase === 'notify' ? c.deadline : c.softDeadline)) return false;
@@ -429,7 +493,7 @@ async function groupPhase(c: Ctx): Promise<void> {
 async function deliverGroup(c: Ctx, g: GroupRow, now: Date): Promise<void> {
   const members = await c.repo.groupMembers(g.id);
   // PauseWait (S-10): DEFER members get the severity's auto-pause before we decide whether they still fire.
-  const pauseSec = c.policy.autoPauseSec[g.severity] ?? 0;
+  const pauseSec = policyOf(c).autoPauseSec[g.severity] ?? 0;
   const closedAt = g.closedAt ?? g.closeAt;
   if (pauseSec > 0 && members.some((m) => m.decision === 'DEFER') && now.getTime() < closedAt.getTime() + pauseSec * 1000) {
     c.sum.group.paused++;
@@ -448,7 +512,7 @@ async function deliverGroup(c: Ctx, g: GroupRow, now: Date): Promise<void> {
 
   for (let attempt = 0; attempt < MAX_VERSION_RETRIES; attempt++) {
     const target = await c.repo.findMergeTarget(g.groupKey);
-    const decision = mergeOrOpen(target, now, c.policy);
+    const decision = mergeOrOpen(target, now, policyOf(c));
     const memberRows = firing.map((m) => ({ alertId: m.alertId, fingerprint: m.fingerprint, eventCount: Math.max(1, m.eventCount) }));
     let commit: GroupDeliveryCommit;
     if (decision.action === 'MERGE' && target) {
@@ -532,7 +596,7 @@ async function openIncident(c: Ctx, g: GroupRow, firing: GroupMember[], now: Dat
     events.push({ incidentId: inc.id, customerId: inc.customerId, at: inc.triggeredAt, kind: 'NOTE', actorType: 'SYSTEM', actorId: null,
       message: inc.customerId ? 'Nobody is paged: no call order is configured for this customer.' : 'Nobody is paged: the AWS account is not assigned to a customer.', data: { note: 'NO_OWNER' } });
   }
-  inc = { ...inc, nextEscalationAt: scheduleNext(inc, { now, renotifyAfterSec: c.policy.renotifyAfterSec }) };
+  inc = { ...inc, nextEscalationAt: scheduleNext(inc, { now, renotifyAfterSec: policyOf(c).renotifyAfterSec }) };
   return { row: inc, events, jobs };
 }
 
@@ -597,7 +661,7 @@ async function escalateOne(c: Ctx, inc: IncidentRow): Promise<void> {
   const lastStep = inc.assignmentSnapshot?.steps?.[inc.escalationStep - 1];
   const lastStepAllFailed = inc.status === 'TRIGGERED' && lastStep?.advanceOnAllFail
     ? await c.repo.stepAllFailed(inc.id, lastStep.index, inc.escalationRepeat) : false;
-  const plan = planEscalation(inc, { now, renotifyAfterSec: c.policy.renotifyAfterSec, mutedUntil: mute?.endsAt ?? null, lastStepAllFailed });
+  const plan = planEscalation(inc, { now, renotifyAfterSec: policyOf(c).renotifyAfterSec, mutedUntil: mute?.endsAt ?? null, lastStepAllFailed });
 
   if (plan.kind === 'NONE' || plan.kind === 'MUTED') {
     if (plan.kind === 'MUTED') c.sum.escalation.muted++;
@@ -626,16 +690,18 @@ async function escalateOne(c: Ctx, inc: IncidentRow): Promise<void> {
  *
  * There is NO lane-wide circuit breaker (security review 3, R-17): a lane is never closed and nothing about a
  * provider is remembered between ticks. What protects the queue instead:
- * - fair selection (`selectForClaim`): round-robin over customers, SEV-1 first, never-attempted before retries —
- *   one tenant's hanging recipients sit next to, not in front of, another tenant's page;
- * - per-job backoff (`beginSend` → RETRY_DELAYS_SEC): a job that timed out is not due again for 30 s … 10 min, so
- *   the same failing job is never sent twice in a row;
- * - PROBE MODE, inside one tick only: once `laneConcurrency` calls have timed out and the provider has not
- *   answered a single call in this tick, the lane keeps ONE call in flight (the next job in fair order) instead of
- *   five. The first answer of any kind puts it back to full width. A dead provider therefore costs
- *   `laneConcurrency` + about one attempt per SEND_TIMEOUT_MS per tick, and a provider that comes back in the
- *   middle of a tick is used in that same tick.
- * Every tick starts at full width again, so the wait a lane can add is never more than one tick.
+ * - fair selection (`selectForClaim`): round-robin over customers, SEV-1 first, never-attempted before retries;
+ * - per-job backoff (`beginSend` → RETRY_DELAYS_SEC): a job that timed out is not due again for 30 s … 10 min;
+ * - the SEND ORDER inside one tick (`drainLane`, security review 4, R-22): a customer or a recipient whose call
+ *   timed out in this tick goes behind everyone else for the rest of the tick, and while the provider has not
+ *   answered anything yet the lane probes up to `laneConcurrency` DIFFERENT recipients at once (different customers
+ *   first) instead of one call at a time.
+ * Nothing is carried over: the next tick starts without penalties.
+ *
+ * What this gives, at the defaults (timeout 10 s, budget 45 s, width 5), measured with the real `runTick` in
+ * test/security-review-4.lanes.test.ts: a healthy customer's page is attempted in the tick in which it is due as
+ * long as at most 24 OTHER customers' calls hang in front of it on that lane (5 probes × 5 rounds − 1). With more,
+ * it can slip by whole ticks — that limit is NOT removed, only moved from 4 to 24.
  */
 async function notifyPhase(c: Ctx): Promise<void> {
   const limit = c.notifyBatch ?? NOTIFY_BATCH;
@@ -653,25 +719,79 @@ async function notifyPhase(c: Ctx): Promise<void> {
 
 type SendSignal = 'ANSWERED' | 'TIMEOUT' | 'NONE';
 
+const customerKeyOf = (j: NotificationJob): string => j.customerId ?? '\u0000msp';
+/** Who a call rings: the person, the MSP default channel (one for all customers), or the customer's own channel(s). */
+const recipientKeyOf = (j: NotificationJob): string =>
+  j.contactId ? `c:${j.contactId}` : j.targetRef === MSP_DEFAULT_TARGET ? 't:msp' : `t:${customerKeyOf(j)}:${j.targetRef}`;
+
+/**
+ * One lane, one tick. `pending` is the claim in fair order; `pick` decides which job is sent next:
+ *
+ * PENALTIES (this tick only): a TIMEOUT marks the job's customer and its recipient. A job is
+ *   class 0 — neither marked, class 1 — customer marked, another recipient, class 2 — recipient marked.
+ *
+ * - ANSWERED (the provider answered at least one call in this tick, success or refusal): `width` calls in flight,
+ *   lowest class first; inside a class a recipient who is not being called right now first, then fair order. So a customer whose calls hang waits until every other customer
+ *   was served, and a number that hangs waits until the other numbers of the same customer were tried.
+ * - UNANSWERED (no answer yet): up to `width` calls in flight, each to a DIFFERENT recipient that has not timed out
+ *   in this tick; customers without a timeout and without a call in flight first, then a second recipient of a
+ *   customer that is in flight, then other recipients of a marked customer. When only marked recipients are left:
+ *   ONE call at a time, in fair order. A dead provider therefore costs at most one call per distinct recipient
+ *   plus about one per SEND_TIMEOUT_MS per tick, never more than `width` at once.
+ */
 async function drainLane(c: Ctx, kind: SenderKind, limit: number, windows: Map<string, Promise<MaintenanceWindow[]>>): Promise<void> {
   const jobs = await c.repo.claimDueJobs(limit, { kinds: [kind] });
   if (jobs.length >= limit) c.sum.truncated = true;
   const width = Math.max(1, c.laneConcurrency ?? LANE_CONCURRENCY);
-  let next = 0;
+  const pending = [...jobs];
   let inFlight = 0;
   let answered = 0;
   let timeouts = 0;
-  const allowed = (): number => (answered === 0 ? 1 : width);
+  const badCustomers = new Set<string>();
+  const badRecipients = new Set<string>();
+  const flyingCustomers = new Map<string, number>();
+  const flyingRecipients = new Map<string, number>();
+  const bump = (m: Map<string, number>, k: string, d: number): void => { const n = (m.get(k) ?? 0) + d; if (n > 0) m.set(k, n); else m.delete(k); };
+  const penalty = (j: NotificationJob): number => (badRecipients.has(recipientKeyOf(j)) ? 2 : badCustomers.has(customerKeyOf(j)) ? 1 : 0);
+  /** Index in `pending` of the job to send now, or −1: nothing may start until a call in flight comes back. */
+  const pick = (): number => {
+    if (inFlight >= width) return -1;
+    let best = -1;
+    let bestRank = Infinity;
+    if (answered > 0) {
+      for (let i = 0; i < pending.length && bestRank > 0; i++) {
+        // inside a class, a recipient who is not being called right now goes first
+        const rank = penalty(pending[i]!) * 2 + (flyingRecipients.has(recipientKeyOf(pending[i]!)) ? 1 : 0);
+        if (rank < bestRank) { best = i; bestRank = rank; }
+      }
+      return best;
+    }
+    for (let i = 0; i < pending.length && bestRank > 0; i++) {
+      const j = pending[i]!;
+      const r = recipientKeyOf(j);
+      if (badRecipients.has(r) || flyingRecipients.has(r)) continue;
+      const ck = customerKeyOf(j);
+      const rank = badCustomers.has(ck) ? 2 : flyingCustomers.has(ck) ? 1 : 0;
+      if (rank < bestRank) { best = i; bestRank = rank; }
+    }
+    if (best >= 0) return best;
+    // only recipients that already timed out (or are being called right now) are left: one call at a time
+    return inFlight === 0 ? 0 : -1;
+  };
   await new Promise<void>((done) => {
     const pump = (): void => {
-      while (next < jobs.length && inFlight < allowed() && !overBudget(c, 'notify')) {
-        const job = jobs[next++]!;
-        inFlight++;
+      while (pending.length > 0) {
+        const i = pick();
+        if (i < 0 || overBudget(c, 'notify')) break;
+        const job = pending.splice(i, 1)[0]!;
+        const ck = customerKeyOf(job);
+        const rk = recipientKeyOf(job);
+        inFlight++; bump(flyingCustomers, ck, 1); bump(flyingRecipients, rk, 1);
         // sendOne never rejects: it records its own errors.
         void sendOne(c, job, windows).then((signal) => {
-          inFlight--;
+          inFlight--; bump(flyingCustomers, ck, -1); bump(flyingRecipients, rk, -1);
           if (signal === 'ANSWERED') answered++;
-          else if (signal === 'TIMEOUT') timeouts++;
+          else if (signal === 'TIMEOUT') { timeouts++; badCustomers.add(ck); badRecipients.add(rk); }
           pump();
         });
       }
@@ -680,12 +800,12 @@ async function drainLane(c: Ctx, kind: SenderKind, limit: number, windows: Map<s
     pump();
   });
   // Not reached (budget): hand the claims back untouched — no attempt counted, due time kept.
-  for (const j of jobs.slice(next)) {
+  for (const j of pending) {
     try { if (await c.repo.releaseJob(j.id, j.claimSeq)) c.sum.notify.released++; } catch (err) { c.sum.errors.push({ phase: 'notify', id: j.id, message: errMsg(err) }); }
   }
   if (timeouts > 0 && answered === 0) {
     c.sum.notify.unanswered.push(kind);
-    c.log?.('warn', 'notify_lane_unanswered', { kind, timeouts, released: jobs.length - next });
+    c.log?.('warn', 'notify_lane_unanswered', { kind, timeouts, released: pending.length });
   }
 }
 
