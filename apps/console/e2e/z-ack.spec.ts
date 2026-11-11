@@ -1,6 +1,11 @@
 // QA "Console 범위 틀 점검 — 2026-11-10" fixes: P1-1..3, P2-1..8, cheap P3s, security R-4, Filter to… (Ctrl/⌘K).
 // Runs after scope.spec.ts (file order). The tests that acknowledge put the shared mock store back with Undo.
 import { test, expect, type Page } from "@playwright/test";
+import { reportOnFailure, watchPage } from "./helpers/diag";
+
+// a failure prints what the page saw (taps, clicks, layout shifts, fonts) to the run's log
+test.beforeEach(({ page }) => watchPage(page));
+test.afterEach(({ page }, info) => reportOnFailure(page, info));
 
 const PAY_ID = "inc-7f3a0c91b2d4-20261108181204";
 const PAY = `/c/mirae/core/payments-api/incident/${PAY_ID}`;
