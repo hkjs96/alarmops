@@ -83,10 +83,10 @@ describe('R-15: PORTAL_SHOWS_STAFF_NAMES is on only for the boolean true', () =>
   });
 
   it('loadApiConfig parses env strings', () => {
-    expect(loadApiConfig({ PORTAL_SHOWS_STAFF_NAMES: 'false' })).toEqual({ config: { portalShowsStaffNames: false }, warnings: [] });
-    expect(loadApiConfig({ PORTAL_SHOWS_STAFF_NAMES: 'true' }).config).toEqual({ portalShowsStaffNames: true });
+    expect(loadApiConfig({ PORTAL_SHOWS_STAFF_NAMES: 'false' })).toEqual({ config: { portalShowsStaffNames: false, storeProviderText: false }, warnings: [] });
+    expect(loadApiConfig({ PORTAL_SHOWS_STAFF_NAMES: 'true' }).config).toEqual({ portalShowsStaffNames: true, storeProviderText: false });
     expect(loadApiConfig({ PORTAL_SHOWS_STAFF_NAMES: 'yes please' })).toMatchObject({ config: { portalShowsStaffNames: false }, warnings: [expect.stringContaining('PORTAL_SHOWS_STAFF_NAMES')] });
-    expect(loadApiConfig()).toEqual({ config: { portalShowsStaffNames: false }, warnings: [] });
+    expect(loadApiConfig()).toEqual({ config: { portalShowsStaffNames: false, storeProviderText: false }, warnings: [] });
   });
 });
 

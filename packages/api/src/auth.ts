@@ -2,6 +2,7 @@
  * Authorization context and tenant scope (API-CONTRACT §2 "범위", §8.0 tenant rules; DATA-MODEL §0).
  * The adapter resolves the session (Google SSO etc.) into an AuthContext; this package never talks to an auth provider.
  */
+import { types } from 'node:util';
 import { isRecord, roleRequired, unauthenticated, type ApiRequest } from './http.js';
 
 export type Role = 'VIEWER' | 'OPERATOR' | 'ADMIN';
@@ -61,7 +62,9 @@ export function inScope(s: ScopeFilter, e: { customerId: string | null; projectI
   if (!seesCustomer(s, e.customerId)) return false;
   const subs = s.subScopes.filter((x) => x.customerId === e.customerId);
   if (subs.length === 0) return true;
-  return subs.some((x) => (x.serviceId ? x.serviceId === e.serviceId : x.projectId ? x.projectId === e.projectId : true));
+  // An entry with BOTH ids means that service IN that project (review 4): a pair that does not belong together
+  // matches nothing — it used to apply the service alone, so "narrowed to prj_data" could show a service of prj_core.
+  return subs.some((x) => (x.serviceId ? x.serviceId === e.serviceId && (!x.projectId || x.projectId === e.projectId) : x.projectId ? x.projectId === e.projectId : true));
 }
 
 /** Can the scope see this tree node (a node is visible when it is, contains, or is contained in a granted subtree)? */
@@ -70,7 +73,10 @@ export function nodeVisible(s: ScopeFilter, n: { customerId: string; projectId?:
   const subs = s.subScopes.filter((x) => x.customerId === n.customerId);
   if (subs.length === 0) return true;
   return subs.some((x) => {
-    const xProject = x.projectId ?? (x.serviceId ? serviceProject?.(x.serviceId) : undefined);
+    const real = x.serviceId ? serviceProject?.(x.serviceId) : undefined;
+    // both ids given but the service is in another project: the entry grants nothing (see inScope)
+    if (x.projectId && x.serviceId && real !== undefined && real !== x.projectId) return false;
+    const xProject = x.projectId ?? real;
     if (!x.projectId && !x.serviceId) return true;
     if (!n.projectId) return true; // the customer node itself, as the parent of a granted subtree
     if (n.serviceId) return x.serviceId ? x.serviceId === n.serviceId : xProject === n.projectId;
@@ -87,17 +93,59 @@ const own = (o: object, k: string): unknown => {
   const d = Object.getOwnPropertyDescriptor(o, k);
   return d && 'value' in d ? d.value : undefined;
 };
-const SUB_KEYS: readonly string[] = ['customerId', 'projectId', 'serviceId'];
-function isExactSubScope(x: object): boolean {
-  for (const k of Reflect.ownKeys(x)) {
-    if (typeof k !== 'string' || !SUB_KEYS.includes(k)) return false;
-    const d = Object.getOwnPropertyDescriptor(x, k);
-    if (!d || !('value' in d) || !isStr(d.value)) return false;
+const SUB_KEYS = ['customerId', 'projectId', 'serviceId'] as const;
+type SubScope = { customerId: string; projectId?: string; serviceId?: string };
+
+/**
+ * R-23 (security review 4): READ ONCE, THEN CHECK THE COPY. Whatever the adapter handed over is copied element by
+ * element into a plain array first, and only that copy is validated and used. The value that was checked is the
+ * value that is used — an index getter that answers differently the second time, a custom `Symbol.iterator`, an
+ * Array subclass or a Proxy cannot show one list to the check and another to the copy.
+ *
+ * Accepted: a real Array (not a Proxy, prototype exactly Array.prototype) whose own keys are its indexes and
+ * `length`, every index an own DATA property. Anything else — a hole, an accessor, an extra own key (which is where
+ * an own `Symbol.iterator` would be), a subclass, an array-like, an array from another realm — is null (→ 401).
+ * The iterator protocol and Array.prototype methods of the input are never used.
+ */
+export function copyPlainArray(raw: unknown): unknown[] | null {
+  if (!Array.isArray(raw) || types.isProxy(raw)) return null;
+  if (Object.getPrototypeOf(raw) !== Array.prototype) return null;
+  const len = Object.getOwnPropertyDescriptor(raw, 'length');
+  if (!len || !('value' in len) || typeof len.value !== 'number') return null;
+  const n = len.value;
+  if (Reflect.ownKeys(raw).length !== n + 1) return null; // exactly 0 … n−1 and `length`: no hole, no extra key
+  const out: unknown[] = [];
+  for (let i = 0; i < n; i++) {
+    const d = Object.getOwnPropertyDescriptor(raw, String(i));
+    if (!d || !('value' in d)) return null;
+    out.push(d.value);
   }
-  if (!Object.hasOwn(x, 'customerId')) return false;
-  // not own, but visible through the prototype chain (class getter, Object.create({ projectId }), polluted prototype)
-  for (const k of SUB_KEYS) if (!Object.hasOwn(x, k) && k in x) return false;
-  return true;
+  return out;
+}
+
+/**
+ * One subScopes entry, copied the same way (R-18, R-23): each own key is read ONCE through its descriptor into a
+ * new object, and that object is what is checked and kept. An entry is exactly { customerId, projectId?,
+ * serviceId? } as own data properties holding non-empty strings, on a plain object (prototype Object.prototype or
+ * null, not a Proxy). "Key absent" means "the whole customer", so anything that could make a key look absent while
+ * the adapter meant to narrow — a getter, an inherited property (class, Object.create, polluted Object.prototype),
+ * `projectId: undefined`, a wrong type, a misspelt or extra key, a symbol key — is refused, never dropped.
+ */
+function copySubScope(x: unknown): SubScope | null {
+  if (!isRecord(x) || types.isProxy(x)) return null;
+  const proto: unknown = Object.getPrototypeOf(x);
+  if (proto !== null && proto !== Object.prototype) return null;
+  const out = Object.create(null) as Partial<SubScope>; // null prototype: a polluted Object.prototype cannot fill a key in
+  for (const k of Reflect.ownKeys(x)) {
+    if (typeof k !== 'string' || !(SUB_KEYS as readonly string[]).includes(k)) return null;
+    const d = Object.getOwnPropertyDescriptor(x, k);
+    if (!d || !('value' in d) || !isStr(d.value)) return null;
+    out[k as (typeof SUB_KEYS)[number]] = d.value;
+  }
+  if (out.customerId === undefined) return null;
+  // absent here, but something answers for it up the chain (polluted Object.prototype)
+  if (proto !== null) for (const k of SUB_KEYS) if (out[k] === undefined && k in Object.prototype) return null;
+  return out as SubScope;
 }
 const nullProto = <T extends object>(fields: T): T => Object.freeze(Object.assign(Object.create(null) as T, fields));
 
@@ -111,11 +159,14 @@ const nullProto = <T extends object>(fields: T): T => Object.freeze(Object.assig
  * - `subScopes` may only narrow customers the user has: an entry for a customer that is not in `customerIds`
  *   (wrong case, typo, another tenant) used to be ignored — which WIDENED the view to the whole customer. It is 401 now.
  *   So is an entry that is not exactly { customerId, projectId?, serviceId? } as own string data properties (R-18).
+ * - Lists are copied by index into plain arrays BEFORE they are checked, and the copy is what is used (R-23):
+ *   `customerIds` and `subScopes` must be real arrays — a Proxy, an Array subclass, a list with its own iterator,
+ *   a hole or an index getter is 401. The session object itself must not be a Proxy either.
  * - The result is a frozen copy on a null prototype: later mutation of the adapter's object, or of
  *   Object.prototype, cannot change what was checked.
  */
 export function normalizeAuth(a: unknown): AuthContext | null {
-  if (!isRecord(a)) return null;
+  if (!isRecord(a) || types.isProxy(a)) return null;
   const userId = own(a, 'userId');
   const kind = own(a, 'kind');
   const name = own(a, 'name');
@@ -127,26 +178,23 @@ export function normalizeAuth(a: unknown): AuthContext | null {
   if (name !== undefined && typeof name !== 'string') return null;
   let customerIds: readonly string[] | '*';
   if (rawIds === '*') customerIds = '*';
-  else if (Array.isArray(rawIds) && rawIds.every(isStr)) customerIds = Object.freeze([...rawIds]);
-  else return null;
+  else {
+    const ids = copyPlainArray(rawIds);
+    if (!ids || !ids.every(isStr)) return null;
+    customerIds = Object.freeze(ids as string[]);
+  }
   let subScopes: AuthContext['subScopes'];
   if (rawSubs !== undefined) {
-    if (!Array.isArray(rawSubs)) return null;
-    const list: Array<{ customerId: string; projectId?: string; serviceId?: string }> = [];
-    for (const x of rawSubs) {
-      if (!isRecord(x)) return null;
-      // R-18: an entry is exactly { customerId, projectId?, serviceId? }, each an OWN DATA property holding a
-      // non-empty string. "Key absent" means "the whole customer", so anything that could make a key look absent
-      // while the adapter meant to narrow — a getter, an inherited property, `projectId: undefined`, a wrong type,
-      // a misspelt or extra key (`project_id`), a symbol key — is refused (401), never dropped.
-      if (!isExactSubScope(x)) return null;
-      const customerId = own(x, 'customerId') as string;
-      const projectId = own(x, 'projectId') as string | undefined;
-      const serviceId = own(x, 'serviceId') as string | undefined;
+    const entries = copyPlainArray(rawSubs);
+    if (!entries) return null;
+    const list: SubScope[] = [];
+    for (const x of entries) {
+      const sub = copySubScope(x);
+      if (!sub) return null;
       // N-15: a narrowing for a customer the user does not have. '*' is honoured for INTERNAL staff only.
-      const has = customerIds === '*' ? kind === 'INTERNAL' : customerIds.includes(customerId);
+      const has = customerIds === '*' ? kind === 'INTERNAL' : customerIds.includes(sub.customerId);
       if (!has) return null;
-      list.push(nullProto({ customerId, ...(projectId !== undefined ? { projectId } : {}), ...(serviceId !== undefined ? { serviceId } : {}) }));
+      list.push(nullProto({ customerId: sub.customerId, ...(sub.projectId !== undefined ? { projectId: sub.projectId } : {}), ...(sub.serviceId !== undefined ? { serviceId: sub.serviceId } : {}) }));
     }
     subScopes = Object.freeze(list);
   }

@@ -10,7 +10,7 @@
  *   internal sentence, so a name that is only in free text cannot leak (anything unknown is treated as staff).
  */
 import {
-  PORTAL_SHOWS_STAFF_NAMES, STAFF_ALIAS, allowOnlyIfTrue, loadPolicyFlags, nextStep, type AssignmentSnapshot, type DeliveryLog, type IncidentEventInput, type IncidentRow,
+  PORTAL_SHOWS_STAFF_NAMES, PROVIDER_EXCERPT_MAX_CHARS, STAFF_ALIAS, STORE_PROVIDER_TEXT, allowOnlyIfTrue, loadPolicyFlags, nextStep, type AssignmentSnapshot, type DeliveryLog, type IncidentEventInput, type IncidentRow,
   type ResolvedTarget, type SnapshotStep, type StepChannel,
 } from '@alarmops/core';
 import { hasRole, type AuthContext } from './auth.js';
@@ -18,8 +18,14 @@ import { hasRole, type AuthContext } from './auth.js';
 export interface ApiConfig {
   /** Pending decision Q-1. false → portal users read "MSP on-call" instead of a staff member's name. */
   portalShowsStaffNames: boolean;
+  /**
+   * R-20 / STORE_PROVIDER_TEXT (PROPOSED, default false). false → the provider's (masked) error text is an excerpt
+   * of 120 characters and only ADMIN reads it; OPERATOR works with the reason code. true → OPERATOR and ADMIN read
+   * the masked text (300). Optional in the type so existing callers keep compiling; absent = false.
+   */
+  storeProviderText?: boolean;
 }
-export const DEFAULT_API_CONFIG: ApiConfig = { portalShowsStaffNames: PORTAL_SHOWS_STAFF_NAMES };
+export const DEFAULT_API_CONFIG: ApiConfig = { portalShowsStaffNames: PORTAL_SHOWS_STAFF_NAMES, storeProviderText: STORE_PROVIDER_TEXT };
 
 /**
  * ApiConfig from an env-like record (R-15). The adapter calls `loadApiConfig(process.env)` and passes the result
@@ -28,10 +34,11 @@ export const DEFAULT_API_CONFIG: ApiConfig = { portalShowsStaffNames: PORTAL_SHO
  */
 export function loadApiConfig(env: Record<string, unknown> = {}): { config: ApiConfig; warnings: string[] } {
   const { flags, warnings } = loadPolicyFlags(env);
-  return { config: { portalShowsStaffNames: flags.portalShowsStaffNames }, warnings };
+  return { config: { portalShowsStaffNames: flags.portalShowsStaffNames, storeProviderText: flags.storeProviderText }, warnings };
 }
 /** Whatever was handed to createApi → a config whose flags are real booleans; only `true` switches a name on. */
-export const strictApiConfig = (c: { portalShowsStaffNames?: unknown } | undefined): ApiConfig => ({ portalShowsStaffNames: allowOnlyIfTrue(c?.portalShowsStaffNames) });
+export const strictApiConfig = (c: { portalShowsStaffNames?: unknown; storeProviderText?: unknown } | undefined): ApiConfig =>
+  ({ portalShowsStaffNames: allowOnlyIfTrue(c?.portalShowsStaffNames), storeProviderText: allowOnlyIfTrue(c?.storeProviderText) });
 
 export interface UserInfo { name: string; kind: 'INTERNAL' | 'CUSTOMER'; customerId: string | null }
 
@@ -159,17 +166,29 @@ const PORTAL_ALIAS = portalSerializer(false);
 const PORTAL_NAMES = portalSerializer(true);
 
 /**
- * Internal VIEWER (R-13, D-35): everything staff see EXCEPT the provider's own words. The sanitiser is a second
- * line, not a licence — provider text (`error`) is for OPERATOR and ADMIN. `reason` (the mapped code) stays.
+ * Internal staff WITHOUT the provider's own words (R-13): everything else staff see. The sanitiser is a second
+ * line, not a licence. `reason` (the mapped code) stays. Who this is depends on STORE_PROVIDER_TEXT (R-20):
+ * - false (default): VIEWER and OPERATOR — only ADMIN reads the text, and only a 120-character excerpt of it;
+ * - true: VIEWER only — OPERATOR and ADMIN read the masked text.
  */
 const INTERNAL_VIEWER: IncidentSerializer = {
   ...internalSerializer,
   notification: (l) => ({ ...internalSerializer.notification(l), error: null }),
 };
+/** ADMIN while STORE_PROVIDER_TEXT is off: the excerpt, also for rows that were written while it was on. */
+const INTERNAL_EXCERPT: IncidentSerializer = {
+  ...internalSerializer,
+  notification: (l) => ({ ...internalSerializer.notification(l), error: l.error == null ? null : l.error.slice(0, PROVIDER_EXCERPT_MAX_CHARS) }),
+};
+function internalFor(auth: { kind: unknown; role?: unknown }, cfg: ApiConfig): IncidentSerializer {
+  if (cfg.storeProviderText === true) return hasRole(auth, 'OPERATOR') ? internalSerializer : INTERNAL_VIEWER;
+  return hasRole(auth, 'ADMIN') ? INTERNAL_EXCERPT : INTERNAL_VIEWER;
+}
 
 /**
- * Fail closed: only kind === 'INTERNAL' gets an internal serializer, only OPERATOR+ the one with provider text,
- * and only the boolean `true` shows staff names to the portal (R-15: the string 'false' is not true).
+ * Fail closed: only kind === 'INTERNAL' gets an internal serializer; provider text only for ADMIN (an excerpt), or
+ * for OPERATOR+ when STORE_PROVIDER_TEXT is the boolean `true`; and only the boolean `true` shows staff names to
+ * the portal (R-15: the string 'false' is not true).
  */
 export const serializerFor = (auth: Pick<AuthContext, 'kind'> & { role?: unknown }, cfg: ApiConfig = DEFAULT_API_CONFIG): IncidentSerializer =>
-  auth.kind === 'INTERNAL' ? (hasRole(auth, 'OPERATOR') ? internalSerializer : INTERNAL_VIEWER) : cfg.portalShowsStaffNames === true ? PORTAL_NAMES : PORTAL_ALIAS;
+  auth.kind === 'INTERNAL' ? internalFor(auth, cfg) : cfg.portalShowsStaffNames === true ? PORTAL_NAMES : PORTAL_ALIAS;

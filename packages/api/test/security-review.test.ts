@@ -398,7 +398,12 @@ describe('Q-1: what a portal (customer) user receives', () => {
     const v = body(await w.call(USERS.viewer, 'GET', `/incidents/${w.ids.mirae}/notifications`));
     expect(v.items[1]).toMatchObject({ channel: 'SMS', status: 'FAILED', reason: 'PROVIDER_REJECTED', error: null });
     expect(JSON.stringify(v)).not.toMatch(/vendor|rejected \(/);
-    const n = body(await w.call(USERS.haeun, 'GET', `/incidents/${w.ids.mirae}/notifications`));
+    // review 4 (R-20, STORE_PROVIDER_TEXT default false): an OPERATOR gets the reason code only as well; the masked
+    // excerpt is for ADMIN. (With the switch on, OPERATOR reads the text: security-review-4.test.ts.)
+    const o = body(await w.call(USERS.haeun, 'GET', `/incidents/${w.ids.mirae}/notifications`));
+    expect(o.items[1]).toMatchObject({ channel: 'SMS', status: 'FAILED', targetSummary: 'Haeun Kim', reason: 'PROVIDER_REJECTED', error: null, providerMessageId: null });
+    expect(JSON.stringify(o)).not.toMatch(/vendor|rejected \(/);
+    const n = body(await w.call(USERS.minjae, 'GET', `/incidents/${w.ids.mirae}/notifications`));
     expect(n.items[1]).toMatchObject({ channel: 'SMS', status: 'FAILED', targetSummary: 'Haeun Kim', reason: 'PROVIDER_REJECTED', error: 'vendor: number [number] rejected ([secret], [secret])', providerMessageId: null });
     expect(n.items[0]).toMatchObject({ targetSummary: 'Customer Slack channel', providerMessageId: expect.stringMatching(/^slack-\d$/) });
     expect(JSON.stringify(n)).not.toMatch(/82100008995|sk_live|AC123|C_MIRAE|C_MSP/); // not even staff get the raw provider text or a channel id
