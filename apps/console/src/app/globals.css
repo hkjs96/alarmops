@@ -271,6 +271,11 @@ body { overflow-x: hidden; }
   .tl .ev { grid-template-columns: 20px 58px minmax(0, 1fr); }
   .hero-actions { width: 100%; }
   .hero-actions .btn { flex: 1; }
+  /* The panel's three actions are three fixed columns, never a wrapping row: when the text is a few pixels wider
+     (another machine's text rendering) the primary button used to drop to a second line, and the narrower
+     "Acknowledged ✓" that replaces it jumped back up and sideways — away from the finger that had just pressed. */
+  .hero-actions-wrap > .hero-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr) minmax(0, 1.5fr); align-items: stretch; }
+  .hero-actions-wrap > .hero-actions > .btn { min-width: 0; height: auto; min-height: 44px; padding: 0 6px; white-space: normal; line-height: 1.15; }
 }
 .show-m { display: none; }
 @media (max-width: 760px) { .show-m { display: block; } }
