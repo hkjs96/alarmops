@@ -16,10 +16,10 @@ import { MSP_DEFAULT_TARGET, buildSnapshot, clampMessage, incidentMute, planEsca
 import { GROUP_GRACE_SEC, representative, type GroupRow } from './grouping.js';
 import { addMember, mergeOrOpen, newIncident, incidentId, resolve, type IncidentRow } from './incident.js';
 import { protectUnlessFalse } from './config.js';
-import { LANE_CONCURRENCY, NOTIFY_RESERVE_MS, SEND_TIMEOUT_MS, STORE_CALL_TIMEOUT_MS, TICK_RESPONSE_LIMIT_MS } from './limits.js';
+import { CLOCK_SKEW_LIMIT_MS, LANE_CONCURRENCY, NOTIFY_RESERVE_MS, SEND_TIMEOUT_MS, STORE_CALL_TIMEOUT_MS, TICK_RESPONSE_LIMIT_MS } from './limits.js';
 import type { MaintenanceWindow } from './maintenance.js';
 import {
-  dispatchJob, LANES, MAX_ATTEMPTS, NOTIFY_BATCH, providerText,
+  claimReserve, dispatchJob, LANES, MAX_ATTEMPTS, NOTIFY_BATCH, providerText, rotationKey,
   type DeliveryLog, type DeliveryReason, type NotificationJob, type SenderKind, type Senders,
 } from './notify.js';
 import type { Contact, PagingConfig, PagingWorld } from './paging.js';
@@ -138,8 +138,21 @@ export type HeartbeatWrite = Omit<HeartbeatRow, 'consecutiveFailures'>;
  * contract suite (test/contract).
  */
 export interface TickRepository {
-  /** Claim this minute (one TickClaim row per scheduledAt minute). false = another call already took it. */
-  claimTick(minuteKey: string, at: Date): Promise<boolean>;
+  /**
+   * The STORE's clock (R-14, security review SQL R-2): SQL → the database's `now()`. `runTick` asks it first,
+   * refuses to tick when the runner's clock is more than CLOCK_SKEW_LIMIT_MS away from it, and otherwise makes its
+   * due decisions (groups, escalation, maintenance) on this time, so a runner with a wrong clock can neither page
+   * early nor hold pages back. `null` = the store has no clock of its own (an in-memory store whose `clock` was
+   * never set): the runner's clock is used as it is.
+   */
+  now(): Promise<Date | null>;
+  /**
+   * Claim this minute (one TickClaim row per scheduledAt minute). false = another call already took it.
+   * `at` is the runner's clock when it asked: a store with its own clock answers 'CLOCK_SKEW' (and claims nothing)
+   * when `at` is more than CLOCK_SKEW_LIMIT_MS away from it — the same rule as in `runTick`, enforced by the store
+   * for callers that did not ask `now()` first.
+   */
+  claimTick(minuteKey: string, at: Date): Promise<boolean | 'CLOCK_SKEW'>;
   loadPolicy(): Promise<SuppressionPolicy>;
 
   // ① groups
@@ -184,8 +197,15 @@ export interface TickRepository {
    * nextAttemptAt = store now + CLAIM_LEASE_SEC, all in the claiming UPDATE. `attempts` and `dueAt` are NOT touched
    * (R-3, R-11). A due job that already used MAX_ATTEMPTS sends (the process died during the last one) becomes
    * FAILED with a NotificationLog row (errorCode GAVE_UP) and is not returned.
+   *
+   * Two runners at once never get the same job and never an EMPTY claim while jobs are due: claims of one lane are
+   * serialised (SQL: `pg_advisory_xact_lock` per lane at the start of the claim transaction), so the second runner
+   * chooses among what the first left (security review SQL, B-1).
+   *
+   * `rotateAfter` (R-24): see `selectForClaim` — with more due customers than the claim holds, the customers after
+   * this key come first. The result is in fair order either way.
    */
-  claimDueJobs(limit: number, opts?: { kinds?: readonly SenderKind[] }): Promise<NotificationJob[]>;
+  claimDueJobs(limit: number, opts?: { kinds?: readonly SenderKind[]; rotateAfter?: string | null }): Promise<NotificationJob[]>;
   /**
    * Right before the provider call: `attempts+1, nextAttemptAt = dueAt = retryAt(attempts, store now) WHERE status='SENDING' AND claimSeq=?`.
    * Returns the new attempt number, or null when the claim is no longer ours (then the caller must not send).
@@ -195,7 +215,8 @@ export interface TickRepository {
    * Give back a claimed job that was not sent. Guarded by the claim token. Status QUEUED, `attempts` unchanged.
    * - plain (budget ran out): `nextAttemptAt = dueAt` — the ORIGINAL due time, never "now" (R-11);
    * - `notBefore` (held by a maintenance window, N-13): `nextAttemptAt = dueAt = notBefore`, `lastError = note`,
-   *   and `event` (if any) is written in the same transaction.
+   *   and `event` (if any) is written in the same transaction. The store never parks a job further ahead than its
+   *   own now + RELEASE_HOLD_MAX_SEC, whatever `notBefore` says (R-2: the runner's clock is not trusted).
    */
   releaseJob(jobId: string, claimSeq: number, opts?: { notBefore?: Date; note?: string; event?: IncidentEventInput }): Promise<boolean>;
   /**
@@ -221,6 +242,14 @@ export interface TickRepository {
   // ⑤ heartbeat
   writeHeartbeat(hb: HeartbeatWrite): Promise<void>;
   readHeartbeats(): Promise<HeartbeatRow[]>;
+
+  // ⑥ housekeeping
+  /**
+   * Delete what has expired, on the store's clock, for EVERY owner (security review SQL, R-7): tick claims older
+   * than two days, Idempotency-Key entries past `expiresAt`, undo records a day past theirs. Bounded per call.
+   * Called once per tick after the phases; a failure is logged and never fails the tick.
+   */
+  purgeExpired(): Promise<number>;
 }
 
 export interface TickInput {
@@ -277,13 +306,23 @@ export interface TickSummary {
     /** Due and never attempted after the drain (N-12). SEV-1 > 0 → heartbeat DEGRADED. */
     dueUnattempted: number;
     dueSev1Unattempted: number;
+    /**
+     * R-24: per lane that ended this tick without ANY answer, the customer key (`rotationKey`) the probing reached.
+     * It is stored with the notify heartbeat (`lastStats.probeCursor`) and the next tick starts after it. A lane
+     * that got an answer has no entry: its next tick starts in fair order again.
+     */
+    probeCursor: Partial<Record<SenderKind, string>>;
   };
   errors: TickError[];
   /** A phase hit its batch limit or the time budget; the remainder runs next tick. */
   truncated: boolean;
   durationMs: number;
 }
-export type TickResult = TickSummary | { skipped: 'duplicate'; scheduledAt: string };
+export type TickResult =
+  | TickSummary
+  | { skipped: 'duplicate'; scheduledAt: string }
+  /** R-2: the runner's clock and the store's clock disagree by `clockSkewMs` (runner − store); nothing ran. */
+  | { skipped: 'clock-skew'; scheduledAt: string; clockSkewMs: number };
 
 export const minuteKey = (d: Date): string => d.toISOString().slice(0, 16) + 'Z';
 const MAX_VERSION_RETRIES = 3;
@@ -314,15 +353,40 @@ export async function runTick(input: TickInput, deps: TickDeps): Promise<TickRes
   /** Guard for one store call outside the phases: at most STORE_CALL_TIMEOUT_MS, less when the tick is nearly over. */
   const guardMs = (keepMs = 0): number => Math.max(MIN_GUARD_MS, Math.min(STORE_CALL_TIMEOUT_MS, hardStop - clock().getTime() - keepMs));
   const firstJob = TICK_JOBS.find((j) => jobs.has(j)) ?? 'group';
-  const claimed = await guarded(deps.repo.claimTick(key, started), guardMs());
+  // R-2 (security review SQL): the store's clock decides. Asked first; the round trip is split in half.
+  const asked = started.getTime();
+  const storeClock = await guarded(deps.repo.now(), guardMs());
+  const answered = clock().getTime();
+  let skewMs = 0; // runner − store
+  if (!storeClock.timedOut && storeClock.value) skewMs = Math.round((asked + answered) / 2 - storeClock.value.getTime());
+  const skewed = async (ms: number): Promise<TickResult> => {
+    const message = `runner clock is ${Math.abs(Math.round(ms / 1000))} s ${ms > 0 ? 'ahead of' : 'behind'} the store clock (limit ${CLOCK_SKEW_LIMIT_MS / 1000} s); this tick did nothing`;
+    deps.log?.('error', 'tick_clock_skew', { clockSkewMs: ms, message });
+    // On the record, and visible to the health check: status ERROR and NO finish time, so the job reads as stale.
+    const storeNow = new Date(clock().getTime() - ms);
+    for (const name of TICK_JOBS) {
+      if (!jobs.has(name)) continue;
+      try {
+        await guarded(deps.repo.writeHeartbeat({ name, lastStartedAt: storeNow, lastFinishedAt: null, lastStatus: 'ERROR', lastDurationMs: 0, lastStats: { skipped: 'clock-skew', clockSkewMs: ms, errors: 1 } }), guardMs());
+      } catch { /* the heartbeat goes stale either way */ }
+    }
+    return { skipped: 'clock-skew', scheduledAt: key, clockSkewMs: ms };
+  };
+  if (Math.abs(skewMs) > CLOCK_SKEW_LIMIT_MS + (answered - asked) / 2) return skewed(skewMs);
+  const claimed = storeClock.timedOut ? storeClock : await guarded(deps.repo.claimTick(key, started), guardMs());
   if (claimed.timedOut) {
     // Nobody knows whether the minute was claimed. Nothing runs and no heartbeat is written: the heartbeat goes
     // stale (D-10) and the next minute's tick is a separate call.
-    const message = `claimTick did not answer within ${STORE_CALL_TIMEOUT_MS} ms; this tick did nothing`;
-    deps.log?.('error', 'tick_item_failed', { phase: firstJob, id: 'claimTick', message });
-    return { ...emptySummary(key), errors: [{ phase: firstJob, id: 'claimTick', message }], truncated: true, durationMs: Math.max(0, clock().getTime() - started.getTime()) };
+    const call = storeClock.timedOut ? 'now' : 'claimTick';
+    const message = `${call} did not answer within ${STORE_CALL_TIMEOUT_MS} ms; this tick did nothing`;
+    deps.log?.('error', 'tick_item_failed', { phase: firstJob, id: call, message });
+    return { ...emptySummary(key), errors: [{ phase: firstJob, id: call, message }], truncated: true, durationMs: Math.max(0, clock().getTime() - started.getTime()) };
   }
+  if (claimed.value === 'CLOCK_SKEW') return skewed(skewMs);
   if (!claimed.value) return { skipped: 'duplicate', scheduledAt: key };
+  // Below a second the two clocks are treated as one (the measurement itself is not better than that).
+  const offsetMs = Math.abs(skewMs) >= 1000 ? -skewMs : 0;
+  const at = (): Date => (offsetMs ? new Date(clock().getTime() + offsetMs) : clock());
 
   const batch = deps.batch ?? DEFAULT_BATCH;
   // N-21: the call answers within budget + one send timeout (+ a second for the result writes), and that sum never
@@ -335,7 +399,7 @@ export async function runTick(input: TickInput, deps: TickDeps): Promise<TickRes
   // N-33: the outbox does not need the policy. When it cannot be read in time the three phases that do are skipped
   // (heartbeat ERROR) and the pages that are already queued still go out.
   const policy = await guarded(deps.repo.loadPolicy(), guardMs());
-  const ctx: Ctx = { ...deps, sendTimeoutMs, clock, batch, deadline, softDeadline, sum, policy: policy.timedOut ? null : policy.value };
+  const ctx: Ctx = { ...deps, sendTimeoutMs, clock, at, batch, deadline, softDeadline, sum, policy: policy.timedOut ? null : policy.value };
 
   const phases: Array<[TickJob, () => Promise<void>, () => Record<string, unknown>]> = [
     ['group', () => groupPhase(ctx), () => sum.group],
@@ -407,14 +471,21 @@ export async function runTick(input: TickInput, deps: TickDeps): Promise<TickRes
     const failed = sum.errors.length > errorsBefore;
     try {
       const wrote = await guarded(deps.repo.writeHeartbeat({
-        name, lastStartedAt: t0, lastFinishedAt: t1, lastStatus: failed ? 'ERROR' : degraded ? 'DEGRADED' : 'OK',
-        lastDurationMs: Math.max(0, t1.getTime() - t0.getTime()), lastStats: { ...stats(), errors: sum.errors.length - errorsBefore },
+        name, lastStartedAt: new Date(t0.getTime() + offsetMs), lastFinishedAt: new Date(t1.getTime() + offsetMs), lastStatus: failed ? 'ERROR' : degraded ? 'DEGRADED' : 'OK',
+        lastDurationMs: Math.max(0, t1.getTime() - t0.getTime()), lastStats: structuredClone({ ...stats(), errors: sum.errors.length - errorsBefore }),
       }), guardMs());
       // Not written → the row goes stale and the health check says so (D-10).
       if (wrote.timedOut) sum.errors.push({ phase: name, id: 'heartbeat', message: 'writeHeartbeat did not answer in time' });
     } catch (err) {
       sum.errors.push({ phase: name, id: 'heartbeat', message: errMsg(err) });
     }
+  }
+  // R-7: expired rows of every owner go here, not only when their owner happens to write again.
+  try {
+    const purged = await guarded(deps.repo.purgeExpired(), guardMs());
+    if (purged.timedOut) deps.log?.('warn', 'tick_purge_failed', { message: 'purgeExpired did not answer in time' });
+  } catch (err) {
+    deps.log?.('warn', 'tick_purge_failed', { message: errMsg(err) });
   }
   for (const e of sum.errors) deps.log?.('error', 'tick_item_failed', { ...e });
   sum.durationMs = Math.max(0, clock().getTime() - started.getTime());
@@ -426,7 +497,7 @@ const emptySummary = (key: string): TickSummary => ({
   group: { closed: 0, delivered: 0, opened: 0, merged: 0, empty: 0, paused: 0, conflicts: 0 },
   reconcile: { checked: 0, resolved: 0 },
   escalation: { checked: 0, escalated: 0, muted: 0, renotified: 0, done: 0, conflicts: 0 },
-  notify: { sent: 0, failed: 0, retried: 0, skipped: 0, deferred: 0, released: 0, timeouts: 0, unanswered: [], dueUnattempted: 0, dueSev1Unattempted: 0 },
+  notify: { sent: 0, failed: 0, retried: 0, skipped: 0, deferred: 0, released: 0, timeouts: 0, unanswered: [], dueUnattempted: 0, dueSev1Unattempted: 0, probeCursor: {} },
   errors: [], truncated: false, durationMs: 0,
 });
 
@@ -449,7 +520,12 @@ function withinBudget(p: Promise<void>, ms: number): Promise<'DONE' | 'TIMED_OUT
 }
 
 interface Ctx extends TickDeps {
+  /** The runner's clock: budget and deadlines only. */
   clock: () => Date;
+  /** The store's time (runner clock + the offset measured at the start, R-2): every due decision and every stored timestamp. */
+  at: () => Date;
+  /** R-24: where the last tick's probing stopped, per lane that got no answer (from the notify heartbeat). */
+  probeCursor?: Partial<Record<SenderKind, string>>;
   batch: number;
   deadline: number;
   /** Deadline of every phase before the outbox. */
@@ -474,7 +550,7 @@ const overBudget = (c: Ctx, phase: TickJob = 'group'): boolean => {
 // ───────────────────────────── ① groups → incidents ─────────────────────────────
 
 async function groupPhase(c: Ctx): Promise<void> {
-  const now = c.clock();
+  const now = c.at();
   // Close first, collect later (G-5): groups this tick closes are collected once the grace has passed (next tick).
   const toClose = await c.repo.listGroupsToClose(now, c.batch);
   if (toClose.length >= c.batch) c.sum.truncated = true;
@@ -617,7 +693,7 @@ async function reconcilePhase(c: Ctx): Promise<void> {
     if (overBudget(c)) return;
     c.sum.reconcile.checked++;
     try {
-      const now = c.clock();
+      const now = c.at();
       // I-5: never in the same tick that merged a fire into it (a stored time, so a second run of this tick agrees).
       if (inc.lastMergedAt && inc.lastMergedAt.getTime() >= now.getTime()) continue;
       const next = resolve(inc, 'AUTO', null, now);
@@ -641,7 +717,7 @@ async function escalationPhase(c: Ctx): Promise<void> {
   // of broken incidents cannot starve the rest of the batch (they are tried again next tick, not pushed back).
   const failed: string[] = [];
   for (let round = 0; round < MAX_ESCALATION_ROUNDS; round++) {
-    const due = await c.repo.listEscalationDue(c.clock(), c.batch, failed.length ? failed : undefined);
+    const due = await c.repo.listEscalationDue(c.at(), c.batch, failed.length ? failed : undefined);
     if (due.length >= c.batch) c.sum.truncated = true;
     let failedNow = 0;
     for (const inc of due) {
@@ -661,7 +737,7 @@ async function escalationPhase(c: Ctx): Promise<void> {
 const MAX_ESCALATION_ROUNDS = 3;
 
 async function escalateOne(c: Ctx, inc: IncidentRow): Promise<void> {
-  const now = c.clock();
+  const now = c.at();
   const mute = incidentMute(
     { customerId: inc.customerId, projectId: inc.projectId, serviceId: inc.serviceId, accountIds: inc.accountIds, resourceTypes: inc.resourceTypes, severity: inc.severity },
     await c.repo.maintenanceWindows(inc.customerId, now), now,
@@ -707,17 +783,28 @@ async function escalateOne(c: Ctx, inc: IncidentRow): Promise<void> {
  * Nothing is carried over: the next tick starts without penalties.
  *
  * What this gives, at the defaults (timeout 10 s, budget 45 s, width 5), measured with the real `runTick` in
- * test/security-review-4.lanes.test.ts and test/security-review-5.lanes.test.ts: a healthy customer's page is
- * attempted in the tick in which it is due as long as at most 24 OTHER customers' calls hang in front of it on that
- * lane (5 probes × 5 rounds − 1) and the store is fast. Beyond that it slips by whole ticks, but by few (R-24, the
- * rotating start in `drainLane`): at most ⌈(H + 1) ÷ 25⌉ − 1 ticks for H hanging customers inside one claim (so one
- * tick up to 49), and one tick when a slow store (about 0.3 s a call or more) keeps the fifth round from starting.
- * Before review 5 it was 20 ticks from the 25th customer on. More customers than the claim holds (50 per lane)
- * are not covered by the rotation.
+ * test/security-review-4.lanes.test.ts, test/security-review-5.lanes.test.ts and test/r24-rotation.test.ts: a healthy
+ * customer's page is attempted in the tick in which it is due as long as at most 24 OTHER customers' calls hang in
+ * front of it on that lane (5 probes × 5 rounds − 1) and the store is fast. Beyond that it slips by whole ticks, but
+ * by few (R-24, the probe cursor in `drainLane`): with n customers due on the lane and P customers probed per tick,
+ * at most ⌈n ÷ P⌉ − 1 ticks. P is what the tick really does — 25 with a fast store, 20 when a store call takes
+ * 0.4 – 1 s, 15 at 2.5 s — and the bound holds for whatever P turns out to be, because the next tick starts where
+ * this one stopped (the cursor is stored, not computed from the minute).
  */
 async function notifyPhase(c: Ctx): Promise<void> {
   const limit = c.notifyBatch ?? NOTIFY_BATCH;
   // R-3: look at the budget BEFORE claiming — a tick that cannot send must not touch the jobs at all.
+  if (overBudget(c, 'notify')) return;
+  // R-24: where did the probing of a lane that got no answer stop last time? One read; without it (slow, failing)
+  // the lanes start in fair order, as a first tick does.
+  try {
+    const left = Math.max(MIN_GUARD_MS, Math.min(STORE_CALL_TIMEOUT_MS, c.deadline - c.clock().getTime()));
+    const read = await guarded(c.repo.readHeartbeats(), left);
+    const saved = read.timedOut ? undefined : read.value.find((h) => h.name === 'notify')?.lastStats?.probeCursor;
+    if (saved && typeof saved === 'object') {
+      c.probeCursor = Object.fromEntries(Object.entries(saved as Record<string, unknown>).filter(([k, v]) => (LANES as readonly string[]).includes(k) && typeof v === 'string'));
+    }
+  } catch { /* fair order */ }
   if (overBudget(c, 'notify')) return;
   const windows = new Map<string, Promise<MaintenanceWindow[]>>();
   await Promise.all(LANES.map(async (kind) => {
@@ -730,8 +817,6 @@ async function notifyPhase(c: Ctx): Promise<void> {
 }
 
 type SendSignal = 'ANSWERED' | 'TIMEOUT' | 'NONE';
-/** Probe rounds that fit in one tick at the defaults (budget 45 s ÷ send timeout 10 s, the fifth starts at 40 s). */
-const PROBE_ROUNDS_PER_TICK = 5;
 
 const customerKeyOf = (j: NotificationJob): string => j.customerId ?? '\u0000msp';
 /** Who a call rings: the person, the MSP default channel (one for all customers), or the customer's own channel(s). */
@@ -752,9 +837,26 @@ const recipientKeyOf = (j: NotificationJob): string =>
  *   customer that is in flight, then other recipients of a marked customer. When only marked recipients are left:
  *   ONE call at a time, in fair order. A dead provider therefore costs at most one call per distinct recipient
  *   plus about one per SEND_TIMEOUT_MS per tick, never more than `width` at once.
+ *
+ * PROBE CURSOR (R-24; security review SQL, R-1). While the lane is unanswered the customers are probed in KEY order
+ * (`rotationKey`, code-unit order — stable from tick to tick, unlike the position in a claim), around the circle:
+ * - no cursor (the previous tick of this lane got an answer, or there was none): start at the customer the fair
+ *   order puts first;
+ * - cursor K (the previous tick got NO answer and probed up to customer K): start at the first customer after K,
+ *   and the claim itself is rotated the same way (`claimDueJobs({ rotateAfter: K })`), so with more due customers
+ *   than one claim holds the window follows the cursor.
+ * A tick that ends without an answer stores the key of the last customer it probed in that order
+ * (`notify.probeCursor[lane]` → notify heartbeat `lastStats`). So tick k probes the customers at circle positions
+ * [s, s + P) and tick k + 1 starts at s + P, whatever P was: every customer is probed within ⌈n ÷ P⌉ ticks. No
+ * stride, no gcd, and nothing depends on the minute number. (The first rule replaced `start = minute × stride mod
+ * n`, which stood still or skipped positions whenever a tick made fewer probes than the stride.)
+ * Not covered: the cursor is advisory state in the heartbeat — if that write or the read at the start of the phase
+ * fails, the lane starts in fair order again; two runners overlapping on one lane both move it (last write wins).
+ * Customers that share a recipient with a call in flight (the MSP default channel) are passed over in that tick.
  */
 async function drainLane(c: Ctx, kind: SenderKind, limit: number, windows: Map<string, Promise<MaintenanceWindow[]>>): Promise<void> {
-  const jobs = await c.repo.claimDueJobs(limit, { kinds: [kind] });
+  const cursor = c.probeCursor?.[kind] ?? null;
+  const jobs = await c.repo.claimDueJobs(limit, cursor == null ? { kinds: [kind] } : { kinds: [kind], rotateAfter: cursor });
   if (jobs.length >= limit) c.sum.truncated = true;
   const width = Math.max(1, c.laneConcurrency ?? LANE_CONCURRENCY);
   const pending = [...jobs];
@@ -767,21 +869,28 @@ async function drainLane(c: Ctx, kind: SenderKind, limit: number, windows: Map<s
   const flyingRecipients = new Map<string, number>();
   const bump = (m: Map<string, number>, k: string, d: number): void => { const n = (m.get(k) ?? 0) + d; if (n > 0) m.set(k, n); else m.delete(k); };
   const penalty = (j: NotificationJob): number => (badRecipients.has(recipientKeyOf(j)) ? 2 : badCustomers.has(customerKeyOf(j)) ? 1 : 0);
-  // R-24 (security review 5): while the provider has not answered, the customer the probing STARTS with moves on
-  // every minute by one tick's worth of probes: start = (minute × 25) mod nCustomers (25 = width × 5 rounds).
-  // Nothing is stored — the start is a pure function of the minute and of the claim — and the order used once the
-  // provider answers (fair order, SEV-1 first) is not touched.
-  // With 25 customers or fewer that formula stands still or creeps (25 mod n is 0 or small), and it is exactly
-  // there that a slow store bites: the fifth round does not start, so only width × 4 = 20 are probed. For n ≤ 25
-  // the step is therefore 20: the customers one tick did not reach are the first of the next.
-  const custPos = new Map<string, number>();
-  for (const j of jobs) if (!custPos.has(customerKeyOf(j))) custPos.set(customerKeyOf(j), custPos.size);
-  const nCust = custPos.size;
-  const perTick = width * PROBE_ROUNDS_PER_TICK;
-  const stride = nCust > perTick ? perTick : width * (PROBE_ROUNDS_PER_TICK - 1);
-  const rotation = nCust > 0 ? (Math.floor(c.clock().getTime() / 60_000) * stride) % nCust : 0;
-  /** 0 ≤ x < 1: how far a customer is behind this minute's starting customer. */
-  const turn = (ck: string): number => (((custPos.get(ck) ?? 0) - rotation + nCust) % nCust) / (nCust + 1);
+  const keys = [...new Set(jobs.map(rotationKey))].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  const nCust = keys.length;
+  const keyPos = new Map(keys.map((k, i) => [k, i]));
+  let startPos = 0;
+  if (cursor != null) startPos = Math.max(0, keys.findIndex((k) => k > cursor));
+  else if (jobs.length) startPos = keyPos.get(rotationKey(jobs[0]!)) ?? 0;
+  /** Steps around the circle from this tick's starting customer (0 = the start). */
+  const dist = (j: NotificationJob): number => ((keyPos.get(rotationKey(j)) ?? 0) - startPos + nCust) % nCust;
+  /** 0 ≤ x < 1 */
+  const turn = (j: NotificationJob): number => dist(j) / (nCust + 1);
+  // How far the cursor may move: only over customers that are certainly ALL in this claim. A full claim holds the
+  // first `limit − reserve` customers after the cursor without a gap (`selectForClaim`); the reserve slots may
+  // belong to customers anywhere on the circle.
+  const contiguous = jobs.length < limit ? nCust : Math.min(nCust, Math.max(1, limit - claimReserve(limit)));
+  /** Furthest customer (in `dist`) probed while the lane was unanswered; −1 = none. */
+  let reach = -1;
+  // Kept current while the lane runs (not written at its end): a lane that is left running at the end of the tick
+  // (slow store) has its cursor in the heartbeat all the same.
+  const publishCursor = (): void => {
+    if (answered > 0) delete c.sum.notify.probeCursor[kind];
+    else if (timeouts > 0 && reach >= 0 && nCust > 0) c.sum.notify.probeCursor[kind] = keys[(startPos + Math.min(reach, contiguous - 1)) % nCust]!;
+  };
   /** Index in `pending` of the job to send now, or −1: nothing may start until a call in flight comes back. */
   const pick = (): number => {
     if (inFlight >= width) return -1;
@@ -800,27 +909,42 @@ async function drainLane(c: Ctx, kind: SenderKind, limit: number, windows: Map<s
       const r = recipientKeyOf(j);
       if (badRecipients.has(r) || flyingRecipients.has(r)) continue;
       const ck = customerKeyOf(j);
-      const rank = (badCustomers.has(ck) ? 2 : flyingCustomers.has(ck) ? 1 : 0) + turn(ck);
+      const rank = (badCustomers.has(ck) ? 2 : flyingCustomers.has(ck) ? 1 : 0) + turn(j);
       if (rank < bestRank) { best = i; bestRank = rank; }
     }
     if (best >= 0) return best;
     // only recipients that already timed out (or are being called right now) are left: one call at a time
     return inFlight === 0 ? 0 : -1;
   };
+  // Not reached (budget): hand the claims back untouched — no attempt counted, due time kept. This happens AS SOON AS
+  // the budget is over (no call can start any more), side by side, and not after the calls in flight have come back:
+  // with a slow store those return after the next tick has started, and a job that is still claimed then is
+  // missing from that tick's claim (R-1: the probe cursor would pass its customer).
+  let handedBack: Promise<void> | null = null;
+  const handBack = (): Promise<void> => (handedBack ??= Promise.all(pending.splice(0).map(async (j) => {
+    try { if (await c.repo.releaseJob(j.id, j.claimSeq)) c.sum.notify.released++; } catch (err) { c.sum.errors.push({ phase: 'notify', id: j.id, message: errMsg(err) }); }
+  })).then(() => undefined));
+  let released = 0;
+  // The pump only runs when a call comes back; the deadline may pass in between (a round of slow calls).
+  const atDeadline = setTimeout(() => { if (pending.length > 0 && overBudget(c, 'notify')) { released = pending.length; void handBack(); } }, Math.max(0, c.deadline - c.clock().getTime()) + 1);
+  (atDeadline as { unref?: () => void }).unref?.();
   await new Promise<void>((done) => {
     const pump = (): void => {
       while (pending.length > 0) {
         const i = pick();
-        if (i < 0 || overBudget(c, 'notify')) break;
+        if (i < 0) break;
+        if (overBudget(c, 'notify')) { released = pending.length; void handBack(); break; }
         const job = pending.splice(i, 1)[0]!;
         const ck = customerKeyOf(job);
         const rk = recipientKeyOf(job);
+        if (answered === 0 && !badCustomers.has(ck) && !flyingCustomers.has(ck)) { reach = Math.max(reach, dist(job)); publishCursor(); }
         inFlight++; bump(flyingCustomers, ck, 1); bump(flyingRecipients, rk, 1);
         // sendOne never rejects: it records its own errors.
         void sendOne(c, job, windows).then((signal) => {
           inFlight--; bump(flyingCustomers, ck, -1); bump(flyingRecipients, rk, -1);
           if (signal === 'ANSWERED') answered++;
           else if (signal === 'TIMEOUT') { timeouts++; badCustomers.add(ck); badRecipients.add(rk); }
+          publishCursor();
           pump();
         });
       }
@@ -828,13 +952,12 @@ async function drainLane(c: Ctx, kind: SenderKind, limit: number, windows: Map<s
     };
     pump();
   });
-  // Not reached (budget): hand the claims back untouched — no attempt counted, due time kept.
-  for (const j of pending) {
-    try { if (await c.repo.releaseJob(j.id, j.claimSeq)) c.sum.notify.released++; } catch (err) { c.sum.errors.push({ phase: 'notify', id: j.id, message: errMsg(err) }); }
-  }
+  clearTimeout(atDeadline);
+  released ||= pending.length;
+  await handBack();
   if (timeouts > 0 && answered === 0) {
     c.sum.notify.unanswered.push(kind);
-    c.log?.('warn', 'notify_lane_unanswered', { kind, timeouts, released: pending.length });
+    c.log?.('warn', 'notify_lane_unanswered', { kind, timeouts, released });
   }
 }
 
@@ -842,7 +965,7 @@ async function drainLane(c: Ctx, kind: SenderKind, limit: number, windows: Map<s
 async function sendOne(c: Ctx, job: NotificationJob, windows: Map<string, Promise<MaintenanceWindow[]>>): Promise<SendSignal> {
   let attempt: number | null | undefined;
   try {
-    const now = c.clock();
+    const now = c.at();
     const inc = await c.repo.findIncidentById(job.incidentId);
     const person = job.contactId ? await c.repo.getContact(job.contactId) : null;
     const slack = job.channel === 'SLACK_BOT' || job.channel === 'SLACK_WEBHOOK' ? await c.repo.slackDestinations(job) : { channels: [], owner: 'MSP' as const };
@@ -899,7 +1022,7 @@ async function sendOne(c: Ctx, job: NotificationJob, windows: Map<string, Promis
         if (attempt >= MAX_ATTEMPTS) {
           const channel = job.channel === 'SLACK_BOT' || job.channel === 'SLACK_WEBHOOK';
           const ok = await c.repo.completeJob(job.id, job.claimSeq, { status: 'FAILED', error, errorCode: 'GAVE_UP' }, {
-            at: c.clock(), customerId: job.customerId, incidentId: job.incidentId, jobId: job.id, channel: job.channel, status: 'FAILED',
+            at: c.at(), customerId: job.customerId, incidentId: job.incidentId, jobId: job.id, channel: job.channel, status: 'FAILED',
             targetSummary: channel ? 'Slack channel' : job.contactName ?? 'Unknown person', targetKind: channel ? 'MSP_CHANNEL' : 'STAFF', contactId: channel ? null : job.contactId,
             escalationStep: job.stepIndex, attempt, providerMessageId: null, error, errorCode: 'GAVE_UP', warnings: [],
           });

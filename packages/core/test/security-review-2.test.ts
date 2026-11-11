@@ -470,8 +470,13 @@ describe('R-14: due / lease / retry times come from the store’s clock, not fro
     const a = runTick({ scheduledAt: T0 }, { repo: store, senders: { SMS: sender }, now: () => T0, sendTimeoutMs: 60_000 });
     await new Promise((r) => setTimeout(r, 15));
     dbNow = at(0, 9); // 9 s later for the database …
-    const b = (await runTick({ scheduledAt: at(10) }, { repo: store, senders: { SMS: sender }, now: () => at(10), sendTimeoutMs: 60_000 })) as TickSummary; // … 10 min later for runner B
-    expect(b.notify).toMatchObject({ sent: 0, retried: 0, failed: 0 });
+    // … 10 min later for runner B: since security review SQL (R-2) such a runner does not tick at all
+    const b = await runTick({ scheduledAt: at(10) }, { repo: store, senders: { SMS: sender }, now: () => at(10), sendTimeoutMs: 60_000 });
+    expect(b).toMatchObject({ skipped: 'clock-skew' });
+    expect(calls).toHaveLength(1);
+    // … and one that is 25 s ahead (inside the limit) runs on the store's time: the lease (store 00:00 + 60 s) holds
+    const c = (await runTick({ scheduledAt: at(0, 34) }, { repo: store, senders: { SMS: sender }, now: () => at(0, 34), sendTimeoutMs: 60_000 })) as TickSummary;
+    expect(c.notify).toMatchObject({ sent: 0, retried: 0, failed: 0 });
     expect(calls).toHaveLength(1);
     settle({ ok: true, providerMessageId: 'p1' });
     expect(((await a) as TickSummary).notify.sent).toBe(1);

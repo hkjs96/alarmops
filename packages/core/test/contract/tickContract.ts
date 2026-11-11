@@ -383,13 +383,20 @@ export function tickContract(make: MakeFixture): void {
     });
 
     it('claimTick: a minute is claimed once, by whichever runner asks first; other minutes are independent', async () => {
-      await open();
+      const sim = await open();
+      sim.now = at(7);
       const other = fx.secondRunner();
       const both = await Promise.all([fx.repo.claimTick('2026-11-09T03:07Z', at(7)), other.claimTick('2026-11-09T03:07Z', at(7))]);
-      expect(both.filter(Boolean)).toHaveLength(1);
+      expect(both.filter((x) => x === true)).toHaveLength(1);
+      expect(both.filter((x) => x === false)).toHaveLength(1);
       expect(await fx.repo.claimTick('2026-11-09T03:07Z', at(7))).toBe(false);
       expect(await fx.repo.claimTick('2026-11-09T03:06Z', at(7))).toBe(true); // an earlier minute that arrives late still runs once
-      expect(await fx.repo.claimTick('2026-11-09T03:08Z', at(8))).toBe(true);
+      expect(await fx.repo.claimTick('2026-11-09T03:08Z', at(7, 25))).toBe(true); // 25 s apart: inside the skew limit
+      // R-2: the caller's clock more than 30 s from the store's → no claim, and the minute stays free
+      expect(await fx.repo.claimTick('2026-11-09T03:09Z', at(9))).toBe('CLOCK_SKEW');
+      expect(await fx.repo.claimTick('2026-11-09T03:09Z', at(6))).toBe('CLOCK_SKEW');
+      expect(await fx.repo.claimTick('2026-11-09T03:09Z', at(7))).toBe(true);
+      expect((await fx.repo.now())?.getTime()).toBe(at(7).getTime());
     });
   });
 
@@ -414,6 +421,7 @@ export function tickContract(make: MakeFixture): void {
       expect(page).toMatchObject({ status: 'SKIPPED', lastError: 'acknowledged', attempts: 1 });
       expect(await sim.timeline()).toEqual(['0 SLACK_DM Haeun Kim']); // step 2 at 10 min did not fire
 
+      sim.now = at(12, 30); // the undo happens 30 s after the last tick, by the store's clock too
       const cur = await sim.incident();
       const back = unack(cur)!;
       const undone = await fx.repo.commitIncident({ row: { ...back, nextEscalationAt: scheduleNext(back, { now: at(12, 30), ...POLICY }) }, expectedVersion: cur.version, bump: true, memberEffect: 'UNACK',
@@ -421,6 +429,7 @@ export function tickContract(make: MakeFixture): void {
       expect(undone).not.toBe('CONFLICT');
       expect(await fx.alertAcked('al_1')).toBe(false);
       expect((await fx.jobs(inc.id))[0]).toMatchObject({ status: 'QUEUED', lastError: null, dueAt: at(12, 30), nextAttemptAt: at(12, 30), attempts: 1 });
+      sim.now = at(12);
       await sim.run(40);
       expect(await sim.timeline()).toEqual(['0 SLACK_DM Haeun Kim', '13 VOICE Yuna Seo', '23 SLACK_DM Haeun Kim', '33 VOICE Yuna Seo']);
       expect(sim.slack.sent.map((m) => m.idempotencyKey)).toHaveLength(2); // the restored page and the repeat, each once
@@ -628,22 +637,38 @@ export function tickContract(make: MakeFixture): void {
       expect(await fx.logs()).toHaveLength(1);
     });
 
-    it('R-14: the runner’s clock does not decide. A runner an hour ahead cannot take a leased job, one an hour behind still gets what is due', async () => {
+    it('R-14 / R-2: the runner’s clock does not decide. 20 s ahead or behind: the tick runs on the store’s time; an hour (or 3 days) off: the tick does nothing and says so', async () => {
       const sim = await open(tenantSeed(2));
       const base = await openTenants(sim, 2);
       await fx.putJob(pageOf(base.get(0)!, 'a', at(0, 30)));
-      await fx.putJob(pageOf(base.get(1)!, 'future', at(30)));
+      await fx.putJob(pageOf(base.get(1)!, 'future', at(1, 15)));
       sim.now = at(1); // the store's clock
-      const ahead = () => new Date(at(61).getTime());
-      const behind = () => new Date(at(-59).getTime());
-      const r1 = await runTick({ scheduledAt: behind(), jobs: ['notify'] }, { repo: fx.repo, senders: sim.senders, now: behind }) as TickSummary;
-      expect(r1.notify.sent).toBe(1); // due by the store's clock
-      await fx.clearTickClaims();
-      const r2 = await runTick({ scheduledAt: ahead(), jobs: ['notify'] }, { repo: fx.repo, senders: sim.senders, now: ahead }) as TickSummary;
-      expect(r2.notify.sent).toBe(0); // the 00:30 page of tenant 1 is not due for the store
+      const off = (ms: number) => () => new Date(at(1).getTime() + ms);
+      // far off, both ways: nothing runs, nothing is claimed, the heartbeat says ERROR and has no finish time (→ stale)
+      for (const ms of [3_600_000, -3_600_000, 10 * 60_000, -10 * 60_000, 3 * 86_400_000]) {
+        const r = await runTick({ scheduledAt: off(ms)(), jobs: ['notify'] }, { repo: fx.repo, senders: sim.senders, now: off(ms) });
+        expect(r, `${ms}`).toMatchObject({ skipped: 'clock-skew' });
+        expect(Math.abs((r as { clockSkewMs: number }).clockSkewMs - ms), `${ms}`).toBeLessThan(1500);
+        const hb = (await fx.repo.readHeartbeats()).find((h) => h.name === 'notify')!;
+        expect(hb, `${ms}`).toMatchObject({ lastStatus: 'ERROR', lastFinishedAt: null, lastStats: { skipped: 'clock-skew' } });
+        expect(heartbeatHealth(await fx.repo.readHeartbeats(), sim.now, { jobs: ['notify'] }).stale).toBe(true);
+        // the store says the same to a caller that did not ask first
+        expect(await fx.repo.claimTick('2026-11-09T03:01Z', off(ms)())).toBe('CLOCK_SKEW');
+      }
+      expect(sim.sms.sent).toHaveLength(0);
+      expect((await fx.jobs()).filter((j) => j.claimSeq > 0)).toHaveLength(0);
+      // 20 s ahead: inside the limit. The 01:15 page is "due" for the runner but not for the store → not sent.
+      const r1 = await runTick({ scheduledAt: at(1), jobs: ['notify'] }, { repo: fx.repo, senders: sim.senders, now: off(20_000) }) as TickSummary;
+      expect(r1.notify.sent).toBe(1);
       expect(sim.sms.sent).toHaveLength(1);
       const [future] = (await fx.jobs()).filter((j) => j.idempotencyKey.endsWith('#future'));
       expect(future).toMatchObject({ status: 'QUEUED', claimSeq: 0 });
+      // 20 s behind, store at 01:20: the page is due for the store → sent, although the runner thinks it is 01:00
+      sim.now = at(1, 20);
+      await fx.clearTickClaims();
+      const r2 = await runTick({ scheduledAt: at(1), jobs: ['notify'] }, { repo: fx.repo, senders: sim.senders, now: () => at(1) }) as TickSummary;
+      expect(r2.notify.sent).toBe(1);
+      expect((await fx.repo.readHeartbeats()).find((h) => h.name === 'notify')).toMatchObject({ lastStatus: 'OK', lastFinishedAt: at(1, 20) });
     });
 
     it('completeJob writes the result, the delivery log and the timeline event together; provider text is masked', async () => {
