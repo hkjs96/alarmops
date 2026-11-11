@@ -1,0 +1,91 @@
+name: dev-db
+
+# Applies db/prisma/migrations to the dev Supabase database with `prisma migrate deploy`.
+# `prisma db push` is never used (D-10). Setup: docs/SETUP-SUPABASE.md
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "migrate" to apply pending migrations to the dev database'
+        required: true
+        type: string
+  push:
+    branches: [main]
+    paths:
+      - "db/prisma/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dev-db
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: dev
+    env:
+      DATABASE_URL: ${{ secrets.DEV_DATABASE_URL }}
+      DIRECT_URL: ${{ secrets.DEV_DIRECT_URL }}
+      CONFIRM: ${{ inputs.confirm }}
+    steps:
+      - name: Check confirmation
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if [ "$CONFIRM" != "migrate" ]; then
+            echo "::error::Nothing was changed. To run this, type exactly: migrate"
+            exit 1
+          fi
+      - name: Check secrets
+        run: |
+          missing=""
+          [ -n "$DATABASE_URL" ] || missing="$missing DEV_DATABASE_URL"
+          [ -n "$DIRECT_URL" ] || missing="$missing DEV_DIRECT_URL"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing secret(s) in the GitHub environment 'dev':$missing. Add them under Settings > Environments > dev (docs/SETUP-SUPABASE.md, step 4)."
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Hide connection details in the log
+        run: node .github/scripts/mask-db-urls.mjs
+      - run: npm ci
+      - name: Status before
+        working-directory: db
+        run: |
+          set +e
+          npx prisma migrate status > "$RUNNER_TEMP/status-before.log" 2>&1
+          code=$?
+          set -e
+          cat "$RUNNER_TEMP/status-before.log"
+          # Exit 1 with pending migrations is the normal case here. Stop only when the database was not reached.
+          if [ "$code" -ne 0 ] && ! grep -qE "have not yet been applied|Database schema is up to date" "$RUNNER_TEMP/status-before.log"; then
+            echo "::error::Could not read the migration status of the dev database. Check DEV_DIRECT_URL (session connection, port 5432) and the database password."
+            exit 1
+          fi
+      - name: Apply migrations (prisma migrate deploy)
+        working-directory: db
+        run: |
+          set -o pipefail
+          npx prisma migrate deploy 2>&1 | tee "$RUNNER_TEMP/deploy.log"
+      - name: Status after
+        working-directory: db
+        run: npx prisma migrate status
+      - name: Applied migrations
+        run: |
+          applied=$(grep -oE 'Applying migration `[^`]+`' "$RUNNER_TEMP/deploy.log" | sed -E 's/.*`([^`]+)`/- \1/' || true)
+          {
+            echo "### dev database migrations"
+            echo
+            echo "Applied in this run:"
+            if [ -n "$applied" ]; then echo "$applied"; else echo "- (none, already up to date)"; fi
+            echo
+            echo "All migrations now in the dev database:"
+            find db/prisma/migrations -mindepth 1 -maxdepth 1 -type d -printf '- %f\n' | sort
+          } | tee -a "$GITHUB_STEP_SUMMARY"

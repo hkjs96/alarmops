@@ -1,14 +1,15 @@
 // db checks run by `npm test`:
 // 1. `prisma validate` on schema.prisma
 // 2. migrations/0001_init/migration.sql generated part is in sync with schema.prisma
-// Works offline: DATABASE_URL gets a placeholder (validate never connects).
+// Works offline: DATABASE_URL and DIRECT_URL get a placeholder (validate never connects).
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const env = { ...process.env, DATABASE_URL: process.env.DATABASE_URL ?? 'postgresql://offline@localhost:5432/none' };
+const offline = 'postgresql://offline@localhost:5432/none';
+const env = { ...process.env, DATABASE_URL: process.env.DATABASE_URL ?? offline, DIRECT_URL: process.env.DIRECT_URL ?? offline };
 const v = spawnSync('npx', ['prisma', 'validate'], { cwd: root, env, encoding: 'utf8', shell: process.platform === 'win32' });
 process.stdout.write(v.stdout); process.stderr.write(v.stderr);
 if (v.status !== 0) {
