@@ -94,6 +94,15 @@ export function parsePanelRoute(customer: string, path: string[] | undefined): P
   return { customer, project: scope[0], service: scope[1], kind: "incident", id };
 }
 
+/** Parses /c/<customer>[/<project>[/<service>]]/call-order. null when the address is anything else. */
+export function parseCallOrderRoute(customer: string, path: string[] | undefined): { customer: string; project?: string; service?: string } | null {
+  const p = path ?? [];
+  if (p.length < 1 || p.length > 3 || p[p.length - 1] !== "call-order") return null;
+  const scope = p.slice(0, -1);
+  if (!isSlug(customer) || !scope.every(isSlug)) return null;
+  return { customer, project: scope[0], service: scope[1] };
+}
+
 /** The address must be the incident's own scope, segment for segment. */
 export function panelRouteMatches(route: PanelRoute, org: OrgSlugs): boolean {
   return (route.customer ?? undefined) === (org.customer?.slug ?? undefined)

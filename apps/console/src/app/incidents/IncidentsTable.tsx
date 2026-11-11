@@ -2,20 +2,20 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
-import { Avatar, Banner, Button, EmptyState, SevBadge, StatusBadge, cx } from "@alarmops/design-system";
+import { Avatar, Banner, Button, EmptyState, SAME_SPOT_MS, SevBadge, StatusBadge, cx, isSameSpot, markSpot, useStableRows } from "@alarmops/design-system";
 import type { IncidentListItem } from "@/lib/api/types";
 import { displayStatus, orgChainParts } from "@/lib/incidents";
 import { age, groupDigits, kstTime } from "@/lib/format";
-import { mergeView, pendingOf, pendingText, startView, type StableView } from "@/lib/stable-list";
 import { RowMenu } from "@/components/RowMenu";
-import { useShell } from "@/components/ShellContext";
+import { hasRole, roleReason, useShell } from "@/components/ShellContext";
+import { errorText } from "@/lib/errors";
+import { SESSION_ENDED, callAction, sessionEndReason } from "@/lib/session-ended";
 import { ackIncident, undoBulk } from "./actions";
 
 export type IncidentRow = IncidentListItem & { href: string };
 
-/** A second press at the same spot this soon after an Acknowledge is a double tap, not a decision. */
-export const DOUBLE_MS = 600;
-const SAME_SPOT_PX = 24;
+/** A second press at the same spot this soon after an Acknowledge is a double tap, not a decision (design-system list/same-spot: one rule for every list). */
+export const DOUBLE_MS = SAME_SPOT_MS;
 
 function ScopePath({ i }: { i: IncidentListItem }) {
   if (i.unmapped || !i.org.customer) {
@@ -69,21 +69,14 @@ export function IncidentsTable({ items, nowMs, openId, emptyKind, listKey = "", 
   const [busy, setBusy] = useState<Record<string, "ack" | "undo">>({}); // per row: one row waiting never locks another
   const [optim, setOptim] = useState<Record<string, number>>({}); // id → version acknowledged, until the list says so itself
   const tableRef = useRef<HTMLTableElement>(null);
-  const lastAck = useRef<{ t: number; x: number; y: number } | null>(null);
   const focusLabel = useRef<string | null>(null);
-  const barShownAt = useRef(0);
+  const canAck = hasRole(shell.user, "OPERATOR");
+  const noAck = canAck ? undefined : roleReason(shell.user, "OPERATOR", "Acknowledging");
 
-  const [stored, setView] = useState<StableView<IncidentRow>>(() => {
-    const kept = shell.listView.current as StableView<IncidentRow> | null;
-    return kept && kept.key === listKey ? mergeView(kept, items) : startView(items, listKey);
-  });
-  let view = stored;
-  if (view.key !== listKey) view = startView(items, listKey);
-  else if (view.src !== items) view = mergeView(view, items);
-  if (view !== stored) setView(view);
+  const stable = useStableRows(items, listKey, { keep: shell.listView });
+  const view = stable.view;
   const viewRef = useRef(view);
   viewRef.current = view;
-  useEffect(() => { shell.listView.current = view; }, [shell.listView, view]);
   useEffect(() => { setChanged({}); }, [listKey]);
 
   // A row whose content changes (acknowledged: the "escalated to …" note goes away) must not get shorter and pull the
@@ -139,21 +132,11 @@ export function IncidentsTable({ items, nowMs, openId, emptyKind, listKey = "", 
     return () => ro.disconnect();
   }, [view.rows.length === 0]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const pending = pendingText(pendingOf(view));
-  const hasPending = Boolean(pending);
-  useEffect(() => { if (hasPending) barShownAt.current = performance.now(); }, [hasPending]);
-  const resort = (e: MouseEvent) => {
-    // the bar may have come up under a second tap
-    if (e.detail > 0 && performance.now() - barShownAt.current < DOUBLE_MS) return;
-    setView(startView(items, listKey));
-  };
+  const pending = stable.pending;
+  const resort = (e: MouseEvent) => stable.resort(e);
 
-  /** true = a pointer press at the spot where an Acknowledge was pressed a moment ago: ignore it */
-  const doubleTap = (e?: MouseEvent) => {
-    const g = lastAck.current;
-    return Boolean(e && g && e.detail > 0 && performance.now() - g.t < DOUBLE_MS
-      && Math.abs(e.clientX - g.x) <= SAME_SPOT_PX && Math.abs(e.clientY - g.y) <= SAME_SPOT_PX);
-  };
+  /** true = a pointer press at the spot where a row action was pressed a moment ago: ignore it */
+  const doubleTap = (e?: MouseEvent) => isSameSpot(e);
   const setBusyFor = (id: string, v: "ack" | "undo" | null) => setBusy((b) => { const n = { ...b }; if (v) n[id] = v; else delete n[id]; return n; });
   const rowEl = (id: string) => tableRef.current?.querySelector<HTMLElement>(`tr[data-id="${CSS.escape(id)}"]`);
   /** the control that had the focus is about to be replaced: the focus goes to what replaces it, or to the row's title */
@@ -179,21 +162,25 @@ export function IncidentsTable({ items, nowMs, openId, emptyKind, listKey = "", 
     if (fromRow) focusLabel.current = i.id; // from the toast, the focus stays where it is
     measure();
     setBusyFor(i.id, "undo");
-    const r = await undoBulk(token);
+    const r = await callAction(() => undoBulk(token));
+    // the session is gone: nothing was undone and nothing is forgotten — the row stays as it is, the shell asks to sign in
+    if (!r.ok && r.code === SESSION_ENDED) { setBusyFor(i.id, null); setError(errorText(r)); return; }
     shell.setAck(i.id, null);
     setOptim((o) => { const n = { ...o }; delete n[i.id]; return n; });
     setBusyFor(i.id, null);
-    if (!r.ok) setError(r.message);
+    if (!r.ok) setError(r.code === "NOT_FOUND" ? "Undo is no longer available: it works once, for 5 minutes, for the person who acknowledged." : errorText(r, { what: "Undoing an acknowledgement" }));
+    // someone touched the incident since: it is not put back, and that is said
+    else if (!r.data.restored.includes(i.id)) setError(`Could not undo — ${i.title} was changed again since you acknowledged it. It stays as it is now.`);
     else { if (focusLabel.current === i.id) wantButton.current = i.id; shell.mark(i.id, "REOPENED"); shell.toast(`Acknowledge undone in ${pathText(i)} · paging continues`); }
     router.refresh();
   };
   const doAck = async (i: IncidentListItem, e?: MouseEvent) => {
-    if (busy[i.id] || doubleTap(e)) return;
-    if (e && e.detail > 0) lastAck.current = { t: performance.now(), x: e.clientX, y: e.clientY };
+    if (busy[i.id] || doubleTap(e) || !canAck) return;
+    if (e) markSpot(e);
     keepFocus(i.id);
     measure();
     setBusyFor(i.id, "ack");
-    const r = await ackIncident(i.id, i.version);
+    const r = await callAction(() => ackIncident(i.id, i.version));
     setBusyFor(i.id, null);
     if (r.ok) {
       const token = r.data.undoToken;
@@ -206,8 +193,8 @@ export function IncidentsTable({ items, nowMs, openId, emptyKind, listKey = "", 
       // someone or something changed it since this list was loaded: nothing was acknowledged, the row says so
       setChanged((c) => ({ ...c, [i.id]: i.version }));
     } else {
-      setError(r.message);
-      router.refresh();
+      setError(errorText(r, { what: "Acknowledging", where: pathText(i) }));
+      if (!sessionEndReason()) router.refresh();
     }
   };
   const reload = (id: string, e: MouseEvent) => {
@@ -256,6 +243,8 @@ export function IncidentsTable({ items, nowMs, openId, emptyKind, listKey = "", 
   return (
     <>
       {error ? <Banner tone="red" action={<Button size="sm" onClick={() => setError(null)}>Dismiss</Button>}>{error}</Banner> : null}
+      {/* in words on the page, not in a tooltip: a phone has no hover (QA 재점검 P3-A) */}
+      {noAck ? <p className="list-why" data-testid="list-role-why">Read only. {noAck}</p> : null}
       {/* always here and always the same height: when it has something to say, nothing below it moves */}
       <div className={cx("list-bar", pending && "on")} data-testid="list-bar">
         {pending ? (
@@ -300,7 +289,7 @@ export function IncidentsTable({ items, nowMs, openId, emptyKind, listKey = "", 
                 const token = acked[i.id];
                 return (
                   <tr
-                    key={i.id} data-id={i.id} data-testid="incident-row" aria-current={cur ? "true" : undefined}
+                    key={i.id} data-id={i.id} data-row-key={i.id} data-testid="incident-row" aria-current={cur ? "true" : undefined}
                     data-inplace={inPlace ? "1" : undefined} data-gone={gone ? "1" : undefined}
                     data-lock={locks[i.id] !== undefined ? "1" : undefined} style={locks[i.id] !== undefined ? ({ "--lock-h": `${locks[i.id]}px` } as CSSProperties) : undefined}
                     className={cx(ds === "TRIGGERED" && "hot", ds === "ESCALATED" && "esc", cur && "cur", stale && "stale", inPlace && status !== "TRIGGERED" && "dim")}
@@ -325,7 +314,7 @@ export function IncidentsTable({ items, nowMs, openId, emptyKind, listKey = "", 
                     <td className="r c-act">
                       {stale ? (
                         <span className="act warn">
-                          <Button key="b" size="sm" className="act-2" onClick={(e) => reload(i.id, e)} aria-label={`Reload the list, ${i.title} changed`}>Reload</Button>
+                          <Button key="b" size="sm" className="act-2" data-list-action="incident.reload" onClick={(e) => reload(i.id, e)} aria-label={`Reload the list, ${i.title} changed`}>Reload</Button>
                           <span key="l" className="act-l" role="status" title="Changed since you loaded this list. It was not acknowledged.">Not acknowledged</span>
                         </span>
                       ) : gone ? (
@@ -337,11 +326,11 @@ export function IncidentsTable({ items, nowMs, openId, emptyKind, listKey = "", 
                       ) : working === "undo" ? (
                         <span className="act"><span key="l" className="act-l" role="status" tabIndex={-1} data-focus>Undoing…</span></span>
                       ) : status === "TRIGGERED" && !i.unmapped ? (
-                        <span className="act"><Button key="a" size="sm" onClick={(e) => { void doAck(i, e); }} aria-label={`Acknowledge ${i.title}`}>Acknowledge</Button></span>
+                        <span className="act"><Button key="a" size="sm" data-list-action="incident.ack" disabled={!canAck} title={noAck} onClick={(e) => { void doAck(i, e); }} aria-label={`Acknowledge ${i.title}`}>Acknowledge</Button></span>
                       ) : status === "ACKNOWLEDGED" && (token || inPlace) ? (
                         <span className="act">
                           {/* Undo is not where Acknowledge was (QA P2-A): it is behind "…", at the other end of the cell, and in the toast */}
-                          {token ? <RowMenu key="m" label={`More for ${i.title}`} items={[{ label: "Undo acknowledge", onSelect: () => { void undoAck(i, token, true); } }]} /> : null}
+                          {token ? <RowMenu key="m" label={`More for ${i.title}`} items={[{ label: "Undo acknowledge", action: "incident.undo-ack", onSelect: () => { void undoAck(i, token, true); } }]} /> : null}
                           <span key="l" className="act-l" role="status" tabIndex={-1} data-focus data-testid="ack-label">
                             Acknowledged <span aria-hidden="true">✓</span>{i.acknowledgedAt && !ackedNow ? <span className="act-t"> {kstTime(i.acknowledgedAt)}</span> : null}
                           </span>

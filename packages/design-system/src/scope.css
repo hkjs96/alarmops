@@ -174,6 +174,19 @@ a.outside:hover { text-decoration: underline; }
 .dguard-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
 .dguard-acts .btn { height: auto; min-height: 30px; white-space: normal; text-align: left; }
 
+.cdlg { max-height: calc(100dvh - 32px); display: flex; flex-direction: column; }
+.cdlg-b { overflow-y: auto; min-height: 0; }
+.cdlg-b ul { margin: 6px 0; padding-left: 20px; }
+.cdlg-warn { margin: 0 0 12px; padding: 10px 12px; border: 2px solid var(--red); background: var(--red-t); color: var(--ink); font-size: 15px; font-weight: 600; line-height: 1.4; }
+.cdlg-warn.amber { border-color: var(--amber); background: var(--amber-t); }
+.cdlg-warn small { display: block; margin-top: 4px; font-size: 13px; font-weight: 400; color: var(--ink2); }
+
+/* what a removed row leaves in its place (list/Tombstone) */
+.tomb { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; font-size: 13px; color: var(--ink2); }
+.tomb-t { min-width: 0; overflow-wrap: anywhere; }
+.tomb-t b { color: var(--ink); }
+.tomb-u { flex: none; }
+
 @media (max-width: 760px) {
   /* the filter and what it hides stay in sight while the list scrolls */
   .sline { padding: 6px 16px; gap: 6px; position: sticky; top: 0; z-index: 30; }

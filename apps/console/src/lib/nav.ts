@@ -22,7 +22,15 @@ export const NAV: NavSection[] = [
       { label: "Sync runs", href: "/monitoring/sync-runs" },
     ],
   },
-  { key: "call-order", label: "Call order", href: "/call-order", match: ["call-order"], sub: [] },
+  {
+    // D-26: Rotations and Templates are tabs of Call order
+    key: "call-order", label: "Call order", href: "/call-order", match: ["call-order"],
+    sub: [
+      { label: "Call order", href: "/call-order" },
+      { label: "Rotations", href: "/call-order/rotations" },
+      { label: "Templates", href: "/call-order/templates" },
+    ],
+  },
   { key: "people", label: "People", href: "/people", match: ["people"], sub: [] },
   { key: "maintenance", label: "Maintenance", short: "Maint.", href: "/maintenance", match: ["maintenance"], sub: [] },
   // D-26: Customers is a top-level menu. The list is a stub for now; it lives in the shell like the others.
@@ -40,7 +48,13 @@ export const NAV: NavSection[] = [
   },
 ];
 
+/** Panel addresses are /c/<scope>/<screen>[/<id>]: the screen segment says which list the panel belongs to. */
+export function panelListPath(pathname: string): string {
+  return /^\/c\/.+\/call-order$/.test(pathname) ? "/call-order" : "/incidents";
+}
+
 export function sectionFor(pathname: string): NavSection | undefined {
   const seg = pathname.split("/")[1] ?? "";
+  if (seg === "c") return NAV.find((s) => s.href === panelListPath(pathname)) ?? NAV[0];
   return NAV.find((s) => s.match.includes(seg));
 }

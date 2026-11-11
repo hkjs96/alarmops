@@ -21,3 +21,8 @@ export { ScopeLine, OutsideLine, type ScopeLineProps, type OutsideLineProps, typ
 export { ScopeSheet, type ScopeSheetProps } from "./scope/ScopeSheet";
 export { Panel, type PanelProps } from "./scope/Panel";
 export { DirtyGuard, type DirtyGuardProps } from "./scope/DirtyGuard";
+export { ConfirmDialog, type ConfirmDialogProps } from "./scope/ConfirmDialog";
+export * from "./list/stable-list";
+export { SAME_SPOT_MS, SAME_SPOT_PX, markSpot, isSameSpot, clearSpot, installSameSpotGuard } from "./list/same-spot";
+export { useStableRows, type StableRows } from "./list/useStableRows";
+export { Tombstone, type TombstoneProps } from "./list/Tombstone";

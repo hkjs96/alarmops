@@ -4,7 +4,7 @@
  * Clock is frozen at Mon Nov 9 2026 03:16:16 KST so ages match the mockup.
  */
 import type {
-  IncidentDetail, IncidentEvent, IncidentListItem, NotificationLogEntry, OncallNowEntry, Severity,
+  EscalationProgress, IncidentDetail, IncidentEvent, IncidentListItem, NotificationLogEntry, OncallNowEntry, Severity,
 } from "../types";
 import { orgOf } from "./scope-fixtures";
 
@@ -16,6 +16,11 @@ const KST = (hhmmss: string, day = "2026-11-09") => {
   return d.toISOString().replace(".000", "");
 };
 
+/** `escalation` as the API sends it (packages/api incidents.ts): always an object, with the state that says why paging is or is not going on. */
+export function esc(p: Partial<EscalationProgress> & Pick<EscalationProgress, "state">): EscalationProgress {
+  const step = p.step ?? 0;
+  return { step, firedSteps: p.totalSteps ? step + 1 : 0, totalSteps: 0, repeat: 0, repeatCount: 0, nextAt: null, nextLabel: null, doneAt: null, baseAt: null, stoppedAt: null, renotifyAt: null, mutedByMaintenance: false, ...p };
+}
 const MIRAE = "mirae";
 const HANBIT = "hanbit";
 const DAON = "daon";
@@ -29,10 +34,7 @@ export const openIncidents: IncidentListItem[] = [
     awsAccountIds: ["827311046650"], resourceTypes: ["RDS"], source: "CLOUDWATCH", env: "prd", memberCount: 3,
     assignee: { contactId: "ct_haeun", name: "Haeun Kim", via: "on shift in MSP night desk" },
     assigneeNote: "next: call Yuna at 03:22",
-    escalation: {
-      step: 0, totalSteps: 3, repeat: 0, repeatCount: 1, nextAt: KST("03:22:04"), doneAt: null, baseAt: KST("03:12:04"),
-      summary: "call Yuna at 03:22", nextLabel: "Step 2 · call Yuna Seo (Mirae Pay)",
-    },
+    escalation: esc({ state: "PAGING", step: 0, totalSteps: 3, repeatCount: 1, nextAt: KST("03:22:04"), baseAt: KST("03:12:04"), nextLabel: "Step 2 · call Yuna Seo (Mirae Pay)" }),
     triggeredAt: KST("03:12:04"), acknowledgedAt: null, resolvedAt: null, version: 4,
   },
   {
@@ -42,10 +44,7 @@ export const openIncidents: IncidentListItem[] = [
     awsAccountIds: ["330188124407"], resourceTypes: ["ALB"], source: "CLOUDWATCH", env: "prd", memberCount: 2,
     assignee: { contactId: "ct_junho", name: "Junho Park", via: "on shift in Hanbit on-call" },
     assigneeNote: "on shift in Hanbit on-call · called 03:12",
-    escalation: {
-      step: 2, totalSteps: 4, repeat: 0, repeatCount: 1, nextAt: KST("03:17:04"), doneAt: null, baseAt: KST("03:12:04"),
-      summary: "everyone in 1m", nextLabel: "Step 4 · call everyone in Responders (4) · Hanbit Logistics",
-    },
+    escalation: esc({ state: "PAGING", step: 2, totalSteps: 4, repeatCount: 1, nextAt: KST("03:17:04"), baseAt: KST("03:12:04"), nextLabel: "Step 4 · call everyone in Responders (4) · Hanbit Logistics" }),
     triggeredAt: KST("03:05:12"), acknowledgedAt: null, resolvedAt: null, version: 7,
   },
   {
@@ -55,17 +54,14 @@ export const openIncidents: IncidentListItem[] = [
     awsAccountIds: [], resourceTypes: ["Node"], source: "PROMETHEUS", memberCount: 1,
     assignee: { contactId: "ct_junho", name: "Junho, Minjae, Soyeon", via: "all at once" },
     assigneeNote: "all at once · next: call all 3 at 7 min",
-    escalation: {
-      step: 1, totalSteps: 3, repeat: 0, repeatCount: 1, nextAt: KST("03:21:01"), doneAt: null, baseAt: KST("03:14:01"),
-      summary: "Slack + SMS sent",
-    },
+    escalation: esc({ state: "PAGING", step: 1, totalSteps: 3, repeatCount: 1, nextAt: KST("03:21:01"), baseAt: KST("03:14:01"), nextLabel: "Step 3 · call everyone in Responders (3)" }),
     triggeredAt: KST("03:14:01"), acknowledgedAt: null, resolvedAt: null, version: 2,
   },
   {
     id: "inc-55e0a7b19c4f-20261108175002", number: 5516, key: "INC-20261109-0250-55E0",
     title: "3 alarms from unmapped account", severity: "SEV_3", status: "TRIGGERED", escalated: false,
     org: org(null), unmapped: true, awsAccountIds: ["481220935017"], resourceTypes: ["EC2"], source: "CLOUDWATCH",
-    memberCount: 3, assignee: null, escalation: null,
+    memberCount: 3, assignee: null, escalation: esc({ state: "NEVER_ESCALATING" }),
     triggeredAt: KST("02:50:02"), acknowledgedAt: null, resolvedAt: null, version: 3,
   },
   {
@@ -74,7 +70,7 @@ export const openIncidents: IncidentListItem[] = [
     org: org(HANBIT, "Ops", "Batch"), unmapped: false,
     awsAccountIds: ["330188124407"], resourceTypes: ["EC2"], source: "CLOUDWATCH", env: "prd", memberCount: 1,
     assignee: { contactId: "ct_haeun", name: "Haeun Kim" }, assigneeNote: "ack'd 02:58",
-    escalation: { step: 0, totalSteps: 3, repeat: 0, repeatCount: 1, nextAt: null, doneAt: KST("02:58:00"), summary: "stopped · re-notify 03:58" },
+    escalation: esc({ state: "STOPPED_ACKED", step: 0, totalSteps: 3, repeatCount: 1, stoppedAt: KST("02:58:00"), renotifyAt: KST("03:58:00") }),
     triggeredAt: KST("02:57:10"), acknowledgedAt: KST("02:58:00"), resolvedAt: null, version: 5,
   },
   {
@@ -83,7 +79,7 @@ export const openIncidents: IncidentListItem[] = [
     org: org(DAON, "Commerce", "Checkout"), unmapped: false,
     awsAccountIds: [], resourceTypes: ["Service"], source: "GRAFANA", memberCount: 4,
     assignee: { contactId: "ct_minjae", name: "Minjae Lee" }, assigneeNote: "ack'd 02:41",
-    escalation: { step: 0, totalSteps: 3, repeat: 0, repeatCount: 1, nextAt: null, doneAt: KST("02:41:00"), summary: "stopped" },
+    escalation: esc({ state: "STOPPED_ACKED", step: 0, totalSteps: 3, repeatCount: 1, stoppedAt: KST("02:41:00") }),
     triggeredAt: KST("02:38:02"), acknowledgedAt: KST("02:41:00"), resolvedAt: null, version: 6,
   },
   {
@@ -92,7 +88,7 @@ export const openIncidents: IncidentListItem[] = [
     org: org("bora", "Main", "Web"), unmapped: false,
     awsAccountIds: ["560914472281"], resourceTypes: ["EC2"], source: "CLOUDWATCH", env: "prd", memberCount: 1,
     assignee: { contactId: "ct_haeun", name: "Haeun Kim" }, assigneeNote: "ack'd 02:20",
-    escalation: { step: 0, totalSteps: 4, repeat: 0, repeatCount: 1, nextAt: null, doneAt: KST("02:20:50"), summary: "stopped" },
+    escalation: esc({ state: "STOPPED_ACKED", step: 0, totalSteps: 4, repeatCount: 1, stoppedAt: KST("02:20:50") }),
     triggeredAt: KST("02:19:40"), acknowledgedAt: KST("02:20:50"), resolvedAt: null, version: 3,
   },
 ];
@@ -132,7 +128,7 @@ export const resolvedIncidents: IncidentListItem[] = RESOLVED_TITLES.map(([title
     memberCount: 1 + (i % 3),
     assignee: auto ? null : { contactId: "ct_haeun", name: "Haeun Kim" },
     assigneeNote: auto ? "resolved automatically" : "resolved by Haeun Kim",
-    escalation: null, triggeredAt: trig, acknowledgedAt: auto ? null : trig, resolvedAt: res, version: 3,
+    escalation: esc({ state: "STOPPED_RESOLVED", stoppedAt: res }), triggeredAt: trig, acknowledgedAt: auto ? null : trig, resolvedAt: res, version: 3,
     resolvedVia: auto ? "AUTO" : "MANUAL",
   };
 });
@@ -169,9 +165,10 @@ export const paymentsDetailExtra: Omit<IncidentDetail, keyof IncidentListItem> =
     { id: "al_3", fingerprint: "cloudwatch:827311046650:827311046650#payments-db-1#DiskQueueDepth", title: "payments-db-1 DiskQueueDepth above 20", status: "FIRING", severity: "SEV_3", metricKey: "DiskQueueDepth", resourceId: "res_paydb1", value: 31, threshold: 20, eventCount: 1, lastEventAt: KST("03:12:00") },
   ],
   assignmentSnapshot: {
-    capturedAt: KST("03:12:04"), pagingConfigId: "pc_mirae", planLabel: "Custom steps · Urgent (edited)", level: "CUSTOMER", repeatCount: 1,
+    // the server's wording; the panel words it the way Call order does (lib/call-order/plan-label.ts)
+    capturedAt: KST("03:12:04"), pagingConfigId: "pc_cus_mirae", planLabel: "Custom steps · Urgent (edited)", level: "CUSTOMER", repeatCount: 1,
     steps: [
-      { index: 0, atMin: 0, targetType: "ROTATION", targetId: "rot_night", resolved: [{ contactId: "ct_haeun", name: "Haeun Kim", via: "on shift in MSP night desk" }], channels: ["SLACK_BOT", "VOICE"] },
+      { index: 0, atMin: 0, targetType: "ROTATION", targetId: "rot_night", resolved: [{ contactId: "ct_haeun", name: "Haeun Kim", via: "on shift in MSP night desk" }], channels: ["SLACK_CHANNEL", "VOICE"] },
       { index: 1, atMin: 10, targetType: "PERSON", targetId: "ct_yuna", resolved: [{ contactId: "ct_yuna", name: "Yuna Seo", via: "Mirae Pay" }], channels: ["VOICE"] },
       { index: 2, atMin: 15, targetType: "ALL_RESPONDERS", resolved: [], channels: ["VOICE"], label: "everyone in Responders (5)" },
     ],
@@ -217,11 +214,11 @@ export const timelines: Record<string, IncidentEvent[]> = {
 
 export const notifications: Record<string, NotificationLogEntry[]> = {
   [PAY_ID]: [
-    { id: "nl6", at: KST("03:12:07"), channel: "EMAIL", status: "SENT", targetSummary: "Hyejin Lim", escalationStep: 0, error: null },
-    { id: "nl5", at: KST("03:12:07"), channel: "EMAIL", status: "SENT", targetSummary: "Hana Noh", escalationStep: 0, error: null },
-    { id: "nl4", at: KST("03:12:07"), channel: "EMAIL", status: "SENT", targetSummary: "Seojun Bae", escalationStep: 0, error: null },
-    { id: "nl3", at: KST("03:12:06"), channel: "VOICE", status: "SENT", targetSummary: "Haeun Kim", escalationStep: 0, error: null },
-    { id: "nl2", at: KST("03:12:06"), channel: "SLACK_DM", status: "SENT", targetSummary: "Haeun Kim", escalationStep: 0, error: null },
-    { id: "nl1", at: KST("03:12:06"), channel: "SLACK_BOT", status: "SENT", targetSummary: "#mirae-ops", escalationStep: 0, error: null },
+    { id: "nl6", at: KST("03:12:07"), channel: "EMAIL", status: "SENT", targetSummary: "Hyejin Lim", escalationStep: 0, reason: null, attempt: 1, error: null },
+    { id: "nl5", at: KST("03:12:07"), channel: "EMAIL", status: "SENT", targetSummary: "Hana Noh", escalationStep: 0, reason: null, attempt: 1, error: null },
+    { id: "nl4", at: KST("03:12:07"), channel: "EMAIL", status: "SENT", targetSummary: "Seojun Bae", escalationStep: 0, reason: null, attempt: 1, error: null },
+    { id: "nl3", at: KST("03:12:06"), channel: "VOICE", status: "SENT", targetSummary: "Haeun Kim", escalationStep: 0, reason: null, attempt: 1, error: null },
+    { id: "nl2", at: KST("03:12:06"), channel: "SLACK_DM", status: "SENT", targetSummary: "Haeun Kim", escalationStep: 0, reason: null, attempt: 1, error: null },
+    { id: "nl1", at: KST("03:12:06"), channel: "SLACK_BOT", status: "SENT", targetSummary: "#mirae-ops", escalationStep: 0, reason: null, attempt: 1, error: null },
   ],
 };

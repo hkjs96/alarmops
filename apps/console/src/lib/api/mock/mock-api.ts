@@ -1,23 +1,38 @@
 import { ApiError, type ConsoleApi } from "../client";
-import type { AckResult, BulkItem, BulkResult, IncidentDetail, IncidentEvent, IncidentListItem, IncidentListQuery, IncidentStatus, ScopeTreeResponse } from "../types";
+import type { AckResult, BulkItem, BulkResult, IncidentDetail, IncidentEvent, IncidentListItem, IncidentListQuery, IncidentStatus, Role, ScopeTreeResponse, UndoResult } from "../types";
 import { computeCounts, isOpen, matchesBaseFilters, matchesStatus, outsideCounts, sortIncidents } from "../../incidents";
 import { isSlug } from "../../validate";
 import * as fx from "./fixtures";
 import { customers14, customers34, type FxCustomer } from "./scope-fixtures";
+import { createPaging, type FxPaging } from "./paging-fixtures";
+import { createPagingApi, hasOwnSteps, healthOf } from "./paging-mock";
 
 interface Store {
   customers: FxCustomer[];
   incidents: IncidentListItem[];
   timelines: Record<string, IncidentEvent[]>;
-  undo: Map<string, { snapshot: IncidentListItem[]; exp: number }>;
+  undo: Map<string, { snapshot: IncidentListItem[]; after: Record<string, number>; by: string; exp: number }>;
+  paging: FxPaging;
 }
 
-const ME = { id: "usr_haeun", contactId: "ct_haeun", name: "Haeun Kim", email: "haeun@msp.example", role: "OPERATOR" as const };
+export interface MockUser { id: string; contactId: string; name: string; email: string; role: Role }
+/**
+ * The people who can sign in to the mock (/auth/dev-login?as=…), by session subject. Changing who gets called is an
+ * ADMIN action in the contract (§8.3), acknowledging an OPERATOR one, so the default user is an admin and the other
+ * two are there to see the console as someone who may do less.
+ */
+export const MOCK_USERS: Record<string, MockUser> = {
+  "usr-haeun": { id: "usr_haeun", contactId: "ct_haeun", name: "Haeun Kim", email: "haeun@msp.example", role: "ADMIN" },
+  "usr-minjae": { id: "usr_minjae", contactId: "ct_minjae", name: "Minjae Lee", email: "minjae@msp.example", role: "OPERATOR" },
+  "usr-sora": { id: "usr_sora", contactId: "ct_sora", name: "Sora Yoon", email: "sora@msp.example", role: "VIEWER" },
+};
+const RANK: Record<Role, number> = { VIEWER: 0, OPERATOR: 1, ADMIN: 2 };
 
 /** `customers: 34` adds the 20 extra customers of the mockup's "34 customers" toggle. */
 export function createStore(opts: { customers?: 14 | 34 } = {}): Store {
+  const customers = opts.customers === 34 ? customers34 : customers14;
   return {
-    customers: opts.customers === 34 ? customers34 : customers14,
+    customers, paging: createPaging(customers),
     incidents: structuredClone([...fx.openIncidents, ...fx.resolvedIncidents]),
     timelines: structuredClone(fx.timelines),
     undo: new Map(),
@@ -32,8 +47,10 @@ const notFound = () => new ApiError(404, "NOT_FOUND", "Not found.", `req_mock_${
  * counts on the same filter basis, If-Match version checks (409 VERSION_CONFLICT),
  * bulk preview → execute → undoToken (5 min).
  */
-export function createMockApi(store: Store = createStore(), clock: () => number = () => Date.parse(fx.MOCK_NOW)): ConsoleApi {
+export function createMockApi(store: Store = createStore(), clock: () => number = () => Date.parse(fx.MOCK_NOW), ME: MockUser = MOCK_USERS["usr-haeun"]!): ConsoleApi {
   const find = (id: string) => store.incidents.find((i) => i.id === id);
+  /** after "can you see it" (404), before the version and the state: 403 ROLE_REQUIRED */
+  const need = (role: Role) => { if (RANK[ME.role] < RANK[role]) throw new ApiError(403, "ROLE_REQUIRED", `This action needs the ${role} role.`, `req_mock_${++reqSeq}`, { role }); };
   const nowIso = () => new Date(clock()).toISOString().replace(".000", "");
 
   /**
@@ -83,11 +100,11 @@ export function createMockApi(store: Store = createStore(), clock: () => number 
       i.acknowledgedAt = at;
       i.acknowledgedBy = { contactId: ME.contactId, name: ME.name };
       i.assigneeNote = `ack'd ${new Date(clock() + 9 * 3600_000).toISOString().slice(11, 16)}`;
-      if (i.escalation) i.escalation = { ...i.escalation, nextAt: null, doneAt: at, summary: "stopped" };
+      if (i.escalation.state !== "NEVER_ESCALATING") i.escalation = { ...i.escalation, state: "STOPPED_ACKED", nextAt: null, nextLabel: null, stoppedAt: at };
     } else {
       i.resolvedAt = at;
       i.resolvedVia = "MANUAL";
-      i.escalation = null;
+      i.escalation = { ...i.escalation, state: "STOPPED_RESOLVED", nextAt: null, nextLabel: null, stoppedAt: i.acknowledgedAt ?? at };
     }
     (store.timelines[i.id] ??= []).unshift({
       id: `ev_${i.version}_${to}`, at, kind: to === "ACKNOWLEDGED" ? "ACKED" : "RESOLVED", actorType: "USER", actorId: ME.id,
@@ -95,10 +112,10 @@ export function createMockApi(store: Store = createStore(), clock: () => number 
     });
   }
 
-  /** undo token for a single ack or a bulk run: 5 minutes */
+  /** undo token for a single ack or a bulk run: 5 minutes, the person who pressed, once */
   function remember(snapshot: IncidentListItem[]): string {
     const undoToken = `undo_${++reqSeq}`;
-    store.undo.set(undoToken, { snapshot, exp: clock() + 5 * 60_000 });
+    store.undo.set(undoToken, { snapshot, after: Object.fromEntries(snapshot.map((s) => [s.id, find(s.id)!.version])), by: ME.id, exp: clock() + 5 * 60_000 });
     return undoToken;
   }
 
@@ -106,7 +123,14 @@ export function createMockApi(store: Store = createStore(), clock: () => number 
     if (i.version !== version) throw new ApiError(409, "VERSION_CONFLICT", "Incident was updated by someone else.", `req_mock_${++reqSeq}`);
   }
 
+  const pagingApi = createPagingApi({
+    customers: store.customers, paging: store.paging, me: ME, now: nowIso,
+    openCustomerIds: () => new Set(store.incidents.filter(isOpen).map((i) => i.org.customer?.id).filter((v): v is string => Boolean(v))),
+    err: (status, code, message, details) => new ApiError(status, code, message, `req_mock_${++reqSeq}`, details),
+  });
+
   return {
+    ...pagingApi,
     async me() { return { id: ME.id, name: ME.name, email: ME.email, role: ME.role }; },
     async listIncidents(q = {}) {
       const scope = scopeOf(q);
@@ -138,6 +162,7 @@ export function createMockApi(store: Store = createStore(), clock: () => number 
     async ack(id, version): Promise<AckResult> {
       const i = find(id);
       if (!i) throw notFound();
+      need("OPERATOR");
       checkVersion(i, version);
       const snapshot = [structuredClone(i)];
       transition(i, "ACKNOWLEDGED");
@@ -146,6 +171,7 @@ export function createMockApi(store: Store = createStore(), clock: () => number 
     async resolve(id, version) {
       const i = find(id);
       if (!i) throw notFound();
+      need("OPERATOR");
       checkVersion(i, version);
       transition(i, "RESOLVED");
       return detail(i);
@@ -153,27 +179,33 @@ export function createMockApi(store: Store = createStore(), clock: () => number 
     async escalate(id, version) {
       const i = find(id);
       if (!i) throw notFound();
+      need("OPERATOR");
       checkVersion(i, version);
-      if (i.status !== "TRIGGERED" || !i.escalation) throw new ApiError(409, "INVALID_TRANSITION", "Nothing to escalate.", `req_mock_${++reqSeq}`);
+      if (i.status !== "TRIGGERED") throw new ApiError(409, "INVALID_TRANSITION", "Only a triggered incident can be escalated.", `req_mock_${++reqSeq}`);
+      if (i.escalation.state === "MUTED") throw new ApiError(409, "MUTED_BY_MAINTENANCE", "Paging for this incident is muted by a maintenance window. Only SEV-1 incidents page during maintenance.", `req_mock_${++reqSeq}`, { mutedUntil: null });
+      if (i.escalation.state !== "PAGING" && i.escalation.state !== "UNREACHABLE") throw new ApiError(409, "INVALID_TRANSITION", "No call order applies to this incident: there is nobody to escalate to.", `req_mock_${++reqSeq}`);
       i.escalated = true;
       i.version += 1;
-      i.escalation = { ...i.escalation, step: Math.min(i.escalation.step + 1, i.escalation.totalSteps - 1) };
+      const step = Math.min(i.escalation.step + 1, i.escalation.totalSteps - 1);
+      i.escalation = { ...i.escalation, step, firedSteps: step + 1 };
       return detail(i);
     },
     async bulkPreview(action, items: BulkItem[]) {
+      need("OPERATOR");
       const targets = [];
       const skipped = [];
       for (const { id, version } of items) {
         const i = find(id);
-        if (!i) { skipped.push({ id, reason: "Not found" }); continue; }
-        if (i.version !== version) { skipped.push({ id, reason: "Changed since you loaded the list" }); continue; }
+        if (!i) { skipped.push({ id, reason: "NOT_FOUND" }); continue; }
+        if (i.version !== version) { skipped.push({ id, reason: "VERSION_CONFLICT" }); continue; }
         const ok = action === "ack" ? i.status === "TRIGGERED" : i.status !== "RESOLVED";
         if (ok) targets.push({ id: i.id, key: i.key, title: i.title, status: i.status });
-        else skipped.push({ id, reason: action === "ack" ? "Already acknowledged" : "Already resolved" });
+        else skipped.push({ id, reason: "INVALID_TRANSITION" });
       }
       return { action, targets, skipped };
     },
     async bulkExecute(action, items: BulkItem[]): Promise<BulkResult> {
+      need("OPERATOR");
       // a version that moved on is skipped and reported; the rest runs (API-CONTRACT §8.1)
       const done: IncidentListItem[] = [];
       const conflicts: BulkResult["conflicts"] = [];
@@ -188,17 +220,25 @@ export function createMockApi(store: Store = createStore(), clock: () => number 
       for (const i of done) transition(i, action === "ack" ? "ACKNOWLEDGED" : "RESOLVED");
       return { done: done.map((i) => i.id), conflicts, undoToken: remember(snapshot) };
     },
-    async bulkUndo(undoToken) {
+    async bulkUndo(undoToken): Promise<UndoResult> {
+      need("OPERATOR");
       const u = store.undo.get(undoToken);
-      if (!u || u.exp < clock()) throw new ApiError(409, "INVALID_TRANSITION", "Undo window has expired.", `req_mock_${++reqSeq}`);
+      // unknown, used, expired and someone else's token: the same 404 (API-CONTRACT §8.1)
+      if (!u || u.exp < clock() || u.by !== ME.id) throw notFound();
       store.undo.delete(undoToken);
+      const restored: string[] = [];
+      const skipped: UndoResult["skipped"] = [];
       for (const snap of u.snapshot) {
         const idx = store.incidents.findIndex((i) => i.id === snap.id);
-        if (idx >= 0) store.incidents[idx] = { ...snap, version: store.incidents[idx]!.version + 1 };
+        if (idx < 0) { skipped.push({ id: snap.id, code: "NOT_FOUND" }); continue; }
+        // only what nobody touched since: the version must still be the one the action left
+        if (store.incidents[idx]!.version !== u.after[snap.id]) { skipped.push({ id: snap.id, code: "VERSION_CONFLICT" }); continue; }
+        store.incidents[idx] = { ...snap, version: store.incidents[idx]!.version + 1 };
         const tl = store.timelines[snap.id];
         if (tl?.[0] && (tl[0].kind === "ACKED" || tl[0].kind === "RESOLVED") && tl[0].actorId === ME.id) tl.shift();
+        restored.push(snap.id);
       }
-      return { restored: u.snapshot.map((s) => s.id) };
+      return { restored, skipped };
     },
     async oncallNow() { return structuredClone(fx.oncallNow); },
     async scopeTree(): Promise<ScopeTreeResponse> {
@@ -206,12 +246,12 @@ export function createMockApi(store: Store = createStore(), clock: () => number 
       const n = (f: (i: IncidentListItem) => boolean) => open.filter(f).length;
       return {
         customers: store.customers.map((c) => ({
-          id: c.id, slug: c.slug, name: c.name, mine: c.mine, callHealth: c.callHealth,
+          id: c.id, slug: c.slug, name: c.name, mine: c.mine, callHealth: healthOf(store.paging, c).level,
           openIncidents: n((i) => i.org.customer?.id === c.id),
           projects: c.projects.map((p) => ({
-            id: p.id, slug: p.slug, name: p.name, ownSteps: p.ownSteps,
+            id: p.id, slug: p.slug, name: p.name, ownSteps: hasOwnSteps(store.paging, c.id, "PROJECT", p.id),
             openIncidents: n((i) => i.org.project?.id === p.id),
-            services: p.services.map((v) => ({ id: v.id, slug: v.slug, name: v.name, ownSteps: v.ownSteps, openIncidents: n((i) => i.org.service?.id === v.id) })),
+            services: p.services.map((v) => ({ id: v.id, slug: v.slug, name: v.name, ownSteps: hasOwnSteps(store.paging, c.id, "SERVICE", v.id), openIncidents: n((i) => i.org.service?.id === v.id) })),
           })),
         })),
       };

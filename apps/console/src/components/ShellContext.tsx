@@ -1,11 +1,22 @@
 "use client";
 import { createContext, useContext, useLayoutEffect } from "react";
-import type { ScopeSel } from "@alarmops/design-system";
-import type { OutsideCounts } from "@/lib/api/types";
+import type { ScopeCustomerNode, ScopeSel } from "@alarmops/design-system";
+import type { OutsideCounts, Role } from "@/lib/api/types";
+import { roleAtLeast } from "@/lib/roles";
 
 export interface ToastAction { label: string; href?: string; onAction?: () => void }
 export type LocalMark = "RESOLVED" | "REOPENED";
+export interface ShellUser { id: string; name: string; role: Role }
+/** What the console offers follows GET /me; what is allowed is decided by the API (a 403 is worded by lib/errors.ts). */
+export const hasRole = (user: Pick<ShellUser, "role">, min: Role): boolean => roleAtLeast(user.role, min);
+/** Why an action is not offered: "Changing the call order needs the Admin role. You are signed in as Operator." */
+export function roleReason(user: Pick<ShellUser, "role">, min: Role, what: string): string {
+  const n: Record<Role, string> = { ADMIN: "Admin", OPERATOR: "Operator", VIEWER: "Viewer" };
+  return `${what} needs the ${n[min]} role. You are signed in as ${n[user.role]}.`;
+}
 export interface ShellApi {
+  /** the signed-in user (GET /me): id for what is kept per user in the browser, role for what to offer */
+  user: ShellUser;
   /** current list filter (empty when the address has none or it is not valid) */
   sel: ScopeSel;
   /** "Mirae Pay › Core", "My customers" or "All customers" */
@@ -24,7 +35,23 @@ export interface ShellApi {
   /** the incidents list's on-screen order (lib/stable-list.ts). Kept here so opening or closing a panel does not re-sort it; dropped on leaving Incidents. */
   listView: { current: unknown };
   setOutside: (o: OutsideCounts | null) => void;
+  /** the scope tree (customer › project › service with ownSteps, callHealth, openIncidents) the shell was rendered with */
+  customers: readonly ScopeCustomerNode[];
+  /** the tree's "Only with problems" switch; lists that follow it (Call order) read it here */
+  problemsOnly: boolean;
+  /** the Call order list's on-screen row order, kept while the user stays in Call order (list ↔ panel) */
+  callOrderView: { current: unknown };
+  /**
+   * Every way out of the current view goes through this (shell-scope §6): with an unsaved edit registered, the edit's
+   * own Save / Keep draft / Discard dialog decides whether `proceed` runs; without one it runs at once.
+   */
+  requestLeave: (proceed: () => void, leavingTo?: string) => void;
+  /** an editor with unsaved changes registers here; null when it is clean or gone */
+  setLeaveGuard: (guard: LeaveGuard | null) => void;
 }
+/** `leavingTo` of the one exit that cannot keep a draft: sign-out removes what this tab kept for the user */
+export const SIGN_OUT = "sign out";
+export type LeaveGuard = (proceed: () => void, leavingTo?: string) => void;
 
 export const ShellContext = createContext<ShellApi | null>(null);
 

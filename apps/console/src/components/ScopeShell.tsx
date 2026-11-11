@@ -3,15 +3,17 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  OutsideLine, ScopeLine, ScopeSearch, ScopeSheet, ScopeTree, clampTreeWidth, cx, normalizeSel, readSession, resolveSel, sameSel, selKey, selLabel, writeSession,
+  OutsideLine, ScopeLine, ScopeSearch, ScopeSheet, ScopeTree, clampTreeWidth, cx, installSameSpotGuard, normalizeSel, readSession, resolveSel, sameSel, selKey, selLabel, writeSession,
   TREE_DEFAULT_WIDTH, type ScopeCustomerNode, type ScopeLevel, type ScopeSel,
 } from "@alarmops/design-system";
 import type { OutsideCounts } from "@/lib/api/types";
 import { clearLevel, isPanelPath, parseScopeParams, scopeQuery } from "@/lib/scope";
-import { ShellContext, type LocalMark, type ShellApi, type ToastAction } from "./ShellContext";
+import { ShellContext, type LeaveGuard, type LocalMark, type ShellApi, type ShellUser, type ToastAction } from "./ShellContext";
+import { claimStorageFor } from "@/lib/user-storage";
 import { NotFoundBody } from "./NotFoundBody";
+import { SessionEnded } from "./SessionEnded";
 import { TopNav } from "./TopNav";
-import { sectionFor } from "@/lib/nav";
+import { panelListPath, sectionFor } from "@/lib/nav";
 import { AUTO_RAIL_BELOW, DEFAULT_RAIL_MAX, PREFS_KEY } from "@/lib/shell-prefs";
 
 interface Prefs { col: boolean | null; w: number }
@@ -19,7 +21,8 @@ interface Toast { id: number; text: string; action?: ToastAction; at: number }
 /** A toast's button does nothing this soon after the toast appeared: it may have come up under a second tap. */
 const TOAST_ARM_MS = 600;
 
-export function ScopeShell({ customers, userName, openCount, children }: { customers: ScopeCustomerNode[]; userName: string; openCount: number; children: ReactNode }) {
+export function ScopeShell({ customers, user, openCount, children }: { customers: ScopeCustomerNode[]; user: ShellUser; openCount: number; children: ReactNode }) {
+  const userName = user.name;
   const pathname = usePathname();
   const sp = useSearchParams();
   const router = useRouter();
@@ -35,7 +38,7 @@ export function ScopeShell({ customers, userName, openCount, children }: { custo
 
   const panelOpen = isPanelPath(pathname);
   const settings = pathname.startsWith("/settings");
-  const listPath = panelOpen ? "/incidents" : pathname;
+  const listPath = panelOpen ? panelListPath(pathname) : pathname;
 
   const [mounted, setMounted] = useState(false);
   const [ready, setReady] = useState(false);
@@ -47,11 +50,22 @@ export function ScopeShell({ customers, userName, openCount, children }: { custo
   const [acks, setAcks] = useState<Record<string, string>>({});
   const [marks, setMarks] = useState<Record<string, LocalMark>>({});
   const listView = useRef<unknown>(null);
+  const callOrderView = useRef<unknown>(null);
+  const [problemsOnly, setProblemsOnly] = useState(false);
+  const leaveGuard = useRef<LeaveGuard | null>(null);
+  const setLeaveGuard = useCallback((g: LeaveGuard | null) => { leaveGuard.current = g; }, []);
+  const requestLeave = useCallback((proceed: () => void, leavingTo?: string) => {
+    if (leaveGuard.current) leaveGuard.current(proceed, leavingTo); else proceed();
+  }, []);
   const shellRef = useRef<HTMLDivElement>(null);
   const [outside, setOutside] = useState<OutsideCounts | null>(null);
   const [toastState, setToast] = useState<Toast | null>(null);
   const focusTitle = useRef(false);
 
+  // One rule for every list (design-system list/same-spot): a second press where a row action was just pressed does nothing.
+  useEffect(() => installSameSpotGuard(), []);
+  // before anything reads sessionStorage (layout effects run before every effect): what another user left in this tab goes
+  useLayoutEffect(() => { claimStorageFor(user.id); }, [user.id]);
   useLayoutEffect(() => {
     const s = readSession<Prefs>(PREFS_KEY);
     if (s) setPrefs({ col: typeof s.col === "boolean" ? s.col : null, w: clampTreeWidth(Number(s.w) || TREE_DEFAULT_WIDTH) });
@@ -107,6 +121,8 @@ export function ScopeShell({ customers, userName, openCount, children }: { custo
   // the list keeps its order while the user stays in Incidents (list ↔ panel); leaving is a navigation: next time it is sorted
   const inIncidents = sectionFor(pathname)?.key === "incidents";
   useEffect(() => { if (!inIncidents) listView.current = null; }, [inIncidents]);
+  const inCallOrder = sectionFor(pathname)?.key === "call-order";
+  useEffect(() => { if (!inCallOrder) callOrderView.current = null; }, [inCallOrder]);
   // on a phone the filter line sticks to the top; whatever sticks below it needs its height
   useEffect(() => {
     const line = shellRef.current?.querySelector<HTMLElement>(".sline");
@@ -122,11 +138,14 @@ export function ScopeShell({ customers, userName, openCount, children }: { custo
     const n = normalizeSel(next);
     if (sameSel(n, sel) && valid) return; // choosing the filter that is already set leaves an open panel alone
     const keep = new URLSearchParams(search);
-    focusTitle.current = from !== "tree";
-    setToast(null);
-    router.push(listPath + scopeQuery(n, keep));
-    // a panel never stays open under a filter it was not opened from (T11)
-    if (panelOpen) toast(`Panel closed · the list now shows ${selLabel(customers, n)}`);
+    // an unsaved edit in the panel is asked about first; the filter changes only if the user lets go of it (T11, §6)
+    requestLeave(() => {
+      focusTitle.current = from !== "tree";
+      setToast(null);
+      router.push(listPath + scopeQuery(n, keep));
+      // a panel never stays open under a filter it was not opened from (T11)
+      if (panelOpen) toast(`Panel closed · the list now shows ${selLabel(customers, n)}`);
+    }, "continue");
   };
   const key = selKey(sel);
   useEffect(() => {
@@ -137,8 +156,8 @@ export function ScopeShell({ customers, userName, openCount, children }: { custo
 
   const clearToast = useCallback(() => setToast(null), []);
   const api: ShellApi = useMemo(
-    () => ({ sel, label, filtered, totalCustomers: customers.length, toast, clearToast, setOutside, acks, setAck, marks, mark, listView }),
-    [sel, label, filtered, customers.length, toast, clearToast, acks, setAck, marks, mark],
+    () => ({ user, sel, label, filtered, totalCustomers: customers.length, toast, clearToast, setOutside, acks, setAck, marks, mark, listView, customers, problemsOnly, callOrderView, requestLeave, setLeaveGuard }),
+    [user, sel, label, filtered, customers, toast, clearToast, acks, setAck, marks, mark, problemsOnly, requestLeave, setLeaveGuard],
   );
 
   // Ctrl/⌘K opens "Filter to…" on every screen that has a filter; Esc with the focus in the tree closes an open panel
@@ -148,22 +167,24 @@ export function ScopeShell({ customers, userName, openCount, children }: { custo
       if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "k") {
         if (settings) return;
         e.preventDefault();
+        // a question is on the screen (confirm, unsaved changes): it is answered first, nothing opens over it (QA P3-D)
+        if (document.querySelector("[role=alertdialog]")) return;
         setSheet(false);
         setFinder((v) => !v);
         return;
       }
       if (e.key === "Escape" && !e.defaultPrevented && panelOpen && (e.target as HTMLElement | null)?.closest?.(".stree")) {
         e.preventDefault();
-        router.push(listHref);
+        requestLeave(() => router.push(listHref), "continue");
       }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [settings, panelOpen, listHref, router]);
+  }, [settings, panelOpen, listHref, router, requestLeave]);
 
   const allHref = listPath + scopeQuery({}, new URLSearchParams(search));
   // the list's counts arrive after the first paint; the line keeps its place until then, so nothing jumps (QA P2-2)
-  const expectsOutside = filtered && valid && !settings && (pathname === "/incidents" || panelOpen);
+  const expectsOutside = filtered && valid && !settings && listPath === "/incidents";
   const outsideNode = !outside && expectsOutside ? (
     <span className="outside-w" aria-hidden="true">
       <span className="outside calm pending" data-testid="outside-pending">Outside this view: …</span>
@@ -187,7 +208,7 @@ export function ScopeShell({ customers, userName, openCount, children }: { custo
   return (
     <ShellContext.Provider value={api}>
       <div ref={shellRef} className={cx("shell", mounted && "mounted", ready && "ready", settings && "no-tree")} data-panel={panelOpen ? "1" : "0"} data-rail={rail ? "1" : "0"}>
-        <TopNav openCount={openCount} userName={userName} scopeQuery={scopeQuery(sel)} onOpenFinder={settings ? undefined : () => { setToast(null); setFinder(true); }} />
+        <TopNav openCount={openCount} userName={userName} role={user.role} scopeQuery={scopeQuery(sel)} onOpenFinder={settings ? undefined : () => { setToast(null); setFinder(true); }} />
         {settings ? (
           <ScopeLine totalCustomers={customers.length} mineCustomers={mineCount} onClear={() => undefined} locked={<><b>MSP-wide settings</b> · all {customers.length} customers</>} />
         ) : (
@@ -206,7 +227,7 @@ export function ScopeShell({ customers, userName, openCount, children }: { custo
               customers={customers} value={sel} onChange={(s) => setFilter(s, "tree")}
               rail={rail} onRailChange={onRailChange}
               width={prefs.w} onWidthChange={(w) => save({ ...prefs, w })}
-              beside={panelOpen ? "panel" : "list"} me={userName.split(" ")[0]}
+              beside={panelOpen ? "panel" : "list"} me={userName.split(" ")[0]} onProblemsChange={setProblemsOnly}
             />
           )}
           <main id="main" className="shell-main">{valid ? children : <NotFoundBody />}</main>
@@ -228,6 +249,7 @@ export function ScopeShell({ customers, userName, openCount, children }: { custo
             <button type="button" className="btn sm ghost" aria-label="Dismiss" onClick={() => setToast(null)}>×</button>
           </div>
         ) : null}
+        <SessionEnded />
       </div>
     </ShellContext.Provider>
   );

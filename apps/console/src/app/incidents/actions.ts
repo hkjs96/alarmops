@@ -1,26 +1,23 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { getApi } from "@/lib/api";
-import { ApiError } from "@/lib/api/client";
-import { requireSession, UnauthorizedError } from "@/lib/auth";
-import { NotConfiguredError } from "@/lib/mode";
-import { assertBulkAction, assertBulkItems, assertId, assertToken, assertVersion, InvalidInputError } from "@/lib/validate";
-import type { BulkItem, BulkPreview, BulkResult } from "@/lib/api/types";
+import { requireSession } from "@/lib/auth";
+import { requireRole } from "@/lib/auth/role";
+import { assertBulkAction, assertBulkItems, assertId, assertToken, assertVersion } from "@/lib/validate";
+import type { BulkItem, BulkPreview, BulkResult, UndoResult } from "@/lib/api/types";
+import { fail, type ActionResult } from "@/lib/action-result";
 
-export type ActionResult<T = null> = { ok: true; data: T } | { ok: false; code: string; message: string; requestId: string };
+export type { ActionResult };
 
-function fail(e: unknown): { ok: false; code: string; message: string; requestId: string } {
-  if (e instanceof ApiError) return { ok: false, code: e.code, message: e.message, requestId: e.requestId };
-  if (e instanceof UnauthorizedError || e instanceof InvalidInputError || e instanceof NotConfiguredError) {
-    return { ok: false, code: e.code, message: e.message, requestId: "" };
-  }
-  return { ok: false, code: "UNKNOWN", message: "Something went wrong.", requestId: "" };
-}
-
-/** Session check first, then input validation, then the API call (security review C-2, C-5). */
+/**
+ * Session check first, then the role, then input validation, then the API call (security review C-2, C-5).
+ * Everything here acknowledges, escalates, resolves or undoes that: Operator or Admin (security 재검토 권고 2). The
+ * console's check is a second line; the API checks the role on the write itself and stays the authority.
+ */
 async function run<T>(fn: () => Promise<T>, revalidate = true): Promise<ActionResult<T>> {
   try {
     await requireSession();
+    await requireRole("OPERATOR");
     const data = await fn();
     if (revalidate) revalidatePath("/", "layout"); // the list lives at /incidents and beside every /c/… panel
     return { ok: true, data };
@@ -67,10 +64,11 @@ export async function executeBulk(action: "ack" | "resolve", items: BulkItem[]):
     return (await getApi()).bulkExecute(a, list);
   });
 }
-export async function undoBulk(token: string) {
+/** `restored` / `skipped`: an incident someone touched since is not put back (VERSION_CONFLICT) and the caller says so. */
+export async function undoBulk(token: string): Promise<ActionResult<UndoResult>> {
   return run(async () => {
     const t = assertToken(token);
-    await (await getApi()).bulkUndo(t);
-    return null;
+    const r = await (await getApi()).bulkUndo(t);
+    return { restored: r.restored ?? [], skipped: r.skipped ?? [] };
   });
 }

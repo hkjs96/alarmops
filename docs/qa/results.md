@@ -404,3 +404,376 @@
 **머지 가능 — P1 0건, P2 0건, [차단] 0건.** P1-A는 고쳐졌다: 1행 Ack 뒤 2행으로 옮겨 누르면 2행이 Ack되고(0.3/0.7/1.5초, 패널 열림, 스크롤, 필터, 세 건 연속 모두), Ack·Undo·Resolve 어느 구간에서도 행 상자가 움직이지 않았으며 재정렬은 Re-sort·탭·필터·검색 변경 때만 일어난다. P2-A(Undo가 Ack 자리와 떨어짐)·P2-B(패널 옆 넘침)도 통과, 새로 시도한 10가지 경로에서 엉뚱한 인시던트가 Ack/Undo/Resolve된 경우는 없었다. P3 5건은 백로그. 남은 관문은 사용자 승인.
 
 점검 한계: 목 서버에는 새 인시던트가 들어오는 자동 갱신이 없어 "N new · Show" 줄은 화면에서 못 봄(단위 테스트만 있음). 터치는 Playwright 에뮬레이션이고 폰 스크롤은 휠 입력으로 대신함. 대비 4.5:1은 눈으로만 확인. 샌드박스에서 Google Fonts가 막혀 Space Mono는 대체 글꼴로 렌더링됨.
+
+---
+
+## Console Call order 점검 — 2026-11-11
+
+대상: `apps/console` Call order 화면 (feat/console-call-order, 커밋 `7b636ae`). 만든 쪽과 무관한 독립 점검이며 제품 코드는 고치지 않았다. 빌드본을 직접 기동(`next build` → `E2E_ALLOW_MOCK=1 MOCK_API=1 next start -p 3120`, 시나리오 묶음마다 재기동해 목 상태 초기화, `/auth/dev-login`으로 로그인)하고 Playwright로 1440×900·1280×800(마우스·키보드), 390×844(터치)에서 밟았다. 판정은 화면과 캡처를 직접 보고 했다. 캡처: `docs/qa/shots/console-call-order-check/` (gitignore). 보안 검토는 `/home/claude/alarmops-security-review-callorder.md`.
+
+### 준호 (1440, 키보드 우선)
+
+| 시나리오 | 결과 | 클릭/키 | 관찰 |
+|---|---|---|---|
+| Mirae Pay의 호출 순서 읽기 (누가·어떻게·언제) | 통과 | 행 열기 1 | "Slack + call on shift in MSP night desk (Haeun now) now → Call Yuna Seo (Mirae Pay) at 10 min → Call everyone in Responders (5) at 15 min → repeat once." Paged (5)·Also notified (4) 이름까지 한 화면. Edit 전 입력 요소 0개 |
+| 인시던트 패널 Paged 줄과 일치 | 통과 (P2-A) | — | Mirae Pay › Core › Payments API 인시던트(03:12 발생): "Slack + call Haeun 03:12 ✓ → call Yuna 03:22 → call everyone in Responders (5) 03:27". 사람·수단·시각(0/10/15분) 모두 일치. 다만 플랜 이름이 다름: 인시던트 "CUSTOM STEPS · URGENT (EDITED)", Call order "Custom, started from Standard (edited)" |
+| Edit → 2단계 분 변경 → Save (Mirae Pay) | 통과 | 16키 (열린 패널에서는 4키) | Ctrl K, `mirae`, Enter, Tab×4, Enter, E(2단계 분에 바로 포커스·전체 선택), `8`, Ctrl+Enter, Enter. 확인 상자가 "step 2 10 → 8 min", 바뀌는 4개 서비스, "Not changed: Data platform (own steps)"를 보여 줌. 저장 뒤 패널 닫힘, 포커스는 Mirae Pay 행, 토스트 "Saved for Mirae Pay · step 2 10 → 8 min · 4 services" |
+| 이어서 Daon Retail, Hanbit Logistics | 통과 | 15키 / 17키 | 각각 자기 고객에만 저장(2→3, 2→4). 저장 버튼·확인 상자·토스트가 매번 고객 이름을 말함. 공유 로테이션을 쓰는 다른 고객 행은 변화 없음 |
+| 엉뚱한 고객에 저장 시도: 편집 중 트리로 다른 고객 | 통과 | — | "Unsaved changes for Mirae Pay" (Save for Mirae Pay / Keep draft and continue / Discard / Cancel). 네 선택 모두 Mirae Pay에만 적용되거나 아무것도 저장 안 됨. 가드가 뜬 상태의 Ctrl+Enter는 무시 |
+| 〃 Ctrl/⌘K로 다른 고객 | 통과 | — | 같은 가드. Save를 고르면 Mirae Pay에 저장한 뒤 Daon 목록으로 이동 |
+| 〃 목록에서 다른 고객 행 클릭 | 통과 | — | 같은 가드. Discard 뒤 열린 Daon 패널은 읽기 화면, Daon 값 변화 없음 |
+| 〃 편집 중 뒤로가기 | 통과 | — | 앱 안 이동이면 가드("Keep draft and go back"), 문서를 새로 불러온 이전 주소로 가면 묻지 않고 초안으로 남김. 어느 경우에도 다른 고객에 저장되지 않음 |
+| 〃 Mirae 초안을 둔 채 Daon 편집 | 통과 | — | Daon 편집기는 Daon 값(2분)으로 열리고 저장 버튼은 "Save for Daon Retail". Mirae 초안은 "Draft for Mirae Pay" 줄에 따로 남음 |
+| 편집 중 인시던트 Ack하고 돌아오기 (초안 이어가기) | 통과 | 클릭 5 | 메뉴 Incidents → Keep draft → Acknowledge → Call order → Resume. 2단계 6분이 그대로, 문장에 "at 6 min was 10 min". 새로고침 뒤에도 패널 안에 초안 줄이 남고 E로 이어짐. Call order 밖(Incidents)에서는 초안이 있다는 표시 없음(P3) |
+| 서비스 → 고객 전체로 넓히기 | 통과 | 클릭 3 | Orders API 편집 → "Edit the whole customer instead…" → 상자가 넓어지는 범위(2개 서비스), 닿지 않는 곳(Orders API, own steps)을 말하고 기본 포커스는 "Stay on …". 넓힌 뒤 헤더·저장 버튼이 "Hanbit Logistics", "← Back to Orders API" 있음. 저장 확인 상자에 "Wider than the row you opened". 서비스에서 고치던 값은 넘어가지 않고 그 서비스 초안으로 남음 |
+| 상속 서비스에 own steps 만들기 | 통과 | 3키 (E, 숫자, Ctrl+Enter) | Mirae Pay › Core › Checkout: 버튼 "Create own steps for …", 저장 버튼 "Save own steps for Mirae Pay › Core › Checkout". 서비스 1개라 확인 상자 없이 저장, 토스트에 Undo. 목록에 OWN STEPS 행이 생기고 고객 패널은 "used by 3 services (Core › Checkout, Data platform keep own steps)" |
+| own steps 제거 | 통과 | 클릭 3 | Edit → "Remove own steps of …" → 확인 상자(기본 포커스 "Keep them", "This has no Undo"). 제거 뒤 다시 Mirae Pay를 따름, 고객 단계는 변화 없음 |
+| 두 탭에서 같은 고객 편집 (409) | 통과 | — | 먼저 저장한 탭의 값(8분)만 남음. 두 번째 탭: "Changed — reload. Someone else changed the call order of Mirae Pay… Nothing was saved, and your draft is kept", 저장 버튼 비활성. Reload 뒤 NOW SAVED / YOUR DRAFT 두 문장을 나란히 보여 주고 Keep my draft / Discard 선택. 오래된 초안을 Resume해 저장해도 같은 409 |
+
+### 민재 (1440)
+
+| 시나리오 | 결과 | 클릭/키 | 관찰 |
+|---|---|---|---|
+| UNREACHABLE / AT RISK 고객 찾기 | 통과 | 0 (첫 화면) | 목록 맨 위 두 행이 Kumho Clinic(UNREACHABLE, 빨간 띠), Lumen Bank(AT RISK). 트리 "Other customers"에도 표시, "What do these mean?"에 뜻 설명. Only with problems를 켜면 목록도 5개 고객으로 줄고 "9 customers … are not listed · Show all customers" 안내 |
+| 패널에서 이유 이해 | 통과 (P3) | 클릭 1 | Kumho: "Nobody in Responders can be called or texted. Add a staff member or a Pageable customer person." + Paged (0). Lumen: 단계별로 "reaches only Kyungmin Oh, who has no verified …" 3줄 + "nobody on shift from Sat Nov 14 09:00 to Sun Nov 15 09:00 KST". 다만 Lumen 1단계는 "no verified Slack"이라는데 아래 Kyungmin 카드에는 SMS·Call만 not verified로 나옴 |
+| Pageable 응답자를 추가해 하나 고치기 | 통과 | 클릭 5 | Kumho 행 → Edit responders for Kumho Clinic → MSP staff 선택(2) → Add to Kumho Clinic. 배너가 바로 사라지고 Paged (3), 목록 행·트리 표시도 갱신, 토스트에 Undo. 고객 사람을 Pageable로 바꾸는 길(선택 상자)도 동작: 전화 없는 사람만 있으면 UNREACHABLE 유지 + 이유, 미확인 전화면 AT RISK |
+| Responders에서 사람 제거 | **P1-A** | 클릭 2 | Remove는 확인 없이 바로 실행되고 아래 사람이 같은 자리로 올라온다. 같은 자리를 한 번 더 누르면 다음 사람도 제거됨(아래 문제 목록) |
+
+### 하은 (390, 터치)
+
+| 시나리오 | 결과 | 클릭/키 | 관찰 |
+|---|---|---|---|
+| 타이핑 없이 Daon Retail › Commerce › Checkout에 누가 호출되는지 읽기 | 통과 | 탭 4 (+1로 패널) | SHOWING → Daon Retail → Commerce → Checkout. 목록에 "YOUR FILTER" 행: Junho, Minjae, Soyeon · Slack → 2 min SMS → 7 min call, "inherits from Daon Retail". 행을 누르면 패널에 문장과 Paged (3) 이름 |
+| 폰에서 작은 수정 | 통과 | 탭 3 + 숫자 1 | Create own steps… → 2단계 분(숫자 자판, 글자 16px) → Save own steps for Daon Retail › Commerce › Checkout. 저장 버튼은 화면 아래 고정, 전체 경로가 한 줄에 다 보임. 토스트에 Undo |
+| 폰에서 이탈 가드 | 통과 | — | 하단 메뉴·뒤로가기 모두 가드. 버튼 4개 전부 316×44 이상, 가로 넘침 없음. Keep draft 뒤 목록에 "Draft for …" 줄(Resume/Discard 44px), Resume하면 값 유지 |
+| 폰에서 고객 수준 확인 상자 · 넓히기 상자 · Responders 편집 | 통과 | — | 확인 상자 358×499, 넓히기 358×538로 화면 안, 버튼 44px. Responders 편집의 선택 상자·Remove·입력도 44px 이상 |
+
+### 신입 (1280)
+
+| 시나리오 | 결과 | 클릭/키 | 관찰 |
+|---|---|---|---|
+| "Inherited from" 이해 | 통과 | — | "INHERITED FROM Mirae Pay. Checkout has no steps of its own and follows it. Open the call order of Mirae Pay →", 아래 "Where steps come from" 트리에 inherits / OWN STEPS / CUSTOMER STEPS 표시. 바닥 글: "Read only. To change these steps for everything that follows them, open Mirae Pay." |
+| "Own steps" 이해 | 통과 (P3) | — | 편집 화면 맨 위 "Creating own steps for … Started from the steps of Mirae Pay. Nothing changes until you save… Mirae Pay itself is not changed." 다만 E 키로 들어가면 2단계 입력으로 스크롤되어 이 설명이 화면 위로 밀려남. 문장 "1 service of … stop following"은 어색 |
+| 순서 방식 4가지 | 통과 | — | 각 카드에 한 줄 설명, 쓸 수 없는 방식은 이유와 함께 비활성("Mirae Pay has no rotation of its own"). 방식을 바꾸면 문장이 바로 바뀌고 "was …"로 이전 값 표시. 플랜을 누르면 단계가 바뀌고 "Steps replaced with the Urgent plan. Put my steps back" |
+| 분이 늘어나지 않음 (7,7 / 9,7 / 0) | 통과 | — | "Step 3 (7 min) would not come after step 2 (9 min). Fix the minutes to save." 저장 시도하면 해당 입력으로 포커스, 저장 안 됨 |
+| 닿는 사람 없음 | 통과 | — | 채널 전부 끔: "Step n: choose at least one of Slack, SMS or Call." Responders 0명(Kumho): "Nobody would be called… add someone to Responders", 저장 안 됨 |
+| 단계 전부 지우기 | 통과 | — | 마지막 1단계의 ✕는 비활성. 1단계만 남긴 저장은 가능(확인 상자에 지워진 단계 표시) |
+| 13단계 | **P2-B** | — | + Add step이 끝없이 눌림. 15단계가 경고 없이 저장되고, 21단계는 "Could not save: Invalid steps."만 나옴(한도 20이라는 말도, 어느 단계인지도 없음) |
+| 반복 99 | 통과 | — | 입력이 한 자리로 잘려 "9", "Repeat must be a whole number from 0 to 5.", 저장 안 됨 |
+| 음수·큰 값·문자 붙여넣기 | 통과 (P3) | — | 숫자가 아닌 글자는 입력 단계에서 버려짐: `abc`·전각 `３` → 빈 칸(오류 표시), `99999` → `9999`(0–1440 오류), `12 minutes<script>` → `12`. 그런데 `-5` → `5`, `2.5` → `25`, `1e1` → `11`로 조용히 바뀜(문장의 "was"로만 알 수 있음) |
+
+### 공통 점검
+
+| 항목 | 폭 | 결과 | 관찰 |
+|---|---|---|---|
+| 저장 뒤 포인터 아래가 움직이지 않음 (단계 저장) | 1440·390 | 통과 | 저장하면 패널이 닫히고 목록 행 순서·y 좌표 유지(Mirae 287, Daon 287, Hanbit 287 그대로). 저장 버튼 자리에는 목록 셀(누르면 읽기 패널)만 옴. 서비스 저장 버튼 더블클릭 → 1번만 저장. 390에서는 토스트 글자가 그 자리에 옴(Undo 버튼은 옆) |
+| 〃 (Responders 변경) | 1440·390 | **P1-A** | Remove 뒤 다음 사람의 Remove가 같은 자리에 옴. Add 뒤에는 그 자리에 선택 상자가 옴(해 없음) |
+| 저장 라벨은 항상 전체 경로 | 전 폭 | 통과 | "Save for Mirae Pay", "Save for Hanbit Logistics › Fulfilment › Orders API", "Save own steps for Daon Retail › Commerce › Checkout". 확인 상자·가드·토스트·초안 줄도 같은 경로. 가드 안 버튼은 own steps 생성일 때도 "Save for …"(P3) |
+| 읽기 먼저 | 전 폭 | 통과 | 패널을 열면 입력 요소 0개. 링크·새로고침은 항상 읽기 화면. Responders도 "Edit responders for …"를 눌러야 입력이 나옴. 단 Responders 편집 중에도 바닥 글은 "Read only until you press Edit."(P3) |
+| 레이아웃 | 1440·1280·390 | 통과 (P3) | 가로 넘침 0(390 scrollWidth 390: 목록, 패널, 편집, 가드, 확인 상자, Responders 편집). 1280은 패널을 열면 트리가 레일로 접힘. 1440 편집기의 1단계 선택 상자 글자가 "On shift in MSP night desk (Haeun no"에서 잘림 |
+| 터치 44px | 390 | 통과 | 패널·편집·가드·확인 상자·초안 줄·Responders 편집의 버튼·선택 상자·입력 모두 44px 이상(방식 라디오 자체는 13px이고 카드 영역의 누름 범위는 재지 않음) |
+| 다크 모드 | 1440·390 | 통과 | 읽기·편집·UNREACHABLE/AT RISK 배너 대비 정상(눈으로 확인, 확인 상자는 캡처만 하고 판정에 쓰지 않음) |
+| Incidents 화면과의 일관성 | 1440 | P2-A · P3 | 사람·수단·시각은 일치. 플랜 이름 불일치(P2-A). Incidents는 J/K로 행 이동, Call order는 J/K 없음(Tab만 — 페이지 맨 위에서 Mirae 행까지 23번, Ctrl K를 쓰면 4번). 확인 상자 기본 포커스: Incidents Resolve와 own steps 제거는 안전한 쪽, 단계 저장은 "Save for …" 쪽 |
+| 막다른 곳 | 전 폭 | 통과 (P3) | Rotations·Templates 탭은 "Not built yet" 스텁(메뉴·탭 유지). 없는 주소는 같은 Not found인데 Call order 주소에서도 버튼은 "Back to Incidents". 409·검증 오류·가드 모두 빠져나갈 길 있음 |
+| 콘솔 오류 | 전 폭 | 통과 | 앱 오류 0건(샌드박스에서 Google Fonts 요청만 실패) |
+
+### 문제 목록
+
+| 등급 | # | 문제 | 재현 |
+|---|---|---|---|
+| P1 | A | Responders의 Remove가 확인 없이 한 번에 실행되고, 지워진 줄 아래 사람이 같은 자리로 올라와 그 사람의 Remove가 포인터 아래에 온다. 같은 자리를 한 번 더 누르면(1.5초 뒤에도) 다음 사람까지 제거된다. 토스트 Undo는 마지막 한 건만 되돌리고 첫 번째 제거의 Undo는 사라진다. Daon Retail(열린 인시던트 있음)에서 두 번 누르면 MSP staff 0명, "UNREACHABLE … nobody for Daon Retail is reached"가 된다. 이전 Incidents P1-A(Ack 뒤 행이 포인터 아래로 올라옴)와 같은 종류 | 1440: `/c/daon/call-order` → Edit responders for Daon Retail → Junho Park의 Remove 클릭 → 같은 자리 다시 클릭 → Minjae Lee도 제거, Undo는 Minjae만. 390도 같은 배치 (P1-1440-after-first, P1-1440-after-second) |
+| P2 | A | 같은 Mirae Pay 단계를 인시던트 패널은 "CUSTOM STEPS · URGENT (EDITED)", Call order는 "Custom, started from Standard (edited)"(편집기에서도 Standard (edited) 선택)라고 한다. 어느 플랜에서 출발했는지 두 화면이 다르게 말함 | `/incidents?customer=mirae` → 인시던트 패널 PAGED 아래 줄 vs `/c/mirae/call-order`의 COMES FROM (A-mirae-incpanel-1440, A-mirae-read-1440) |
+| P2 | B | 단계 수 한도가 화면에 없다. + Add step이 계속 눌리고 15단계가 그대로 저장되며(목록 행·토스트가 매우 길어짐), 21단계부터는 "Could not save: Invalid steps."만 나와 무엇을 고쳐야 하는지 알 수 없다 | 1280: `/c/daon/call-order` → Edit → + Add step 12번 → 저장됨. `/c/hanbit/fulfilment/orders-api/call-order` → Edit → + Add step 19번 → Ctrl+Enter (V-15steps-list, V-21steps) |
+| P3 | C | 여러 서비스에 걸친 저장 확인 상자("This save has no Undo")의 기본 포커스가 "Save for …"라 Ctrl+Enter 뒤 Enter(또는 Enter를 누른 채)로 저장된다. 같은 화면의 own steps 제거와 Incidents Resolve는 기본이 안전한 쪽 | 1440: 고객 패널 E → 숫자 → Ctrl+Enter → Enter |
+| P3 | D | 분 입력이 `-5`→`5`, `2.5`→`25`, `1e1`→`11`로 조용히 바뀐다 | 1280: Edit → 2단계 분에 `2.5` 입력 |
+| P3 | E | Call order 목록에 J/K 행 이동이 없다(Incidents에는 있음). 바닥 안내도 "Enter open · E edit"뿐 | 1440: `/call-order`에서 J |
+| P3 | F | Responders를 편집하는 중에도 패널 바닥 글이 "Read only until you press Edit." / "Read only. An edit here reaches 3 services." | Edit responders for … 누른 상태 (H-resp-edit-390) |
+| P3 | G | 문구: 문장의 "(Haeun now) now →" 반복, "After saving, 1 service of … stop following Mirae Pay", 단계만 추가했는데 "Ordering switched from All at once to Custom, because you changed who a step calls", 플랜을 바꾼 뒤 문장이 "Call was Slack … was on shift in …"로 읽기 어려움 | 각 편집 화면 |
+| P3 | H | Lumen Bank 배너는 Kyungmin Oh에게 "no verified Slack"이라는데 Responders 카드에는 SMS·Call만 not verified로 나온다 | `/c/lumen/call-order` (M-lumen-1440) |
+| P3 | I | 상속 서비스에서 E 키로 편집에 들어가면 2단계 입력으로 스크롤되어 "Creating own steps for …" 설명이 보이지 않는다(저장 버튼 라벨로는 알 수 있음) | 1280: `/c/mirae/core/checkout/call-order` → E (N-inherited-edit-1280) |
+| P3 | J | 1440 편집기 1단계 선택 상자 글자 잘림("(Haeun no") | `/c/mirae/call-order` → Edit (A-mirae-edit-1440) |
+| P3 | K | Call order 주소의 Not found 버튼이 "Back to Incidents". 초안이 있어도 Call order 밖에서는 표시가 없음 | `/c/nope/call-order` |
+
+### 판정
+
+**머지 불가 — P1 1건, P2 2건. 보안 [차단] 0건.** 단계 편집의 핵심(읽기 먼저, 전체 경로 저장 라벨, 이탈 가드, 초안, 넓히기, own steps, 409)은 세 폭 모두에서 통과했고, 트리·Ctrl/⌘K·행 클릭·뒤로가기·초안 Resume 어느 경로로도 엉뚱한 고객에 단계가 저장되지 않았다. 막는 것은 Responders 편집의 Remove(P1-A)다: 확인 없이 실행되고 줄이 포인터 아래로 올라와 두 번 누르면 두 사람이 빠지며 고객이 UNREACHABLE이 될 수 있다. P1-A를 고치고(줄 자리를 유지하거나 확인을 받고, Undo를 건마다 남김) P2-A·B를 고치거나 사유와 함께 백로그로 넘긴 뒤 재점검 필요.
+
+점검 한계: 목 API 기준이라 백엔드의 실제 409·검증 문구는 다를 수 있다. 터치는 Playwright 에뮬레이션. 대비는 눈으로만 확인. 샌드박스에서 Google Fonts가 막혀 대체 글꼴로 렌더링됨. Rotations·Templates 탭은 스텁이라 점검 대상이 아님.
+
+---
+
+## Console Call order 재점검 — 2026-11-11
+
+대상: `apps/console` (feat/console-call-order, 커밋 `d9e91b9`, origin/main은 움직이지 않아 병합 없음). 고친 쪽과 무관한 독립 재점검이며 제품 코드는 고치지 않았다. 빌드본을 직접 기동(`next build` → `E2E_ALLOW_MOCK=1 MOCK_API=1 next start -p 3121`, 시나리오 묶음마다 재기동해 목 상태 초기화, `/auth/dev-login`·`?as=operator`·`?as=viewer`)하고 Playwright로 1440×900(마우스·키보드), 390×844(터치)를 밟았다. 판정은 캡처를 직접 보고 했고, 결과는 화면이 아니라 새 세션으로 다시 읽은 서버 상태로 확인했다. 행 위치는 조작 전후 각 행의 상자(y·높이)를 기록해 비교. 캡처: `docs/qa/shots/console-call-order-recheck/` (gitignore). 보안 검토는 `/home/claude/alarmops-security-review-callorder-2.md`.
+
+### 통합
+
+| 항목 | 결과 |
+|---|---|
+| 병합 | 필요 없음 (`origin/main`에 새 커밋 없음) |
+| `npm test` | 통과 — console 156, core 81, design-system 96, ingest 32 (합 365), db 스키마 검사 통과 |
+| `npm run typecheck` | 통과 (console, core, design-system, ingest) |
+| console `eslint .` | 통과 (경고 0) |
+| `next build` | 통과 |
+| Playwright (3107) | 118 / 118 통과 (새로 띄운 서버). 첫 실행 때는 3107에 이전 작업이 남긴 서버(09:57 기동, 목 상태가 이미 바뀐 것)가 떠 있어 `reuseExistingServer`가 그것을 잡았고 25건 넘게 실패했다. 새 서버(3122)에서 118/118, 그 서버가 사라진 뒤 3107에서 다시 118/118. 코드 문제가 아니라 실행 환경 문제이나, 남은 서버가 있으면 결과가 틀어진다는 점은 기억할 것 |
+
+### 이전 실패 항목 재실행
+
+| # | 이전 문제 | 폭 | 결과 | 측정·관찰 | 캡처 |
+|---|---|---|---|---|---|
+| P1-A | Remove를 같은 자리에서 빠르게 두 번 | 1440·390 | 통과 | 90ms 간격 두 번 → 확인 상자 "Remove Junho Park from Responders of Daon Retail?"만 뜨고 기본 포커스 "Keep Junho Park". 서버: 아무도 안 빠짐 | P1A-1440-1-dialog, P1A-390-1-dialog |
+| P1-A | 같은 자리 느린 두 번째 누름 (0.7 / 1.5 / 3초) | 1440·390 | 통과 | 세 번 모두 확인 상자 그대로, 포커스도 "Keep …" 그대로, 서버 변화 없음. 확인 버튼은 Remove… 자리와 떨어져 있음(1440: Remove… 1329×747, 확인 481–725×530 / 390: Remove… y 422, 확인 y 500–544) | — |
+| P1-A | 확인 버튼 더블클릭, 그 뒤 Remove… 자리 다시 누름 (0.8 / 1.6 / 2.4초) | 1440·390 | 통과 | Junho 한 명만 제거. Remove… 자리에는 "Junho Park · Removed · kept here until you press Done"(누를 것 없음), Undo는 줄 반대쪽(1440 x 1040, 390 x 29–93). 행 이동 0건 | P1A-1440-2-tombstone |
+| P1-A | 두 명 제거 뒤 첫 번째 사람 Undo | 1440·390 | 통과 | Junho·Minjae 각자 자기 줄에 Undo. Junho의 Undo(더블클릭) → Junho만 돌아옴, Minjae는 제거된 채. 서버 일치. Undo 자리에는 글자만 옴. 행 이동 0건(1440에서 두 번째 제거 때 아래 세 줄이 1px 내려감) | P1A-1440-4-two-tombstones, P1A-390-5-undo-first |
+| P1-A | 범위를 AT RISK로 만드는 제거 | 1440·390 | 통과 | Junho 제거 뒤 Minjae: 확인 상자에 노란 "AT RISK After this, Daon Retail is harder to reach: Step 2 (SMS at 2 min) reaches only Soyeon Choi, who has no verified SMS. Step 3 …". 제거 뒤 목록 행·패널 모두 AT RISK | P1A-1440-3-unreachable-warning |
+| P1-A | 범위를 UNREACHABLE로 만드는 제거·역할 변경 | 1440·390 | 통과 | 남은 Pageable 한 명(Soyeon)을 Remove… 또는 Notify only로: 빨간 "UNREACHABLE After this, nobody for Daon Retail is reached if something breaks. … Add someone else first, or keep Soyeon Choi.", 기본 포커스 "Keep Soyeon Choi Pageable". Enter를 누르고 있어도 유지(서버 변화 없음). 명시적으로 확인하면 적용되고 패널·목록이 UNREACHABLE, 토스트 Undo로 복귀 | A3-390-unreachable-warning, A3-1440-unreachable-after |
+| P1-A | Notify only로 역할 변경 | 1440·390 | 통과 | 도달에 영향이 있으면 묻고(위), 없으면(Hanbit의 Eunbi Song) 바로 적용 + 토스트 "… is now Notify only for Hanbit Logistics · Undo". 행 이동 0건 | — |
+| 행 고정 | Incidents (Ack 두 건, 같은 자리 더블·느린 누름) | 1440·390 | 통과 | 1행 더블클릭 → 2행으로 이동 → 포인터 밑은 2행 버튼, 두 건만 Ack, 행 이동 0건, "2 acknowledged in place · Re-sort". 같은 자리 0.7·1.5·3초 누름은 아무 일 없음. 390 탭 5회도 1건만 | R6-incidents-1440 |
+| 행 고정 | Call order 목록 (저장, own steps 생성·제거) | 1440 | 통과 | 저장 뒤 패널이 닫히고 행 순서·위치 유지, own steps 행은 추가되고(17행) 제거 뒤 "follows Mirae Pay again" | — |
+| 행 고정 | Responders (제거, Undo, 역할, 409) | 1440·390 | 통과 (P2-B) | Chromium에서는 모든 구간 0~1px. 단 범위 상태가 바뀌는 제거에서는 문서 좌표로 줄이 225~269px 내려가고 브라우저의 스크롤 보정이 화면 위치를 지켜 준 것이다 — 아래 P2-B | A3-390-after-minjae |
+| P2-A | 플랜 이름 | 1440·390 | 통과 | 인시던트 패널(두 곳)과 Call order 모두 "Custom, started from Urgent (edited)". 편집기에서도 Urgent (edited)가 선택됨 | P2A-1440-incident, P2A-1440-callorder |
+| P2-B | 한도 표시, 12단계 | 1280·390 | 통과 | "Limits: Up to 12 steps · minutes 0–1,440 … · repeat 0–5 · at most 60 notifications … 120 in an hour · "everyone" reaches at most 20 people", "3 of 12 steps", 보내는 수 "7 of 60 … 14 of 120". 12에서 + Add step 비활성 + "12 of 12 steps — that is the limit. Remove a step to add another."(강제로 눌러도 12). 오류는 단계와 고칠 것을 말함: "Step 3 (2 min) would not come after step 2 (2 min). Fix the minutes to save.", "Step 3: "2.5" was not entered — minutes are a whole number from 0 to 1440, digits only. It stays at 2 min.", "Repeat must be a whole number from 0 to 5." | P2B-390-12steps |
+| 초안 | 로그아웃하면 초안 삭제 | 1440·390 | 통과 | 편집 중이 아닐 때: Sign out → `/login?signedOut=1`, `ao-…` 키 0개, 쿠키 없음, 뒤로가기는 `/login?next=…`, 다시 로그인해도 초안 없음 | SIGNOUT-1440-login |
+| 초안 | 다른 사용자는 이전 사용자의 초안을 못 봄 | 1440·390 | 통과 | 관리자 초안 2개(Mirae Pay, Daon Retail) → 같은 탭에서 로그아웃 없이 operator 로그인 → 초안 줄 0, 키 0, 패널은 저장된 값(10분). 관리자로 돌아와도 돌아오지 않음. 다른 사용자 id로 키를 직접 심어도 안 보임 | DRAFT-1440-operator |
+| 로그아웃 | 편집 중 Sign out | 1440·390 | **P2-A** | 가드가 뜨는 것까지는 맞음. 그런데 "Keep draft and sign out" / "Discard changes" / "Save for …" 어느 것을 눌러도 로그아웃되지 않는다(아래 문제 목록) | SIGNOUT-GUARD-1440-Keepdraft |
+| 역할 | operator·viewer | 1440·390 | 통과 (P3) | 계정 메뉴에 Operator/Viewer. Edit call order·Create own steps·Edit responders 비활성 + 이유가 글로 보임: "Read only. Changing the call order needs the Admin role. You are signed in as Operator.", "Changing Responders needs the Admin role. …". 입력 요소 0개, E 키·비활성 속성을 지우고 눌러도 편집 화면이 안 열림. viewer는 Acknowledge 비활성, operator는 가능. 관리자의 요청을 operator·viewer 세션으로 다시 보내도 `ROLE_REQUIRED`, 서버 변화 없음 | ROLE-operator-390-resp, ROLE-viewer-390-incidents |
+| 409 | Responders 두 탭 | 1440 | 통과 | A가 Junho 제거 → 낡은 B가 Minjae 제거: "Changed — reload. Someone else changed the Responders of Hanbit Logistics while you were editing. Your last change was not applied." 서버 변화 없음, B의 버튼 전부 비활성, Reload 뒤 Junho 줄은 "No longer in Responders · changed by someone else"로 제자리 | 409-resp-B, 409-resp-B-reloaded |
+
+### 회귀 점검
+
+| 시나리오 | 폭 | 결과 | 관찰 |
+|---|---|---|---|
+| 세 고객 키보드만으로 저장 (Mirae Pay, Daon Retail, Hanbit Logistics) | 1440 | 통과 | Ctrl K → 이름 → Enter → J → Enter → E(2단계 분에 포커스) → 숫자 → Ctrl+Enter → Shift+Tab → Enter. 14~17키. 각자 자기 고객에만 저장(8·3·4분), Ara Games 변화 없음. 확인 상자 기본 포커스가 Cancel로 바뀌어 Enter만으로는 저장되지 않음(이전 P3-C 해결), J/K 행 이동 동작(이전 P3-E 해결) |
+| 편집 중 인시던트 Ack하고 돌아와 이어가기 | 1440 | 통과 | Incidents → 가드 "Keep draft and continue" → Ack 두 건 → Call order → "Draft for Mirae Pay · Resume" → 2단계 6분 그대로, 저장 버튼 "Save for Mirae Pay" |
+| 서비스 → 고객 전체로 넓히기 | 1440 | 통과 | 넓히기 상자 기본 포커스 "Stay on Hanbit Logistics › Fulfilment › Orders API"(Enter는 머무름). 넓힌 뒤 "Save for Hanbit Logistics" + "← Back to Orders API", 저장 확인에 "Wider than the row you opened". 저장 뒤 고객은 5분, Orders API의 own steps는 그대로 |
+| own steps 생성·제거 | 1440 | 통과 | Mirae Pay › Core › Checkout: E → 7 → Ctrl+Enter, "Own steps created for … · 1 service · Undo", 고객은 8분 그대로. 제거 상자 기본 포커스 "Keep them"(Enter는 유지), 제거 뒤 다시 Mirae Pay를 따름 |
+| 폰에서 읽기·수정 | 390 | 통과 | 시트 4탭으로 Daon Retail › Commerce › Checkout, "YOUR FILTER" 행 → 패널 문장 + Paged (3) 이름, 입력 요소 0. Create own steps → 2단계 4분(숫자 자판, 16px) → "Save own steps for Daon Retail › Commerce › Checkout". 44px 미만 0개, 가로 넘침 0, 고객 값은 그대로 |
+| Ack 안전 | 1440·390 | 통과 | 위 "행 고정 · Incidents" 줄 |
+| 콘솔 오류, 가로 넘침 | 전 폭 | 통과 | 앱 오류 0건(샌드박스에서 Google Fonts 요청만 실패), scrollWidth = 화면 폭 |
+
+### 엉뚱한 사람·범위를 제거/강등/저장하려는 새 시도
+
+| # | 시도 | 폭 | 결과 | 관찰 |
+|---|---|---|---|---|
+| X1 | Remove…에 포커스 두고 Enter 3초, Space 3초 유지 | 1440 | 통과 | 상자가 열리고 "Keep …"으로 닫히기를 반복할 뿐, 아무도 안 빠짐 |
+| X2 | 확인 버튼으로 옮겨 Enter 3.5초 유지 | 1440 | 통과 (P3) | 이름이 뜬 Junho 한 명만 제거, 다음 사람 상자는 열리지 않음. 다만 제거 뒤 포커스가 문서 맨 위(body)로 떨어짐 |
+| X3 | 묘비 줄: 글자 클릭, Undo 3연타, Undo 자리 0.8·1.5초 뒤 누름, Undo에서 Enter 유지 | 1440 | 통과 (P3) | 글자는 반응 없음. Undo는 한 번만 실행(Junho 복귀), 그 자리에는 글자만 와서 이후 누름은 아무 일 없음. Enter 유지도 한 번만. Undo 뒤에도 포커스가 body로 떨어짐 |
+| X4 | 제거 뒤 다른 고객 패널로 나갔다가 예전 Undo 자리 누름·뒤로가기 / 역할 토스트 Undo를 다른 고객 패널에서 누름 | 1440 | 통과 | 나가면 묘비·Undo는 사라짐(안내대로), 예전 자리에는 Hanbit 패널의 글자, Hanbit 변화 없음. 돌아오면 Junho는 제거된 상태. 역할 토스트는 Daon 패널에서 눌러도 "Undone · Eunbi Song is Pageable for Hanbit Logistics again" — 원래 고객에만 적용 |
+| X5 | 두 탭: B가 Junho 확인 상자를 띄운 사이 A가 Junho 제거 → B 확인 → B가 Done→Edit 뒤 Minjae 제거 → A가 Undo | 1440 | 통과 (P3) | B의 확인은 "Not found. It may have been removed…"(아무도 안 빠짐), 이어진 Minjae 제거는 "Changed — reload"로 막힘. A의 Undo는 Junho만 복귀. 단 404 뒤에는 B 화면에 Junho가 그대로 남고 Reload 안내가 없음 |
+| X6 | 확인 상자가 뜬 채 Ctrl K로 다른 고객 필터, 뒤로가기 | 1440 | 통과 (P3) | 확인 상자 위로 "Filter to…"가 열리고 Hanbit을 고르면 필터가 바뀌며 패널·상자가 닫힘 — 아무도 안 빠짐, Hanbit 변화 없음. 뒤로가기도 상자가 닫히고 변화 없음. 상자가 Ctrl K를 막지는 않음 |
+| X7 | 확인 상자가 뜬 채 창을 1440→390으로, 제거 뒤 1380·1280·1024·1440으로 | 1440→390 | 통과 | 상자·이름·기본 포커스 유지(390에서 버튼 316×44). 제거 뒤 폭을 바꿔도 묘비 유지, 예전 Remove… 자리에는 버튼이 오지 않음, 가로 넘침 0 |
+| X8 | 제거 직후 스크롤로 다음 사람의 Remove…를 같은 자리로 가져와 0.45초·1.7초 뒤 누름, 상자 뜬 채 두 번 더 | 1440·390 | 통과 | "Remove Minjae Lee from Responders of Daon Retail?"이 이름과 함께 뜨고 기본 포커스 "Keep Minjae Lee". 같은 자리를 더 눌러도 그대로. Minjae는 안 빠짐 |
+| X9 | 역할 선택 상자에서 ↓ 12번, ↑↓ 번갈아 6번 | 1440 | 통과(참고) | 도달에 영향 없는 Eunbi는 마지막 값(Notify only)으로 한 번 적용 + 토스트 Undo, 충돌·오류 없음. 확인 없이 바뀌는 것은 설계대로이나 키 한 번으로 호출 대상에서 빠진다는 점은 기억할 것 |
+| X10 | 확인 누른 직후(40ms) 다른 두 사람의 Remove…를 연달아 | 1440 | 통과 | 마지막에 누른 사람(Minjae) 이름의 상자 하나만 뜸. 확인하면 Junho·Minjae 각자 묘비+Undo, 세 번째 사람(Sungmin)은 그대로 |
+| X11 | Remove…에서 눌러 다른 사람의 Remove…에서 뗌(드래그) | 1440 | 통과 | 아무 일 없음 |
+| X12 | Responders 편집 중(묘비 있음) E 키·Edit call order | 1440 | 통과 | Edit call order 비활성 + "Editing Responders of Daon Retail: each change applies at once. The steps stay as they are until you press Edit.", E 무시 |
+| X13 | 스크롤 보정이 없는 브라우저 흉내(`overflow-anchor: none`)로 범위 상태가 바뀌는 제거 | 1440·390 | **P2-B** | 아래 문제 목록 |
+
+### 보안 재검토 요약 (`git diff 7b636ae..HEAD -- apps packages`, 읽기 전용)
+
+| 항목 | 결과 | 확인 |
+|---|---|---|
+| 로그아웃 경로 | 통과 (화면 경로는 P2-A) | GET·HEAD 405, 다른 출처·`Origin: null`·cross-site POST 403(세션 유지), 같은 출처 POST 303 + `ao_session=; Max-Age=0; HttpOnly; SameSite=lax` |
+| 초안 키·삭제 | 통과 | 키에 사용자 id, 본문과 불일치하면 버림, 사용자가 바뀌면 읽기 전에 삭제, 로그아웃 때 삭제 |
+| Responders If-Match | 통과 | 세 쓰기 모두 버전 전송, 낡은 요청은 409·변화 없음 |
+| 서버 액션 검증 | 통과 | 화면과 같은 규칙(12단계, 분 증가, 채널 중복, 닿는 사람, 발송 한도, 이메일·전화 형식) |
+| 역할 | [권고] | 화면은 버튼을 끄고, 실제 거부는 API가 함. 콘솔 서버 액션은 세션만 확인한다. 목 API는 `ROLE_REQUIRED`로 거부(확인함) — 실제 백엔드의 역할 검사는 백엔드 PR에서 확인 필요 |
+| `?as=` | 통과 | 목 모드에서만(아니면 404, 운영에서는 목 모드 자체가 예외), 알 수 없는 값·`__proto__`는 기본 사용자, 역할은 쿠키가 아니라 API 쪽 |
+| 0.6초 가드 | 통과 | 포인터만, 표시한 지점 24px 안만 삼킴. 삼켜지면 "아무 일 없음"이라 Cancel·Keep이 삼켜져도 상태는 안 바뀜. 키보드는 안 막음 |
+| 헤더·미들웨어 | 통과 | CSP·XFO·Referrer·nosniff·Permissions·HSTS 유지, 공개 경로는 `/auth/sign-out` 하나만 추가 |
+| [차단] | 0건 | [권고] 4건(편집 중 로그아웃 실패, 역할은 백엔드 의존, `X-Forwarded-Host` 신뢰, 404 뒤 Reload 안내 없음) |
+
+### 문제 목록
+
+| 등급 | # | 문제 | 재현 |
+|---|---|---|---|
+| P1 | — | 없음 | — |
+| P2 | A | 편집 중 Sign out을 누르고 가드에서 "Keep draft and sign out", "Discard changes", "Save for …" 중 어느 것을 골라도 로그아웃되지 않는다. 화면은 편집기 그대로이고 세션 쿠키가 남아 `GET /call-order`가 200이다. 한편 브라우저의 초안은 지워진다("Keep draft"를 골랐는데도). 가드의 버튼을 누르는 순간 계정 메뉴가 닫히며 로그아웃 폼이 사라지는 것이 원인으로 보임(`AccountMenu.tsx`). 편집 중이 아닐 때의 로그아웃은 정상. 기존 e2e는 가드의 Cancel만 확인 | 1440·390: `/c/iruda/call-order` → Edit → 2단계 분 변경 → 계정(HK) → Sign out → "Keep draft and sign out" → 주소·화면 그대로, 다시 `/call-order`에 들어가짐 (SIGNOUT-GUARD-1440-Keepdraft) |
+| P2 | B | "행이 움직이지 않는다"가 Responders에서는 브라우저의 스크롤 보정에 기대고 있다. 제거·역할 변경으로 고객 상태가 바뀌면(정상 → AT RISK → UNREACHABLE) 패널 위쪽에 상태 띠가 생기고 그 아래 전부가 내려간다. Chromium은 스크롤을 자동으로 맞춰 화면 위치를 지키지만(0~1px), 그 보정을 끄면 Responders 줄이 225~269px(AT RISK), 39px(UNREACHABLE) 움직인다. 스크롤 보정이 없는 것으로 알려진 Safari(아이폰)에서는 이렇게 보일 가능성이 높다. 모든 Remove…가 이름을 넣어 다시 묻고 기본이 "Keep …"이라 엉뚱한 사람이 조용히 빠지지는 않으며, 이번 재현에서 예전 자리에 온 것은 안내 글과 "Add MSP staff…" 선택 상자였다. 409 띠("Changed — reload")도 같은 자리에 생기지만 그때는 버튼이 전부 꺼져 있다. 실기기 확인 필요 | 390 또는 1440, 페이지에 `*{overflow-anchor:none}` 적용: `/c/daon/call-order` → Edit responders → Junho Park 제거 → Minjae Lee 제거(확인) → 줄 전체가 269px/225px 아래로 (A3-390-noanchor-after-minjae) |
+| P3 | A | viewer가 폰에서 Incidents 목록의 꺼진 Acknowledge를 보면 이유가 없다(이유는 `title`뿐이라 터치에서는 안 보임). 패널을 열면 글로 나옴 | 390, `?as=viewer`, `/incidents` (ROLE-viewer-390-incidents) |
+| P3 | B | Responders에서 키보드로 제거를 확인하거나 Undo하면 포커스가 문서 맨 위로 떨어진다(Incidents는 그 줄에 남음) | 1440: Remove…에 포커스 → Enter → Shift+Tab → Enter |
+| P3 | C | 다른 탭에서 이미 제거된 사람을 제거하면 "Not found…"만 나오고 그 사람이 목록에 남으며 Reload 안내가 없다(다음 변경은 409로 막힘) | 두 탭에서 같은 사람 Remove… |
+| P3 | D | 확인 상자가 떠 있어도 Ctrl K "Filter to…"가 그 위로 열린다(고르면 패널이 닫힐 뿐 변화는 없음) | Remove… → Ctrl K |
+| P3 | E | 3107에 이전 서버가 남아 있으면 Playwright가 그것을 재사용해 무관한 실패가 난다. 시작 전에 포트를 확인하거나 CI에서는 `reuseExistingServer`를 끌 것 | 남은 `next start -p 3107`이 있는 상태에서 `npx playwright test` |
+| P3 | — | 이전 P3-F·G·H·I·K는 이번에 다시 보지 않았다(P3-C·D·E·J는 해결 확인) | — |
+
+### 판정
+
+**머지 불가 — P1 0건, P2 2건, 보안 [차단] 0건.** 이전 P1-A는 고쳐졌다: Remove…는 사람과 고객 이름으로 묻고 기본이 "Keep …"이며, 같은 자리 두 번(90ms~3초)·확인 더블클릭·Enter 유지·스크롤·창 크기 변경·두 탭·필터 변경 어느 경로로도 이름이 뜨지 않은 사람이 빠지지 않았고, 제거된 사람은 제자리에 남아 각자 Undo를 가진다. UNREACHABLE·AT RISK 경고, P2-A(플랜 이름), P2-B(한도), 초안의 사용자 분리, 역할, Responders 409도 통과했고 회귀는 없다. 막는 것은 새로 생긴 로그아웃 경로의 P2-A다: 편집 중에 누른 Sign out이 "sign out"이라고 답하고도 세션을 남긴다. 고칠 범위는 좁다(폼이 메뉴와 함께 사라지지 않게) — 고친 뒤 "로그아웃" 두 줄과 가드의 세 버튼만 재실행하면 된다. P2-B는 같은 PR에서 고치거나(상태 띠·409 띠가 목록을 밀지 않게 자리 확보), 아이폰 Safari 실기기 확인을 조건으로 사유와 함께 백로그로 넘길 수 있다.
+
+점검 한계: 목 API 기준(역할·If-Match·검증의 실제 강제는 백엔드에서 확인 필요). 터치는 Playwright 에뮬레이션이고 Safari는 `overflow-anchor: none`으로 흉내만 냈다. 역할 선택 상자의 ↓ 반복은 헤드리스에서 값이 안 바뀌는 경우가 있어 Eunbi 한 건만 판정에 썼다. 대비는 눈으로만 확인. 샌드박스에서 Google Fonts가 막혀 대체 글꼴로 렌더링됨.
+
+---
+
+## Console Call order 최종 점검 — 2026-11-11
+
+대상: `apps/console` (feat/console-call-order, 커밋 `28e60b0`, origin/main은 `1eb757f` 그대로라 병합 없음). 고친 쪽과 무관한 독립 점검이며 제품 코드는 고치지 않았다. 재점검에서 실패한 것(P2-A, P2-B, P3-A~D)과 새 동작("Responders 편집 중 패널 나머지는 멈춰 있다가 Done에 갱신")만 다시 밟았고, 회귀는 빠르게만 봤다. 빌드본을 직접 기동(`E2E_ALLOW_MOCK=1 MOCK_API=1 next start -p 3142`, 묶음마다 재기동해 목 상태 초기화), Playwright 1440×900(마우스·키보드)·390×844(터치), 캡처를 직접 보고 판정했고 결과는 새 세션으로 다시 읽은 서버 상태로 확인했다. 행 위치는 `overflow-anchor: none`을 넣은 뒤 각 행의 화면 좌표(top·height, 소수점 그대로)와 모든 스크롤 위치를 조작 전후로 비교. 캡처: `docs/qa/shots/console-call-order-final/` (gitignore). 보안 검토는 `/home/claude/alarmops-security-review-callorder-3.md`.
+
+### 통합
+
+| 항목 | 결과 |
+|---|---|
+| 병합 | 필요 없음 (`origin/main`에 새 커밋 없음) |
+| `npm test` | 통과 — console 173, core 81, design-system 97, ingest 32 (합 383), db 스키마 검사 통과(샌드박스에서 Prisma 엔진 내려받기가 막혀 스크립트의 대체 경로로 검증) |
+| `npm run typecheck` | 통과 (console, core, design-system, ingest) |
+| console `eslint .` | 통과 (경고 0) |
+| `next build` | 통과 |
+| Playwright (`PORT=3141 PW_NO_REUSE=1`) | 133 / 133 통과 (직접 띄운 새 서버, 6.3분) |
+
+### 이전 실패 항목 재실행
+
+| # | 이전 문제 | 폭 | 결과 | 측정·관찰 | 캡처 |
+|---|---|---|---|---|---|
+| P2-A | 편집 중 Sign out — 가드 | 1440·390 | 통과 | 버튼이 셋으로 바뀜: "Save for Iruda Edu and sign out" / "Sign out without saving" / "Cancel"(초안 유지는 없앰 — 로그아웃이 초안을 지우므로). 본문이 그 이유와 "If the save does not go through, you stay signed in."을 말함. 가로 넘침 0 | P2A-1440-1-guard, P2A-390-1-guard |
+| P2-A | Sign out without saving | 1440·390 | 통과 | `/login?signedOut=1`, 세션 쿠키 없음, `ao-…` 키 0개(직전 초안 키 1개), 다시 `/call-order` → `/login?next=…`. 서버 값 그대로(5분), 다시 로그인해도 초안 없음 | P2A-1440-2-after-nosave |
+| P2-A | Save … and sign out (저장 성공) | 1440·390 | 통과 | 서버에 9분 저장된 뒤 로그아웃(쿠키 없음·키 0·`/login`) | — |
+| P2-A | 저장이 막힘 (2단계 0분) | 1440·390 | 통과 | 로그인 유지, 토스트 "Not signed out: Iruda Edu was not saved. Fix what is marked and save, or sign out without saving.", 문제 줄 "Step 2 (0 min) would not come after step 1 (0 min)…", 포커스는 2단계 분, 초안 유지 | P2A-1440-4-blocked |
+| P2-A | 저장이 서버에서 실패 (다른 세션이 먼저 저장 → 409) | 1440·390 | 통과 | 로그인 유지, 같은 토스트 + 패널 "Changed — reload. Someone else changed the call order of Iruda Edu while you were editing. Nothing was saved, and your draft is kept as you typed it." 서버는 다른 세션의 값(7분). 그 상태에서 "Sign out without saving"은 정상 로그아웃 | P2A-390-5-failed-409 |
+| P2-A | 저장 확인 상자에서 Cancel (여러 서비스에 닿는 저장, Cheong Media) | 1440·390 | 통과 (P3-F) | 로그인 유지, 편집 화면 그대로, 서버 변화 없음. 다만 이때는 "Not signed out" 안내가 없고, 확인 상자("Save for Cheong Media?")도 저장 뒤 로그아웃된다는 말이 없다 | P2A-1440-6-confirm-wide, -7-confirm-cancelled |
+| P2-A | 가드의 Cancel · Esc | 1440·390 | 통과 | 가드만 닫힘, 입력 값·세션 그대로 | — |
+| P2-A | 편집 중이 아닐 때 Sign out / 다른 고객 초안만 남아 있을 때 | 1440·390 | 통과 | 가드 없이 바로 로그아웃, 쿠키 없음·키 0, 다시 로그인해도 초안 없음. 메뉴에 "Signing out removes the drafts kept in this tab." | P2A-1440-8-menu |
+| P2-B | Responders 행 고정 (`overflow-anchor: none`) — 제거 → AT RISK → UNREACHABLE → 역할 복귀 → Undo 두 번 | 1440·390 | 통과 | 여섯 구간 모두 0.00px, 스크롤 위치도 그대로(재현 때는 225~269px·39px). 상태는 목록 위의 44px 고정 줄("Reach now: OK" → "AT RISK … harder to reach now" → "UNREACHABLE Nobody for Daon Retail is reached now")과 마지막 줄 아래 상세로 나옴. 가로 넘침 0 | P2B-1440-1-at-risk, P2B-390-2-unreachable |
+| P2-B | 409 띠 (다른 세션이 먼저 변경) | 1440·390 | 통과 | 0.00px. 고정 줄 "Changed — reload. The last change was not applied · details below the list [Reload]", 상세는 목록 아래. 남는 버튼은 Done·Reload 둘뿐. 서버 변화 없음 | CONF-1440-409, CONF-390-409 |
+| P2-B | 새 동작: 편집 중 패널 나머지는 멈춤, Done에 갱신 | 1440·390 | **P2-C** | Done을 누르면 패널이 최신이 된다(AT RISK 띠, "Paged (1): Soyeon Choi"). 그러나 편집 중에는 아래 문제 목록 P2-C | P2B-1440-3-held-top, P2B-390-3-held-top, P2B-1440-4-after-done |
+| P3-A | viewer가 폰에서 꺼진 Acknowledge의 이유 | 390 | 통과 | 목록 위에 글로 "Read only. Acknowledging needs the Operator role. You are signed in as Viewer."(13px, 첫 화면 y 431). operator에게는 안 나옴. Call order 패널에도 두 이유가 글로 보임 | P3A-390-viewer-incidents |
+| P3-B | 키보드로 제거·Undo 뒤 포커스 | 1440 | 통과 | Enter → (기본 "Keep Junho Park") Shift+Tab → Enter: 포커스가 Junho 줄(2px 테두리 보임). Tab → "Undo: put Junho Park back" → Enter: 다시 Junho 줄. 다음 Tab은 그 줄의 Remove… | P3B-1440-focus-after-remove |
+| P3-C | 다른 탭이 이미 제거한 사람을 제거 (404) | 1440·390 | 통과 | "Changed — reload. Someone else changed the Responders of Daon Retail …"(맨 "Not found" 없음), 0.00px, Reload 뒤 그 줄은 "Junho Park · No longer in Responders · changed by someone else" | P3C-1440-404 |
+| P3-D | 질문 위로 Ctrl/⌘K | 1440 | 통과 | Remove 확인, Unsaved changes 가드, Save 확인 세 상자 모두에서 Ctrl K·⌘K가 아무것도 열지 않고 상자·기본 포커스 유지. 질문이 없을 때는 전처럼 열림 | — |
+
+### 회귀 점검 (빠르게)
+
+| 시나리오 | 폭 | 결과 | 관찰 |
+|---|---|---|---|
+| 세 고객 키보드만으로 저장 (Mirae Pay, Daon Retail, Hanbit Logistics) | 1440 | 통과 | Ctrl K → 이름 → Enter → Tab → Enter → E(2단계 분에 포커스) → 숫자 → Ctrl+Enter → Shift+Tab → Enter, 16~18키. 확인 상자 기본 포커스 Cancel. 서버: 8·3·4분, Ara Games 그대로 |
+| Incidents Ack 안전 | 1440·390 | 통과 | 같은 자리 5번(90ms·0.7·1.5·3초 간격): 한 건만 Ack, 행 이동 0, 그 자리에는 글자만("Acknowledged ✓"), "1 acknowledged in place · Re-sort" |
+| 폰에서 읽기·수정 | 390 | 통과 | Daon Retail › Commerce › Checkout: 입력 요소 0, 가로 넘침 0, 44px 미만은 "Skip to content"뿐. Create own steps → 2단계 4분(숫자 자판, 16px) → 저장. 서버: Checkout 4분, 고객 값 그대로 |
+| 서비스 → 고객 전체로 넓히기 | 1440 | 통과 | 넓히기 상자 기본 포커스 "Stay on Hanbit Logistics › Fulfilment › Orders API"(Enter는 머무름). 넓힌 뒤 "Save for Hanbit Logistics", 확인에 "Wider than the row you opened". 서버: 고객 5분, Orders API own steps 그대로 |
+| 콘솔 오류 | 전 폭 | 통과 | 위 시나리오에서 앱 오류 0건 (세션이 사라진 경우 제외 — P2-D) |
+
+### 로그아웃·Responders 편집 주변의 새 시도
+
+| # | 시도 | 폭 | 결과 | 관찰 |
+|---|---|---|---|---|
+| A1 | 가드의 "Save … and sign out"을 60·40ms 간격 3번 / "Sign out without saving" 3번 | 1440·390 | 통과 | 저장 요청 1건 + 로그아웃 1건만 나감, 오류 0. 저장 안 함 쪽은 저장 요청 0건 |
+| A2 | 둘째 탭에서 로그아웃한 뒤 첫 탭에서 Save / Responders Remove 확인 | 1440·390 | **P2-D** | 서버에는 아무것도 안 바뀐다(좋음). 그런데 화면은 "Saving…" / "Removing…"에서 영원히 멈추고 아무 말이 없다. 아래 문제 목록 |
+| A3 | 로그아웃 뒤 뒤로가기 3번·앞으로 | 1440·390 | 통과 | 매번 `/login?next=…`, 고객·사람 이름 없음, 이전 문서가 되살아나지 않음(bfcache 복원 없음 — 응답이 `no-store`) |
+| A4 | 관리자 초안을 둔 채 같은 탭에서 `?as=operator` → `?as=viewer` → 관리자 | 1440·390 | 통과 | 초안 키 0, 초안 줄·"Draft for" 없음, 화면 값은 저장된 5분, 뒤로가기로도 관리자의 입력(9분)이 안 보임. 관리자로 돌아와도 초안은 돌아오지 않음. operator 세션에서 관리자 id의 키를 직접 심어도 안 보임 |
+| A5 | 저장이 진행 중(3초 지연)일 때 Sign out | 1440·390 | 통과 (P3-G) | 가드가 뜬다. "Sign out without saving" → 로그아웃. "Save … and sign out" → 아무 말 없이 무시되고 진행 중이던 저장만 끝나 "Saved for Iruda Edu" 토스트, 로그인 유지 |
+
+### 보안 재검토 요약 (`git diff d9e91b9..HEAD -- apps packages`, 읽기 전용)
+
+| 항목 | 결과 | 확인 |
+|---|---|---|
+| 로그아웃 폼(body에 붙임) | 통과 | GET 405. 다른 출처·`Origin: null`·다른 포트·`Sec-Fetch-Site: cross-site`/`same-site` 모두 403(세션 유지). 같은 출처 303 → 항상 `/login?signedOut=1`(`next`·본문 값은 읽지 않음 — 열린 리다이렉트 없음), `ao_session=; Max-Age=0; HttpOnly; SameSite=lax`. CSP `form-action 'self'` 유지 |
+| `TRUSTED_PROXY` | 통과 | 미설정: `X-Forwarded-Host`를 위조해도 403. `=1`: XFH(첫 값)와 Origin 비교, XFH 없으면 Host. README에 조건 명시 |
+| 서버 액션의 `requireRole` | 통과 | 서버 액션 11개 전부(`call-order/actions.ts` 5개 ADMIN, `incidents/actions.ts` 6개 OPERATOR) `run()` 안에서 세션 → 역할 → 입력 순서. 빠진 것 없음. 관리자의 실제 요청을 operator·viewer 세션으로 다시 보내면 없는 고객·없는 사람이어도 똑같이 `ROLE_REQUIRED`, 서버 변화 없음. 세션 없으면 `/login`으로 307 |
+| `/me` 실패 | 통과 | 예외는 `run()`의 catch로 가서 거부, 모르는 역할 값은 최하위 취급. 단위 테스트 있음 |
+| 로그아웃 뒤 캐시 | 통과 | 인증 페이지·RSC 응답 `Cache-Control: private, no-cache, no-store, max-age=0, must-revalidate`, 뒤로가기는 `/login`. localStorage에는 테마뿐 |
+| 헤더 | 통과 | CSP·X-Frame-Options·Referrer-Policy·nosniff·Permissions-Policy·HSTS 그대로 |
+| [차단] | 0건 | [권고] 4건: 세션이 사라진 뒤의 쓰기가 멈춤(P2-D), Origin 비교가 호스트만 봄(스킴 무시), 서명 쿠키라 로그아웃이 서버에서 토큰을 무효화하지는 않음(SSO 연결 때), 다른 탭에서 로그아웃하면 이 탭의 초안 키는 남음(다른 사용자가 로그인하면 읽기 전에 삭제됨 — 확인) |
+
+### 문제 목록
+
+| 등급 | # | 문제 | 재현 |
+|---|---|---|---|
+| P1 | — | 없음 | — |
+| P2 | A·B | 재점검의 P2-A(편집 중 로그아웃), P2-B(스크롤 보정 의존)는 해결 확인 | — |
+| P2 | C | (P2-B 수정으로 생김) Responders 편집 중 패널 위쪽이 거짓을 "지금"이라고 말한다. 두 명을 빼고 한 명을 Notify only로 바꿔 서버가 UNREACHABLE인 동안에도 패널 맨 위는 "IF SOMETHING BREAKS NOW — Slack everyone in Responders (3) now … Paged (3): Junho Park, Minjae Lee, Soyeon Choi"이고 STEPS도 "(3)"이다. 그 자리에는 "편집 시작 때 기준"이라는 표시가 전혀 없다(흐리게도, 문구도 없음). 설명은 아래 Responders 카드 안의 한 문장("…the summary above this card stays as it was, until you press Done")과 카드의 상태 줄뿐인데, 위로 스크롤하면 둘 다 화면 밖이다. 1440에서는 바로 옆 목록 행이 "UNREACHABLE · nobody · Responders (0)"라 같은 화면에서 답이 둘이고, 390에서는 틀린 쪽만 보인다. 준호가 사람을 뺀 뒤 "그래서 지금 누가 불리나"를 확인하려고 위로 올리면 방금 뺀 사람이 그대로 Paged에 있다 — 제거가 안 먹었다고 읽거나, Done 없이 "Back to the list"로 나가면서 3명이 불린다고 믿을 수 있다. 완화: UNREACHABLE·AT RISK로 만드는 변경은 그 전에 이름을 넣어 묻고, 카드의 줄은 맞게 말하며, 편집한 본인의 그 탭에서 Done 전까지만이다. 고칠 범위는 좁다: 멈춘 구간에 Edit을 누르는 순간부터 "As of when you started editing Responders · updates on Done" 같은 표시를 두거나(Edit 때 한 번 생기므로 행을 밀지 않는다) "NOW" 문장·Paged 줄을 가린다 | 1440·390: `/c/daon/call-order` → Edit responders → Junho Park, Minjae Lee 제거 → Soyeon Choi를 Notify only → 패널을 맨 위로 (P2B-1440-3-held-top, P2B-390-3-held-top) |
+| P2 | D | (이 브랜치에서 생긴 것이 아님 — main의 Incidents도 같음) 세션이 사라진 탭(다른 탭에서 로그아웃, 또는 8시간 만료)에서 쓰기를 누르면 화면이 "Saving…" / "Removing…" / "Acknowledging…"에서 영원히 멈추고 아무 안내가 없다. 서버에는 아무것도 적용되지 않으므로 잘못 저장되지는 않지만, 온콜이 밤새 열어 둔 탭에서 Acknowledge를 누르면 "처리 중"으로 보인 채 호출은 계속된다. 원인: 서버 액션 POST가 미들웨어에서 `/login`으로 307 → 클라이언트가 "An unexpected response was received from the server."를 던지는데 잡는 곳이 없다. 새로고침하면 `/login`으로 가고 초안은 남아 있다. 콘솔 전체 문제라 별도 이슈를 권함(액션 호출을 감싸 "Signed out — sign in again" 안내 + 로그인으로) | 두 탭: 첫 탭 `/c/iruda/call-order` Edit → 값 변경, 둘째 탭 Sign out, 첫 탭 Save (A2-390-save-after-other-tab-signout, A2-1440-remove-after-other-tab-signout, EXP-1440-ack-no-session) |
+| P3 | F | "Save … and sign out" 뒤의 저장 확인 상자가 로그아웃이 이어진다는 말을 하지 않고, 거기서 Cancel하면 "Not signed out" 안내가 없다(README는 "told"라고 적음). 로그인은 유지되고 편집 화면 그대로라 헷갈릴 여지는 작다 | `/c/cheong/call-order` Edit → 값 변경 → Sign out → Save for Cheong Media and sign out → Cancel |
+| P3 | G | 저장이 진행 중일 때 뜬 가드에서 "Save … and sign out"은 조용히 무시된다(저장은 끝나고 로그인 유지, 안내 없음). 같은 가드의 "Sign out without saving"은 이미 보낸 저장이 적용될 수 있는데도 그렇게 적혀 있다. 느린 망에서만 가능 | Save 직후 응답 전에 계정 → Sign out |
+| P3 | H | 409 뒤 아래쪽 "Reload the Responders of …"를 누르면 띠가 사라지고 묘비 줄 높이가 바뀌어(76→55px) 줄들이 화면에서 140~161px 움직인다. 명시적 새로고침이고 포인터 밑에 온 것은 줄의 글자(버튼 아님), 같은 자리 재누름은 아무 일 없음 | 두 탭 409 → 아래 Reload (CONF-1440-after-bottom-reload) |
+| P3 | I | 상태 줄이 한 줄 고정이라 뒷부분이 잘린다("… is reached now · d…"). 핵심 낱말(UNREACHABLE / AT RISK / Changed — reload)은 보임 | 390·1440 (P2B-390-2-unreachable) |
+| P3 | — | 재점검의 P3-A·B·C·D 해결 확인, P3-E는 `PW_NO_REUSE=1`로 해결. 이전 P3-F·G·H·I·K(첫 점검 번호)는 이번에도 다시 보지 않았다 | — |
+
+### 판정
+
+**머지 불가(조건부) — P1 0건, P2 2건(C: 이번 수정에서 생김, D: 기존·콘솔 전체), 보안 [차단] 0건.** 재점검에서 막았던 두 건은 고쳐졌다. 편집 중 로그아웃은 세 선택 모두 말한 대로 움직이고(저장 성공 → 로그아웃, 저장이 막히거나 실패 → 로그인 유지 + 안내, 저장 안 함 → 쿠키·초안 삭제 후 `/login`), Responders 줄은 스크롤 보정을 꺼도 1440·390 모두 0px이다. P3-A~D도 해결됐고 회귀는 없다. 남은 것은 P2-B를 고치는 방법에서 나온 P2-C다: 줄을 붙들기 위해 패널 위쪽을 멈춰 두었는데, 그 멈춘 구간이 "NOW"라는 제목 아래 방금 뺀 사람을 Paged로 보여 주면서 멈췄다는 표시가 없다. 이 화면이 답해야 하는 바로 그 질문("지금 터지면 누가 불리나")에 틀린 답이 표시 없이 남는 것이라 P2로 둔다. 표시 한 줄(또는 멈춘 구간 가리기)이면 되고, 고친 뒤에는 P2-B 묶음과 이 한 장면만 재실행하면 된다. P2-D는 이 PR이 만든 문제가 아니고 main에도 있으므로 별도 이슈로 넘기는 것을 권한다 — 그 경우 이 PR을 막는 것은 P2-C 하나다. 사용자가 P2-C를 사유와 함께 백로그로 받아들이면 그대로 머지할 수 있다.
+
+점검 한계: 목 API 기준(역할·If-Match의 실제 강제는 백엔드에서 확인 필요). 터치는 Playwright 에뮬레이션이고 Safari는 `overflow-anchor: none`으로 흉내만 냈다(WebKit 실기기 미확인). A5의 "저장 안 하고 로그아웃"은 지연을 브라우저 쪽에서 걸어 저장 요청이 서버에 닿기 전에 취소됐다 — 실제 느린 서버에서는 저장이 적용될 수 있다. 대비는 눈으로만 확인. 샌드박스에서 Google Fonts가 막혀 대체 글꼴로 렌더링됨.
+
+---
+
+## Console Call order 3차 점검 — 2026-11-11
+
+대상: `apps/console` (feat/console-call-order, 커밋 `57ac28c`, origin/main은 `1eb757f` 그대로라 병합 없음). 고친 쪽과 무관한 독립 점검이며 제품 코드는 고치지 않았다. 최종 점검에서 남은 것(P2-C, P2-D, P3-F·G·H·I)만 다시 밟았고 회귀는 빠르게만 봤다. 빌드본을 직접 기동(`E2E_ALLOW_MOCK=1 MOCK_API=1 next start -p 3162`, 묶음마다 재기동해 목 상태 초기화, 끝난 뒤 내 프로세스만 종료), Playwright 1440×900(마우스·키보드)·390×844(터치), 캡처를 직접 보고 판정했고 "서버에 안 바뀜"은 매번 새 세션으로 다시 읽어 확인했다. 행 위치는 `overflow-anchor: none`을 넣고 측정. 캡처는 커밋하지 않았다(세션 작업 폴더에만 있음).
+
+### 통합
+
+| 항목 | 결과 |
+|---|---|
+| 병합 | 필요 없음 (`origin/main`에 새 커밋 없음) |
+| `npm test` | 통과 — console 198, core 81, design-system 97, ingest 32 (합 408), db 스키마 검사 통과(샌드박스에서 Prisma 엔진 내려받기가 막혀 스크립트의 대체 경로로 검증) |
+| `npm run typecheck` | 통과 (console, core, design-system, ingest) |
+| console `eslint .` | 통과 (경고 0) |
+| `next build` | 통과 |
+| Playwright (`PORT=3161 PW_NO_REUSE=1`) | 152 / 152 통과 (직접 띄운 새 서버, 7.8분) |
+
+### 이전 실패 항목 재실행
+
+| # | 이전 문제 | 폭 | 결과 | 측정·관찰 |
+|---|---|---|---|---|
+| P2-C | 멈춘 패널 위쪽의 표시 | 1440·390 | 통과 | Edit을 누르면 위쪽 묶음 맨 위에 "▲ Before your changes — updates when you press Done"(13px 굵게), 그 아래 살아 있는 줄, 그 아래 옛 내용은 opacity 0.5 + inert. 위쪽 묶음의 위치·높이는 Edit 전후 동일(1440: 170.09/434.34, 390: 250.39/608.78) |
+| P2-C | 살아 있는 "Now:" 줄 — 상태마다 | 1440·390 | 통과 | 3명 "Now: OK — paged (3): Junho Park, Minjae Lee, Soyeon Choi" → Junho 제거 "Now: OK — paged (2): Minjae Lee, Soyeon Choi" → Minjae 제거 "Now: AT RISK — paged (1): Soyeon Choi"(노란 바탕) → Soyeon Notify only "Now: UNREACHABLE — nobody is paged"(붉은 바탕). 줄 높이는 내내 52px(1440)·70px(390), 글자 잘림 없음. 1440에서는 옆 목록 행(AT RISK · Soyeon)과 같은 답 |
+| P2-C | 폰 첫 화면 | 390 | 통과 | 패널을 맨 위로 올리면 라벨 y 250~270, Now 줄 y 276~346 (화면 높이 844). 옛 "Paged (3)…"은 그 아래 y 504, 흐리게 |
+| P2-C | 행 이동 (`overflow-anchor: none`) | 1440·390 | 통과 | 제거 2번·역할 변경 1번 모두 Responders 다섯 줄과 위쪽 묶음의 위치·높이 0.00px, 스크롤 위치도 그대로 |
+| P2-C | Done 없이 나가기 | 1440·390 | 통과 | UNREACHABLE 상태에서 Close(1440)·← Back to the list(390): 목록 행 "UNREACHABLE · nobody · Responders (0)". 다시 열면 멈춤 표시 없이 "UNREACHABLE … Paged (0) · Also notified (3)". 새 세션으로 읽은 서버 값과 같음 |
+| P2-D | 세션이 사라진 뒤의 쓰기 — 목록 Acknowledge | 1440·390 | 통과 | 아래 공통 결과. 행은 "Acknowledge" 버튼으로 돌아옴, 서버는 미확인 그대로 |
+| P2-D | 패널 Acknowledge / Escalate now / Undo / Resolve | 1440·390 | 통과 | Escalate는 켜져 있는 건(Mirae Pay › Core › Payments API, 열린 3건 모두 켜져 있었음)에서 실제로 POST가 나가 401 `SESSION_ENDED`를 받은 것을 확인. 패널 서버 상태는 Ack·Escalate 시도 전후 동일. 실제 Ack 뒤 Undo는 거부되고 건은 Ack 상태 그대로, Resolve도 미적용. 패널 안에도 "Your session ended — sign in again. Nothing was changed. [Reload]" |
+| P2-D | 토스트의 Undo (Incidents) | 1440·390 | 통과 | 거부, 건은 Ack 상태 그대로 |
+| P2-D | Call order Save | 1440·390 | 통과 | 버튼은 "Save for Iruda Edu"로 돌아옴, "Could not save: Your session ended — sign in again. Nothing was changed.", 토스트 없음, 입력 값(8)·초안 키 1개 유지, 서버 5분 그대로. Sign in → 같은 주소 → "Draft for Iruda Edu … Resume" → 8이 되살아나고 그대로 저장하면 서버 8분 |
+| P2-D | Responders 제거 / 역할 / 추가 / 줄의 Undo | 1440·390 | 통과 | 네 가지 모두 401 → 안내. 줄은 그대로("Remove…" 버튼, 역할 PAGEABLE, 추가한 줄 없음), Now 줄은 바뀌지 않음, 서버 "Paged (3)…" 그대로. 실제 제거 뒤 Undo는 거부되고 서버는 "Paged (2)" 그대로 |
+| P2-D | 세션이 없는 채 Sign out | 1440·390 | 통과 | `/login?signedOut=1` |
+| P2-D | 공통 (위 13가지 × 폭) | 1440·390 | 통과 | 매번 가운데에 "Your session ended — sign in again. Nothing was changed." + 본문 + Sign in 하나(포커스가 거기, 390에서 높이 44px). Esc·바깥 누름·Ctrl K로 안 닫힘. "…ing…" 글자 0개, 가로 넘침 0. Sign in의 주소는 매번 `/login?next=<지금 주소>`이고 로그인하면 같은 주소로 돌아옴. 페이지 오류는 401 응답의 콘솔 줄뿐 |
+| P2-D | 둘째 탭에서 로그아웃 | 1440·390 | 통과 | 첫 탭은 건드리지 않아도 195ms(1440)·300ms(390) 뒤 "You signed out in another tab — sign in again. … The drafts kept in this tab were removed, as signing out does." `ao-` 키 3개 → 0개. Sign in → 같은 주소, 초안 없음, 서버 값 그대로 |
+| P2-D | 답이 없는 경우(NO_ANSWER) 문구 | 1440 | 통과 | 세션은 살아 있고 응답만 끊김(요청 차단 / 서버 500 / 서버에는 적용됐는데 응답 유실) 세 경우 모두 세션 종료 상자는 안 뜨고 "No answer from the server, so it is not known whether this was applied. Reload to see how things are now." 대기 글자 0개. 적용 후 유실된 경우 서버는 Ack됐고 행도 ACK'D로 보임 — 문구가 "적용 여부를 모른다"고 말하므로 거짓이 아님 |
+| P3-F | 저장 확인 상자가 로그아웃을 말하지 않음 | 1440·390 | 통과 | 제목 "Save for Cheong Media and sign out?", "You are signed out after this save. If the save does not go through, you stay signed in and are told." Cancel → 토스트 "Not signed out: the save for Cheong Media was cancelled. Nothing was saved; your edit is still open." 로그인·입력 유지, 서버 2분 그대로 |
+| P3-G | 저장이 진행 중일 때의 가드 | 1440 | 통과 | 가드 본문 "A save for Iruda Edu is being sent right now. "Save … and sign out" waits for it and signs out once it is saved. "Sign out without saving" signs out now — the save that is already on its way may still be applied." 누르면 "Saving for Iruda Edu… You are signed out as soon as it is saved…" → 저장 후 `/login?signedOut=1`(서버 6분). 저장이 거부되는 경우(다른 세션이 먼저 9분 저장): 로그인 유지, "Not signed out: Iruda Edu was not saved. …", 서버 9분 |
+| P3-H | 409 뒤 Reload에서 줄이 움직임 | 1440·390 | 통과 | Reload 전후 다섯 줄 모두 dy 0.0 / dh 0.0. 누른 자리 밑은 글자("Reloaded. These are the Responders of Daon Retail"), 버튼 아님 |
+| P3-I | 상태 줄이 잘림 | 1440·390 | 통과 | 손으로 잰 것은 "AT RISK Daon Retail is harder to reach now · details below · 2 removed, shown until Done"과 Now 줄: 세로·가로 잘림 0, 말줄임 없음(줄 높이 52·70px). 가장 긴 UNREACHABLE 문장은 자동 테스트(137번)가 같은 방법으로 확인하고, Now 줄의 UNREACHABLE은 캡처로 확인 |
+
+### 회귀 점검 (빠르게)
+
+| 시나리오 | 폭 | 결과 | 관찰 |
+|---|---|---|---|
+| Incidents Ack 안전 | 1440·390 | 통과 | 같은 자리 5번(0·90ms·0.7·1.5·3초 간격): 한 건만 Ack, 행 이동 없음, 그 자리 밑은 글자("Acknowledged ✓"), "1 acknowledged in place". 서버의 열린 건 수도 1만 줄었다 |
+| 세 고객 키보드만으로 저장 (Mirae Pay, Bora Foods, Hanbit Logistics) | 1440 | 통과 | Ctrl K → 이름 → Enter → Tab×4 → Enter → E(포커스 "Step 2 minutes") → 숫자 → Ctrl+Enter → (확인 상자 기본 포커스 Cancel) Shift+Tab → Enter. 서버 10→8, 2→3, 2→4분 |
+| 폰에서 읽기·수정 | 390 | 통과 | Daon Retail › Commerce › Checkout: 읽기 화면 입력 요소 0, 가로 넘침 0. Create own steps → 2단계 4분(숫자 자판, 16px) → "Save own steps for …" → 서버 Checkout 4분, 고객 값 2분 그대로 |
+
+### 새 시도 세 가지
+
+| # | 시도 | 폭 | 결과 | 관찰 |
+|---|---|---|---|---|
+| B1 | 질문 상자가 떠 있는 동안 세션이 끝남 — (a) 여러 서비스 저장 확인 상자에서 "Save for Cheong Media", (b) 로그아웃 가드에서 "Save … and sign out" | 1440·390 | 통과 | 둘 다 세션 종료 상자가 뜨고 확인 상자·가드는 닫힘. 로그아웃 처리(초안 삭제)로 넘어가지 않아 초안 1개 유지, 서버 그대로. (b)에서 Sign in → 같은 주소 → "Draft for Iruda Edu … Resume" |
+| B2 | Sign in 버튼의 `next` 조작 — 주소에 `?next=https://evil.example`·`#//evil.example`, 경로 `//evil.example/x`, `/%5Cevil.example`, `..%2f..%2f%2fevil.example`, CRLF | 1440 | 통과 (P3-L) | 링크는 `/login`(되돌아갈 주소를 버림) 또는 콘솔 안 경로(`/login?next=%2Fevil.example%2Fx` → 콘솔의 404)뿐. 로그인 뒤 항상 콘솔 출처에 머묾. `/auth/dev-login?next=`에 `//evil`·`/\evil`·`https://`·`/%5C…`·`/%2F%2F…`·탭 문자·`/login?next=//…`를 직접 넣어도 모두 `/incidents`로 감 |
+| B3 | 개발자 도구에서 `BroadcastChannel("ao-auth")`에 `signed-out` 위조(여분 필드 포함), `ao-session-ended` 이벤트 위조, 잘못된 모양의 메시지 | 1440 | 통과 | 위조한 브라우저 자신의 탭들만 "signed out" 상자 + 자기 초안 삭제(쿠키는 그대로 유효). 다른 사람의 브라우저(별도 컨텍스트, operator)는 상자 없음·저장소 키 2→2·쿠키 유지. 서버 변화 없음. 상자 뒤의 Save를 스크립트로 눌러도 POST 0건. 이벤트만 위조하거나 모양이 틀린 메시지는 아무 일도 없음. 채널은 같은 출처·같은 브라우저 프로필에만 닿으므로 남의 데이터에는 닿지 않는다 |
+
+### 보안 재검토 요약 (`git diff 28e60b0..HEAD -- apps packages`, 읽기 전용)
+
+| 항목 | 결과 | 확인 |
+|---|---|---|
+| 미들웨어 | 통과 | 세션 없는 요청 중 `POST` + `next-action` 헤더만 401 `SESSION_ENDED`(text/plain, `no-store`, 보안 헤더 그대로). GET+헤더, 헤더 없는 POST, PUT·DELETE+헤더, 변조 쿠키는 전처럼 307 `/login?next=…`. 새로 공개된 경로는 `/auth/session` 하나(정확히 일치 — `/auth/session/x`, `/auth/sessions`는 307). `x-middleware-subrequest` 우회 안 됨 |
+| `GET /auth/session` | 통과 | 204 또는 401, 본문 0바이트, `Cache-Control: no-store`, Set-Cookie 없음, CORS 허용 헤더 없음. 쿼리(`as`, `next`)는 읽지 않음. POST·PUT 405. 쿠키가 SameSite=Lax라 다른 사이트의 요청에는 쿠키가 안 실리고 응답도 읽을 수 없어 자기 쿠키 밖의 로그인 여부는 알 수 없다. 상태를 바꾸지 않으므로 CSRF 대상이 아님 |
+| `callAction` 적용 범위 | 통과 | 서버 액션 11개(`"use server"` 파일 2개)의 호출 15곳 모두 `callAction(() => …)` 안. 맨 호출 0건(직접 grep). 같은 것을 검사하는 단위 테스트 있음 |
+| Origin 비교 (`CONSOLE_ORIGIN` / `X-Forwarded-Proto`) | 통과 | 미설정: 같은 출처 303, `https://` 같은 호스트·다른 포트·`null`·cross-site·XFH 위조 403. `CONSOLE_ORIGIN=https://console.example`: 그 값만 303, localhost·다른 포트·http·접미사 도메인·XFH/XFP 위조·same-site 403 |
+| Sign in 링크의 `next` | 통과 | `safeNextPath`를 거침. B2 참고 |
+| 헤더 | 통과 | CSP·X-Frame-Options·Referrer-Policy·nosniff·Permissions-Policy·HSTS가 `/login`, `/auth/session`, 401 응답에 그대로 |
+| [차단] | 0건 | [권고] 3건: ① `CONSOLE_ORIGIN` 미설정 시 `X-Forwarded-Proto: https`를 직접 보내면 `https://` Origin이 통과(브라우저의 폼 전송으로는 불가, 대상은 로그아웃뿐) — 운영에서는 `CONSOLE_ORIGIN`을 필수로. ② 서명 쿠키라 로그아웃이 서버에서 토큰을 무효화하지 않음(이전 권고 유지, SSO 연결 때). ③ `/auth/session`에 요청 수 제한 없음(정보는 안 나감, 운영 프록시에서) |
+
+### 문제 목록
+
+| 등급 | # | 문제 | 재현 |
+|---|---|---|---|
+| P1 | — | 없음 | — |
+| P2 | — | 없음. 최종 점검의 P2-C, P2-D 해결 확인 | — |
+| P3 | J | 다른 관리자가 먼저 바꿔 409/404가 난 뒤, 맨 위 "Now:" 줄은 Reload를 누를 때까지 충돌 전 값을 말한다("Now: OK — paged (3): Junho Park, Minjae Lee, Soyeon Choi" — 서버는 Minjae가 빠진 2명). "Changed — reload" 안내는 아래 Responders 카드에만 있어 폰에서 맨 위로 올리면 안 보인다. Reload 뒤에는 "Now: OK — paged (2): Junho Park, Soyeon Choi"로 맞다. 두 관리자가 같은 고객을 동시에 고칠 때만 생기고 누른 자리에는 안내가 뜨므로 P3로 두었지만, 준호·민재가 아직 잘못 읽을 수 있는 유일한 자리다. 충돌 상태에서는 Now 줄도 "changed by someone else — reload"로 바꾸기를 권함 | 두 세션: A가 Daon Retail Responders Edit → B가 Minjae 제거 → A가 Minjae 제거 확인 → A에서 맨 위로 스크롤 |
+| P3 | K | Responders의 Edit을 누르는 순간 Responders 줄들이 아래로 239px(1440)·281px(390) 내려가고 줄 높이가 커진다(위쪽 묶음은 0px). 편집 모드로 들어가는 명시적 전환이고 이후 변경은 모두 0px. 누른 자리 밑에 무엇이 오는지는 이번에 재지 않았다 | `/c/daon/call-order` → Responders Edit |
+| P3 | L | 주소의 쿼리·해시에 `//`나 `next=https://…` 같은 것이 있으면 Sign in 링크가 되돌아갈 주소를 버리고 `/login`이 된다(안전한 쪽). 로그인 뒤 `/incidents`로 감 | B2 |
+| P3 | M | 문구: ① 흐린 옛 묶음의 제목이 여전히 "IF SOMETHING BREAKS NOW"다(라벨·흐림·바로 위 Now 줄이 있어 오독 여지는 작음). ② 세션 종료 상자가 Incidents에서도 "A draft you were writing is kept…"라고 말하고, Acknowledge가 적용되지 않아 호출이 계속된다는 말은 없다("What you just pressed was not applied"는 있음). ③ 다른 탭에서 로그아웃 후 다시 로그인한 경우, 이 탭의 Sign in은 유효한 세션인데도 로그인 화면을 한 번 거친다 | — |
+| P3 | — | 최종 점검의 P3-F·G·H·I 해결 확인 | — |
+
+### 판정
+
+**머지 가능 (MERGE-READY) — P1 0건, P2 0건, 보안 [차단] 0건.** 최종 점검에서 막았던 두 건이 고쳐졌다. 멈춘 패널 위쪽은 "Before your changes"라고 표시되고 흐려지며, 그 위에 지금의 도달 상태가 OK / AT RISK(이름) / UNREACHABLE로 한 줄에 나오고 폰 첫 화면에 들어온다. 세션이 사라진 탭에서는 모든 쓰기(13가지)가 "Saving…"에 멈추지 않고 세션 종료를 말하며, 서버는 바뀌지 않고 초안은 남아 로그인 뒤 같은 주소에서 이어 쓸 수 있다. 남은 것은 P3 네 건이고 그중 J(충돌 뒤 Now 줄)는 파일럿 전에 고치기를 권한다. 머지 전 관문 4(사용자 승인)는 남아 있다.
+
+점검 한계: 목 API 기준(역할·If-Match·세션 만료의 실제 강제는 백엔드·SSO 연결 뒤 확인 필요). 세션 만료는 쿠키 삭제로 흉내 냈다(8시간 만료 자체는 기다리지 않음). 터치는 Playwright 에뮬레이션, Safari는 `overflow-anchor: none`으로 흉내만 냈다(WebKit 실기기 미확인). P3-G·NO_ANSWER는 브라우저 쪽에서 지연·차단을 걸어 만들었다. 키보드 회귀의 둘째 고객은 지난번의 Daon Retail 대신 Bora Foods로 했다. 대비는 눈으로만 확인. 샌드박스에서 Google Fonts가 막혀 대체 글꼴로 렌더링됨.

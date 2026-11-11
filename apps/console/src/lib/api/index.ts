@@ -1,6 +1,6 @@
 import "server-only";
 import { createHttpApi, type ConsoleApi } from "./client";
-import { createMockApi, createStore } from "./mock/mock-api";
+import { MOCK_USERS, createMockApi, createStore } from "./mock/mock-api";
 import { MOCK_NOW } from "./mock/fixtures";
 import { apiBaseUrl, mockMode } from "../mode";
 import { requireSession } from "../auth";
@@ -20,7 +20,8 @@ export async function getApi(): Promise<ConsoleApi> {
   const session = await requireSession();
   if (isMock()) {
     g.__aoMockStore ??= createStore({ customers: process.env.MOCK_CUSTOMERS === "34" ? 34 : 14 });
-    return createMockApi(g.__aoMockStore);
+    // who the mock answers as comes from the session, like the real API reads the token
+    return createMockApi(g.__aoMockStore, undefined, MOCK_USERS[session.sub] ?? { id: session.sub, contactId: "", name: session.name, email: session.email, role: "VIEWER" });
   }
   return createHttpApi({ baseUrl: apiBaseUrl(), headers: () => ({ authorization: `Bearer ${session.token}` }) });
 }
