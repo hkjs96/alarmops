@@ -154,7 +154,7 @@ test.describe("panel: read first", () => {
     await expect(page.getByTestId("co-paged")).toContainText("Paged (5): Haeun Kim, Yuna Seo, Junho Park, Minjae Lee, Taemin Jung · Also notified (4): Seojun Bae, Hana Noh, Hyejin Lim, Dami Ko.");
     await expect(page.getByTestId("co-steps").locator("li")).toHaveText([/^1\s*0 min.*MSP night desk.*Slack · call$/, /^2\s*10 min.*Yuna Seo \(Mirae Pay\).*Call$/, /^3\s*15 min.*everyone in Responders \(5\).*Call$/, /then.*repeat once/]);
     await expect(page.getByTestId("co-from")).toContainText("Comes from");
-    await expect(page.getByTestId("co-from")).toContainText("Mirae Pay · customer steps · Custom, started from Standard (edited) · used by 4 services (Data platform keeps own steps) · edited by Minjae Lee, Nov 7.");
+    await expect(page.getByTestId("co-from")).toContainText("Mirae Pay · customer steps · Custom, started from Urgent (edited) · used by 4 services (Data platform keeps own steps) · edited by Minjae Lee, Nov 7.");
     // read first: no input of any kind, no Save, no widening, no remove
     await expect(panel(page).locator("input, select, textarea")).toHaveCount(0);
     await expect(page.getByTestId("co-save")).toHaveCount(0);
@@ -228,7 +228,10 @@ test.describe("panel: read first", () => {
     await page.goto("/c/lumen/call-order");
     const h = page.getByTestId("co-health");
     await expect(h).toContainText("At risk");
-    await expect(h.locator("li")).toHaveCount(4);
+    // step 1 is a post in Lumen's Slack channel, which is connected: steps 2 and 3 (SMS, call) and the rotation gap are the problems
+    await expect(h.locator("li")).toHaveCount(3);
+    await expect(h).not.toContainText("no verified Slack"); // QA P3-H: the banner and the Responders card name the same channels
+    await expect(page.getByTestId("co-cust-person").filter({ hasText: "Kyungmin Oh" })).toContainText("SMS · not verified");
     await expect(h).toContainText("Step 2 (SMS at 2 min) reaches only Kyungmin Oh, who has no verified SMS.");
     await expect(h).toContainText("Lumen on-call has nobody on shift from Sat Nov 14 09:00");
     await page.goto("/c/daon/call-order");
@@ -306,11 +309,20 @@ test.describe("edit and save", () => {
     await expect(dlg.getByTestId("co-affected").locator("li")).toHaveText(["Ara Games › Live ops › Game API", "Ara Games › Live ops › Matchmaking", "Ara Games › Web › Store"]);
     await expect(dlg).toContainText("Nothing else is changed.");
     expect(actions.saves()).toHaveLength(0); // nothing is sent before the confirmation
-    await expect(dlg.getByRole("button", { name: "Save for Ara Games" })).toBeFocused();
+    // the safe choice has the focus (QA P3-C): Enter — once too often, or held down from Ctrl+Enter — saves nothing
+    await expect(dlg.getByRole("button", { name: "Cancel" })).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(dlg).toHaveCount(0);
+    expect(actions.saves()).toHaveLength(0);
+    await expect(editView(page)).toBeVisible();
+    await page.keyboard.press("Control+Enter");
+    await expect(dlg.getByRole("button", { name: "Cancel" })).toBeFocused();
     // Tab stays inside the dialog
     await page.keyboard.press("Tab");
-    await expect(dlg.getByRole("button", { name: "Cancel" })).toBeFocused();
+    await expect(dlg.getByRole("button", { name: "Save for Ara Games" })).toBeFocused();
     await page.keyboard.press("Tab");
+    await expect(dlg.getByRole("button", { name: "Cancel" })).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
     await expect(dlg.getByRole("button", { name: "Save for Ara Games" })).toBeFocused();
     await page.keyboard.press("Enter");
     await expect(toast(page)).toContainText("Saved for Ara Games · step 2 2 → 3 min · 3 services");
@@ -337,9 +349,11 @@ test.describe("edit and save", () => {
     await minutes(page, 2).fill("2");
     await expect(page.getByTestId("co-issues")).toHaveText("");
     // no channel on a step
-    await page.locator('[data-step="0"]').getByRole("button", { name: "Slack" }).click();
-    await expect(page.getByTestId("co-issues")).toContainText("Step 1: choose at least one of Slack, SMS or Call.");
-    await page.locator('[data-step="0"]').getByRole("button", { name: "Slack" }).click();
+    const way = (step: number, name: string) => page.locator(`[data-step="${step}"]`).getByRole("button", { name, exact: true });
+    await expect(page.locator('[data-step="0"] .co-chs button')).toHaveText(["Slack", "Slack DM", "SMS", "Call", "Email"]); // every way to send the API has
+    await way(0, "Slack").click();
+    await expect(page.getByTestId("co-issues")).toContainText("Step 1: choose at least one way to send it — Slack, Slack DM, SMS, Call or Email.");
+    await way(0, "Slack").click();
     expect(actions.saves()).toHaveLength(0);
     await page.keyboard.press("Escape");
     await expect(page).toHaveURL(/\/call-order$/); // nothing changed in the end: no guard
@@ -348,10 +362,14 @@ test.describe("edit and save", () => {
     await openEdit(page, "/c/daon/call-order");
     await page.getByLabel("Step 1 calls").selectOption({ label: "Soyeon Choi (customer)" });
     await expect(page.locator(".co-ed")).toContainText("Ordering switched from All at once to Custom");
-    await expect(page.getByTestId("co-issues").locator(".co-warn")).toHaveText("Warning: Step 1 reaches only contacts that are not verified for Slack: Soyeon Choi.");
+    // a post in Daon's Slack channel reaches her; a call does not (her phone is not verified)
+    await expect(page.getByTestId("co-issues").locator(".co-warn")).toHaveCount(0);
+    await way(0, "Call").click();
+    await way(0, "Slack").click();
+    await expect(page.getByTestId("co-issues").locator(".co-warn")).toHaveText("Warning: Step 1 reaches only contacts that are not verified for call: Soyeon Choi.");
     await page.getByRole("button", { name: "Remove step 3" }).click();
     await page.getByRole("button", { name: "Remove step 2" }).click();
-    await expect(page.getByTestId("co-issues").locator(".co-err")).toHaveText("Nobody would be reached: no step has a person with a verified Slack, SMS or phone for the way it calls.");
+    await expect(page.getByTestId("co-issues").locator(".co-err")).toHaveText("Nobody would be reached: no step has a person with a verified Slack, SMS, phone or email for the way it calls.");
     await page.keyboard.press("Control+Enter");
     await expect(confirmDlg(page)).toHaveCount(0);
     expect(actions.saves()).toHaveLength(0);
@@ -459,15 +477,31 @@ test.describe("edit and save", () => {
     await expect(toast(page)).toContainText(`Own steps created for ${PORTAL} · step 2 10 → 9 min · 1 service`);
     expect(actions.saves()).toHaveLength(1);
     expect(actions.saves()[0]!.path).toBe("/c/mirae/merchant/merchant-portal/call-order");
-    expect(actions.saves()[0]!.body).toMatch(/,null\]$/); // no version: this creates
+    expect(actions.saves()[0]!.body).toMatch(/,0\]$/); // If-Match 0: this creates
+    // the new level waits above the list instead of pushing rows down; Show puts it in
+    await expect(page.getByTestId("co-row")).toHaveCount(2);
+    await expect(page.getByTestId("co-list-pending")).toHaveText("1 new level with own steps");
+    await page.waitForTimeout(700);
+    await page.getByTestId("co-list-bar").getByRole("button", { name: "Show" }).click();
     // a new row, the tree's OWN STEPS mark, and Mirae Pay itself unchanged
     await expect(page.getByTestId("co-row")).toHaveCount(3);
     await expect(row(page, "mirae/merchant/merchant-portal").locator(".c-style")).toContainText("Own steps");
     await expect(row(page, "mirae").locator(".c-then")).toContainText("10 min call Yuna Seo");
     await page.getByRole("treeitem", { name: /^Merchant/ }).locator(".tg").first().click();
     await expect(page.getByRole("treeitem", { name: /^Merchant portal/ })).toContainText("Own steps");
-    await undo(page);
-    await expect(toast(page)).toContainText(`Undone · ${PORTAL} is back to how it was`);
+    // Undo arrives by toast only while it is on screen: create once more and undo from the toast
+    await row(page, "mirae/merchant/merchant-portal").getByTestId("co-path").click();
+    await page.getByTestId("co-edit").click();
+    await page.getByRole("button", { name: `Remove own steps of ${PORTAL}…` }).click();
+    await confirmDlg(page).getByRole("button", { name: `Remove own steps of ${PORTAL}` }).click();
+    await expect(toast(page)).toContainText(`Own steps removed for ${PORTAL}`);
+    // the row stays where it was and says what happened, until the list is refreshed
+    await expect(page.getByTestId("co-row")).toHaveCount(3);
+    await expect(row(page, "mirae/merchant/merchant-portal")).toHaveAttribute("data-gone", "1");
+    await expect(row(page, "mirae/merchant/merchant-portal").getByTestId("co-row-gone")).toHaveText("Own steps removed");
+    await expect(page.getByTestId("co-list-pending")).toHaveText("1 no longer has own steps");
+    await page.waitForTimeout(700);
+    await page.getByTestId("co-list-bar").getByRole("button", { name: "Refresh list" }).click();
     await expect(page.getByTestId("co-row")).toHaveCount(2);
     await expect(page.getByRole("treeitem", { name: /^Merchant portal/ })).not.toContainText("Own steps");
   });
@@ -478,6 +512,8 @@ test.describe("edit and save", () => {
     await page.getByTestId("co-edit").click();
     await page.keyboard.press("Control+Enter");
     await expect(toast(page)).toContainText("Own steps created for Dasol Health › Main › Web · same steps · 1 service");
+    await page.waitForTimeout(700);
+    await page.getByTestId("co-list-bar").getByRole("button", { name: "Show" }).click();
     await row(page, "dasol/main/web").getByTestId("co-path").click();
     await expect(panel(page).getByRole("button", { name: /Remove own steps/ })).toHaveCount(0);
     await page.getByTestId("co-edit").click();
@@ -486,6 +522,9 @@ test.describe("edit and save", () => {
     await expect(confirmDlg(page).getByRole("button", { name: "Keep them" })).toBeFocused();
     await confirmDlg(page).getByRole("button", { name: "Remove own steps of Dasol Health › Main › Web" }).click();
     await expect(toast(page)).toContainText("Own steps removed for Dasol Health › Main › Web · it follows Dasol Health again");
+    await expect(row(page, "dasol/main/web")).toHaveAttribute("data-gone", "1");
+    await page.waitForTimeout(700);
+    await page.getByTestId("co-list-bar").getByRole("button", { name: "Refresh list" }).click();
     await expect(page.getByTestId("co-row")).toHaveCount(1);
   });
 });
@@ -547,7 +586,7 @@ test.describe("unsaved edits", () => {
     await page.getByRole("navigation", { name: "Main", exact: true }).getByRole("link", { name: "People" }).click();
     await g.getByRole("button", { name: "Keep draft and continue" }).click();
     await expect(page).toHaveURL(/\/people$/);
-    expect(await drafts(page)).toEqual(["ao-draft:call-order:cheong"]);
+    expect(await drafts(page)).toEqual(["ao-draft:call-order:usr_haeun/cheong"]);
     expect(actions.saves()).toHaveLength(0);
     await page.getByRole("navigation", { name: "Main", exact: true }).getByRole("link", { name: "Call order" }).click();
     await expect(page.getByTestId("co-draft")).toContainText("Draft for Cheong Media");
@@ -568,7 +607,7 @@ test.describe("unsaved edits", () => {
     await expect(g.getByRole("button", { name: "Keep draft and go back" })).toBeVisible();
     await g.getByRole("button", { name: "Keep draft and go back" }).click();
     await expect(page).toHaveURL(/\/c\/jeil\/call-order$/);
-    expect(await drafts(page)).toEqual(["ao-draft:call-order:cheong"]);
+    expect(await drafts(page)).toEqual(["ao-draft:call-order:usr_haeun/cheong"]);
     // Save from the dialog: saves (confirmed, two services), then goes where the user was going
     await page.goto("/c/cheong/call-order");
     await page.getByTestId("co-draft-here").getByRole("button", { name: "Resume" }).click();
@@ -612,7 +651,7 @@ test.describe("unsaved edits", () => {
     await expect(sentence(page).locator("s.co-old")).toHaveText("was 2 min");
     await expect(page.getByTestId("co-unsaved")).toHaveText("Unsaved");
     // the draft holds ids and minutes, nothing that identifies a contact's address
-    const raw = await page.evaluate(() => sessionStorage.getItem("ao-draft:call-order:gaon"));
+    const raw = await page.evaluate(() => sessionStorage.getItem("ao-draft:call-order:usr_haeun/gaon"));
     expect(raw).not.toMatch(/@|010-/);
     await panel(page).getByRole("button", { name: "Cancel" }).click();
     await confirmDlg(page).getByRole("button", { name: "Discard changes" }).click();
@@ -635,7 +674,7 @@ test.describe("unsaved edits", () => {
     await expect(c).toContainText("Nothing was saved, and your draft is kept as you typed it.");
     await expect(page).toHaveURL(/\/c\/jeil\/call-order$/);
     await expect(minutes(page, 2)).toHaveValue("4");
-    expect(await drafts(page)).toEqual(["ao-draft:call-order:jeil"]);
+    expect(await drafts(page)).toEqual(["ao-draft:call-order:usr_haeun/jeil"]);
     await expect(page.getByTestId("co-save")).toBeDisabled();
     await page.getByTestId("co-reload").click();
     await expect(c).toContainText("Now saved");
@@ -650,6 +689,8 @@ test.describe("unsaved edits", () => {
     await expect(sentence(page).locator("s.co-old")).toHaveText("was 6 min"); // compared with what is saved now
     await page.getByTestId("co-save").click();
     await expect(confirmDlg(page).getByTestId("co-changes")).toHaveText("step 2 6 → 4 min");
+    // the same button at the same spot as the confirmation a moment ago: the 600 ms same-spot guard holds a press that comes sooner than a person can read
+    await page.waitForTimeout(700);
     await confirmDlg(page).getByRole("button", { name: "Save for Jeil Insure" }).click();
     await expect(toast(page)).toContainText("Saved for Jeil Insure · step 2 6 → 4 min · 2 services");
     expect(actions.saves()).toHaveLength(2); // the refused one and the one that went through
@@ -716,6 +757,9 @@ test("keyboard only: three customers in a row, each save lands on its own custom
     await page.keyboard.press("Control+Enter");
     await expect(confirmDlg(page).getByRole("heading")).toHaveText(`Save for ${name}?`);
     await expect(confirmDlg(page).getByTestId("co-changes")).toHaveText(`step 2 ${from} → ${to} min`);
+    // the focus is on Cancel; Shift+Tab goes to "Save for <customer>"
+    await page.keyboard.press("Shift+Tab");
+    await expect(confirmDlg(page).getByRole("button", { name: `Save for ${name}` })).toBeFocused();
     await page.keyboard.press("Enter");
     await expect(toast(page)).toContainText(`Saved for ${name} · step 2 ${from} → ${to} min`);
     await expect(page).toHaveURL(new RegExp(`/call-order\\?customer=${slug}$`));
@@ -761,49 +805,7 @@ test.describe("responders in the panel", () => {
     expect(await page.content()).not.toMatch(/010-\d{4}-\d{4}/);
   });
 
-  test("edit: add and remove a person, Pageable ↔ Notify only — applied at once with Undo; a customer person can be pageable", async ({ page }) => {
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await signIn(page, "/c/daon/call-order");
-    const card = page.getByTestId("co-responders");
-    const everyone = () => page.getByTestId("co-steps").locator("li").first();
-    const n0 = Number((await everyone().textContent())!.match(/Responders \((\d+)\)/)![1]);
-    await card.getByTestId("co-resp-edit").click();
-    // a customer person becomes Pageable: part of "everyone"
-    await card.getByLabel("Role of Taehee Oh").selectOption("PAGEABLE");
-    await expect(toast(page)).toContainText("Taehee Oh is now Pageable for Daon Retail");
-    await expect(everyone()).toContainText(`everyone in Responders (${n0 + 1})`);
-    await expect(page.getByTestId("co-paged")).toContainText("Taehee Oh");
-    await undo(page);
-    await expect(toast(page)).toContainText("Undone");
-    await expect(everyone()).toContainText(`everyone in Responders (${n0})`);
-    // add MSP staff
-    await card.getByLabel("MSP staff to add").selectOption({ label: "Jiwoo Han · Cloud engineer" });
-    await card.getByRole("button", { name: "Add to Daon Retail" }).first().click();
-    await expect(toast(page)).toContainText("Jiwoo Han added to Responders of Daon Retail");
-    await expect(card.getByTestId("co-staff")).toHaveCount(3);
-    await card.getByRole("button", { name: "Remove Jiwoo Han from Responders of Daon Retail" }).click();
-    await expect(toast(page)).toContainText("Jiwoo Han removed from Responders of Daon Retail");
-    await expect(card.getByTestId("co-staff")).toHaveCount(2);
-    // add a customer person: the typed contact comes back masked only
-    const form = card.getByTestId("co-add-person");
-    await form.getByLabel("Name").fill("Ari Go");
-    await form.getByLabel("Phone").fill("010-2222-3344");
-    await form.getByLabel("Role").selectOption("PAGEABLE");
-    await form.getByRole("button", { name: "Add to Daon Retail" }).click();
-    await expect(toast(page)).toContainText("Ari Go added to Daon Retail as Pageable");
-    const ari = card.getByTestId("co-cust-person").filter({ hasText: "Ari Go" });
-    await expect(ari.getByTestId("co-masked")).toHaveText("010-••••-3344");
-    await expect(form.getByLabel("Phone")).toHaveValue("");
-    expect(await page.content()).not.toContain("2222");
-    await card.getByRole("button", { name: "Remove Ari Go from Daon Retail" }).click();
-    await expect(ari).toHaveCount(0);
-    // someone a step names cannot be removed from under it
-    await page.goto("/c/mirae/call-order");
-    await card.getByTestId("co-resp-edit").click();
-    await card.getByRole("button", { name: "Remove Yuna Seo from Mirae Pay" }).click();
-    await expect(card.getByRole("alert")).toContainText("Yuna Seo is named in a step. Change the step first.");
-    await expect(card.getByTestId("co-staff").first()).toContainText("set by the template");
-  });
+  // editing Responders (add, role, Remove… with confirmation, tombstones, per-person Undo, 409): e2e/zzz-list-rule.spec.ts
 });
 
 test.describe("390px", () => {

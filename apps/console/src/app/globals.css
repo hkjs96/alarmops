@@ -446,12 +446,15 @@ body { overflow-x: hidden; }
 .co-people li.gone { color: var(--ink2); background: var(--soft); overflow: hidden; }
 /* "Removed · Undo" sits where the row's text was; the place of the row's buttons (right) stays empty */
 .co-people li.gone .tomb { flex: 1 1 auto; min-width: 0; flex-wrap: nowrap; margin-right: 96px; padding-left: 8px; }
+/* Undo at the left end, the row's Remove was at the right end: at every width the two are never in the same spot */
+.co-people li.gone .tomb-u { order: -1; }
 .co-people li.gone .tomb-t { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .t.co tr.dim td { color: var(--mut); }
-.co-steps.ed .co-step { grid-template-columns: 20px 76px minmax(0, 1fr) auto; grid-template-areas: "n min who who" ". chs chs ops" ". msg msg msg"; }
-.co-steps.ed .co-chs { grid-column: 2 / 4; flex-wrap: wrap; }
+/* minutes and the row's buttons first; who it calls gets the whole width below (its label is long: QA P3-J); then the five ways to send */
+.co-steps.ed .co-step { grid-template-columns: 20px auto minmax(0, 1fr) auto; grid-template-areas: "n min . ops" ". who who who" ". chs chs chs" ". msg msg msg"; }
+.co-steps.ed .co-who { grid-column: 2 / -1; }
+.co-steps.ed .co-chs { grid-column: 2 / -1; flex-wrap: wrap; }
 .co-steps.ed .co-ops { grid-column: 4; }
-@media (min-width: 761px) { .co-who { font-size: 13px; text-overflow: ellipsis; } }
 .co-refused { grid-area: msg; grid-column: 2 / -1; font-size: 13px; color: var(--red); font-weight: 600; }
 div.co-refused { margin-top: 6px; }
 .co-addw { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -466,7 +469,7 @@ div.co-refused { margin-top: 6px; }
 @media (max-width: 760px) {
   .acct-b { min-width: 44px; min-height: 44px; }
   .acct-out { min-height: 44px; }
-  .co-people li.gone .tomb { margin-right: 0; }
+  .co-people li.gone .tomb { margin-right: 0; padding-left: 0; }
   .co-people li.gone .tomb-u { min-height: 44px; min-width: 64px; }
   .co-steps.ed .co-step { grid-template-columns: 20px minmax(0, 1fr); grid-template-areas: "n min" ". who" ". chs" ". ops" ". msg"; }
   .co-steps.ed .co-chs, .co-steps.ed .co-ops, .co-refused { grid-column: 2; }

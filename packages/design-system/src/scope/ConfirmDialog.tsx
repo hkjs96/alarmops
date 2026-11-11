@@ -50,7 +50,8 @@ export function ConfirmDialog({ open, title, children, confirmLabel, cancelLabel
     else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
   };
   return (
-    <div className="dguard-scrim">
+    // a press beside the buttons (a second click or tap that was meant for what is behind) does not take the focus off the safe choice
+    <div className="dguard-scrim" onMouseDown={(e) => { if (!(e.target as HTMLElement).closest("button, a[href], input, select, textarea")) e.preventDefault(); }}>
       <div ref={ref} className="dguard cdlg" role="alertdialog" aria-modal="true" aria-labelledby="cdlg-h" aria-describedby="cdlg-b" onKeyDown={onKey} data-testid="confirm-dialog">
         <h3 id="cdlg-h">{title}</h3>
         <div id="cdlg-b" className="dguard-b cdlg-b">

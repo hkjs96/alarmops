@@ -147,7 +147,6 @@ export function CallOrderTable({ rows, listQuery, openKey, filterKey }: { rows: 
                     <div>
                       <span data-testid="co-style">{STYLE_LABEL[r.style]}</span>
                       {left ? <span className="pill co-own" data-testid="co-row-gone">Own steps removed</span> : r.level !== "CUSTOMER" && r.own ? <span className="pill accent co-own">Own steps</span> : null}
-                      {left ? <div className="org">follows the level above again · open it to read</div> : null}
                       {!r.own && r.inheritedFrom ? <div className="org">inherits from {r.inheritedFrom.level === "CUSTOMER" ? customer : `${customer} › ${r.inheritedFrom.name}`}</div> : null}
                     </div>
                   </td>

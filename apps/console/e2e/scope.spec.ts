@@ -369,7 +369,11 @@ test.describe("panel", () => {
       await expect(page.getByTestId("not-found"), u).toBeVisible();
       await expect(page.getByTestId("panel"), u).toHaveCount(0);
       await expect(page.getByTestId("incident-row"), u).toHaveCount(0);
-      bodies.add((await page.locator("#main").innerHTML()).replace(/<!--.*?-->/g, "")); // React boundary markers are not content
+      // React boundary markers are not content. The way back names the screen the address is shaped like (Incidents, Monitoring, People) —
+      // that comes from the address alone, never from whether anything in it exists — so it is compared per screen below.
+      const html = (await page.locator("#main").innerHTML()).replace(/<!--.*?-->/g, "");
+      expect(html, u).toMatch(/href="\/(incidents|monitoring\/alarms|people)"[^>]*>Back to (Incidents|Monitoring|People)</);
+      bodies.add(html.replace(/href="[^"]*"([^>]*)>Back to [A-Za-z ]+</, 'href="…"$1>Back to …<'));
       expect(page.url().endsWith(u), `address stays as typed: ${u}`).toBe(true);
       await expect(page.locator(".sline-desk").first(), u).toHaveText("All customers · 14");
     }
