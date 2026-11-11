@@ -67,7 +67,7 @@ Slack ──▶ POST /api/slack/interactive        문자·음성 업체 ──�
 | 422 | `ROLE_UPDATE_REQUIRED` | 고객 스택이 옛 버전 |
 | 409 | `MUTED_BY_MAINTENANCE` | 수동 Escalate: 점검 창이 덮고 SEV-1이 아님. `details.mutedUntil`(D-17) |
 | 422 | `SEND_CAP_EXCEEDED` | 호출 순서 저장: 인시던트 1건이 한 바퀴 60건 또는 1시간 120건을 넘김. `details { perCycle, perHour, limits }`(D-38) |
-| 422 | `RESPONDER_LIMIT_EXCEEDED` | 호출 순서 저장: `ALL_RESPONDERS` 단계인데 Pageable Responder가 20명 초과. `details { field, responders, limit }`. Responder를 늘리는 쓰기도 같은 규칙으로 거부한다(D-38) |
+| 422 | `RESPONDER_LIMIT_EXCEEDED` | 호출 순서 저장: `ALL_RESPONDERS` 단계인데 Pageable Responder가 20명 초과. `details { field, responders, limit }`. **예정(아직 없음):** Responder를 늘리는 쓰기 API가 생기면 같은 규칙(`sendCapViolations`)으로 거부한다 — 지금은 그런 쓰기 경로가 없고, 저장 뒤 늘어난 사람은 엔진이 열릴 때 줄인다(아래 한도표, D-38) |
 | 422 | `IDEMPOTENCY_KEY_REUSED` | 같은 `Idempotency-Key`를 다른 요청(메서드·경로·`If-Match`·본문)에 사용 |
 | 422 | `CROSS_CUSTOMER`, `NOT_PAGEABLE` | 단계 대상이 다른 고객의 사람·로테이션 / Notify-only 사람 |
 | 429 | `RATE_LIMITED` | **응답 헤더 `Retry-After: <초>`**와 같은 값의 `details.retryAfterSec`. 현재 쓰임: 수동 Escalate(인시던트당 60초에 1회) |
@@ -81,13 +81,14 @@ Slack ──▶ POST /api/slack/interactive        문자·음성 업체 ──�
 |---|---|---|
 | 호출 순서: 단계 수 / `atMin` / `repeatCount` | 12 / 0~1440분, 단계마다 앞 단계보다 커야 함 / 0~5 | 400 `VALIDATION_FAILED` |
 | 인시던트 1건의 발송: 한 바퀴 / 1시간(반복 포함) | 60건 / 120건 | 저장 시 422 `SEND_CAP_EXCEEDED`. 저장 뒤 Responder가 늘어 넘게 되면 엔진이 인시던트를 열 때 한도까지 줄이고(큰 단계의 사람 → 반복 횟수 순) 타임라인에 `Send limit applied…`를 남긴다 |
-| `ALL_RESPONDERS` 한 단계가 닿는 사람 | 20명 | 저장 시 422 `RESPONDER_LIMIT_EXCEEDED`. 엔진은 앞 20명만 호출 |
+| `ALL_RESPONDERS` 한 단계가 닿는 사람 | 20명 | 저장 시 422 `RESPONDER_LIMIT_EXCEEDED`. 엔진은 20명만 호출: **지금 근무 중인 사람 먼저, 그다음 Responder 순서**(`order`, 같으면 contactId). 빠진 사람은 타임라인에 이름으로 남는다 |
 | Ack 뒤 재알림 | 12회 | 더 보내지 않음 |
 | 수동 Escalate | 인시던트당 60초에 1회 | 429 `RATE_LIMITED` + `Retry-After` |
 | 일괄 처리 항목 | 200 | 400 |
 | Undo 토큰 | 5분, 누른 사람만, 1회 | 404 |
 | `Idempotency-Key` | 24시간, 사용자당 200개 | 오래된 것부터 버림 |
-| 틱 아웃박스 | 업체 종류(Slack·SMS·음성·이메일)마다 틱당 50건, 동시 5건, 호출 타임아웃 10초 | 남은 잡은 다음 틱(원래 만기 유지) |
+| 틱 아웃박스 | 업체 종류(Slack·SMS·음성·이메일)마다 틱당 50건, 동시 5건(그 틱에 업체가 한 번도 응답하지 않은 동안은 1건), 호출 타임아웃 10초 | 남은 잡은 다음 틱(원래 만기 유지) |
+| 틱 응답 시간 | 예산 45초 + 호출 타임아웃 10초 + 결과 기록 1초, **60초 이하** | 더 큰 예산·타임아웃 설정은 60초에 맞게 줄여서 쓴다 |
 | 발송 재시도 | 5회(30초·1·2·5·10분) | `FAILED` + NotificationLog `GAVE_UP` |
 | 업체 오류 문구 | 300자(마스킹 전에 자름) | 잘림 |
 
@@ -168,9 +169,9 @@ Grafana legacy, PagerDuty, generic은 PoC 범위 밖(fingerprint 제안 4).
 | 본문 | `{ "scheduledAt": "2026-11-09T03:13:00Z", "jobs": ["group","escalation","notify","reconcile"] }` (생략 시 전부) |
 | 멱등 | `scheduledAt`(분 단위)별로 `TickHeartbeat` 선점. 같은 분 중복 호출은 `200 {"skipped":"duplicate"}`. 겹친 실행은 행 단위 낙관적 잠금으로 안전(oncall R4-5) |
 | 처리 | ① group: `closeAt ≤ now`인 OPEN 그룹 Close → grace 5초 경과분 Collect/Finalize → 인시던트 병합(I-3, 6시간 상한) → INITIAL 잡 생성. stale 그룹 sweep(G-6) ② escalation: 아래 표 ③ notify: 아웃박스 드레인 — 아래 "아웃박스 드레인", Slack 다이제스트(R2) ④ reconcile: 5분마다 인시던트 정합성 점검(I-6) → alarm-commands에 `CHECK_ALARM_LIVENESS` 발행 |
-| 응답 | `200 { "group": {...}, "escalation": {"checked":n,"escalated":n,"muted":n}, "notify": {"sent":n,"failed":n,"retried":n,"skipped":n,"deferred":n,"released":n,"timeouts":n,"breakerOpen":["SMS"],"dueUnattempted":n,"dueSev1Unattempted":n}, "truncated": bool, "durationMs": n }` |
-| heartbeat | 작업별 `TickHeartbeat` 갱신. 3분 정체 경보(Q-DM-17). 상태는 `OK` / `ERROR` / `DEGRADED`. **notify는 오류가 없어도, 만기가 된 SEV-1 호출이 한 번도 시도되지 않은 채 남아 있으면 `DEGRADED`**다(예산 소진, 업체 차단기 열림). 상태 점검은 `stale` 또는 `degraded`면 정상으로 보고하지 않는다 |
-| 예산 | 응답 50초 이내(작업 예산 45초). 남은 일은 다음 틱. 앞 단계(group·reconcile·escalation)는 notify 몫(10초, 예산의 1/4 이하)을 남기고 멈춘다. 앞 단계 하나가 돌아오지 않으면 그 시점에 두고 notify로 넘어가며(`ERROR` 기록), notify는 시작 시점부터 자기 몫을 항상 받는다 |
+| 응답 | `200 { "group": {...}, "escalation": {"checked":n,"escalated":n,"muted":n}, "notify": {"sent":n,"failed":n,"retried":n,"skipped":n,"deferred":n,"released":n,"timeouts":n,"unanswered":["SMS"],"dueUnattempted":n,"dueSev1Unattempted":n}, "truncated": bool, "durationMs": n }` |
+| heartbeat | 작업별 `TickHeartbeat` 갱신. 3분 정체 경보(Q-DM-17). 상태는 `OK` / `ERROR` / `DEGRADED`. **notify는 오류가 없어도, 만기가 된 SEV-1 호출이 한 번도 시도되지 않은 채 남아 있으면 `DEGRADED`**다(예산 소진, 업체 무응답). `notify.unanswered`는 그 틱에 타임아웃만 있고 응답이 한 번도 없던 레인이다(표시용 — 레인은 닫히지 않는다). 상태 점검은 `stale` 또는 `degraded`면 정상으로 보고하지 않는다 |
+| 예산 | **응답은 작업 예산(45초) + 호출 타임아웃(10초) + 결과 기록 1초 이내, 최대 60초.** 예산이 지나면 새 호출을 시작하지 않고, 이미 시작한 호출은 타임아웃까지만 기다린다. 예산·타임아웃을 더 크게 줘도 합이 60초를 넘지 않게 줄인다. notify가 그 시간 안에 끝나지 않으면(저장소 호출이 돌아오지 않음) 기다리지 않고 `ERROR`로 응답하며 선점된 잡은 임대(60초)가 끝나면 돌아온다. 호출자(pg_cron·Lambda) 타임아웃은 60초 이상으로 둔다. 남은 일은 다음 틱. 앞 단계(group·reconcile·escalation)는 notify 몫(10초, 예산의 1/4 이하)을 남기고 멈춘다. 앞 단계 하나가 돌아오지 않으면 그 시점에 두고 notify로 넘어가며(`ERROR` 기록), notify는 시작 시점부터 자기 몫을 항상 받는다 |
 
 group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 때 SQS `DelaySeconds = groupWaitSec`인 `GROUP_CLOSE` 메시지를 `alert-events`에 함께 넣어 consumer가 닫게 하고, 틱은 놓친 그룹의 안전망으로 둔다(제안, Q-API-04).
 
@@ -195,14 +196,14 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 |---|---|
 | 레인 | 업체 종류마다 한 줄: 음성 / SMS / Slack(채널·DM) / 이메일. 레인은 동시에 돌고 서로 기다리지 않는다. 레인마다 틱당 50건 선점, 동시 호출 5건 |
 | 선점 순서 | 고객별 라운드 로빈. 고객 안에서는 SEV-1 → **한 번도 시도하지 않은 잡** → 원래 만기(`dueAt`) → 생성 순. 선점 수의 20%는 SEV-1이 아닌 가장 오래된 잡 몫으로 남긴다(SEV-1 고객이 배치보다 많아도 낮은 등급이 굶지 않게) |
-| 차단기 | 레인에서 타임아웃이 연속 3회면 그 레인을 연다: 남은 잡은 시도 횟수·원래 만기 그대로 반환하고, 45초 뒤부터 틱마다 잡 1건으로 탐침한다(실패할 때마다 대기 2배, 최대 5분). 업체가 어떤 응답이든 하면 닫히고 같은 틱에 남은 잡을 보낸다. 상태는 DB에 둔다(업체 종류별 1행) |
-| 반환 | 예산·차단기 때문에 보내지 못한 잡은 `QUEUED`로 돌아가고 **만기를 다시 찍지 않는다** |
+| 업체 무응답 (차단기 없음) | **레인을 닫는 차단기는 두지 않는다**(보안 3차 R-17: 차단기가 부분 장애·특정 고객 번호 장애·깜빡임에서 수정 전보다 호출을 늦췄다). 업체 상태는 틱 사이에 저장하지 않는다. 대신: ① 레인은 매 틱 선점 순서대로 **1건만 먼저** 보낸다. 업체가 어떤 응답이든 하면 그 틱의 나머지는 동시 5건으로 보낸다. 응답이 없으면(타임아웃) 다음 순서의 잡 1건으로 넘어간다 — 완전히 죽은 업체는 틱당 5건(예산 45초 ÷ 타임아웃 10초)만 시도 횟수를 쓴다. ② 잡별 재시도 간격(30초·1·2·5·10분)이 있어 같은 잡을 연속으로 다시 보내지 않는다. ③ 선점 순서가 고객 라운드 로빈이라, 한 고객의 번호가 응답하지 않아도 다른 고객의 호출은 그 뒤 한 건(10초)만 기다린다. 틱 중간에 업체가 살아나면 그 틱에 바로 전체 폭으로 보낸다. 한계: 응답 없는 고객이 5곳 이상 동시에 앞에 서 있으면(틱당 탐침 5건) 그 뒤 고객의 호출은 다음 틱으로 넘어갈 수 있다. 테스트는 3차 검토 표의 모든 행에서 전달 건수가 7b85c90 기준선 이상임을 숫자로 확인한다 |
+| 반환 | 예산 때문에 보내지 못한 잡은 `QUEUED`로 돌아가고 **만기를 다시 찍지 않는다** |
 | 시각 | 만기·임대·재시도 시각은 **DB 시각(`now()`)**으로 계산한다. 실행기 시계는 틱 예산과 로그 시각에만 쓴다 |
 | Slack 채널 여러 개 | 한 잡의 채널들은 동시에 보내고 잡 전체가 타임아웃 10초 하나를 쓴다. 하나라도 성공하면 `SENT` |
 | 발송 직전 재확인 | 인시던트 상태(Ack·Resolve면 `SKIPPED`), 수신자의 고객 일치, 활성 여부, 주소, SMS·음성은 확인된 번호(D-37). 조회가 실패해도 시도 1회로 세고 5회면 `GAVE_UP` |
 | 점검 창 | 호출이 대기 중에 점검 창에 들어가면(SEV-1 제외) **버리지 않고 창이 끝날 때까지 미룬다**(시도 횟수 불변, 창 취소를 알아채도록 5분마다 재확인, 타임라인 1줄). 창이 끝난 뒤 인시던트가 아직 TRIGGERED면 보내고, Ack·Resolve됐으면 `SKIPPED` |
 
-**발송 포트 요건 (업체 어댑터).** ① 업체 호출에 잡의 `idempotencyKey`를 넘기고 **업체(또는 어댑터)가 그 키로 중복 발송을 막아야 한다**. 타임아웃된 호출은 실제로 전달됐을 수 있고, 재시도와 임대를 넘겨받은 다른 실행기가 같은 키로 다시 호출한다. 업체가 키를 지원하지 않으면 어댑터가 `키 → providerMessageId`를 저장해 같은 답을 돌려준다. ② 어댑터 자체 타임아웃은 10초 미만. ③ 동시 5건 호출을 견딘다. ④ 전달 실패는 예외가 아니라 `{ ok:false, retryable, code? }`로 돌려준다. 오류 문구는 저장 전에 300자로 자르고 번호·주소·비밀값을 가린다.
+**발송 포트 요건 (업체 어댑터).** ① 업체 호출에 잡의 `idempotencyKey`를 넘기고 **업체(또는 어댑터)가 그 키로 중복 발송을 막아야 한다**. 타임아웃된 호출은 실제로 전달됐을 수 있고, 재시도와 임대를 넘겨받은 다른 실행기가 같은 키로 다시 호출한다. 업체가 키를 지원하지 않으면 어댑터가 `키 → providerMessageId`를 저장해 같은 답을 돌려준다. ② 어댑터 자체 타임아웃은 10초 미만. ③ 동시 5건 호출을 견딘다(한 틱의 첫 호출은 1건씩 온다). ④ 전달 실패는 예외가 아니라 `{ ok:false, retryable, code? }`로 돌려준다. 오류 문구는 저장 전에 300자로 자르고 번호·주소·비밀값을 가린다.
 
 ## 6. 알람 엔진 명령 (SQS `alarm-commands`, B9)
 

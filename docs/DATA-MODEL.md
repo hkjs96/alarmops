@@ -96,6 +96,8 @@
 | createdBy, createdAt | | |
 
 - "Everyone in Responders" = 이 고객의 role=PAGEABLE 전원(활성 Leave 대체 적용 후). Auto-fix approver·Portal은 ContactScope.role.
+- **Responder 순서(보안 3차 R-19).** 발송 한도로 사람을 줄일 때 누가 남는지는 이 순서로 정한다: ① 지금 근무 중인 사람(이 고객이 쓸 수 있는 로테이션 — MSP 공용 + 자기 고객 — 의 현재 당번, 대체·휴가 적용 후)이 항상 먼저이고 빠지지 않는다, ② `order` 오름차순, ③ 같으면 `contactId`. 저장소 포트(`pagingContext`)는 Responder에 `order`를 채워 `ORDER BY "order", "contactId"`로 돌려주고, 엔진도 같은 키로 다시 정렬하므로 행이 온 순서에는 좌우되지 않는다. 줄일 때는 사람보다 채널을 먼저 뺀다(이메일 → Slack DM. SMS·음성·Slack 채널 글은 빼지 않는다).
+- **PROPOSED — needs migration:** `order int` 열(목록에서의 위치, 0부터). 열이 생기기 전 SQL 어댑터는 `row_number() over (partition by customerId order by createdAt, contactId) − 1`을 `order`로 넘긴다(추가된 순서).
 - IX(contactId) — People 화면 "customers covered".
 
 ### ResponderTemplate / ResponderTemplateMember
@@ -696,7 +698,7 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 | dueAt | timestamptz | **PROPOSED — needs migration.** 원래 만기(정렬 기준). 선점·반환은 건드리지 않고, 실제 재시도·Undo·점검 창 미룸만 옮긴다. `nextAttemptAt`은 임대 시각으로만 쓴다 |
 
 - IX(status, nextAttemptAt). 선점·만기·재시도 시각은 DB 시각(`now()`)으로 계산한다(실행기 시계 금지).
-- **PROPOSED — needs migration:** `ProviderBreaker`(kind PK `SLACK`·`SMS`·`VOICE`·`EMAIL`, state `CLOSED`·`OPEN`, trips, openedAt, nextProbeAt) — 업체별 차단기 상태(API-CONTRACT §5).
+- 업체별 차단기 표(`ProviderBreaker`)는 **두지 않는다**(보안 3차 R-17에서 차단기를 없앰. 업체 상태는 저장하지 않는다 — API-CONTRACT §5 "업체 무응답").
 
 ### NotificationLog (추가만)
 | 필드 | 비고 |
@@ -730,6 +732,18 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 - IX(incidentId, createdAt). 다이제스트에도 좌표를 남겨 상태 동기화한다(notification 새 구현 3).
 
 ## 7. 감사 · 운영
+
+### IdempotencyKey (API 멱등 저장소, API-CONTRACT §2 "멱등")
+**PROPOSED — needs migration.** 지금은 메모리 구현(`MemoryApiStore.idempotent`)만 있다.
+| 필드 | 타입 | 비고 |
+|---|---|---|
+| key | text PK | 요청 헤더 값이 아니라 **사용자 + 범위·역할 + 헤더 값**으로 만든 저장 키 |
+| ownerUserId | text | **소유자 = 요청한 로그인 사용자(`AuthContext.userId`)**. 사용자당 살아 있는 항목 200개 상한의 기준이며, 넘으면 그 사용자의 가장 오래된 것부터 지운다(다른 사용자 것은 건드리지 않는다). preview 요청은 저장하지 않는다 |
+| fingerprint | text | 메서드 + 경로 + `If-Match` + 본문 해시. 다르면 422 `IDEMPOTENCY_KEY_REUSED` |
+| response | jsonb | 첫 응답(상태·헤더·본문), 최대 약 24KB |
+| expiresAt | timestamptz | 24시간. IX(ownerUserId, expiresAt) |
+
+- 상한 처리(만료 삭제 → 초과분 삭제 → 삽입)는 한 문장 또는 한 트랜잭션으로 한다.
 
 ### AuditLog (추가만)
 | 필드 | 비고 |
@@ -771,7 +785,7 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 |---|---|
 | name | PK: `escalation`, `notify`, `group`, `reconcile` |
 | lastStartedAt, lastFinishedAt | |
-| lastStatus | `OK, ERROR` |
+| lastStatus | enum `TickStatus`: `OK, ERROR, DEGRADED`. `DEGRADED`는 notify 전용: 오류 없이 돌았지만 만기가 된 SEV-1 호출이 한 번도 시도되지 않은 채 남음(API-CONTRACT §5). 스키마·`0001_init`에 반영됨 |
 | lastDurationMs | |
 | lastStats | jsonb `{checked, escalated, muted, sent, ...}`(oncall R4-8) |
 | consecutiveFailures | int |
