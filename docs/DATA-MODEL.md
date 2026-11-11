@@ -96,6 +96,8 @@
 | createdBy, createdAt | | |
 
 - "Everyone in Responders" = 이 고객의 role=PAGEABLE 전원(활성 Leave 대체 적용 후). Auto-fix approver·Portal은 ContactScope.role.
+- **Responder 순서(보안 3차 R-19).** 발송 한도로 사람을 줄일 때 누가 남는지는 이 순서로 정한다: ① 지금 근무 중인 사람(이 고객이 쓸 수 있는 로테이션 — MSP 공용 + 자기 고객 — 의 현재 당번, 대체·휴가 적용 후)이 먼저다. **20명(`ALL_RESPONDERS` 한도)까지** 먼저 남기며, 근무자가 20명을 넘으면 근무자도 ②③ 순서의 끝부터 빠지고 타임라인에 `(on shift)`로 남는다(보안 4차 R-19 잔여), ② `order` 오름차순(`order`가 유한한 숫자가 아니면 "없음"으로 보고 맨 뒤 — N-37), ③ 같으면 `contactId`. 메모리 저장소는 `order`를 채우지 않으므로 테스트에서 따로 주지 않으면 contactId 순이다. 저장소 포트(`pagingContext`)는 Responder에 `order`를 채워 `ORDER BY "order", "contactId"`로 돌려주고, 엔진도 같은 키로 다시 정렬하므로 행이 온 순서에는 좌우되지 않는다. 줄일 때는 사람보다 채널을 먼저 뺀다(이메일 → Slack DM. SMS·음성·Slack 채널 글은 빼지 않는다). 사람도 더 줄일 수 없으면 단계를 통째로 빼는데, `ALL_RESPONDERS` 단계부터 빼고 `PERSON`·`ROTATION` 단계는 마지막까지 남긴다. 통째로 빠진 단계의 사람과, 어느 단계에서도 호출되지 않게 된 사람은 타임라인에 이름으로 남는다(API-CONTRACT §2 한도).
+- **PROPOSED — needs migration:** `order int` 열(목록에서의 위치, 0부터). 열이 생기기 전 SQL 어댑터는 `row_number() over (partition by customerId order by createdAt, contactId) − 1`을 `order`로 넘긴다(추가된 순서).
 - IX(contactId) — People 화면 "customers covered".
 
 ### ResponderTemplate / ResponderTemplateMember
@@ -297,6 +299,7 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 | deliveredAt | timestamptz? | 발송 선점(claim)(notification R2-3) |
 | sweptReason | text? | |
 | version | int | |
+| closedAt | timestamptz? | **PROPOSED — needs migration.** 실제로 닫힌 시각. grace·auto-pause 계산의 기준(`closeAt`은 예정 시각) |
 
 - 부분 UQ(groupKey) where status = 'OPEN' — 축당 열린 그룹 하나(G-3). IX(status, closeAt) — 틱이 처리할 그룹 선택.
 - Step Functions 대신 1분 틱 + SQS 지연 메시지(grouping 새 구현 2). 틱 1분 단위라 group_wait 30초 정밀도 처리 방식은 API-CONTRACT 참조.
@@ -327,6 +330,12 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 | rcaPlaceholder | jsonb? | D-14 자리만 |
 | version | int | |
 | isMergeTarget | bool | AAM 포인터 `inc#{axis}` 대체. 새 구성원을 합칠 대상 |
+| nextEscalationAt | timestamptz? | **PROPOSED — needs migration.** 틱이 이 인시던트를 다시 볼 시각(다음 단계·재알림·점검 창 재확인). null = 볼 일 없음. IX(nextEscalationAt) where status ≠ RESOLVED |
+| lastMergedAt | timestamptz? | **PROPOSED — needs migration.** 마지막으로 알림이 합쳐진 시각. 같은 틱에서 합친 뒤 자동 해결하지 않기 위한 기준(I-5) |
+| renotifyCount | int default 0 | **PROPOSED — needs migration.** Ack 뒤 재알림 횟수(상한 12) |
+| projectId, serviceId | text? FK | **PROPOSED — needs migration.** 열릴 때의 조직 위치(계정 → 서비스 → 프로젝트). 범위 필터·점검 창·호출 순서 해석에 사용 |
+| source | enum `CLOUDWATCH, PROMETHEUS, GRAFANA`? | **PROPOSED — needs migration.** 대표 알림의 출처(목록 필터) |
+| lastManualEscalationAt | timestamptz? | **PROPOSED — needs migration.** 수동 Escalate 60초 제한의 기준 |
 
 - 부분 UQ(axis) where isMergeTarget — 축당 병합 대상 하나. 6시간 지난 인시던트는 열린 채 두되 isMergeTarget=false로 내리고 새 인시던트를 연다(I-3).
 - IX(customerId, status, triggeredAt desc), IX(status, escalationBaseAt) — 에스컬레이션 틱.
@@ -681,8 +690,15 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 | nextAttemptAt | timestamptz | 선점 시 미리 기록 |
 | lastError | text? | |
 | payload | jsonb | |
+| stepIndex | int | **PROPOSED — needs migration.** 어느 단계의 호출인지(0부터). 단계 전체 실패 판정, Undo 복원 범위 |
+| repeat | int | **PROPOSED — needs migration.** 몇 번째 반복인지(RENOTIFY는 재알림 번호) |
+| contactId | text? FK Contact | **PROPOSED — needs migration.** 사람에게 가는 잡의 수신자(채널 잡은 null). 발송 직전 고객 일치·확인 여부 재확인 |
+| contactName | text? | **PROPOSED — needs migration.** 열릴 때의 이름(기록 표시용) |
+| claimSeq | int default 0 | **PROPOSED — needs migration.** 선점 토큰. 선점마다 +1, `beginSend`·`release`·`complete`는 `WHERE status='SENDING' AND claimSeq=?`로만 쓴다(겹친 틱의 중복 발송 방지) |
+| dueAt | timestamptz | **PROPOSED — needs migration.** 원래 만기(정렬 기준). 선점·반환은 건드리지 않고, 실제 재시도·Undo·점검 창 미룸만 옮긴다. `nextAttemptAt`은 임대 시각으로만 쓴다 |
 
-- IX(status, nextAttemptAt).
+- IX(status, nextAttemptAt). 선점·만기·재시도 시각은 DB 시각(`now()`)으로 계산한다(실행기 시계 금지).
+- 업체별 차단기 표(`ProviderBreaker`)는 **두지 않는다**(보안 3차 R-17에서 차단기를 없앰. 업체 상태는 저장하지 않는다 — API-CONTRACT §5 "업체 무응답").
 
 ### NotificationLog (추가만)
 | 필드 | 비고 |
@@ -692,7 +708,12 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 | targetSummary | "1순위 이름 외 n명" |
 | escalationStep | |
 | providerMessageId | 문자·음성 업체 ID, Slack ts |
-| error | |
+| error | 가린 업체 문구. 기본(`STORE_PROVIDER_TEXT=false`, D-39 임시): **발췌 120자**, 내부 ADMIN만 봄. `true`: 300자, 내부 OPERATOR·ADMIN. 원문은 저장하지 않는다. `NotificationJob.lastError`도 같다 |
+| attempt | **PROPOSED — needs migration.** int. 몇 번째 시도의 결과인지 |
+| warnings | **PROPOSED — needs migration.** text[]. 예: `UNVERIFIED_ADDRESS`. 내부만 |
+| errorCode | **PROPOSED — needs migration.** enum `TIMEOUT, INVALID_DESTINATION, RATE_LIMITED, PROVIDER_REJECTED, PROVIDER_ERROR, NOT_CONFIGURED, GAVE_UP`?. API의 `reason` — 모든 사용자가 보는 값 |
+| targetKind | **PROPOSED — needs migration.** enum `STAFF, CUSTOMER_PERSON, CUSTOMER_CHANNEL, MSP_CHANNEL`. 포털에서 직원을 `MSP on-call`로, 채널을 `Slack channel`로 바꾸는 근거(D-36) |
+| contactId | **PROPOSED — needs migration.** text? FK Contact. 사람 대상일 때만. 포털 응답에는 나가지 않음 |
 
 - IX(incidentId, at). 고객 포털 "통지가 실제로 나갔는지"(P3-2)의 원천.
 
@@ -711,6 +732,18 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 - IX(incidentId, createdAt). 다이제스트에도 좌표를 남겨 상태 동기화한다(notification 새 구현 3).
 
 ## 7. 감사 · 운영
+
+### IdempotencyKey (API 멱등 저장소, API-CONTRACT §2 "멱등")
+**PROPOSED — needs migration.** 지금은 메모리 구현(`MemoryApiStore.idempotent`)만 있다.
+| 필드 | 타입 | 비고 |
+|---|---|---|
+| key | text PK | 요청 헤더 값이 아니라 **사용자 + 범위·역할 + 헤더 값**으로 만든 저장 키 |
+| ownerUserId | text | **소유자 = 요청한 로그인 사용자(`AuthContext.userId`)**. 사용자당 살아 있는 항목 200개 상한의 기준이며, 넘으면 그 사용자의 가장 오래된 것부터 지운다(다른 사용자 것은 건드리지 않는다). preview 요청은 저장하지 않는다 |
+| fingerprint | text | 메서드 + 경로 + `If-Match` + 본문 해시. 다르면 422 `IDEMPOTENCY_KEY_REUSED` |
+| response | jsonb | 첫 응답(상태·헤더·본문), 최대 약 24KB |
+| expiresAt | timestamptz | 24시간. IX(ownerUserId, expiresAt) |
+
+- 상한 처리(만료 삭제 → 초과분 삭제 → 삽입)는 한 문장 또는 한 트랜잭션으로 한다.
 
 ### AuditLog (추가만)
 | 필드 | 비고 |
@@ -752,7 +785,7 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 |---|---|
 | name | PK: `escalation`, `notify`, `group`, `reconcile` |
 | lastStartedAt, lastFinishedAt | |
-| lastStatus | `OK, ERROR` |
+| lastStatus | enum `TickStatus`: `OK, ERROR, DEGRADED`. `DEGRADED`는 notify 전용: 오류 없이 돌았지만 만기가 된 SEV-1 호출이 한 번도 시도되지 않은 채 남음(API-CONTRACT §5). 스키마·`0001_init`에 반영됨 |
 | lastDurationMs | |
 | lastStats | jsonb `{checked, escalated, muted, sent, ...}`(oncall R4-8) |
 | consecutiveFailures | int |

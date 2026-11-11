@@ -390,9 +390,11 @@ enum AuditActorType {
   SLACK
 }
 
+/// DEGRADED (notify only): the phase ran without an error but due SEV-1 pages were not attempted (security review 2, N-12).
 enum TickStatus {
   OK
   ERROR
+  DEGRADED
 }
 
 // ───────────────────── 1. org · people · access ─────────────────────
