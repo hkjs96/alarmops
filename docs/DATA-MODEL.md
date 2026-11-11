@@ -96,7 +96,7 @@
 | createdBy, createdAt | | |
 
 - "Everyone in Responders" = 이 고객의 role=PAGEABLE 전원(활성 Leave 대체 적용 후). Auto-fix approver·Portal은 ContactScope.role.
-- **Responder 순서(보안 3차 R-19).** 발송 한도로 사람을 줄일 때 누가 남는지는 이 순서로 정한다: ① 지금 근무 중인 사람(이 고객이 쓸 수 있는 로테이션 — MSP 공용 + 자기 고객 — 의 현재 당번, 대체·휴가 적용 후)이 항상 먼저이고 빠지지 않는다, ② `order` 오름차순, ③ 같으면 `contactId`. 저장소 포트(`pagingContext`)는 Responder에 `order`를 채워 `ORDER BY "order", "contactId"`로 돌려주고, 엔진도 같은 키로 다시 정렬하므로 행이 온 순서에는 좌우되지 않는다. 줄일 때는 사람보다 채널을 먼저 뺀다(이메일 → Slack DM. SMS·음성·Slack 채널 글은 빼지 않는다).
+- **Responder 순서(보안 3차 R-19).** 발송 한도로 사람을 줄일 때 누가 남는지는 이 순서로 정한다: ① 지금 근무 중인 사람(이 고객이 쓸 수 있는 로테이션 — MSP 공용 + 자기 고객 — 의 현재 당번, 대체·휴가 적용 후)이 먼저다. **20명(`ALL_RESPONDERS` 한도)까지** 먼저 남기며, 근무자가 20명을 넘으면 근무자도 ②③ 순서의 끝부터 빠지고 타임라인에 `(on shift)`로 남는다(보안 4차 R-19 잔여), ② `order` 오름차순(`order`가 유한한 숫자가 아니면 "없음"으로 보고 맨 뒤 — N-37), ③ 같으면 `contactId`. 메모리 저장소는 `order`를 채우지 않으므로 테스트에서 따로 주지 않으면 contactId 순이다. 저장소 포트(`pagingContext`)는 Responder에 `order`를 채워 `ORDER BY "order", "contactId"`로 돌려주고, 엔진도 같은 키로 다시 정렬하므로 행이 온 순서에는 좌우되지 않는다. 줄일 때는 사람보다 채널을 먼저 뺀다(이메일 → Slack DM. SMS·음성·Slack 채널 글은 빼지 않는다). 사람도 더 줄일 수 없으면 단계를 통째로 빼는데, `ALL_RESPONDERS` 단계부터 빼고 `PERSON`·`ROTATION` 단계는 마지막까지 남긴다. 통째로 빠진 단계의 사람과, 어느 단계에서도 호출되지 않게 된 사람은 타임라인에 이름으로 남는다(API-CONTRACT §2 한도).
 - **PROPOSED — needs migration:** `order int` 열(목록에서의 위치, 0부터). 열이 생기기 전 SQL 어댑터는 `row_number() over (partition by customerId order by createdAt, contactId) − 1`을 `order`로 넘긴다(추가된 순서).
 - IX(contactId) — People 화면 "customers covered".
 
@@ -708,7 +708,7 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 | targetSummary | "1순위 이름 외 n명" |
 | escalationStep | |
 | providerMessageId | 문자·음성 업체 ID, Slack ts |
-| error | 가린 업체 문구(300자). 내부 OPERATOR·ADMIN만 봄 |
+| error | 가린 업체 문구. 기본(`STORE_PROVIDER_TEXT=false`, D-39 임시): **발췌 120자**, 내부 ADMIN만 봄. `true`: 300자, 내부 OPERATOR·ADMIN. 원문은 저장하지 않는다. `NotificationJob.lastError`도 같다 |
 | attempt | **PROPOSED — needs migration.** int. 몇 번째 시도의 결과인지 |
 | warnings | **PROPOSED — needs migration.** text[]. 예: `UNVERIFIED_ADDRESS`. 내부만 |
 | errorCode | **PROPOSED — needs migration.** enum `TIMEOUT, INVALID_DESTINATION, RATE_LIMITED, PROVIDER_REJECTED, PROVIDER_ERROR, NOT_CONFIGURED, GAVE_UP`?. API의 `reason` — 모든 사용자가 보는 값 |
