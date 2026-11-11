@@ -63,14 +63,23 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}-chromium
-      - name: Install Chromium and system packages
+      # The browser is one download. Its system packages come from the runner's apt mirror, which at times cannot be
+      # resolved for minutes ("Temporary failure resolving", 2026-11-11, two runs in a row): apt is tried three times.
+      # If it still fails the run goes on with what the runner image already has (it ships Chrome's libraries) and
+      # says so; a library that is really missing then fails the tests at browser start, with its name.
+      - name: Install Chromium
         if: steps.pw-cache.outputs.cache-hit != 'true'
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install chromium
         working-directory: apps/console
-      - name: Install system packages only (browser from cache)
-        if: steps.pw-cache.outputs.cache-hit == 'true'
-        run: npx playwright install-deps chromium
+      - name: Install system packages for Chromium
         working-directory: apps/console
+        run: |
+          for attempt in 1 2 3; do
+            if timeout 240 npx playwright install-deps chromium; then exit 0; fi
+            echo "install-deps failed (attempt $attempt of 3)"
+            sleep $((attempt * 20))
+          done
+          echo "::warning::Could not install Chromium's system packages (apt mirror not reachable). Continuing with the packages of the runner image."
       - name: Build (console)
         run: npm run build -w @alarmops/console
       - name: End-to-end tests (mock mode)
