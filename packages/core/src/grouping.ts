@@ -26,6 +26,8 @@ export interface GroupRow {
   openedAt: Date;
   groupWaitSec: number;
   closeAt: Date;
+  /** PROPOSED column: when the group was actually closed; Collect waits GROUP_GRACE_SEC after it (G-5). */
+  closedAt?: Date | null;
   pauseUntil: Date | null;
   staleAfter: Date;
   deliveredAt: Date | null;

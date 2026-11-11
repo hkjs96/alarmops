@@ -170,7 +170,7 @@ CREATE TYPE "SlackMessageKind" AS ENUM ('INCIDENT', 'DIGEST', 'DM', 'REMEDIATION
 CREATE TYPE "AuditActorType" AS ENUM ('USER', 'CONTACT', 'SYSTEM', 'SLACK');
 
 -- CreateEnum
-CREATE TYPE "TickStatus" AS ENUM ('OK', 'ERROR');
+CREATE TYPE "TickStatus" AS ENUM ('OK', 'ERROR', 'DEGRADED');
 
 -- CreateTable
 CREATE TABLE "MspOrg" (
