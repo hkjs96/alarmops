@@ -36,6 +36,11 @@ export const MAX_RENOTIFY = 12;
 export const SEND_TIMEOUT_MS = 10_000;
 /** A claimed job that was never sent nor released comes back after this long (tick budget 45 s + send timeout). */
 export const CLAIM_LEASE_SEC = 60;
+/**
+ * Hard bound of one tick call (API-CONTRACT §5): budget + one send timeout must fit in it. `runTick` cuts the budget
+ * down when the two together would not, and gives up waiting for the outbox at budget + send timeout.
+ */
+export const TICK_RESPONSE_LIMIT_MS = 60_000;
 /** Part of the tick budget the earlier phases may not use, so the outbox is always drained (capped at budget / 4). */
 export const NOTIFY_RESERVE_MS = 10_000;
 
@@ -45,12 +50,6 @@ export const MANUAL_ESCALATE_MIN_GAP_SEC = 60;
 // ── outbox lanes (PROPOSED, security review 2: R-11, N-11, N-12, N-17) ──
 /** Provider calls in flight per lane (SLACK / SMS / VOICE / EMAIL). Lanes run side by side and never wait for each other. */
 export const LANE_CONCURRENCY = 5;
-/** Consecutive timeouts after which a lane's circuit breaker opens; the rest of its claimed jobs go back untouched. */
-export const BREAKER_TIMEOUTS = 3;
-/** How long an open breaker waits before one probe job is sent (half-open). Below one tick, so the next tick probes. */
-export const BREAKER_OPEN_SEC = 45;
-/** The wait doubles after every failed probe, up to this. */
-export const BREAKER_MAX_OPEN_SEC = 300;
 /** Share of each claim kept for non-SEV-1 jobs, oldest first, so a wall of SEV-1 tenants cannot starve them (N-17). */
 export const NON_SEV1_RESERVE_PCT = 20;
 /** A page held by a maintenance window is looked at again at least this often (a window may be revoked early) — N-13. */

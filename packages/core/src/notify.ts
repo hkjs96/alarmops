@@ -6,7 +6,7 @@
  */
 import type { NotificationIntent, NotifyChannel, NotifyPurpose } from './escalation.js';
 import { protectUnlessFalse } from './config.js';
-import { BREAKER_MAX_OPEN_SEC, BREAKER_OPEN_SEC, MAINTENANCE_RECHECK_SEC, NON_SEV1_RESERVE_PCT, PROVIDER_ERROR_MAX_CHARS, SEND_TIMEOUT_MS, SMS_VOICE_REQUIRE_VERIFIED } from './limits.js';
+import { MAINTENANCE_RECHECK_SEC, NON_SEV1_RESERVE_PCT, PROVIDER_ERROR_MAX_CHARS, SEND_TIMEOUT_MS, SMS_VOICE_REQUIRE_VERIFIED } from './limits.js';
 import type { Contact } from './paging.js';
 import type { Severity } from './types.js';
 
@@ -27,7 +27,7 @@ export interface NotificationJob extends NotificationIntent {
   /**
    * When the job became due — the ORDER column (R-11). Set at insert, moved only by a real retry (`beginSend`), an
    * undo, or a maintenance deferral. A claim and a release never touch it: a job handed back because of the budget
-   * or an open breaker keeps its place in the queue instead of being re-stamped "now".
+   * keeps its place in the queue instead of being re-stamped "now".
    */
   dueAt: Date;
   /** Sanitised text (never a phone number or a key); for SKIPPED jobs the skip reason. */
@@ -383,32 +383,10 @@ export function selectForClaim<T extends Orderable>(due: T[], limit: number): T[
   return ordered.filter((j) => chosen.has(j));
 }
 
-// ───────────────────────────── lanes and circuit breakers (R-11) ─────────────────────────────
+// ───────────────────────────── lanes (R-11) ─────────────────────────────
 
 /** One lane per provider kind. Voice first only matters for the order lanes are started in; they run side by side. */
 export const LANES: readonly SenderKind[] = ['VOICE', 'SMS', 'SLACK', 'EMAIL'];
 export const LANE_CHANNELS: Record<SenderKind, readonly NotifyChannel[]> = {
   VOICE: ['VOICE'], SMS: ['SMS'], EMAIL: ['EMAIL'], SLACK: ['SLACK_BOT', 'SLACK_WEBHOOK', 'SLACK_DM'],
 };
-
-/**
- * Circuit breaker of one provider lane, kept in the store so every runner and every tick sees it.
- * CLOSED → (BREAKER_TIMEOUTS consecutive timeouts) → OPEN: the lane's jobs are not claimed at all (they keep their
- * place and their attempts). Once `nextProbeAt` has passed the next tick sends ONE job (half-open probe): an answer
- * of any kind closes the breaker and the lane drains normally in the same tick; another timeout re-opens it with
- * twice the wait (up to BREAKER_MAX_OPEN_SEC).
- */
-export interface ProviderBreaker {
-  kind: SenderKind;
-  state: 'CLOSED' | 'OPEN';
-  /** Failed probes in a row since it opened (0 while closed). */
-  trips: number;
-  openedAt: Date | null;
-  nextProbeAt: Date | null;
-}
-export const closedBreaker = (kind: SenderKind): ProviderBreaker => ({ kind, state: 'CLOSED', trips: 0, openedAt: null, nextProbeAt: null });
-export function tripBreaker(b: ProviderBreaker, now: Date): ProviderBreaker {
-  const trips = b.state === 'OPEN' ? b.trips + 1 : 1;
-  const waitSec = Math.min(BREAKER_MAX_OPEN_SEC, BREAKER_OPEN_SEC * 2 ** (trips - 1));
-  return { kind: b.kind, state: 'OPEN', trips, openedAt: b.state === 'OPEN' ? b.openedAt ?? now : now, nextProbeAt: new Date(now.getTime() + waitSec * 1000) };
-}

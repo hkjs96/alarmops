@@ -7,7 +7,7 @@ import type { GroupRow } from './grouping.js';
 import type { IncidentRow } from './incident.js';
 import type { MaintenanceWindow } from './maintenance.js';
 import { CLAIM_LEASE_SEC } from './limits.js';
-import { LANE_CHANNELS, MAX_ATTEMPTS, retryAt, sanitizeProviderError, selectForClaim, type DeliveryLog, type DeliveryReason, type NotificationJob, type ProviderBreaker, type SenderKind } from './notify.js';
+import { LANE_CHANNELS, MAX_ATTEMPTS, retryAt, sanitizeProviderError, selectForClaim, type DeliveryLog, type DeliveryReason, type NotificationJob, type SenderKind } from './notify.js';
 import type { Contact, Leave, Override, PagingConfig, PagingWorld, Responder, Rotation } from './paging.js';
 import { DEFAULT_POLICY, type SuppressionPolicy } from './policy.js';
 import type {
@@ -52,7 +52,6 @@ export class MemoryTickStore implements TickRepository {
   audits: AuditInput[] = [];
   heartbeats = new Map<string, HeartbeatRow>();
   ticks = new Set<string>();
-  breakers = new Map<SenderKind, ProviderBreaker>();
   /**
    * The store's OWN clock (R-14) — what `now()` is for the SQL adapter. Every outbox decision (due, lease, retry
    * time) reads it; the runner's clock is never asked. Tests and simulations point it at their simulated time.
@@ -263,8 +262,6 @@ export class MemoryTickStore implements TickRepository {
       oldestDueAt: due.length ? new Date(Math.min(...due.map((j) => j.dueAt.getTime()))) : null,
     };
   }
-  async loadBreakers() { return [...this.breakers.values()].map((b) => ({ ...b })); }
-  async saveBreaker(b: ProviderBreaker) { this.breakers.set(b.kind, { ...b }); }
   async findIncidentById(id: string) { const i = this.incidents.get(id); return i ? structuredClone(i) : null; }
   async getContact(id: string) { const c = this.contacts.get(id); return c ? { ...c } : null; }
   async slackDestinations(job: NotificationJob) {

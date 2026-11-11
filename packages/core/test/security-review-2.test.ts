@@ -4,9 +4,9 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  BREAKER_OPEN_SEC, BREAKER_TIMEOUTS, FakeSender, LANE_CONCURRENCY, MAINTENANCE_RECHECK_SEC, MAX_ATTEMPTS, MAX_SENDS_PER_CYCLE, MAX_SENDS_PER_HOUR, MemoryTickStore,
+  FakeSender, LANE_CONCURRENCY, MAINTENANCE_RECHECK_SEC, MAX_ATTEMPTS, MAX_SENDS_PER_CYCLE, MAX_SENDS_PER_HOUR, MemoryTickStore,
   NON_SEV1_RESERVE_PCT, NOTIFY_BATCH, buildSnapshot, clampSnapshot, dispatchJob, fairOrder, heartbeatHealth, loadPolicyFlags, pagingHealth, parseFlag, parseSnapshot,
-  resolveDestination, runTick, sanitizeProviderError, selectForClaim, sendCapViolations, tripBreaker, closedBreaker, verifiedAt,
+  resolveDestination, runTick, sanitizeProviderError, selectForClaim, sendCapViolations, verifiedAt,
   type Contact, type NotificationJob, type NotifyChannel, type OutboundMessage, type SendResult, type Severity, type StepChannel, type TickSummary,
 } from '../src/index.js';
 import { Sim, T0, at, closedGroup, config, on, seedWorld, step } from './world.js';
@@ -30,7 +30,8 @@ const hanging = (clock: ReturnType<typeof simClock>, calls: OutboundMessage[] = 
     calls.push(m);
     const passed = clock.hang();
     // the tick's own timeout (sendTimeoutMs: 1) cuts the call; by then 10 simulated seconds have gone by
-    setTimeout(passed, 0);
+    // (a microtask, not a timer: it must have run before the timeout timer does, also for calls made one by one)
+    void Promise.resolve().then(passed);
     return new Promise<SendResult>(() => undefined);
   },
 });
@@ -90,34 +91,37 @@ describe('R-11: a provider that hangs does not delay the healthy channels', () =
     const r = await tick(t, 1, { SMS: t.sms, VOICE: t.voice });
     expect(t.voiceAt).toHaveLength(20);
     expect(Math.max(...t.voiceAt)).toBeLessThan(2); // inside the tick that queued them
-    expect(r.notify).toMatchObject({ sent: 20, breakerOpen: ['SMS'] });
-    // the SMS lane cost ONE wave of timeouts, then its breaker opened and the rest went back untouched
-    expect(t.sms.calls).toHaveLength(LANE_CONCURRENCY);
-    expect(r.notify.timeouts).toBe(LANE_CONCURRENCY);
-    expect(r.notify.released).toBe(20 - LANE_CONCURRENCY);
+    expect(r.notify).toMatchObject({ sent: 20, unanswered: ['SMS'] });
+    // review 3 (R-17): no breaker. A lane that got no answer keeps ONE call in flight: 45 s budget / 10 s timeout = 5
+    // calls in the tick, one after the other; the rest went back untouched.
+    const PROBES = 5;
+    expect(t.sms.calls).toHaveLength(PROBES);
+    expect(r.notify.timeouts).toBe(PROBES);
+    expect(r.notify.released).toBe(20 - PROBES);
     const sms = t.store.jobList().filter((j) => j.channel === 'SMS');
     expect(sms.filter((j) => j.attempts === 0).map((j) => [j.status, j.dueAt, j.nextAttemptAt])).toEqual(Array.from({ length: 15 }, () => ['QUEUED', at(1), at(1)])); // original due time kept
-    expect(sms.filter((j) => j.attempts === 1)).toHaveLength(LANE_CONCURRENCY);
-    expect(r.durationMs).toBeLessThanOrEqual(10_000); // one timeout, not 20
+    expect(sms.filter((j) => j.attempts === 1)).toHaveLength(PROBES);
+    expect(r.durationMs).toBeLessThanOrEqual(45_000 + 10_000); // budget + one timeout
   });
 
-  it('while SMS stays down: one probe per allowed interval, attempts are not burned, voice keeps flowing; SMS recovers → everything drains in one tick', async () => {
+  it('while SMS stays down: at most 5 calls per tick, never the same job twice in a row, voice keeps flowing; SMS recovers → the lane drains at once', async () => {
     const t = trace();
-    await tick(t, 1, { SMS: t.sms, VOICE: t.voice });
-    expect(t.store.breakers.get('SMS')).toMatchObject({ state: 'OPEN', trips: 1, nextProbeAt: at(1, 10 + BREAKER_OPEN_SEC) });
-    for (let m = 2; m <= 12; m++) await tick(t, m, { SMS: t.sms, VOICE: t.voice });
-    // 5 in the first wave + one probe on some of the 11 later ticks (the wait doubles: 45 s, 90 s, 180 s, 300 s)
-    const probes = t.sms.calls.length - LANE_CONCURRENCY;
-    expect(probes).toBeGreaterThanOrEqual(3);
-    expect(probes).toBeLessThanOrEqual(6);
+    for (let m = 1; m <= 3; m++) {
+      const before = t.sms.calls.length;
+      const r = await tick(t, m, { SMS: t.sms, VOICE: t.voice });
+      expect(t.sms.calls.length - before).toBeLessThanOrEqual(5);
+      expect(r.notify.unanswered).toEqual(['SMS']);
+    }
+    // fresh pages go before retries: 15 different people were tried in the three ticks, nobody twice
+    expect(new Set(t.sms.calls.map((x) => x.contactId)).size).toBe(t.sms.calls.length);
     expect(t.store.jobList().filter((j) => j.channel === 'SMS' && j.status === 'FAILED')).toHaveLength(0);
-    expect(Math.max(...t.store.jobList().filter((j) => j.channel === 'SMS').map((j) => j.attempts))).toBeLessThan(MAX_ATTEMPTS);
-    // the provider is back: the next allowed probe is answered, the breaker closes and the lane drains in that tick
+    // the provider is back: the first call is answered and the lane goes to full width in that same tick
     const sms = new FakeSender('sms');
-    let m = 13;
-    for (; m <= 20 && sms.sent.length === 0; m++) await tick(t, m, { SMS: sms, VOICE: t.voice });
+    const r4 = await tick(t, 4, { SMS: sms, VOICE: t.voice });
+    expect(r4.notify.unanswered).toEqual([]);
+    expect(sms.sent.length).toBeGreaterThanOrEqual(19); // everything that is due (one retry is due 10 s after the tick started)
+    await tick(t, 5, { SMS: sms, VOICE: t.voice });
     expect(sms.sent).toHaveLength(20);
-    expect(t.store.breakers.get('SMS')).toMatchObject({ state: 'CLOSED', trips: 0 });
     expect(new Set(sms.sent.map((x) => x.contactId)).size).toBe(20);
   });
 
@@ -151,7 +155,7 @@ describe('R-11: a provider that hangs does not delay the healthy channels', () =
       for (let i = 0; i < 4; i++) inject(i, 10, at(1), 'x');
       const r = (await runTick({ scheduledAt: at(1), jobs: ['notify'] }, on({ repo: store, senders, now: clock.get, sendTimeoutMs: 1 }))) as TickSummary;
       for (const [, kind] of CH) expect(sent[kind] ?? 0, `${down} down → ${kind}`).toBe(kind === down ? 0 : 11); // 10 injected + the incident's own page
-      expect(r.notify.breakerOpen).toEqual([down]);
+      expect(r.notify.unanswered).toEqual([down]);
     }
   });
 
@@ -181,22 +185,12 @@ describe('R-11: a provider that hangs does not delay the healthy channels', () =
     expect(fairOrder(due).map((j) => j.payload.title)).toEqual(['sev1-fresh', 'sev1-retry', 'fresh-early', 'fresh-late', 'retry-early']);
   });
 
-  it('breaker arithmetic: opens for BREAKER_OPEN_SEC, doubles per failed probe, capped', () => {
-    let b = tripBreaker(closedBreaker('SMS'), T0);
-    expect(b).toMatchObject({ state: 'OPEN', trips: 1, openedAt: T0, nextProbeAt: at(0, BREAKER_OPEN_SEC) });
-    b = tripBreaker(b, at(1));
-    expect(b).toMatchObject({ trips: 2, openedAt: T0, nextProbeAt: at(1, 2 * BREAKER_OPEN_SEC) });
-    for (let i = 0; i < 10; i++) b = tripBreaker(b, at(2));
-    expect(b.nextProbeAt).toEqual(at(2, 300));
-    expect(BREAKER_TIMEOUTS).toBeLessThanOrEqual(LANE_CONCURRENCY); // one wave of a dead provider is enough to open it
-  });
-
-  it('a provider that answers with errors (not timeouts) does not open the breaker', async () => {
+  it('a provider that answers with errors (not timeouts) is not reported as unanswered and is drained at full width', async () => {
     const { store, inject } = await tenants(1, () => 'SEV_2', () => 'SMS');
     inject(0, 20, at(1), 'x');
     const sms = new FakeSender('sms').failNext(100, { retryable: true, error: '503' });
     const r = (await runTick({ scheduledAt: at(1), jobs: ['notify'] }, on({ repo: store, senders: { SMS: sms }, now: () => at(1) }))) as TickSummary;
-    expect(r.notify).toMatchObject({ retried: 21, released: 0, timeouts: 0, breakerOpen: [] });
+    expect(r.notify).toMatchObject({ retried: 21, released: 0, timeouts: 0, unanswered: [] });
   });
 });
 
@@ -283,7 +277,7 @@ describe('N-12: the outbox keeps its share of the tick, and a tick that did not 
     expect(sim.allSent()).toHaveLength(2);
   });
 
-  it('non-SEV-1 backlog alone is truncated, not DEGRADED; an open breaker holding SEV-1 pages IS degraded', async () => {
+  it('non-SEV-1 backlog alone is truncated, not DEGRADED; an unanswered lane holding SEV-1 pages IS degraded', async () => {
     const { store, inject } = await tenants(1, () => 'SEV_3', () => 'SMS');
     inject(0, 80, at(1), 'x');
     await runTick({ scheduledAt: at(1), jobs: ['notify'] }, on({ repo: store, senders: { SMS: new FakeSender() }, now: () => at(1) }));
@@ -293,7 +287,7 @@ describe('N-12: the outbox keeps its share of the tick, and a tick that did not 
     t.inject(0, 9, at(1), 'x');
     const clock = simClock(at(1));
     await runTick({ scheduledAt: at(1), jobs: ['notify'] }, on({ repo: t.store, senders: { SMS: hanging(clock) }, now: clock.get, sendTimeoutMs: 1 }));
-    expect((await t.store.readHeartbeats()).find((h) => h.name === 'notify')).toMatchObject({ lastStatus: 'DEGRADED', lastStats: expect.objectContaining({ dueSev1Unattempted: 5, breakerOpen: ['SMS'] }) });
+    expect((await t.store.readHeartbeats()).find((h) => h.name === 'notify')).toMatchObject({ lastStatus: 'DEGRADED', lastStats: expect.objectContaining({ dueSev1Unattempted: 5, unanswered: ['SMS'] }) });
   });
 });
 
