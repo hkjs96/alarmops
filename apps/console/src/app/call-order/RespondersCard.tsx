@@ -9,6 +9,7 @@ import type {
 import { computeHealth, plural, type Directory } from "@/lib/call-order/model";
 import { errorLine, type Failure } from "@/lib/errors";
 import { hasRole, roleReason, useShell } from "@/components/ShellContext";
+import { callAction } from "@/lib/session-ended";
 import { addResponder, removeResponder, setResponderRole } from "./actions";
 
 const CH_NAME: Record<ContactChannelKey, string> = { SLACK: "Slack DM", EMAIL: "Email", SMS: "SMS", VOICE: "Call" };
@@ -89,6 +90,13 @@ export function RespondersCard({ customer, customerName, services, responders, s
   /** removed in this visit: who, and what puts them back */
   const [removed, setRemoved] = useState<Record<string, { name: string; staff: boolean; role?: CustomerPersonRole }>>({});
   const [heights, setHeights] = useState<Record<string, number>>({});
+  /**
+   * Reload after "Changed — reload" is asked for under the pointer (QA 최종 점검 P3-H): every row keeps at least the
+   * height it had and the status area below the list keeps its own, so nothing slides under the spot that was pressed
+   * — a row someone else removed becomes a tombstone of the same height, and where Reload was there is a sentence.
+   * Done (the explicit refresh) lets go of all of it.
+   */
+  const [reloaded, setReloaded] = useState<{ rows: Record<string, number>; status: number } | null>(null);
   /** put back a moment ago: until the list says so itself, the row says it is coming back */
   const [restored, setRestored] = useState<Record<string, true>>({});
   const [pick, setPick] = useState("");
@@ -139,7 +147,7 @@ export function RespondersCard({ customer, customerName, services, responders, s
     const was = removed[id];
     if (!was || busy[id]) return;
     setBusyFor(id, "undo"); setErr(null);
-    const r = await addResponder(customer, was.staff ? { contactId: id } : { contactId: id, role: was.role }, ver.current);
+    const r = await callAction(() => addResponder(customer, was.staff ? { contactId: id } : { contactId: id, role: was.role }, ver.current));
     setBusyFor(id, null);
     if (!r.ok) { failed(r); return; }
     ver.current = Math.max(ver.current, r.data.version);
@@ -151,7 +159,7 @@ export function RespondersCard({ customer, customerName, services, responders, s
   const doRemove = async (a: Ask, confirmUnreachable: boolean) => {
     lockHeight(a.id);
     setBusyFor(a.id, "remove"); setErr(null);
-    const r = await removeResponder(customer, a.id, ver.current, confirmUnreachable);
+    const r = await callAction(() => removeResponder(customer, a.id, ver.current, confirmUnreachable));
     setBusyFor(a.id, null);
     if (!r.ok) {
       if (r.code === "WOULD_BE_UNREACHABLE") { shell.clearToast(); setAsk({ ...a, forced: true }); return; }
@@ -166,7 +174,7 @@ export function RespondersCard({ customer, customerName, services, responders, s
   };
   const doRole = async (a: { id: string; name: string }, to: CustomerPersonRole, was: CustomerPersonRole, confirmUnreachable = false, quiet = false) => {
     setBusyFor(a.id, "role"); setErr(null);
-    const r = await setResponderRole(customer, a.id, to, ver.current, confirmUnreachable);
+    const r = await callAction(() => setResponderRole(customer, a.id, to, ver.current, confirmUnreachable));
     setBusyFor(a.id, null);
     if (!r.ok) {
       if (r.code === "WOULD_BE_UNREACHABLE") { shell.clearToast(); setAsk({ kind: "role", id: a.id, name: a.name, staff: false, role: was, forced: true }); return; }
@@ -203,7 +211,7 @@ export function RespondersCard({ customer, customerName, services, responders, s
     if (!s || isSameSpot(e) || busy.add) return;
     markSpot(e);
     setBusyFor("add", "add"); setErr(null);
-    const r = await addResponder(customer, { contactId: s.contactId }, ver.current);
+    const r = await callAction(() => addResponder(customer, { contactId: s.contactId }, ver.current));
     setBusyFor("add", null);
     if (!r.ok) { failed(r); return; }
     ver.current = Math.max(ver.current, r.data.version);
@@ -217,7 +225,7 @@ export function RespondersCard({ customer, customerName, services, responders, s
     if (!name) { setFormErr("Enter the person's name."); return; }
     if (!form.email.trim() && !form.phone.trim()) { setFormErr("Enter an email or a phone number."); return; }
     setBusyFor("add", "add"); setErr(null); setFormErr(null);
-    const r = await addResponder(customer, { name, email: form.email, phone: form.phone, role: form.role }, ver.current);
+    const r = await callAction(() => addResponder(customer, { name, email: form.email, phone: form.phone, role: form.role }, ver.current));
     setBusyFor("add", null);
     if (!r.ok) { failed(r); return; }
     ver.current = Math.max(ver.current, r.data.version);
@@ -228,7 +236,7 @@ export function RespondersCard({ customer, customerName, services, responders, s
 
   /** Done (or the steps editor taking over): the explicit refresh. Tombstones go, the list is taken as it is now. */
   const finish = () => {
-    setEditing(false); setErr(null); setFormErr(null); setRemoved({}); setHeights({}); setRestored({});
+    setEditing(false); setErr(null); setFormErr(null); setRemoved({}); setHeights({}); setRestored({}); setReloaded(null);
     staffRows.resort(); peopleRows.resort();
   };
   useEffect(() => { onEditingChange?.(on); }, [on, onEditingChange]);
@@ -243,7 +251,13 @@ export function RespondersCard({ customer, customerName, services, responders, s
     const at = document.activeElement;
     if (row && (!at || at === document.body || row.contains(at))) row.focus({ preventScroll: true });
   }, [removed, restored]);
-  const reload = () => { setConflict(false); setErr(null); router.refresh(); };
+  const reload = () => {
+    const rows: Record<string, number> = { ...(reloaded?.rows ?? {}) };
+    listRef.current?.querySelectorAll<HTMLElement>("li[data-row-key]").forEach((el) => { rows[el.dataset.rowKey!] = el.getBoundingClientRect().height; });
+    const status = listRef.current?.querySelector<HTMLElement>(".co-resp-status")?.getBoundingClientRect().height ?? 0;
+    setReloaded({ rows, status: Math.max(status, reloaded?.status ?? 0) });
+    setConflict(false); setErr(null); router.refresh();
+  };
 
   const tomb = (id: string, name: string, gone: boolean) => {
     const mine = removed[id];
@@ -258,7 +272,8 @@ export function RespondersCard({ customer, customerName, services, responders, s
       />
     );
   };
-  const rowStyle = (id: string): CSSProperties | undefined => (heights[id] !== undefined ? { height: heights[id], boxSizing: "border-box" } : undefined);
+  const rowStyle = (id: string): CSSProperties | undefined => (heights[id] !== undefined ? { height: heights[id], boxSizing: "border-box" }
+    : reloaded?.rows[id] !== undefined ? { minHeight: reloaded.rows[id], boxSizing: "border-box" } : undefined);
 
   return (
     <section className="card co-resp" aria-labelledby="co-resp-h" data-testid="co-responders" data-editing={on ? "1" : undefined}>
@@ -273,15 +288,15 @@ export function RespondersCard({ customer, customerName, services, responders, s
       <div className="co-resp-b" ref={listRef}>
         {why ? <p className="sm mut co-resp-n" id="co-resp-why" data-testid="co-resp-why">{why}</p> : null}
         <p className="sm mut co-resp-n">“Everyone in Responders” is these {pageable}: all MSP staff here plus the Pageable people of {customerName}. Responders belong to the whole customer, whatever level this panel shows.</p>
-        {on ? <p className="sm co-resp-n" data-testid="co-resp-rule">Each change applies at once to all of {customerName}. Rows keep their place: a removed person stays as “Removed · Undo”, and the summary above this card stays as it was, until you press Done.</p> : null}
+        {on ? <p className="sm co-resp-n" data-testid="co-resp-rule">Each change applies at once to all of {customerName}. Rows keep their place: a removed person stays as “Removed · Undo” until you press Done. The summary at the top of this panel is marked “Before your changes” and shows how things are now on one line.</p> : null}
         {/* one line, one height, there for as long as Responders are edited: what it says changes, nothing below it moves */}
         {on ? (
           <div className={cx("co-resp-live", conflict || err ? "warn" : now.level === "UNREACHABLE" ? "unr" : now.level === "AT_RISK" ? "ar" : null)} data-testid="co-resp-live">
             <span className="co-resp-live-t" role="status">
-              {conflict ? <><b>Changed — reload.</b> The last change was not applied · details below the list</>
-                : err ? <><b>Not applied.</b> The reason is below the list</>
-                  : now.level === "UNREACHABLE" ? <><span className="stag unr">Unreachable</span> <b>Nobody for {customerName} is reached now</b> · details below the list</>
-                    : now.level === "AT_RISK" ? <><span className="stag ar">At risk</span> <b>{customerName} is harder to reach now</b> · details below the list</>
+              {conflict ? <><b>Changed — reload.</b> The last change was not applied · details below</>
+                : err ? <><b>Not applied.</b> The reason is below</>
+                  : now.level === "UNREACHABLE" ? <><span className="stag unr">Unreachable</span> <b>Nobody for {customerName} is reached now</b> · details below</>
+                    : now.level === "AT_RISK" ? <><span className="stag ar">At risk</span> <b>{customerName} is harder to reach now</b> · details below</>
                       : <><b>Reach now: OK</b> · {customerName}</>}
               {tombstones && !conflict && !err ? ` · ${tombstones} removed, shown until Done` : ""}
             </span>
@@ -378,7 +393,8 @@ export function RespondersCard({ customer, customerName, services, responders, s
           {peopleRows.rows.length === 0 ? <li className="sm mut">No customer people yet.</li> : null}
         </ul>
         {/* below the last row: whatever is said here, however long, cannot move a row */}
-        <div className="co-resp-status" data-testid="co-resp-status">
+        <div className="co-resp-status" data-testid="co-resp-status" style={reloaded && on ? { minHeight: reloaded.status, boxSizing: "border-box" } : undefined}>
+          {reloaded && on && !conflict ? <p className="sm co-resp-reloaded" role="status" data-testid="co-resp-reloaded"><b>Reloaded.</b> These are the Responders of {customerName} as they are now. Your last change was not applied — make it again if it is still needed.</p> : null}
           {conflict ? (
             <Banner tone="amber">
               <div data-testid="co-resp-conflict">

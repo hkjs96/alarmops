@@ -161,7 +161,7 @@ test.describe("Responders: add, the explicit refresh, a step's person, two peopl
   test("an added person goes after the last row and nothing above moves; Done is the refresh that takes tombstones away; someone a step names cannot be removed", async ({ page }) => {
     await signIn(page, "/c/daon/call-order");
     await card(page).getByTestId("co-resp-edit").click();
-    await expect(page.getByTestId("co-footnote")).toHaveText("Editing Responders of Daon Retail: each change applies at once. The steps stay as they are until you press Edit."); // QA P3-F
+    await expect(page.getByTestId("co-footnote")).toHaveText("Editing Responders of Daon Retail: each change applies at once. The steps themselves are not changed here."); // QA P3-F
     await expect(page.getByTestId("co-edit")).toBeDisabled();
     await card(page).getByLabel("MSP staff to add").selectOption({ label: "Jiwoo Han · Cloud engineer" });
     await assertNoRowShift(page, {

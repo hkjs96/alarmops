@@ -11,6 +11,7 @@ import { clearLevel, isPanelPath, parseScopeParams, scopeQuery } from "@/lib/sco
 import { ShellContext, type LeaveGuard, type LocalMark, type ShellApi, type ShellUser, type ToastAction } from "./ShellContext";
 import { claimStorageFor } from "@/lib/user-storage";
 import { NotFoundBody } from "./NotFoundBody";
+import { SessionEnded } from "./SessionEnded";
 import { TopNav } from "./TopNav";
 import { panelListPath, sectionFor } from "@/lib/nav";
 import { AUTO_RAIL_BELOW, DEFAULT_RAIL_MAX, PREFS_KEY } from "@/lib/shell-prefs";
@@ -248,6 +249,7 @@ export function ScopeShell({ customers, user, openCount, children }: { customers
             <button type="button" className="btn sm ghost" aria-label="Dismiss" onClick={() => setToast(null)}>×</button>
           </div>
         ) : null}
+        <SessionEnded />
       </div>
     </ShellContext.Provider>
   );

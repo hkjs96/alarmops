@@ -15,6 +15,7 @@ import { scopeQuery } from "@/lib/scope";
 import { SIGN_OUT, hasRole, roleReason, useShell } from "@/components/ShellContext";
 import { errorLine } from "@/lib/errors";
 import type { PanelData } from "./CallOrderScreen";
+import { SESSION_ENDED, callAction } from "@/lib/session-ended";
 import { removeOwnSteps, saveCallOrder } from "./actions";
 import { Sentence } from "./Sentence";
 import { StepEditor } from "./StepEditor";
@@ -54,16 +55,31 @@ const typing = (t: EventTarget | null) => t instanceof HTMLElement && (t.isConte
  */
 export function CallOrderPanel({ data, listHref, listQuery }: { data: PanelData; listHref: string; listQuery: string }) {
   /**
-   * While Responders are edited, the panel around the card holds still (QA 재점검 P2-B): the sentence, the steps and the
-   * health banner are shown as they were when Edit was pressed, so no change to a responder can add or take a line
-   * above the rows. The card itself is live (it says how reachable the customer is now); Done brings the rest up to date.
+   * While Responders are edited, the top of the panel (sentence, "Paged (n)", steps, health) holds still (QA 재점검
+   * P2-B): no change to a responder may add or take a line above the rows. But what is held must not pass for what
+   * is true now (QA 최종 점검 P2-C: "If something breaks now … Paged (3)" stayed up, unmarked, while the customer was
+   * UNREACHABLE). So from the press on Edit — one change, before any row is touched — until Done, that block is a
+   * box of exactly the height it had, and in it:
+   *   - a label: "Before your changes — updates when you press Done";
+   *   - one line of fixed height that is live: "Now: UNREACHABLE — nobody is paged" (`co-held-now`);
+   *   - the old text below, dimmed and inert, cut off at the box's edge. The old health banner is not repeated: the
+   *     live line stands where it stood.
+   * Each change is applied when it is made, so leaving without Done (Close, Esc, another row) leaves nothing stale:
+   * the list and a panel opened again are read from the server as it is.
    */
   const [respEditing, setRespEditing] = useState(false);
   const latest = useRef(data);
   latest.current = data;
   const held = useRef<PanelData | null>(null);
-  const onRespEditing = useCallback((on: boolean) => { held.current = on ? latest.current : null; setRespEditing(on); }, []);
+  const topRef = useRef<HTMLDivElement>(null);
+  const [heldHeight, setHeldHeight] = useState<number | null>(null);
+  const onRespEditing = useCallback((on: boolean) => {
+    held.current = on ? latest.current : null;
+    setHeldHeight(on && topRef.current ? topRef.current.getBoundingClientRect().height : null);
+    setRespEditing(on);
+  }, []);
   const view = respEditing && held.current && scopeKey(held.current.scope) === scopeKey(data.scope) ? held.current : data;
+  const isHeld = respEditing && heldHeight !== null;
   const { scope, path, health, responders, rotations, staff } = view;
   const shell = useShell();
   const uid = shell.user.id;
@@ -104,6 +120,8 @@ export function CallOrderPanel({ data, listHref, listQuery }: { data: PanelData;
   const [conflict, setConflict] = useState(false);
   const [tried, setTried] = useState(false);
   const focusField = useRef(false);
+  /** a way out that was asked for while a save was on its way: it follows that save (QA 최종 점검 P3-G) */
+  const queued = useRef<Pending | null>(null);
 
   const editing = mode === "edit";
   const dirty = editing && (noOrder || !sameConfig(value, base));
@@ -206,18 +224,28 @@ export function CallOrderPanel({ data, listHref, listQuery }: { data: PanelData;
   const notLeft = (leavingTo?: string) => {
     if (leavingTo === SIGN_OUT) shell.toast(`Not signed out: ${label} was not saved. Fix what is marked and save, or sign out without saving.`);
   };
+  /** the confirmation of a save that had sign-out behind it was cancelled: neither happened, and both are said (P3-F) */
+  const cancelConfirm = () => {
+    const c = confirm;
+    setConfirm(null);
+    if (c?.leavingTo === SIGN_OUT) shell.toast(`Not signed out: the save for ${label} was cancelled. Nothing was saved; your edit is still open.`);
+  };
   const doSave = async (after?: () => void, leavingTo?: string) => {
     setBusy(true); setError(null);
     const wasCreating = meta.creating;
     // If-Match: the version the edit started from; 0 creates the steps of a level that has none (API-CONTRACT §8.3)
-    const res = await saveCallOrder(scope, value, wasCreating ? 0 : meta.baseVersion ?? 0);
+    const res = await callAction(() => saveCallOrder(scope, value, wasCreating ? 0 : meta.baseVersion ?? 0));
+    // whatever asked to follow this save while it was on its way (P3-G)
+    const waiting = queued.current;
+    queued.current = null;
     if (!res.ok) {
       setBusy(false);
       // the draft stays exactly as typed; nothing is overwritten on either side
       if (res.code === "VERSION_CONFLICT" || res.code === "ALREADY_EXISTS") setConflict(true);
       // every refusal says what to change (lib/errors.ts): which step, which limit, which role
       else setError(errorLine(res, { what: "Changing the call order", where: label }));
-      notLeft(leavingTo);
+      // a session that ended says so itself (components/SessionEnded.tsx): "not signed out" would be wrong on top of it
+      if (res.code !== SESSION_ENDED) notLeft(leavingTo ?? waiting?.leavingTo);
       return;
     }
     const newVersion = res.data.version;
@@ -228,16 +256,28 @@ export function CallOrderPanel({ data, listHref, listQuery }: { data: PanelData;
     const undo = wide || (wasCreating && !scope.project) ? undefined : {
       label: "Undo",
       onAction: async () => {
-        const r = wasCreating ? await removeOwnSteps(scope, newVersion) : await saveCallOrder(scope, base, newVersion);
+        const r = await callAction(() => (wasCreating ? removeOwnSteps(scope, newVersion) : saveCallOrder(scope, base, newVersion)));
         shell.toast(r.ok ? `Undone · ${label} is back to how it was` : r.code === "VERSION_CONFLICT" ? `Could not undo — ${label} was changed again` : `Could not undo — ${errorLine(r, { what: "Changing the call order", where: label })}`);
       },
     };
     setFocusRow(key);
-    if (after) leaveNow(after); else router.push(listHref);
+    const next = after ?? waiting?.proceed;
+    if (next) leaveNow(next); else router.push(listHref);
     shell.toast(text, undo);
   };
   const attemptSave = (after?: () => void, leavingTo?: string) => {
-    if (!editing || busy) return;
+    // the save went through a moment ago and nothing is unsaved any more: what was asked to follow it goes ahead
+    if (!editing) { if (after) leaveNow(after); return; }
+    if (busy) {
+      // a save is on its way: this is not a second save, and it is not ignored either — it follows the first one (P3-G)
+      if (after) {
+        queued.current = { proceed: after, leavingTo };
+        shell.toast(leavingTo === SIGN_OUT
+          ? `Saving for ${label}… You are signed out as soon as it is saved. If it is not saved, you stay signed in.`
+          : `Saving for ${label}… What you asked for follows as soon as it is saved.`);
+      }
+      return;
+    }
     setTried(true);
     if (stale || conflict) { notLeft(leavingTo); return; }
     if (check.errors.length) {
@@ -280,7 +320,7 @@ export function CallOrderPanel({ data, listHref, listQuery }: { data: PanelData;
 
   const remove = async () => {
     setBusy(true);
-    const r = await removeOwnSteps(scope, path.version);
+    const r = await callAction(() => removeOwnSteps(scope, path.version));
     setBusy(false); setAskRemove(false);
     if (!r.ok) { if (r.code === "VERSION_CONFLICT") setConflict(true); else setError(errorLine(r, { what: "Changing the call order", where: label })); return; }
     clearDraft(uid, key); announceDrafts(); setMode("read"); setFocusRow(parentKey);
@@ -298,6 +338,13 @@ export function CallOrderPanel({ data, listHref, listQuery }: { data: PanelData;
   const sentence = editing ? sentenceParts(liveSteps, value.repeatCount, names.customer, before) : sentenceParts(path.steps, path.repeatCount, names.customer);
   const issues = editing ? [...check.errors.map((i) => ({ ...i, err: true })), ...check.warnings.map((i) => ({ ...i, err: false }))] : [];
 
+  /* ---- the live line of the held state: how things are now, whatever the held text below it says (P2-C) ---- */
+  const livePaged = pagedNow(data.path.steps);
+  const nowLevel = data.path.steps.length === 0 ? "NO CALL ORDER" : data.health.level === "UNREACHABLE" ? "UNREACHABLE" : data.health.level === "AT_RISK" ? "AT RISK" : "OK";
+  const nowTone = nowLevel === "OK" ? null : nowLevel === "AT RISK" ? "ar" : "unr";
+  const nowNames = livePaged.slice(0, 3).map((p) => p.name).join(", ") + (livePaged.length > 3 ? ` +${livePaged.length - 3} more` : "");
+  const nowLine = <><b>Now: {nowLevel}</b> — {livePaged.length && nowLevel !== "NO CALL ORDER" ? `paged (${livePaged.length}): ${nowNames}` : "nobody is paged"}</>;
+
   const footer = editing ? (
     <>
       <span className={cx("co-dirty", dirty && "on")} data-testid="co-unsaved" aria-live="polite">{dirty ? <><Mark shape="dot" />Unsaved</> : null}</span>
@@ -312,7 +359,7 @@ export function CallOrderPanel({ data, listHref, listQuery }: { data: PanelData;
     <>
       <span className="sm mut co-ro" data-testid="co-footnote">{respEditing
         // the steps are read-only; the Responders above are being changed, and each change applies at once (QA P3-F)
-        ? `Editing Responders of ${names.customer}: each change applies at once. The steps stay as they are until you press Edit.`
+        ? `Editing Responders of ${names.customer}: each change applies at once. The steps themselves are not changed here.`
         : noEdit ? `Read only. ${noEdit}`
           : noOrder ? `No steps yet: nobody is paged for ${label}.`
             : path.own
@@ -329,7 +376,7 @@ export function CallOrderPanel({ data, listHref, listQuery }: { data: PanelData;
   return (
     <>
       <Panel className="co-panel" kind={editing ? `Call order · editing at ${level} level` : `Call order · ${level} level`} path={pathOf(names)} note={filterNote} onClose={close} onCopyLink={copy} footer={footer}>
-        <div className={cx("stack", editing ? "co-edit" : "co-read")} data-held={view !== data ? "1" : undefined} data-testid={editing ? "co-edit-view" : "co-read-view"} data-scope={key}>
+        <div className={cx("stack", editing ? "co-edit" : "co-read")} data-testid={editing ? "co-edit-view" : "co-read-view"} data-scope={key}>
           {!editing && kept ? (
             <div className="banner accent co-draft" data-testid="co-draft-here">
               <span className="co-draft-t"><b>Draft for {label}</b> · not saved, kept in this tab only</span>
@@ -340,128 +387,141 @@ export function CallOrderPanel({ data, listHref, listQuery }: { data: PanelData;
             </div>
           ) : null}
 
-          {noOrder && !editing ? (
-            <Banner tone="red">
-              <div data-testid="co-no-order"><span className="stag unr">No call order</span> <b>Nobody is paged for {label}: no steps are saved for {names.customer} yet.</b>
-                <div className="sm">{noEdit ?? "Press “Set up the call order” below; nothing is saved until you save."}</div></div>
-            </Banner>
-          ) : null}
-          {health.level !== "OK" && !(noOrder && !editing) ? (
-            <Banner tone={problemTone}>
-              <div data-testid="co-health">
-                <div><span className={cx("stag", health.level === "UNREACHABLE" ? "unr" : "ar")}>{health.level === "UNREACHABLE" ? "Unreachable" : "At risk"}</span>{" "}
-                  <b>{health.level === "UNREACHABLE"
-                    ? `If something breaks now, nobody for ${names.customer} is reached.`
-                    : `Some calls for ${names.customer} depend on contacts that are not verified, or on a gap in a rotation.`}</b></div>
-                <ul className="co-probs">{health.problems.map((p, n) => <li key={n}>{p.message}</li>)}</ul>
-                <div className="sm">Worked out from the customer-level steps of {names.customer}, its Responders and the next 14 days of shifts.{" "}
-                  <Link className="co-lnk" href={"/people" + scopeQuery({ customer: scope.customer })}>Check their contacts in People →</Link></div>
-              </div>
-            </Banner>
-          ) : null}
-
-          {editing ? (
-            <div className="co-lv" data-testid="co-level">
-              <div className="ov co-lv-h">Level you are editing</div>
-              <div className="co-lv-r"><span className="ov">{level}</span><span><b>{label}</b><small>{meta.creating ? `no own steps yet · follows ${sourceLabel}` : `own steps · pages for ${reachText(reach)}`}</small></span></div>
-              {origin && originLabel ? (
-                <div className="co-lv-w">
-                  <span className="sm">Widened from the row you opened.</span>
-                  <button type="button" className="btn sm" onClick={() => shell.requestLeave(() => router.push(callOrderPath(origin) + listQuery), "continue")}>← Back to {originLabel.split(" › ").pop()}</button>
+          {/* always this box and the one inside it, so that going into and out of the held state changes no structure */}
+          <div ref={topRef} className={cx("co-top", isHeld && "held")} style={isHeld ? { height: heldHeight! } : undefined} data-testid="co-top" data-held={isHeld ? "1" : undefined}>
+            {isHeld ? (
+              <div className="co-held-h">
+                <div className="co-held-l" data-testid="co-held-label"><Mark shape="tri" />Before your changes — updates when you press Done</div>
+                <div className={cx("co-resp-live co-held-now", nowTone)} data-testid="co-held-now">
+                  <span className="co-resp-live-t" role="status">{nowLine}</span>
                 </div>
-              ) : null}
-              {wider.length ? (
-                <div className="co-lv-w">
-                  <span className="sm mut">Need to change more than {names.service ?? names.project}?</span>
-                  {wider.map((w) => (
-                    <button key={scopeKey(w)} type="button" className="btn sm" onClick={() => { shell.clearToast(); setWiden(w); }}>
-                      {w.project ? `Edit project ${names.project} instead…` : "Edit the whole customer instead…"}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-
-          {editing && meta.creating ? (
-            <div className="co-inh" data-testid="co-creating">
-              <div className="b">Creating own steps for {label}</div>
-              <div>Started from the steps of {sourceLabel}. Nothing changes until you save. After saving, {reach.services.length
-                ? <><b>{reachText(reach)}</b> of {label} {reach.services.length === 1 ? "stops" : "stop"} following {sourceLabel}</>
-                : <><b>no service changes right now</b></>}. {sourceLabel} itself is not changed.</div>
-            </div>
-          ) : null}
-
-          {editing && (conflict || stale) ? (
-            <Banner tone="amber">
-              <div data-testid="co-conflict">
-                <div><b>Changed — reload.</b> Someone else changed the call order of {label} while you were editing{path.updatedByName && stale ? ` (${path.updatedByName})` : ""}. Nothing was saved, and your draft is kept as you typed it.</div>
-                {stale && !conflict ? (
-                  <>
-                    <div className="co-cmp"><span className="ov">Now saved</span><span>{partsText(sentenceParts(path.steps, path.repeatCount, names.customer))}</span></div>
-                    <div className="co-cmp"><span className="ov">Your draft</span><span>{partsText(sentenceParts(liveSteps, value.repeatCount, names.customer))}</span></div>
-                    <div className="row" style={{ marginTop: 8 }}>
-                      <button type="button" className="btn sm" data-testid="co-rebase" onClick={() => setMeta((m) => ({ ...m, creating: !path.own, baseVersion: path.own ? path.version : null }))}>Keep my draft and compare it with what is saved now</button>
-                      <button type="button" className="btn sm ghost" onClick={discard}>Discard my draft</button>
-                    </div>
-                  </>
-                ) : (
-                  <div className="row" style={{ marginTop: 8 }}>
-                    <button type="button" className="btn sm" data-testid="co-reload" onClick={() => { setConflict(false); router.refresh(); }}>Reload what is saved now</button>
-                  </div>
-                )}
-              </div>
-            </Banner>
-          ) : null}
-
-          {editing ? (
-            <StepEditor value={value} onChange={setValue} dir={dir} customerName={names.customer} showErrors={tried} issues={check.errors} />
-          ) : null}
-
-          <section aria-labelledby="co-now">
-            <div className="ov co-h" id="co-now">If something breaks now{editing ? <span className="co-live"> · updates as you type</span> : null}</div>
-            <Sentence parts={sentence} live={editing} />
-            {editing ? (
-              <div className="co-issues" role="alert" data-testid="co-issues">
-                {issues.map((i, n) => <div key={n} className={i.err ? "co-err" : "co-warn"}><Mark shape={i.err ? "dot" : "tri"} /><span>{i.err ? "" : "Warning: "}{i.message}</span></div>)}
-                {error ? <div className="co-err"><Mark shape="dot" /><span>Could not save: {error}</span></div> : null}
               </div>
             ) : null}
-            <p className="sm co-paged" data-testid="co-paged">
-              <b>Paged ({paged.length})</b>{paged.length ? <>: {paged.map((p) => p.name).join(", ")}</> : null}
-              {" · "}<b>Also notified ({notified.length})</b>{notified.length ? <>: {notified.map((p) => p.name).join(", ")}</> : null}.{" "}
-              <Link href={peopleHref} className="co-lnk">Open them in People →</Link>
-            </p>
-          </section>
+            <div className="stack co-top-c" inert={isHeld} aria-hidden={isHeld || undefined} data-testid="co-top-old">
+              {noOrder && !editing ? (
+                <Banner tone="red">
+                  <div data-testid="co-no-order"><span className="stag unr">No call order</span> <b>Nobody is paged for {label}: no steps are saved for {names.customer} yet.</b>
+                    <div className="sm">{noEdit ?? "Press “Set up the call order” below; nothing is saved until you save."}</div></div>
+                </Banner>
+              ) : null}
+              {health.level !== "OK" && !(noOrder && !editing) && !isHeld ? (
+                <Banner tone={problemTone}>
+                  <div data-testid="co-health">
+                    <div><span className={cx("stag", health.level === "UNREACHABLE" ? "unr" : "ar")}>{health.level === "UNREACHABLE" ? "Unreachable" : "At risk"}</span>{" "}
+                      <b>{health.level === "UNREACHABLE"
+                        ? `If something breaks now, nobody for ${names.customer} is reached.`
+                        : `Some calls for ${names.customer} depend on contacts that are not verified, or on a gap in a rotation.`}</b></div>
+                    <ul className="co-probs">{health.problems.map((p, n) => <li key={n}>{p.message}</li>)}</ul>
+                    <div className="sm">Worked out from the customer-level steps of {names.customer}, its Responders and the next 14 days of shifts.{" "}
+                      <Link className="co-lnk" href={"/people" + scopeQuery({ customer: scope.customer })}>Check their contacts in People →</Link></div>
+                  </div>
+                </Banner>
+              ) : null}
 
-          {!editing ? (
-            <>
-              <section aria-labelledby="co-steps">
-                <div className="ov co-h" id="co-steps">Steps</div>
-                <ol className="co-steps" data-testid="co-steps">
-                  {path.steps.map((s, i) => (
-                    <li key={i} className="co-step">
-                      <span className={cx("ord", i === 0 && "first")}>{i + 1}</span>
-                      <span className="mono b nowrap">{s.atMin} min</span>
-                      <span className="co-step-t">{targetParts(s, names.customer).map((p, n) => (p.k === "b" ? <b key={n}>{p.t}</b> : <span key={n}>{p.t}</span>))}</span>
-                      <span className="sm co-step-h">{howText(s.channels).replace(/ \+ /g, " · ")}</span>
-                    </li>
-                  ))}
-                  <li className="co-step"><span /><span className="mono sm mut nowrap">then</span><span className="sm mut">{repeatText(path.repeatCount)}</span><span /></li>
-                </ol>
+              {editing ? (
+                <div className="co-lv" data-testid="co-level">
+                  <div className="ov co-lv-h">Level you are editing</div>
+                  <div className="co-lv-r"><span className="ov">{level}</span><span><b>{label}</b><small>{meta.creating ? `no own steps yet · follows ${sourceLabel}` : `own steps · pages for ${reachText(reach)}`}</small></span></div>
+                  {origin && originLabel ? (
+                    <div className="co-lv-w">
+                      <span className="sm">Widened from the row you opened.</span>
+                      <button type="button" className="btn sm" onClick={() => shell.requestLeave(() => router.push(callOrderPath(origin) + listQuery), "continue")}>← Back to {originLabel.split(" › ").pop()}</button>
+                    </div>
+                  ) : null}
+                  {wider.length ? (
+                    <div className="co-lv-w">
+                      <span className="sm mut">Need to change more than {names.service ?? names.project}?</span>
+                      {wider.map((w) => (
+                        <button key={scopeKey(w)} type="button" className="btn sm" onClick={() => { shell.clearToast(); setWiden(w); }}>
+                          {w.project ? `Edit project ${names.project} instead…` : "Edit the whole customer instead…"}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {editing && meta.creating ? (
+                <div className="co-inh" data-testid="co-creating">
+                  <div className="b">Creating own steps for {label}</div>
+                  <div>Started from the steps of {sourceLabel}. Nothing changes until you save. After saving, {reach.services.length
+                    ? <><b>{reachText(reach)}</b> of {label} {reach.services.length === 1 ? "stops" : "stop"} following {sourceLabel}</>
+                    : <><b>no service changes right now</b></>}. {sourceLabel} itself is not changed.</div>
+                </div>
+              ) : null}
+
+              {editing && (conflict || stale) ? (
+                <Banner tone="amber">
+                  <div data-testid="co-conflict">
+                    <div><b>Changed — reload.</b> Someone else changed the call order of {label} while you were editing{path.updatedByName && stale ? ` (${path.updatedByName})` : ""}. Nothing was saved, and your draft is kept as you typed it.</div>
+                    {stale && !conflict ? (
+                      <>
+                        <div className="co-cmp"><span className="ov">Now saved</span><span>{partsText(sentenceParts(path.steps, path.repeatCount, names.customer))}</span></div>
+                        <div className="co-cmp"><span className="ov">Your draft</span><span>{partsText(sentenceParts(liveSteps, value.repeatCount, names.customer))}</span></div>
+                        <div className="row" style={{ marginTop: 8 }}>
+                          <button type="button" className="btn sm" data-testid="co-rebase" onClick={() => setMeta((m) => ({ ...m, creating: !path.own, baseVersion: path.own ? path.version : null }))}>Keep my draft and compare it with what is saved now</button>
+                          <button type="button" className="btn sm ghost" onClick={discard}>Discard my draft</button>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="row" style={{ marginTop: 8 }}>
+                        <button type="button" className="btn sm" data-testid="co-reload" onClick={() => { setConflict(false); router.refresh(); }}>Reload what is saved now</button>
+                      </div>
+                    )}
+                  </div>
+                </Banner>
+              ) : null}
+
+              {editing ? (
+                <StepEditor value={value} onChange={setValue} dir={dir} customerName={names.customer} showErrors={tried} issues={check.errors} />
+              ) : null}
+
+              <section aria-labelledby="co-now">
+                <div className="ov co-h" id="co-now">If something breaks now{editing ? <span className="co-live"> · updates as you type</span> : null}</div>
+                <Sentence parts={sentence} live={editing} />
+                {editing ? (
+                  <div className="co-issues" role="alert" data-testid="co-issues">
+                    {issues.map((i, n) => <div key={n} className={i.err ? "co-err" : "co-warn"}><Mark shape={i.err ? "dot" : "tri"} /><span>{i.err ? "" : "Warning: "}{i.message}</span></div>)}
+                    {error ? <div className="co-err"><Mark shape="dot" /><span>Could not save: {error}</span></div> : null}
+                  </div>
+                ) : null}
+                <p className="sm co-paged" data-testid="co-paged">
+                  <b>Paged ({paged.length})</b>{paged.length ? <>: {paged.map((p) => p.name).join(", ")}</> : null}
+                  {" · "}<b>Also notified ({notified.length})</b>{notified.length ? <>: {notified.map((p) => p.name).join(", ")}</> : null}.{" "}
+                  <Link href={peopleHref} className="co-lnk">Open them in People →</Link>
+                </p>
               </section>
-              <dl className={cx("co-from", !path.own && "inh")} data-testid="co-from">
-                <dt>{path.own ? "Comes from" : "Inherited from"}</dt>
-                <dd>{path.own ? (
-                  <><b>{label}</b> · {scope.project ? "own steps" : "customer steps"} · <span data-testid="co-plan-label">{path.style && path.plan ? planLabel({ style: path.style, plan: path.plan, edited: path.edited }) : "no plan"}</span> · used by {reachText(reach)}
-                    {path.updatedByName ? ` · edited by ${path.updatedByName}${path.updatedAt ? `, ${shortDate(path.updatedAt)}` : ""}` : ""}.</>
-                ) : (
-                  <><b>{sourceLabel}</b>. {names.service ?? names.project} has no steps of its own and follows it.{" "}
-                    <Link className="co-lnk" href={callOrderPath(source) + listQuery}>Open the call order of {sourceLabel} →</Link></>
-                )}</dd>
-              </dl>
-            </>
-          ) : null}
+
+              {!editing ? (
+                <>
+                  <section aria-labelledby="co-steps">
+                    <div className="ov co-h" id="co-steps">Steps</div>
+                    <ol className="co-steps" data-testid="co-steps">
+                      {path.steps.map((s, i) => (
+                        <li key={i} className="co-step">
+                          <span className={cx("ord", i === 0 && "first")}>{i + 1}</span>
+                          <span className="mono b nowrap">{s.atMin} min</span>
+                          <span className="co-step-t">{targetParts(s, names.customer).map((p, n) => (p.k === "b" ? <b key={n}>{p.t}</b> : <span key={n}>{p.t}</span>))}</span>
+                          <span className="sm co-step-h">{howText(s.channels).replace(/ \+ /g, " · ")}</span>
+                        </li>
+                      ))}
+                      <li className="co-step"><span /><span className="mono sm mut nowrap">then</span><span className="sm mut">{repeatText(path.repeatCount)}</span><span /></li>
+                    </ol>
+                  </section>
+                  <dl className={cx("co-from", !path.own && "inh")} data-testid="co-from">
+                    <dt>{path.own ? "Comes from" : "Inherited from"}</dt>
+                    <dd>{path.own ? (
+                      <><b>{label}</b> · {scope.project ? "own steps" : "customer steps"} · <span data-testid="co-plan-label">{path.style && path.plan ? planLabel({ style: path.style, plan: path.plan, edited: path.edited }) : "no plan"}</span> · used by {reachText(reach)}
+                        {path.updatedByName ? ` · edited by ${path.updatedByName}${path.updatedAt ? `, ${shortDate(path.updatedAt)}` : ""}` : ""}.</>
+                    ) : (
+                      <><b>{sourceLabel}</b>. {names.service ?? names.project} has no steps of its own and follows it.{" "}
+                        <Link className="co-lnk" href={callOrderPath(source) + listQuery}>Open the call order of {sourceLabel} →</Link></>
+                    )}</dd>
+                  </dl>
+                </>
+              ) : null}
+            </div>
+          </div>
 
           {node ? (
             <div className="card co-tree">
@@ -506,7 +566,9 @@ export function CallOrderPanel({ data, listHref, listQuery }: { data: PanelData;
 
       <DirtyGuard
         open={Boolean(guard)} scopeLabel={label} leavingTo={guard?.leavingTo} signOut={guard?.leavingTo === SIGN_OUT}
-        body={guard?.leavingTo === SIGN_OUT
+        body={guard?.leavingTo === SIGN_OUT && busy
+          ? <>A save for <b>{label}</b> is being sent right now. “Save … and sign out” waits for it and signs out once it is saved. “Sign out without saving” signs out now — the save that is already on its way may still be applied.</>
+          : guard?.leavingTo === SIGN_OUT
           ? <>Nothing has been saved for <b>{label}</b> yet. Signing out removes the drafts kept in this tab, so this edit cannot be kept for later: save it first, or sign out without it. If the save does not go through, you stay signed in.</>
           : <>Nothing has been saved for <b>{label}</b> yet. Save it, keep it as a draft for later, or discard it. A kept draft stays in this tab and belongs to {label} only.</>}
         onSave={() => { const g = guard!; setGuard(null); attemptSave(g.proceed, g.leavingTo); }}
@@ -515,8 +577,12 @@ export function CallOrderPanel({ data, listHref, listQuery }: { data: PanelData;
         onCancel={() => setGuard(null)}
       />
 
-      <ConfirmDialog open={Boolean(confirm)} title={`${saveLabel}?`} confirmLabel={saveLabel} busy={busy}
-        onConfirm={() => { const c = confirm!; setConfirm(null); void doSave(c.after, c.leavingTo); }} onCancel={() => setConfirm(null)}>
+      <ConfirmDialog open={Boolean(confirm)} busy={busy}
+        title={confirm?.leavingTo === SIGN_OUT ? `${saveLabel} and sign out?` : `${saveLabel}?`}
+        confirmLabel={confirm?.leavingTo === SIGN_OUT ? `${saveLabel} and sign out` : saveLabel}
+        cancelLabel={confirm?.leavingTo === SIGN_OUT ? "Cancel — do not save, stay signed in" : "Cancel"}
+        onConfirm={() => { const c = confirm!; setConfirm(null); void doSave(c.after, c.leavingTo); }} onCancel={cancelConfirm}>
+        {confirm?.leavingTo === SIGN_OUT ? <p className="co-c-w" data-testid="co-confirm-signout"><b>You are signed out after this save.</b> If the save does not go through, you stay signed in and are told.</p> : null}
         {originLabel ? <p className="co-c-w"><b>Wider than the row you opened.</b> You opened {originLabel}; this saves {label}.</p> : null}
         <div className="ov">Before → after</div>
         {changes.length ? <ul className="co-chg" data-testid="co-changes">{changes.map((c) => <li key={c}>{c}</li>)}</ul> : <p>Same steps as {sourceLabel}, now as own steps.</p>}

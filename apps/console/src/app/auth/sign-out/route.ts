@@ -12,8 +12,8 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(req: NextRequest) {
   const h = req.headers;
-  // X-Forwarded-Host counts only with TRUSTED_PROXY=1 (lib/auth/origin.ts)
-  if (!sameOriginPost({ origin: h.get("origin"), host: h.get("host"), forwardedHost: h.get("x-forwarded-host"), secFetchSite: h.get("sec-fetch-site") })) {
+  // scheme + host + port. X-Forwarded-Host counts only with TRUSTED_PROXY=1; CONSOLE_ORIGIN, when set, is the one answer (lib/auth/origin.ts)
+  if (!sameOriginPost({ origin: h.get("origin"), host: h.get("host"), forwardedHost: h.get("x-forwarded-host"), secFetchSite: h.get("sec-fetch-site"), proto: req.nextUrl.protocol })) {
     return new NextResponse("Forbidden", { status: 403 });
   }
   const res = new NextResponse(null, { status: 303, headers: { Location: "/login?signedOut=1" } });

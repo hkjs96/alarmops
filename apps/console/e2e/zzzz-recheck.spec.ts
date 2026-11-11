@@ -23,6 +23,7 @@ const guard = (page: Page) => page.getByTestId("dirty-guard");
 const toast = (page: Page) => page.getByTestId("toast");
 const live = (page: Page) => card(page).getByTestId("co-resp-live");
 const READ = 700;
+const LIVE_H = (w: number) => (w <= 760 ? 70 : 52);
 const overflow = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 const VIEWPORTS = [{ w: 1440, h: 900, touch: false }, { w: 390, h: 844, touch: true }];
 
@@ -57,7 +58,7 @@ for (const vp of VIEWPORTS) {
       await card(page).getByTestId("co-resp-edit").click();
       await expect(live(page)).toContainText("Reach now: OK");
       const liveBox = (await live(page).boundingBox())!;
-      expect(liveBox.height).toBe(44);
+      expect(liveBox.height).toBe(LIVE_H(vp.w)); // two lines reserved, three on a phone (최종 점검 P3-I)
       await card(page).getByRole("button", { name: "Remove Junho Park from Responders of Daon Retail" }).evaluate((el) => el.scrollIntoView({ block: "center" }));
       const start = await settled(page);
       expect(start.rows.length).toBeGreaterThanOrEqual(3);
@@ -94,7 +95,7 @@ for (const vp of VIEWPORTS) {
       await same("after Soyeon Choi → Notify only (Unreachable)");
       await shot(page, `P2B-${vp.w}-2-unreachable`);
       // the line that says it has not grown, and the status that needs room is below the last row
-      expect((await live(page).boundingBox())!.height).toBe(44);
+      expect((await live(page).boundingBox())!.height).toBe(LIVE_H(vp.w));
       const lastRow = (await card(page).locator("li[data-row-key]").last().boundingBox())!;
       expect((await card(page).getByTestId("co-resp-status").boundingBox())!.y).toBeGreaterThanOrEqual(lastRow.y + lastRow.height - 1);
       expect(await overflow(page)).toBeLessThanOrEqual(0);
@@ -379,17 +380,20 @@ test.describe("P2-A a save that is confirmed first (more than one service)", () 
       await page.getByTestId("account").click();
       await page.getByTestId("sign-out").click();
       await guard(page).getByRole("button", { name: "Save for Cheong Media and sign out" }).click();
-      await expect(dlg(page).getByRole("heading")).toHaveText("Save for Cheong Media?");
+      // 최종 점검 P3-F: the confirmation says that sign-out follows the save
+      await expect(dlg(page).getByRole("heading")).toHaveText("Save for Cheong Media and sign out?");
+      await expect(dlg(page).getByTestId("co-confirm-signout")).toHaveText("You are signed out after this save. If the save does not go through, you stay signed in and are told.");
       await page.waitForTimeout(READ);
     };
     await ask();
-    await dlg(page).getByRole("button", { name: "Cancel" }).click();
+    await dlg(page).getByRole("button", { name: "Cancel — do not save, stay signed in" }).click();
+    await expect(toast(page)).toHaveText(/^Not signed out: the save for Cheong Media was cancelled\. Nothing was saved; your edit is still open\./);
     await page.waitForTimeout(500);
     await expect(page.getByTestId("co-edit-view")).toBeVisible();
     await expect(page).toHaveURL(/\/c\/cheong\/call-order/);
     expect(await session(), "still signed in").toBeDefined();
     await ask();
-    await dlg(page).getByRole("button", { name: "Save for Cheong Media" }).click();
+    await dlg(page).getByRole("button", { name: "Save for Cheong Media and sign out" }).click();
     await expect(page).toHaveURL(/\/login\?signedOut=1$/);
     expect(await session()).toBeUndefined();
     // saved; put back

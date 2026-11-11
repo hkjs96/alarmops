@@ -58,7 +58,7 @@ describe("QA 재점검 P2-A: Sign out signs out", () => {
 });
 
 describe("security 재검토 권고 3: the sign-out origin check does not believe X-Forwarded-Host by itself", () => {
-  const base = { origin: null, host: "console.example", forwardedHost: null, secFetchSite: null };
+  const base = { origin: null, host: "console.example", forwardedHost: null, secFetchSite: null, proto: "https" };
   it("same origin passes; another origin, a null origin, another port do not", () => {
     expect(sameOriginPost({ ...base, origin: "https://console.example" }, {})).toBe(true);
     expect(sameOriginPost({ ...base, origin: "https://CONSOLE.example" }, {})).toBe(true);
@@ -79,6 +79,8 @@ describe("security 재검토 권고 3: the sign-out origin check does not believ
     expect(sameOriginPost({ ...viaProxy, forwardedHost: "console.example, inner.proxy" }, { TRUSTED_PROXY: "1" })).toBe(true);
     expect(sameOriginPost({ ...base, origin: "https://console.example" }, { TRUSTED_PROXY: "1" })).toBe(true);
     expect(sameOriginPost({ ...viaProxy, origin: "https://evil.example" }, { TRUSTED_PROXY: "1" })).toBe(false);
+    // the request reached the console as http (no proxy said otherwise): an https Origin is not the same origin
+    expect(sameOriginPost({ ...viaProxy, proto: "http" }, { TRUSTED_PROXY: "1" })).toBe(false);
   });
   it("Sec-Fetch-Site other than same-origin is refused, with or without Origin; neither header is let through", () => {
     expect(sameOriginPost({ ...base, secFetchSite: "cross-site" }, {})).toBe(false);
@@ -86,5 +88,38 @@ describe("security 재검토 권고 3: the sign-out origin check does not believ
     expect(sameOriginPost({ ...base, origin: "https://console.example", secFetchSite: "cross-site" }, {})).toBe(false);
     expect(sameOriginPost({ ...base, origin: "https://console.example", secFetchSite: "same-origin" }, {})).toBe(true);
     expect(sameOriginPost(base, {})).toBe(true);
+  });
+});
+
+describe("security 재검토 3 권고 2: the origin is compared as scheme + host + port", () => {
+  const http = { origin: null, host: "localhost:3142", forwardedHost: null, secFetchSite: null, proto: "http" };
+  it("the reviewer's request — Origin: https://localhost:3142 to a console served over http — is refused", () => {
+    expect(sameOriginPost({ ...http, origin: "https://localhost:3142" }, {})).toBe(false);
+    expect(sameOriginPost({ ...http, origin: "http://localhost:3142" }, {})).toBe(true);
+    // and the other way round: an http page is not the origin of an https console
+    expect(sameOriginPost({ ...http, proto: "https", origin: "http://localhost:3142" }, {})).toBe(false);
+    expect(sameOriginPost({ ...http, proto: "https:", origin: "https://localhost:3142" }, {})).toBe(true);
+  });
+  it("default ports are the same origin written two ways; any other port is another origin", () => {
+    const tls = { ...http, host: "console.example", proto: "https" };
+    expect(sameOriginPost({ ...tls, origin: "https://console.example:443" }, {})).toBe(true);
+    expect(sameOriginPost({ ...tls, host: "console.example:443", origin: "https://console.example" }, {})).toBe(true);
+    expect(sameOriginPost({ ...tls, origin: "https://console.example:444" }, {})).toBe(false);
+    expect(sameOriginPost({ ...tls, proto: "http", host: "console.example:80", origin: "http://console.example" }, {})).toBe(true);
+  });
+  it("no scheme, an unknown scheme, or an Origin that is not a URL is refused", () => {
+    expect(sameOriginPost({ ...http, origin: "http://localhost:3142", proto: null }, {})).toBe(false);
+    expect(sameOriginPost({ ...http, origin: "ftp://localhost:3142", proto: "ftp" }, {})).toBe(false);
+    expect(sameOriginPost({ ...http, origin: "not a url" }, {})).toBe(false);
+  });
+  it("CONSOLE_ORIGIN, when set, is the one origin that counts (TLS ends at a load balancer, the console sees http)", () => {
+    const behindLb = { ...http, host: "console.example.com", proto: "http" };
+    const env = { CONSOLE_ORIGIN: "https://console.example.com" };
+    expect(sameOriginPost({ ...behindLb, origin: "https://console.example.com" }, {})).toBe(false); // without it: http ≠ https
+    expect(sameOriginPost({ ...behindLb, origin: "https://console.example.com" }, env)).toBe(true);
+    expect(sameOriginPost({ ...behindLb, origin: "http://console.example.com" }, env)).toBe(false);
+    expect(sameOriginPost({ ...behindLb, origin: "https://console.example.com:8443" }, env)).toBe(false);
+    expect(sameOriginPost({ ...behindLb, origin: "https://evil.example", forwardedHost: "evil.example", proto: "https" }, { ...env, TRUSTED_PROXY: "1" })).toBe(false);
+    expect(sameOriginPost({ ...behindLb, origin: "https://console.example.com", secFetchSite: "cross-site" }, env)).toBe(false);
   });
 });

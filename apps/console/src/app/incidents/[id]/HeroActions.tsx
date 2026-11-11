@@ -6,6 +6,7 @@ import type { IncidentStatus } from "@/lib/api/types";
 import { hasRole, roleReason, useShell } from "@/components/ShellContext";
 import { errorText } from "@/lib/errors";
 import { kstTime } from "@/lib/format";
+import { SESSION_ENDED, callAction, sessionEndReason } from "@/lib/session-ended";
 import { ackIncident, escalateIncident, resolveIncident, undoBulk } from "../actions";
 
 /** After Acknowledge the primary button's place only says "Acknowledged ✓ 03:16" this long before Resolve… is offered there. */
@@ -59,10 +60,12 @@ export function HeroActions({ id, title, pathText, status, version, canEscalate,
   const run = async (fn: () => Promise<void>) => {
     setPending(true);
     try { await fn(); } finally { setPending(false); }
-    router.refresh();
+    // a tab without a session has nothing to reload: the shell says "Your session ended" and offers Sign in
+    if (!sessionEndReason()) router.refresh();
   };
   const undo = (t: string) => run(async () => {
-    const r = await undoBulk(t);
+    const r = await callAction(() => undoBulk(t));
+    if (!r.ok && r.code === SESSION_ENDED) { fail(r); return; } // nothing was undone: Undo stays where it is
     shell.setAck(id, null);
     setFresh(false);
     if (!r.ok) fail(r.code === "NOT_FOUND" ? { ...r, code: "UNDO_GONE", message: "Undo is no longer available: it works once, for 5 minutes, for the person who acknowledged." } : r);
@@ -72,7 +75,7 @@ export function HeroActions({ id, title, pathText, status, version, canEscalate,
   const ack = () => {
     refocus.current = document.activeElement === ackRef.current;
     return run(async () => {
-      const r = await ackIncident(id, version);
+      const r = await callAction(() => ackIncident(id, version));
       if (!r.ok) fail(r);
       else {
         const t = r.data.undoToken;
@@ -85,11 +88,11 @@ export function HeroActions({ id, title, pathText, status, version, canEscalate,
     });
   };
   const escalate = () => run(async () => {
-    const r = await escalateIncident(id, version);
+    const r = await callAction(() => escalateIncident(id, version));
     if (!r.ok) fail(r); else setErr(null);
   });
   const resolve = () => run(async () => {
-    const r = await resolveIncident(id, version);
+    const r = await callAction(() => resolveIncident(id, version));
     if (!r.ok) fail(r);
     else { setErr(null); shell.setAck(id, null); shell.mark(id, "RESOLVED"); }
     setConfirm(false);

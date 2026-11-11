@@ -2,6 +2,7 @@
  * One place that words the API's error codes for the user (API-CONTRACT §2 "오류 형식"). A refused save always says
  * what to change: never a bare "Invalid steps" (QA P2-B). Unknown codes fall back to the server's own message.
  */
+import { NO_ANSWER_TEXT, SESSION_ENDED_TEXT } from "./session-ended";
 import { MAX_ALL_RESPONDERS, MAX_MINUTE, MAX_REPEAT, MAX_SENDS_PER_CYCLE, MAX_SENDS_PER_HOUR, MAX_STEPS } from "./call-order/limits";
 
 export interface Failure { code: string; message: string; requestId?: string; details?: Record<string, unknown> }
@@ -68,7 +69,8 @@ export function errorText(f: Failure, ctx: ErrorContext = {}): string {
       const role = typeof d.role === "string" ? ROLE_NAME[d.role] ?? d.role : null;
       return `${ctx.what ?? "This"} ${role ? `needs the ${role} role` : "is not allowed for your account"}. Nothing was changed${ctx.where ? ` for ${ctx.where}` : ""}. Ask an admin if you need it.`;
     }
-    case "UNAUTHENTICATED": case "UNAUTHORIZED": return "You are signed out. Sign in again; nothing was changed.";
+    case "SESSION_ENDED": case "UNAUTHENTICATED": case "UNAUTHORIZED": return SESSION_ENDED_TEXT;
+    case "NO_ANSWER": return NO_ANSWER_TEXT;
     case "VERSION_CONFLICT": return "Someone else changed this in the meantime. Nothing was changed — reload to see it as it is now.";
     case "ALREADY_EXISTS": return f.message || "This already exists.";
     case "INVALID_TRANSITION": return f.message || "This is not possible in the state it is in now.";

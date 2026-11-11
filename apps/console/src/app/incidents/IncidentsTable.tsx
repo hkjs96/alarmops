@@ -9,6 +9,7 @@ import { age, groupDigits, kstTime } from "@/lib/format";
 import { RowMenu } from "@/components/RowMenu";
 import { hasRole, roleReason, useShell } from "@/components/ShellContext";
 import { errorText } from "@/lib/errors";
+import { SESSION_ENDED, callAction, sessionEndReason } from "@/lib/session-ended";
 import { ackIncident, undoBulk } from "./actions";
 
 export type IncidentRow = IncidentListItem & { href: string };
@@ -161,7 +162,9 @@ export function IncidentsTable({ items, nowMs, openId, emptyKind, listKey = "", 
     if (fromRow) focusLabel.current = i.id; // from the toast, the focus stays where it is
     measure();
     setBusyFor(i.id, "undo");
-    const r = await undoBulk(token);
+    const r = await callAction(() => undoBulk(token));
+    // the session is gone: nothing was undone and nothing is forgotten — the row stays as it is, the shell asks to sign in
+    if (!r.ok && r.code === SESSION_ENDED) { setBusyFor(i.id, null); setError(errorText(r)); return; }
     shell.setAck(i.id, null);
     setOptim((o) => { const n = { ...o }; delete n[i.id]; return n; });
     setBusyFor(i.id, null);
@@ -177,7 +180,7 @@ export function IncidentsTable({ items, nowMs, openId, emptyKind, listKey = "", 
     keepFocus(i.id);
     measure();
     setBusyFor(i.id, "ack");
-    const r = await ackIncident(i.id, i.version);
+    const r = await callAction(() => ackIncident(i.id, i.version));
     setBusyFor(i.id, null);
     if (r.ok) {
       const token = r.data.undoToken;
@@ -191,7 +194,7 @@ export function IncidentsTable({ items, nowMs, openId, emptyKind, listKey = "", 
       setChanged((c) => ({ ...c, [i.id]: i.version }));
     } else {
       setError(errorText(r, { what: "Acknowledging", where: pathText(i) }));
-      router.refresh();
+      if (!sessionEndReason()) router.refresh();
     }
   };
   const reload = (id: string, e: MouseEvent) => {

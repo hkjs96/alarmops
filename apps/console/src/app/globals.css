@@ -408,10 +408,20 @@ body { overflow-x: hidden; }
 .co-resp-n { margin: 0 0 8px; }
 .co-resp-g { margin: 12px 0 4px; }
 /* one line of one height: its words change with every edit, the rows below it never move (QA 재점검 P2-B) */
-.co-resp-live { display: flex; align-items: center; gap: 10px; height: 44px; box-sizing: border-box; padding: 0 10px; border-left: 3px solid var(--deco); background: var(--soft); font-size: 13px; overflow: hidden; }
+/* one height, always: two lines of text are reserved (three on a phone), so what it says wraps instead of being cut (QA 최종 점검 P3-I) */
+.co-resp-live { display: flex; align-items: center; gap: 10px; height: 52px; box-sizing: border-box; padding: 0 10px; border-left: 3px solid var(--deco); background: var(--soft); font-size: 13px; overflow: hidden; }
 .co-resp-live.ar, .co-resp-live.warn { border-left-color: var(--amber); background: var(--amber-t); }
 .co-resp-live.unr { border-left-color: var(--red); background: var(--red-t); }
-.co-resp-live-t { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.co-resp-live-t { flex: 1 1 auto; min-width: 0; line-height: 18px; overflow-wrap: anywhere; }
+.co-resp-live-t .stag { line-height: 16px; padding-top: 0; padding-bottom: 0; }
+.co-resp-reloaded { margin: 0; color: var(--ink2); }
+
+/* the top of the panel while Responders are edited: a box of the height it had, labelled, with one live line (QA 최종 점검 P2-C) */
+.co-top.held { box-sizing: border-box; overflow: hidden; }
+.co-held-h { display: grid; gap: 6px; margin-bottom: 12px; }
+.co-held-l { display: flex; align-items: center; gap: 6px; min-height: 20px; font-size: 13px; font-weight: 700; line-height: 1.35; color: var(--ink); }
+.co-held-l .mk { flex: none; }
+.co-top.held .co-top-c { opacity: 0.5; filter: grayscale(1); pointer-events: none; user-select: none; }
 .co-resp-live .btn { flex: none; }
 .co-resp-status { display: grid; gap: 8px; margin-top: 10px; }
 .co-resp-status:empty { display: none; }
@@ -485,6 +495,7 @@ div.co-refused { margin-top: 6px; }
   .co-people li.gone .tomb { margin-right: 0; padding-left: 0; }
   .co-people li.gone .tomb-u { min-height: 44px; min-width: 64px; }
   .co-resp-live .btn { min-height: 44px; }
+  .co-resp-live { height: 70px; }
   .co-steps.ed .co-step { grid-template-columns: 20px minmax(0, 1fr); grid-template-areas: "n min" ". who" ". chs" ". ops" ". msg"; }
   .co-steps.ed .co-chs, .co-steps.ed .co-ops, .co-refused { grid-column: 2; }
 }
