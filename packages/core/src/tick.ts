@@ -230,6 +230,11 @@ export interface TickInput {
 export interface TickDeps {
   repo: TickRepository;
   senders: Senders;
+  /**
+   * The runner's clock. N-40 (security review 5): every time limit of the tick is computed from it, so it MUST be a
+   * real, moving clock in production — leave it out (default `new Date()`) or pass the wall clock. A clock that
+   * stands still (a constant) never shortens the guards. Tests only.
+   */
   now?: () => Date;
   /** Max rows per phase (default 200; outbox 50 per R1-4). */
   batch?: number;
@@ -701,9 +706,13 @@ async function escalateOne(c: Ctx, inc: IncidentRow): Promise<void> {
  * Nothing is carried over: the next tick starts without penalties.
  *
  * What this gives, at the defaults (timeout 10 s, budget 45 s, width 5), measured with the real `runTick` in
- * test/security-review-4.lanes.test.ts: a healthy customer's page is attempted in the tick in which it is due as
- * long as at most 24 OTHER customers' calls hang in front of it on that lane (5 probes × 5 rounds − 1). With more,
- * it can slip by whole ticks — that limit is NOT removed, only moved from 4 to 24.
+ * test/security-review-4.lanes.test.ts and test/security-review-5.lanes.test.ts: a healthy customer's page is
+ * attempted in the tick in which it is due as long as at most 24 OTHER customers' calls hang in front of it on that
+ * lane (5 probes × 5 rounds − 1) and the store is fast. Beyond that it slips by whole ticks, but by few (R-24, the
+ * rotating start in `drainLane`): at most ⌈(H + 1) ÷ 25⌉ − 1 ticks for H hanging customers inside one claim (so one
+ * tick up to 49), and one tick when a slow store (about 0.3 s a call or more) keeps the fifth round from starting.
+ * Before review 5 it was 20 ticks from the 25th customer on. More customers than the claim holds (50 per lane)
+ * are not covered by the rotation.
  */
 async function notifyPhase(c: Ctx): Promise<void> {
   const limit = c.notifyBatch ?? NOTIFY_BATCH;
@@ -720,6 +729,8 @@ async function notifyPhase(c: Ctx): Promise<void> {
 }
 
 type SendSignal = 'ANSWERED' | 'TIMEOUT' | 'NONE';
+/** Probe rounds that fit in one tick at the defaults (budget 45 s ÷ send timeout 10 s, the fifth starts at 40 s). */
+const PROBE_ROUNDS_PER_TICK = 5;
 
 const customerKeyOf = (j: NotificationJob): string => j.customerId ?? '\u0000msp';
 /** Who a call rings: the person, the MSP default channel (one for all customers), or the customer's own channel(s). */
@@ -755,6 +766,21 @@ async function drainLane(c: Ctx, kind: SenderKind, limit: number, windows: Map<s
   const flyingRecipients = new Map<string, number>();
   const bump = (m: Map<string, number>, k: string, d: number): void => { const n = (m.get(k) ?? 0) + d; if (n > 0) m.set(k, n); else m.delete(k); };
   const penalty = (j: NotificationJob): number => (badRecipients.has(recipientKeyOf(j)) ? 2 : badCustomers.has(customerKeyOf(j)) ? 1 : 0);
+  // R-24 (security review 5): while the provider has not answered, the customer the probing STARTS with moves on
+  // every minute by one tick's worth of probes: start = (minute × 25) mod nCustomers (25 = width × 5 rounds).
+  // Nothing is stored — the start is a pure function of the minute and of the claim — and the order used once the
+  // provider answers (fair order, SEV-1 first) is not touched.
+  // With 25 customers or fewer that formula stands still or creeps (25 mod n is 0 or small), and it is exactly
+  // there that a slow store bites: the fifth round does not start, so only width × 4 = 20 are probed. For n ≤ 25
+  // the step is therefore 20: the customers one tick did not reach are the first of the next.
+  const custPos = new Map<string, number>();
+  for (const j of jobs) if (!custPos.has(customerKeyOf(j))) custPos.set(customerKeyOf(j), custPos.size);
+  const nCust = custPos.size;
+  const perTick = width * PROBE_ROUNDS_PER_TICK;
+  const stride = nCust > perTick ? perTick : width * (PROBE_ROUNDS_PER_TICK - 1);
+  const rotation = nCust > 0 ? (Math.floor(c.clock().getTime() / 60_000) * stride) % nCust : 0;
+  /** 0 ≤ x < 1: how far a customer is behind this minute's starting customer. */
+  const turn = (ck: string): number => (((custPos.get(ck) ?? 0) - rotation + nCust) % nCust) / (nCust + 1);
   /** Index in `pending` of the job to send now, or −1: nothing may start until a call in flight comes back. */
   const pick = (): number => {
     if (inFlight >= width) return -1;
@@ -768,12 +794,12 @@ async function drainLane(c: Ctx, kind: SenderKind, limit: number, windows: Map<s
       }
       return best;
     }
-    for (let i = 0; i < pending.length && bestRank > 0; i++) {
+    for (let i = 0; i < pending.length; i++) {
       const j = pending[i]!;
       const r = recipientKeyOf(j);
       if (badRecipients.has(r) || flyingRecipients.has(r)) continue;
       const ck = customerKeyOf(j);
-      const rank = badCustomers.has(ck) ? 2 : flyingCustomers.has(ck) ? 1 : 0;
+      const rank = (badCustomers.has(ck) ? 2 : flyingCustomers.has(ck) ? 1 : 0) + turn(ck);
       if (rank < bestRank) { best = i; bestRank = rank; }
     }
     if (best >= 0) return best;

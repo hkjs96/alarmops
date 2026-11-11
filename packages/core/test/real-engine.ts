@@ -152,7 +152,7 @@ export async function drive(
   // of 1 tick). Each release therefore moves the clock by 1 ms — for both engines.
   if (!store.__timedRelease) {
     const release = store.releaseJob.bind(store);
-    store.releaseJob = (...args: unknown[]) => { vi.setSystemTime(Date.now() + 1); return release(...args); };
+    store.releaseJob = (...args: unknown[]) => { if (vi.isFakeTimers()) vi.setSystemTime(Date.now() + 1); return release(...args); }; // a tick that was left running (slow store) may release after the test ended
     store.__timedRelease = true;
   }
   const run: Run = { reached: new Map(), okCount: new Map(), calls: 0, hangs: 0, perTick: [], maxBurst: 0, maxTickMs: 0, degraded: 0, unanswered: 0, ticks: 0, errors: [], store };

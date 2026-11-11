@@ -39,6 +39,13 @@ const required = [
   ['RemediationRequest decided CHECK (B-5)', /"RemediationRequest_decided_chk"\s+CHECK \("status" NOT IN \('APPROVED', 'EXECUTING', 'SUCCEEDED', 'FAILED'\) OR \("decidedBy" IS NOT NULL AND "decidedAt" IS NOT NULL\)\)/],
   ['RemediationRequest composite FK to Resource(id, customerId) (B-5)', /FOREIGN KEY \("resourceId", "customerId"\) REFERENCES "Resource"\("id", "customerId"\)/],
   ['RemediationRequest active partial UQ (D-15)', /"RemediationRequest_active_key"/],
+  ['AlertGroup one OPEN group per axis (G-3)', /CREATE UNIQUE INDEX "AlertGroup_groupKey_open_key" ON "AlertGroup"\("groupKey"\) WHERE "status" = 'OPEN'/],
+  ['Incident one merge target per axis (I-3)', /CREATE UNIQUE INDEX "Incident_axis_mergeTarget_key" ON "Incident"\("axis"\) WHERE "isMergeTarget"/],
+  ['NotificationJob idempotencyKey UQ (outbox dedup)', /CREATE UNIQUE INDEX "NotificationJob_idempotencyKey_key"/],
+  ['NotificationJob due index for the outbox claim', /CREATE INDEX "NotificationJob_due_idx"/],
+  ['Incident due index for the escalation tick', /CREATE INDEX "Incident_nextEscalationAt_due_idx"/],
+  ['slug format CHECK (D-33)', /"Customer_slug_chk"[\s\S]*"Project_slug_chk"[\s\S]*"Service_slug_chk"/],
+  ['ContactRevealLog emergency reason CHECK (D-35)', /"ContactRevealLog_emergency_reason_chk"/],
 ];
 const missing = required.filter(([, re]) => !re.test(migration)).map(([name]) => name);
 if (/CREATE UNIQUE INDEX "Alert_fingerprint_key"/.test(migration)) missing.push('Alert.fingerprint must not be globally unique (B-4)');
