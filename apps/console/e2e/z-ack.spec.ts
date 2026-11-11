@@ -200,7 +200,7 @@ test.describe("phone 390×740 — 하은 H3 / H4", () => {
     await expect(page.getByRole("button", { name: "Escalate now" })).toBeDisabled();
     expect(sb.x + 20).toBeLessThan(at.x);
     expect(sb.x + sb.width - 20).toBeGreaterThan(at.x);
-    expect(Math.abs(sb.y - at.b.y)).toBeLessThanOrEqual(30); // the paged line above got shorter; the spot is still under the finger's row
+    expect(Math.abs(sb.y - at.b.y)).toBeLessThanOrEqual(1); // the Paged line above lost its coming calls, and its block is held at its height: the spot is where the finger is
     const eb = (await page.getByRole("button", { name: "Escalate now" }).boundingBox())!;
     expect(eb.x + eb.width + 24).toBeLessThan(at.x);
     // the slow "did it take?" taps, 1.2 s and 2.4 s later, on the same spot: still acknowledged
