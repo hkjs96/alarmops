@@ -62,6 +62,8 @@ body { overflow-x: hidden; }
 .finder-btn .kbd { margin-left: 2px; }
 @media (max-width: 1100px) { .finder-btn .kbd { display: none; } }
 .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 70; display: flex; align-items: center; gap: 10px; max-width: min(640px, calc(100vw - 32px)); padding: 8px 8px 8px 14px; background: var(--ink); color: var(--inv); font-size: 13px; box-shadow: var(--pop); }
+/* at the top when the control that raised it is where the toast usually stands (design-system list/same-spot, QA P2-N) */
+.toast.top { bottom: auto; top: calc(52px + var(--sline-h, 40px) + 12px); }
 .toast-t { min-width: 0; overflow-wrap: break-word; }
 .toast .btn { flex: none; }
 .toast .btn.ghost { color: var(--inv); }
@@ -220,6 +222,8 @@ body { overflow-x: hidden; }
 .inc-title { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; margin: 0 0 6px; line-height: 1.25; overflow-wrap: anywhere; }
 .inc-detail .g-detail, .inc-detail .g3 { grid-template-columns: minmax(0, 1fr); }
 .inc-detail .g3 > div + div { border-left: 0; border-top: 1px solid var(--rule); }
+/* the coloured band at the card's left (3px) goes when the incident is acknowledged (1px): what the card holds stays where it was (QA P3-P) */
+.inc-detail .inc-main:not(.lb-red, .lb-orange, .lb-green) > .card-b { padding-left: 18px; }
 .inc-detail .inc-hero { flex-direction: column; align-items: stretch !important; gap: 14px !important; }
 .inc-detail .hero-actions { flex-wrap: wrap; }
 .inc-detail .hero-actions .btn.pri { flex: 1; }
@@ -230,29 +234,51 @@ body { overflow-x: hidden; }
   .g-main, .g-detail { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 760px) {
+  :root { --bnav-h: 56px; }
+  html { scroll-padding-top: calc(var(--sline-h, 57px) + 52px); scroll-padding-bottom: calc(var(--bnav-h) + env(safe-area-inset-bottom, 0px) + 8px); }
   .top { padding: 0 12px; gap: 10px; }
   .hide-m { display: none !important; }
   .top .show-m-flex { display: inline-flex; }
   .top .btn { min-width: 44px; }
   .bnav {
     display: grid; grid-template-columns: repeat(6, auto); justify-content: space-between; padding: 0 4px; position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
-    background: var(--surface); border-top: 1px solid var(--rule); height: 56px;
+    background: var(--surface); border-top: 1px solid var(--rule); height: calc(var(--bnav-h) + env(safe-area-inset-bottom, 0px)); padding-bottom: env(safe-area-inset-bottom, 0px);
   }
   .bnav a { justify-content: center; padding: 0 1px; font-size: 13px; letter-spacing: -0.01em; min-height: 44px; min-width: 44px; }
   .bnav a.on { color: var(--ink); font-weight: 600; box-shadow: inset 0 2px 0 var(--ink); }
   .bnav .cnt { margin-left: 2px; padding: 1px 3px; }
-  main { padding-bottom: 56px; }
+  /* The bottom menu lies over the end of the page (QA P2-O). One rule for every screen: the content ends that much
+     higher (menu + the phone's own inset), so the last row of any list scrolls clear of it; and whatever is
+     scrolled into view (focus, scrollIntoView, an anchor) stops short of the menu and of the filter line and the
+     list bar that stick to the top. */
+  main { padding-bottom: calc(var(--bnav-h) + env(safe-area-inset-bottom, 0px)); }
   .page, .shell-main > .page, .shell-main > .page:has(+ .panel) { padding: 16px 16px 48px; }
+  /* the first incident's Acknowledge is in the first screen down to 360×640: what stands above the list is one line each */
+  .inc-unmapped { margin-bottom: 8px; }
+  .inc-unmapped .banner { display: block; position: relative; margin-bottom: 4px; padding: 8px 12px; min-height: 44px; line-height: 1.35; }
+  .inc-unmapped .banner > .st { margin-right: 8px; }
+  .inc-unmapped .banner > .sp { display: none; }
+  /* "Map account →" ends the sentence; the whole banner is its tap target */
+  .inc-unmapped .banner > .btn { display: inline; margin-left: 6px; position: static; min-height: 0; min-width: 0; height: auto; padding: 0; border: 0; background: none; color: var(--accent); font-weight: 600; text-decoration: underline; white-space: nowrap; }
+  .inc-unmapped .banner > .btn::after { content: ""; position: absolute; inset: 0; }
+  .shell-main .tiles { margin-bottom: 8px; }
+  /* status chips, then Sev and Assignee: one line that scrolls sideways inside itself, never a second line */
+  .row.inc-filters { flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; gap: 6px; margin: -3px -3px 5px; padding: 3px; }
+  .inc-filters::-webkit-scrollbar { display: none; }
+  .inc-filters > .chips, .inc-filters > .row { flex: none; flex-wrap: nowrap; }
+  .inc-filters > .sp { display: none; }
+  .inc-filters .chip { padding: 0 8px; gap: 6px; }
   .shell .stree { display: none; }
   .shell-lay, .shell-main { display: block; }
   .shell-main > .panel { min-width: 0; border-left: 0; }
   .shell-main > .panel .panel-body { overflow: visible; }
   /* full width, just above the bottom menu; at most three lines of text, never taller than 96px */
-  .toast { left: 8px; right: 8px; bottom: calc(56px + 8px + env(safe-area-inset-bottom)); transform: none; max-width: none; max-height: 96px; padding: 6px 6px 6px 12px; gap: 6px; }
+  .toast { left: 8px; right: 8px; bottom: calc(var(--bnav-h) + 8px + env(safe-area-inset-bottom, 0px)); transform: none; max-width: none; max-height: 96px; padding: 6px 6px 6px 12px; gap: 6px; }
+  .toast.top { bottom: auto; top: calc(52px + var(--sline-h, 57px) + 8px); }
   .toast-t { flex: 1; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; line-height: 1.35; }
   .toast .btn { min-height: 44px; min-width: 44px; }
   .tap { display: inline-flex; align-items: center; min-height: 44px; }
-  .ph { margin-bottom: 12px; }
+  .ph { margin-bottom: 8px; }
   .list-bar { height: 44px; padding: 0 6px 0 12px; }
   .list-bar.on { top: var(--sline-h, 0px); }
   .list-bar-p { flex: 1; }

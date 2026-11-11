@@ -494,7 +494,9 @@ test.describe("phone 390", () => {
         return e.offsetParent !== null && r.width > 0 && cs.visibility !== "hidden" && !e.classList.contains("skip") && !(e as HTMLButtonElement).disabled
           && !e.closest("p, .note, .t2, .kv, .xs, .card-h, .org"); // links inside running text
       })
-      .map((e) => { const r = (e.closest(".sel") ?? e).getBoundingClientRect(); return { t: (e.getAttribute("aria-label") ?? e.textContent ?? e.tagName).trim().slice(0, 40), w: Math.round(r.width), h: Math.round(r.height) }; })
+      // a select is pressed anywhere on its box; so is the link that ends the unmapped-account notice (its ::after
+      // covers the notice: y-phone-press.spec.ts checks that a press on the notice reaches the link)
+      .map((e) => { const r = (e.closest(".sel, .inc-unmapped .banner") ?? e).getBoundingClientRect(); return { t: (e.getAttribute("aria-label") ?? e.textContent ?? e.tagName).trim().slice(0, 40), w: Math.round(r.width), h: Math.round(r.height) }; })
       .filter((x) => x.w < 44 || x.h < 44));
     for (const p of pages) {
       await page.goto(p);

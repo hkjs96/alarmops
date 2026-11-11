@@ -87,11 +87,15 @@ export async function IncidentsScreen({ sp, panel }: { sp: SP; panel?: PanelRout
           <div className="desc inc-now">{kstHeading(nowIso)}</div>
         </div>
 
-        {data?.unmapped.map((u) => (
-          <Banner key={u.awsAccountId} tone="amber" action={<Link className="btn sm" href={`/customers?mapAccount=${u.awsAccountId}`}>Map account →</Link>}>
-            <b>{u.alertCount} alerts from an unmapped AWS account</b> <span className="mono sm">{groupDigits(u.awsAccountId)}</span> have no owner and won&apos;t escalate.
-          </Banner>
-        ))}
+        {data?.unmapped.length ? (
+          <div className="inc-unmapped">
+            {data.unmapped.map((u) => (
+              <Banner key={u.awsAccountId} tone="amber" action={<Link className="btn sm" href={`/customers?mapAccount=${u.awsAccountId}`}>Map account →</Link>}>
+                <b>{u.alertCount} alerts from an unmapped AWS account</b> <span className="mono sm">{groupDigits(u.awsAccountId)}</span> have no owner and won&apos;t escalate.
+              </Banner>
+            ))}
+          </div>
+        ) : null}
 
         {c ? (
           <div className="tiles" role="group" aria-label="Incident counts for the current filter" data-testid="tiles">

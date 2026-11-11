@@ -17,6 +17,10 @@ env:
 
 # Runners are pinned to ubuntu-24.04: ubuntu-latest moved to 26.04, which Playwright 1.56 cannot install
 # Chromium on. Move all jobs together once the installed @playwright/test supports the newer image.
+#
+# Follow-up (security review of 2026-11-11, 권고 2): pin the actions to full commit SHAs instead of major tags, and
+# the postgres:16 image to a digest. dev-db.yml first (it reads secrets). The SHAs are to be copied from each
+# action's release page by a person (or by Dependabot); they are not guessed here.
 jobs:
   test:
     runs-on: ubuntu-24.04
@@ -113,6 +117,8 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      - name: Workflow script tests (drift check, connection string check)
+        run: node --test .github/scripts/check-migration-drift.test.mjs .github/scripts/mask-db-urls.test.mjs
       - name: Prisma generate
         run: npx prisma generate
         working-directory: db
