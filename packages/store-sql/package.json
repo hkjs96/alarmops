@@ -7,7 +7,7 @@
   "types": "src/index.ts",
   "scripts": {
     "test": "vitest run",
-    "test:sql": "vitest run",
+    "test:sql": "node scripts/require-db.mjs && vitest run",
     "typecheck": "tsc --noEmit -p ."
   },
   "dependencies": {

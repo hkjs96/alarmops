@@ -10,7 +10,7 @@ export interface PGliteLike {
 
 /**
  * PGlite driver (Postgres compiled to WASM, in-process). For tests and local runs where no server exists.
- * Limits against a real server — see packages/store-sql/README.md: ONE connection (transactions run one after the
+ * Limits against a real server, see db/README.md: ONE connection (transactions run one after the
  * other, so FOR UPDATE SKIP LOCKED never has anything to skip) and `statement_timeout` is accepted but not enforced.
  */
 export function pgliteClient(db: PGliteLike): SqlClient {

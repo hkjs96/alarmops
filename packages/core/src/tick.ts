@@ -133,11 +133,12 @@ export interface HeartbeatRow {
 export type HeartbeatWrite = Omit<HeartbeatRow, 'consecutiveFailures'>;
 
 /**
- * Persistence port of the tick. Production: Prisma/Postgres (each `commit*` is one transaction, each guarded
- * write is `UPDATE … WHERE version = ?`). Tests/local: MemoryTickStore.
+ * Persistence port of the tick. Production: `packages/store-sql` (explicit SQL on Postgres; each `commit*` is one
+ * transaction, each guarded write is `UPDATE … WHERE version = ?`). Tests/local: MemoryTickStore. Both run the same
+ * contract suite (test/contract).
  */
 export interface TickRepository {
-  /** Claim this minute (TickHeartbeat row per scheduledAt minute). false = another call already took it. */
+  /** Claim this minute (one TickClaim row per scheduledAt minute). false = another call already took it. */
   claimTick(minuteKey: string, at: Date): Promise<boolean>;
   loadPolicy(): Promise<SuppressionPolicy>;
 
