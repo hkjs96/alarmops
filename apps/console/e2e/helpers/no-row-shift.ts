@@ -56,7 +56,23 @@ const under = (page: Page, x: number, y: number) => page.evaluate(([px, py]) => 
   return { row: el?.closest<HTMLElement>("[data-row-key]")?.dataset.rowKey ?? null, action: act && !(act as HTMLButtonElement).disabled ? act.dataset.listAction ?? null : null };
 }, [x, y]);
 
+/**
+ * Rows must hold their place by how the page is built, not because the browser re-scrolls for us: Chromium's scroll
+ * anchoring hides a banner that grows above a list, Safari has none (QA 재점검 P2-B). Every measurement here is taken
+ * with anchoring switched off.
+ */
+export async function noScrollAnchoring(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    if (document.getElementById("e2e-no-anchor")) return;
+    const st = document.createElement("style");
+    st.id = "e2e-no-anchor";
+    st.textContent = "*, *::before, *::after { overflow-anchor: none !important; }";
+    document.head.appendChild(st);
+  });
+}
+
 export async function assertNoRowShift(page: Page, o: NoRowShift): Promise<RowBox[]> {
+  await noScrollAnchoring(page);
   const before = o.baseline ?? await rowBoxes(page, o.rows);
   expect(before.length, `${o.name}: the list has rows`).toBeGreaterThan(0);
   expect(before.every((r) => r.key), `${o.name}: every row has data-row-key`).toBe(true);

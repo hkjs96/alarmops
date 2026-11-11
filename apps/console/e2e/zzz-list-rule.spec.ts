@@ -30,7 +30,8 @@ const INC = '[data-testid="incident-row"]';
 const person = (page: Page, id: string) => card(page).locator(`li[data-row-key="${id}"]`);
 const dlg = (page: Page) => page.getByTestId("confirm-dialog");
 const toast = (page: Page) => page.getByTestId("toast");
-const health = (page: Page) => page.getByTestId("co-health");
+// while Responders are edited the reach is said inside the card (below the rows); the panel's own banner waits for Done
+const health = (page: Page) => card(page).getByTestId("co-resp-health");
 /** a dialog's buttons do nothing for 600 ms at the spot that opened it; a person takes longer than that to read it */
 const READ = 700;
 const overflow = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);

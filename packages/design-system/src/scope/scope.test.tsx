@@ -512,6 +512,17 @@ describe("<DirtyGuard>", () => {
     expect([fn.onSave, fn.onKeepDraft, fn.onDiscard].map((f) => f.mock.calls.length)).toEqual([1, 1, 1]);
     expect(fn.onCancel).toHaveBeenCalledTimes(2);
   });
+  it("signing out: Save and sign out / Sign out without saving / Cancel — no draft is offered, because sign-out removes drafts", () => {
+    const fn = { onSave: vi.fn(), onKeepDraft: vi.fn(), onDiscard: vi.fn(), onCancel: vi.fn() };
+    render(<DirtyGuard open signOut scopeLabel="Iruda Edu" leavingTo="sign out" {...fn} />);
+    const dlg = screen.getByRole("alertdialog", { name: "Unsaved changes for Iruda Edu" });
+    expect(within(dlg).getAllByRole("button").map((b) => b.textContent)).toEqual(["Save for Iruda Edu and sign out", "Sign out without saving", "Cancel"]);
+    expect(dlg).toHaveTextContent("Signing out removes drafts");
+    fireEvent.click(within(dlg).getByRole("button", { name: "Save for Iruda Edu and sign out" }));
+    fireEvent.click(within(dlg).getByRole("button", { name: "Sign out without saving" }));
+    fireEvent.click(within(dlg).getByRole("button", { name: "Cancel" }));
+    expect([fn.onSave, fn.onDiscard, fn.onCancel, fn.onKeepDraft].map((f) => f.mock.calls.length)).toEqual([1, 1, 1, 0]);
+  });
   it("is absent when closed", () => {
     render(<DirtyGuard open={false} scopeLabel="x" onSave={() => undefined} onKeepDraft={() => undefined} onDiscard={() => undefined} onCancel={() => undefined} />);
     expect(screen.queryByRole("alertdialog")).toBeNull();

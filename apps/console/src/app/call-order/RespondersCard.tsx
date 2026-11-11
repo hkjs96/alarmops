@@ -48,10 +48,18 @@ interface Outlook { unreachable: boolean; worse: string[] }
  * pointer. A removed person stays where they were as "Removed · Undo" until Done or leaving the panel; a person who
  * is added goes after the last row; Remove asks first, naming the person and the customer, with the safe choice
  * focused, and says loudly when the change would leave nobody reachable; a second press at the same spot within
- * 600 ms does nothing. Every write carries the version of the list the user saw (409 → "Changed — reload").
+ * 600 ms does nothing. Every write carries the version of the list the user saw (409 or 404 → "Changed — reload").
+ *
+ * Nothing that appears because of a change is put above the rows (QA 재점검 P2-B — a browser without scroll anchoring
+ * would show the rows jumping): while editing, one line of fixed height above the lists says how reachable the
+ * customer is now and whether the last change went through (`co-resp-live`), and everything that needs room — the
+ * problems, "Changed — reload", an error — is below the last row (`co-resp-status`). The panel around this card holds
+ * its own text still until Done (CallOrderPanel).
  */
-export function RespondersCard({ customer, customerName, services, responders, staff, steps, customerSteps, customerRepeat, rotations, blocked, onEditingChange }: {
+export function RespondersCard({ customer, customerName, services, responders, staff, steps, customerSteps, customerRepeat, rotations, health: now, blocked, onEditingChange }: {
   customer: string; customerName: string;
+  /** how reachable the customer is now, as the server worked it out (D-32) */
+  health: PagingHealth;
   /** how many services of the customer there are: Responders belong to all of them */
   services: number;
   responders: RespondersResponse; staff: StaffSummary[];
@@ -71,6 +79,10 @@ export function RespondersCard({ customer, customerName, services, responders, s
   const [editing, setEditing] = useState(false);
   const on = editing && !why;
   const [err, setErr] = useState<string | null>(null);
+  /** what is missing in the "Add a person" form: it has its own line in the form, always there */
+  const [formErr, setFormErr] = useState<string | null>(null);
+  /** the row that takes the focus once its button is gone (removed, put back): the keyboard stays where it was (QA P3-B) */
+  const focusRow = useRef<string | null>(null);
   const [conflict, setConflict] = useState(false);
   const [busy, setBusy] = useState<Record<string, "remove" | "undo" | "role" | "add">>({});
   const [ask, setAsk] = useState<Ask | null>(null);
@@ -113,7 +125,8 @@ export function RespondersCard({ customer, customerName, services, responders, s
   const setBusyFor = (id: string, v: "remove" | "undo" | "role" | "add" | null) => setBusy((b) => { const n = { ...b }; if (v) n[id] = v; else delete n[id]; return n; });
   const failed = (r: Failure) => {
     // the list moved on under the user: nothing was changed, and the next write must start from what is there now
-    if (r.code === "VERSION_CONFLICT") { setConflict(true); setErr(null); return; }
+    // "not found" is the same thing seen from the other side: the person this change was for is gone already (QA P3-C)
+    if (r.code === "VERSION_CONFLICT" || r.code === "NOT_FOUND") { setConflict(true); setErr(null); return; }
     setErr(errorLine(r, { what: "Changing Responders", where: customerName }));
   };
   const lockHeight = (id: string) => {
@@ -132,6 +145,7 @@ export function RespondersCard({ customer, customerName, services, responders, s
     ver.current = Math.max(ver.current, r.data.version);
     setRemoved((m) => { const n = { ...m }; delete n[id]; return n; });
     setRestored((m) => ({ ...m, [id]: true }));
+    focusRow.current = id;
     shell.toast(`${was.name} is back in Responders of ${customerName}`);
   };
   const doRemove = async (a: Ask, confirmUnreachable: boolean) => {
@@ -147,6 +161,7 @@ export function RespondersCard({ customer, customerName, services, responders, s
     ver.current = Math.max(ver.current, r.data.version);
     setRemoved((m) => ({ ...m, [a.id]: { name: a.name, staff: a.staff, role: a.role } }));
     setRestored((m) => { const n = { ...m }; delete n[a.id]; return n; });
+    focusRow.current = a.id;
     shell.toast(`${a.name} removed from Responders of ${customerName}`);
   };
   const doRole = async (a: { id: string; name: string }, to: CustomerPersonRole, was: CustomerPersonRole, confirmUnreachable = false, quiet = false) => {
@@ -199,9 +214,9 @@ export function RespondersCard({ customer, customerName, services, responders, s
     e.preventDefault();
     if (busy.add) return;
     const name = form.name.trim();
-    if (!name) { setErr("Enter the person's name."); return; }
-    if (!form.email.trim() && !form.phone.trim()) { setErr("Enter an email or a phone number."); return; }
-    setBusyFor("add", "add"); setErr(null);
+    if (!name) { setFormErr("Enter the person's name."); return; }
+    if (!form.email.trim() && !form.phone.trim()) { setFormErr("Enter an email or a phone number."); return; }
+    setBusyFor("add", "add"); setErr(null); setFormErr(null);
     const r = await addResponder(customer, { name, email: form.email, phone: form.phone, role: form.role }, ver.current);
     setBusyFor("add", null);
     if (!r.ok) { failed(r); return; }
@@ -213,12 +228,21 @@ export function RespondersCard({ customer, customerName, services, responders, s
 
   /** Done (or the steps editor taking over): the explicit refresh. Tombstones go, the list is taken as it is now. */
   const finish = () => {
-    setEditing(false); setErr(null); setRemoved({}); setHeights({}); setRestored({});
+    setEditing(false); setErr(null); setFormErr(null); setRemoved({}); setHeights({}); setRestored({});
     staffRows.resort(); peopleRows.resort();
   };
   useEffect(() => { onEditingChange?.(on); }, [on, onEditingChange]);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- only when the steps editor takes over
   useEffect(() => { if (blocked && editing) finish(); }, [blocked]);
+  // the pressed button is gone (Remove… became a tombstone, Undo became the row): the focus goes to its row, not to the top of the page
+  useEffect(() => {
+    const id = focusRow.current;
+    if (!id) return;
+    focusRow.current = null;
+    const row = listRef.current?.querySelector<HTMLElement>(`li[data-row-key="${CSS.escape(id)}"]`);
+    const at = document.activeElement;
+    if (row && (!at || at === document.body || row.contains(at))) row.focus({ preventScroll: true });
+  }, [removed, restored]);
   const reload = () => { setConflict(false); setErr(null); router.refresh(); };
 
   const tomb = (id: string, name: string, gone: boolean) => {
@@ -249,16 +273,21 @@ export function RespondersCard({ customer, customerName, services, responders, s
       <div className="co-resp-b" ref={listRef}>
         {why ? <p className="sm mut co-resp-n" id="co-resp-why" data-testid="co-resp-why">{why}</p> : null}
         <p className="sm mut co-resp-n">“Everyone in Responders” is these {pageable}: all MSP staff here plus the Pageable people of {customerName}. Responders belong to the whole customer, whatever level this panel shows.</p>
-        {on ? <p className="sm co-resp-n" data-testid="co-resp-rule">Each change applies at once to all of {customerName}. Rows keep their place: a removed person stays as “Removed · Undo” until you press Done{tombstones ? ` (${tombstones} now)` : ""}.</p> : null}
-        {conflict ? (
-          <Banner tone="amber">
-            <div data-testid="co-resp-conflict">
-              <div><b>Changed — reload.</b> Someone else changed the Responders of {customerName} while you were editing. Your last change was not applied.</div>
-              <div className="row" style={{ marginTop: 8 }}><button type="button" className="btn sm" data-testid="co-resp-reload" onClick={reload}>Reload the Responders of {customerName}</button></div>
-            </div>
-          </Banner>
+        {on ? <p className="sm co-resp-n" data-testid="co-resp-rule">Each change applies at once to all of {customerName}. Rows keep their place: a removed person stays as “Removed · Undo”, and the summary above this card stays as it was, until you press Done.</p> : null}
+        {/* one line, one height, there for as long as Responders are edited: what it says changes, nothing below it moves */}
+        {on ? (
+          <div className={cx("co-resp-live", conflict || err ? "warn" : now.level === "UNREACHABLE" ? "unr" : now.level === "AT_RISK" ? "ar" : null)} data-testid="co-resp-live">
+            <span className="co-resp-live-t" role="status">
+              {conflict ? <><b>Changed — reload.</b> The last change was not applied · details below the list</>
+                : err ? <><b>Not applied.</b> The reason is below the list</>
+                  : now.level === "UNREACHABLE" ? <><span className="stag unr">Unreachable</span> <b>Nobody for {customerName} is reached now</b> · details below the list</>
+                    : now.level === "AT_RISK" ? <><span className="stag ar">At risk</span> <b>{customerName} is harder to reach now</b> · details below the list</>
+                      : <><b>Reach now: OK</b> · {customerName}</>}
+              {tombstones && !conflict && !err ? ` · ${tombstones} removed, shown until Done` : ""}
+            </span>
+            {conflict ? <button type="button" className="btn sm" data-testid="co-resp-reload-top" onClick={reload}>Reload</button> : null}
+          </div>
         ) : null}
-        {err ? <div className="co-err" role="alert" data-testid="co-resp-err">{err}</div> : null}
 
         <div className="ov co-resp-g">MSP staff ({responders.staff.length})</div>
         {on ? (
@@ -274,7 +303,7 @@ export function RespondersCard({ customer, customerName, services, responders, s
           {staffRows.rows.map(({ item: p, gone }) => {
             const t = tomb(p.id, p.name, gone);
             return (
-              <li key={p.id} data-testid="co-staff" data-row-key={p.id} data-gone={t ? "1" : undefined} className={cx(t && "gone")} style={rowStyle(p.id)}>
+              <li key={p.id} tabIndex={-1} data-testid="co-staff" data-row-key={p.id} data-gone={t ? "1" : undefined} className={cx(t && "gone")} style={rowStyle(p.id)}>
                 {t ?? (
                   <>
                     <div className="co-person">
@@ -308,13 +337,15 @@ export function RespondersCard({ customer, customerName, services, responders, s
               </select>
             </label>
             <button type="submit" className="btn" disabled={Boolean(busy.add) || conflict} data-list-action="responder.add-person">Add to {customerName}</button>
+            {/* always there, one line high: saying what is missing does not push the people below */}
+            <div className="co-newp-e" role="alert" data-testid="co-add-err">{formErr}</div>
           </form>
         ) : null}
         <ul className="co-people" data-testid="co-people-list">
           {peopleRows.rows.map(({ item: p, gone }) => {
             const t = tomb(p.id, p.name, gone);
             return (
-              <li key={p.id} data-testid="co-cust-person" data-row-key={p.id} data-gone={t ? "1" : undefined} className={cx(t && "gone")} style={rowStyle(p.id)}>
+              <li key={p.id} tabIndex={-1} data-testid="co-cust-person" data-row-key={p.id} data-gone={t ? "1" : undefined} className={cx(t && "gone")} style={rowStyle(p.id)}>
                 {t ?? (
                   <>
                     <div className="co-person">
@@ -346,6 +377,29 @@ export function RespondersCard({ customer, customerName, services, responders, s
           })}
           {peopleRows.rows.length === 0 ? <li className="sm mut">No customer people yet.</li> : null}
         </ul>
+        {/* below the last row: whatever is said here, however long, cannot move a row */}
+        <div className="co-resp-status" data-testid="co-resp-status">
+          {conflict ? (
+            <Banner tone="amber">
+              <div data-testid="co-resp-conflict">
+                <div><b>Changed — reload.</b> Someone else changed the Responders of {customerName} while you were editing. Your last change was not applied.</div>
+                <div className="row" style={{ marginTop: 8 }}><button type="button" className="btn sm" data-testid="co-resp-reload" onClick={reload}>Reload the Responders of {customerName}</button></div>
+              </div>
+            </Banner>
+          ) : null}
+          {err ? <div className="co-err" role="alert" data-testid="co-resp-err">{err}</div> : null}
+          {on && now.level !== "OK" ? (
+            <Banner tone={now.level === "UNREACHABLE" ? "red" : "amber"}>
+              <div data-testid="co-resp-health">
+                <div><span className={cx("stag", now.level === "UNREACHABLE" ? "unr" : "ar")}>{now.level === "UNREACHABLE" ? "Unreachable" : "At risk"}</span>{" "}
+                  <b>{now.level === "UNREACHABLE"
+                    ? `If something breaks now, nobody for ${customerName} is reached.`
+                    : `Some calls for ${customerName} depend on contacts that are not verified, or on a gap in a rotation.`}</b></div>
+                <ul className="co-probs">{now.problems.map((x, n) => <li key={n}>{x.message}</li>)}</ul>
+              </div>
+            </Banner>
+          ) : null}
+        </div>
         <p className="sm mut co-resp-n" data-testid="co-mask-note">Contact details are masked. Showing a full address or number (Reveal, logged) is not available on this screen yet.</p>
       </div>
 

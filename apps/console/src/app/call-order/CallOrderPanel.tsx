@@ -12,7 +12,7 @@ import {
 import { announceDrafts, clearDraft, loadDraft, saveDraft, type CallOrderDraft } from "@/lib/call-order/draft-store";
 import { setBackGuard, setEditIntent, setFocusRow, takeBackGuard, takeEditIntent } from "@/lib/call-order/flags";
 import { scopeQuery } from "@/lib/scope";
-import { hasRole, roleReason, useShell } from "@/components/ShellContext";
+import { SIGN_OUT, hasRole, roleReason, useShell } from "@/components/ShellContext";
 import { errorLine } from "@/lib/errors";
 import type { PanelData } from "./CallOrderScreen";
 import { removeOwnSteps, saveCallOrder } from "./actions";
@@ -53,7 +53,18 @@ const typing = (t: EventTarget | null) => t instanceof HTMLElement && (t.isConte
  * only — a wider level is a separate, explained step — and every way out of an unsaved edit asks first.
  */
 export function CallOrderPanel({ data, listHref, listQuery }: { data: PanelData; listHref: string; listQuery: string }) {
-  const { scope, path, health, responders, rotations, staff } = data;
+  /**
+   * While Responders are edited, the panel around the card holds still (QA 재점검 P2-B): the sentence, the steps and the
+   * health banner are shown as they were when Edit was pressed, so no change to a responder can add or take a line
+   * above the rows. The card itself is live (it says how reachable the customer is now); Done brings the rest up to date.
+   */
+  const [respEditing, setRespEditing] = useState(false);
+  const latest = useRef(data);
+  latest.current = data;
+  const held = useRef<PanelData | null>(null);
+  const onRespEditing = useCallback((on: boolean) => { held.current = on ? latest.current : null; setRespEditing(on); }, []);
+  const view = respEditing && held.current && scopeKey(held.current.scope) === scopeKey(data.scope) ? held.current : data;
+  const { scope, path, health, responders, rotations, staff } = view;
   const shell = useShell();
   const uid = shell.user.id;
   const admin = hasRole(shell.user, "ADMIN");
@@ -84,7 +95,7 @@ export function CallOrderPanel({ data, listHref, listQuery }: { data: PanelData;
   const [meta, setMeta] = useState<Meta>({ creating: false, baseVersion: path.version });
   const [kept, setKept] = useState<CallOrderDraft | null>(null);
   const [guard, setGuard] = useState<Pending | null>(null);
-  const [confirm, setConfirm] = useState<{ after?: () => void } | null>(null);
+  const [confirm, setConfirm] = useState<{ after?: () => void; leavingTo?: string } | null>(null);
   const [widen, setWiden] = useState<CoScope | null>(null);
   const [askCancel, setAskCancel] = useState(false);
   const [askRemove, setAskRemove] = useState(false);
@@ -92,7 +103,6 @@ export function CallOrderPanel({ data, listHref, listQuery }: { data: PanelData;
   const [error, setError] = useState<string | null>(null);
   const [conflict, setConflict] = useState(false);
   const [tried, setTried] = useState(false);
-  const [respEditing, setRespEditing] = useState(false);
   const focusField = useRef(false);
 
   const editing = mode === "edit";
@@ -192,7 +202,11 @@ export function CallOrderPanel({ data, listHref, listQuery }: { data: PanelData;
   const close = () => shell.requestLeave(() => { setFocusRow(key); router.push(listHref); }, "continue");
 
   /* ---- save ---- */
-  const doSave = async (after?: () => void) => {
+  /** a save that was asked for on the way out and did not happen: the user is still here, and is told so */
+  const notLeft = (leavingTo?: string) => {
+    if (leavingTo === SIGN_OUT) shell.toast(`Not signed out: ${label} was not saved. Fix what is marked and save, or sign out without saving.`);
+  };
+  const doSave = async (after?: () => void, leavingTo?: string) => {
     setBusy(true); setError(null);
     const wasCreating = meta.creating;
     // If-Match: the version the edit started from; 0 creates the steps of a level that has none (API-CONTRACT §8.3)
@@ -203,6 +217,7 @@ export function CallOrderPanel({ data, listHref, listQuery }: { data: PanelData;
       if (res.code === "VERSION_CONFLICT" || res.code === "ALREADY_EXISTS") setConflict(true);
       // every refusal says what to change (lib/errors.ts): which step, which limit, which role
       else setError(errorLine(res, { what: "Changing the call order", where: label }));
+      notLeft(leavingTo);
       return;
     }
     const newVersion = res.data.version;
@@ -221,18 +236,19 @@ export function CallOrderPanel({ data, listHref, listQuery }: { data: PanelData;
     if (after) leaveNow(after); else router.push(listHref);
     shell.toast(text, undo);
   };
-  const attemptSave = (after?: () => void) => {
+  const attemptSave = (after?: () => void, leavingTo?: string) => {
     if (!editing || busy) return;
     setTried(true);
-    if (stale || conflict) return;
+    if (stale || conflict) { notLeft(leavingTo); return; }
     if (check.errors.length) {
+      notLeft(leavingTo);
       const bad = check.errors[0]!;
       const sel = bad.stepIndex !== undefined ? `[data-step="${bad.stepIndex}"] [data-field="${bad.field ?? "atMin"}"]` : bad.field === "repeat" ? "[data-field=repeat]" : null;
       (sel ? document.querySelector<HTMLElement>(`.co-panel ${sel}`) : null)?.focus();
       return;
     }
     if (!meta.creating && !dirty) { shell.toast(`Nothing to save — no value changed for ${label}`); return; }
-    if (wide) { shell.clearToast(); setConfirm({ after }); } else void doSave(after);
+    if (wide) { shell.clearToast(); setConfirm({ after, leavingTo }); } else void doSave(after, leavingTo);
   };
 
   const stateRef = useRef({ editing, modal: false, attemptSave, enterEdit });
@@ -313,7 +329,7 @@ export function CallOrderPanel({ data, listHref, listQuery }: { data: PanelData;
   return (
     <>
       <Panel className="co-panel" kind={editing ? `Call order · editing at ${level} level` : `Call order · ${level} level`} path={pathOf(names)} note={filterNote} onClose={close} onCopyLink={copy} footer={footer}>
-        <div className={cx("stack", editing ? "co-edit" : "co-read")} data-testid={editing ? "co-edit-view" : "co-read-view"} data-scope={key}>
+        <div className={cx("stack", editing ? "co-edit" : "co-read")} data-held={view !== data ? "1" : undefined} data-testid={editing ? "co-edit-view" : "co-read-view"} data-scope={key}>
           {!editing && kept ? (
             <div className="banner accent co-draft" data-testid="co-draft-here">
               <span className="co-draft-t"><b>Draft for {label}</b> · not saved, kept in this tab only</span>
@@ -475,8 +491,8 @@ export function CallOrderPanel({ data, listHref, listQuery }: { data: PanelData;
           ) : null}
 
           <RespondersCard customer={scope.customer} customerName={names.customer} services={node ? node.projects.reduce((n, p) => n + p.services.length, 0) : 0}
-            responders={responders} staff={staff} steps={path.steps} customerSteps={data.customerSteps} customerRepeat={data.customerRepeat} rotations={rotations}
-            blocked={editing ? "Save or cancel the step edit above before changing Responders." : null} onEditingChange={setRespEditing} />
+            responders={data.responders} staff={data.staff} steps={data.path.steps} customerSteps={data.customerSteps} customerRepeat={data.customerRepeat} rotations={data.rotations}
+            health={data.health} blocked={editing ? "Save or cancel the step edit above before changing Responders." : null} onEditingChange={onRespEditing} />
 
           {editing && path.own && scope.project && !meta.creating ? (
             <div className="row co-rm">
@@ -489,16 +505,18 @@ export function CallOrderPanel({ data, listHref, listQuery }: { data: PanelData;
       </Panel>
 
       <DirtyGuard
-        open={Boolean(guard)} scopeLabel={label} leavingTo={guard?.leavingTo}
-        body={<>Nothing has been saved for <b>{label}</b> yet. Save it, keep it as a draft for later, or discard it. A kept draft stays in this tab and belongs to {label} only.</>}
-        onSave={() => { const g = guard!; setGuard(null); attemptSave(g.proceed); }}
+        open={Boolean(guard)} scopeLabel={label} leavingTo={guard?.leavingTo} signOut={guard?.leavingTo === SIGN_OUT}
+        body={guard?.leavingTo === SIGN_OUT
+          ? <>Nothing has been saved for <b>{label}</b> yet. Signing out removes the drafts kept in this tab, so this edit cannot be kept for later: save it first, or sign out without it. If the save does not go through, you stay signed in.</>
+          : <>Nothing has been saved for <b>{label}</b> yet. Save it, keep it as a draft for later, or discard it. A kept draft stays in this tab and belongs to {label} only.</>}
+        onSave={() => { const g = guard!; setGuard(null); attemptSave(g.proceed, g.leavingTo); }}
         onKeepDraft={() => { const g = guard!; setGuard(null); leaveNow(g.proceed); }}
         onDiscard={() => { const g = guard!; setGuard(null); discard(); leaveNow(g.proceed); }}
         onCancel={() => setGuard(null)}
       />
 
       <ConfirmDialog open={Boolean(confirm)} title={`${saveLabel}?`} confirmLabel={saveLabel} busy={busy}
-        onConfirm={() => { const c = confirm!; setConfirm(null); void doSave(c.after); }} onCancel={() => setConfirm(null)}>
+        onConfirm={() => { const c = confirm!; setConfirm(null); void doSave(c.after, c.leavingTo); }} onCancel={() => setConfirm(null)}>
         {originLabel ? <p className="co-c-w"><b>Wider than the row you opened.</b> You opened {originLabel}; this saves {label}.</p> : null}
         <div className="ov">Before → after</div>
         {changes.length ? <ul className="co-chg" data-testid="co-changes">{changes.map((c) => <li key={c}>{c}</li>)}</ul> : <p>Same steps as {sourceLabel}, now as own steps.</p>}

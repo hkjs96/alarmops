@@ -2,16 +2,22 @@
 import { revalidatePath } from "next/cache";
 import { getApi } from "@/lib/api";
 import { requireSession } from "@/lib/auth";
+import { requireRole } from "@/lib/auth/role";
 import { assertBulkAction, assertBulkItems, assertId, assertToken, assertVersion } from "@/lib/validate";
 import type { BulkItem, BulkPreview, BulkResult, UndoResult } from "@/lib/api/types";
 import { fail, type ActionResult } from "@/lib/action-result";
 
 export type { ActionResult };
 
-/** Session check first, then input validation, then the API call (security review C-2, C-5). */
+/**
+ * Session check first, then the role, then input validation, then the API call (security review C-2, C-5).
+ * Everything here acknowledges, escalates, resolves or undoes that: Operator or Admin (security 재검토 권고 2). The
+ * console's check is a second line; the API checks the role on the write itself and stays the authority.
+ */
 async function run<T>(fn: () => Promise<T>, revalidate = true): Promise<ActionResult<T>> {
   try {
     await requireSession();
+    await requireRole("OPERATOR");
     const data = await fn();
     if (revalidate) revalidatePath("/", "layout"); // the list lives at /incidents and beside every /c/… panel
     return { ok: true, data };

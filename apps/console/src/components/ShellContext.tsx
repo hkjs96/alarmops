@@ -2,13 +2,13 @@
 import { createContext, useContext, useLayoutEffect } from "react";
 import type { ScopeCustomerNode, ScopeSel } from "@alarmops/design-system";
 import type { OutsideCounts, Role } from "@/lib/api/types";
+import { roleAtLeast } from "@/lib/roles";
 
 export interface ToastAction { label: string; href?: string; onAction?: () => void }
 export type LocalMark = "RESOLVED" | "REOPENED";
 export interface ShellUser { id: string; name: string; role: Role }
-const RANK: Record<Role, number> = { VIEWER: 0, OPERATOR: 1, ADMIN: 2 };
 /** What the console offers follows GET /me; what is allowed is decided by the API (a 403 is worded by lib/errors.ts). */
-export const hasRole = (user: Pick<ShellUser, "role">, min: Role): boolean => RANK[user.role] >= RANK[min];
+export const hasRole = (user: Pick<ShellUser, "role">, min: Role): boolean => roleAtLeast(user.role, min);
 /** Why an action is not offered: "Changing the call order needs the Admin role. You are signed in as Operator." */
 export function roleReason(user: Pick<ShellUser, "role">, min: Role, what: string): string {
   const n: Record<Role, string> = { ADMIN: "Admin", OPERATOR: "Operator", VIEWER: "Viewer" };
@@ -49,6 +49,8 @@ export interface ShellApi {
   /** an editor with unsaved changes registers here; null when it is clean or gone */
   setLeaveGuard: (guard: LeaveGuard | null) => void;
 }
+/** `leavingTo` of the one exit that cannot keep a draft: sign-out removes what this tab kept for the user */
+export const SIGN_OUT = "sign out";
 export type LeaveGuard = (proceed: () => void, leavingTo?: string) => void;
 
 export const ShellContext = createContext<ShellApi | null>(null);

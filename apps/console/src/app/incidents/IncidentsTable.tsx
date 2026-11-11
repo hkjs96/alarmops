@@ -240,6 +240,8 @@ export function IncidentsTable({ items, nowMs, openId, emptyKind, listKey = "", 
   return (
     <>
       {error ? <Banner tone="red" action={<Button size="sm" onClick={() => setError(null)}>Dismiss</Button>}>{error}</Banner> : null}
+      {/* in words on the page, not in a tooltip: a phone has no hover (QA 재점검 P3-A) */}
+      {noAck ? <p className="list-why" data-testid="list-role-why">Read only. {noAck}</p> : null}
       {/* always here and always the same height: when it has something to say, nothing below it moves */}
       <div className={cx("list-bar", pending && "on")} data-testid="list-bar">
         {pending ? (

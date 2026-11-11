@@ -27,8 +27,12 @@ export function fail(e: unknown): ActionFailure {
     const details = safeDetails(e.details ?? {});
     return { ok: false, code: e.code, message: e.code === "CROSS_CUSTOMER" ? "Not found." : e.message, requestId: e.requestId, ...(details ? { details } : {}) };
   }
-  // the console's own refusals (UnauthorizedError, InvalidInputError, NotConfiguredError): their message is written for the user
+  // the console's own refusals (RoleRequiredError, UnauthorizedError, InvalidInputError, NotConfiguredError): their message is written for the user
   const code = e instanceof Error ? (e as Error & { code?: unknown }).code : undefined;
+  if (e instanceof Error && code === "ROLE_REQUIRED") {
+    const details = safeDetails((e as Error & { details?: Record<string, unknown> }).details ?? {});
+    return { ok: false, code, message: e.message, requestId: "", ...(details ? { details } : {}) };
+  }
   if (e instanceof Error && (code === "UNAUTHORIZED" || code === "INVALID_INPUT" || code === "NOT_CONFIGURED")) return { ok: false, code, message: e.message, requestId: "" };
   return { ok: false, code: "UNKNOWN", message: "Something went wrong.", requestId: "" };
 }

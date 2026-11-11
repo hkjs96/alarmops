@@ -166,6 +166,8 @@ export function ScopeShell({ customers, user, openCount, children }: { customers
       if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "k") {
         if (settings) return;
         e.preventDefault();
+        // a question is on the screen (confirm, unsaved changes): it is answered first, nothing opens over it (QA P3-D)
+        if (document.querySelector("[role=alertdialog]")) return;
         setSheet(false);
         setFinder((v) => !v);
         return;

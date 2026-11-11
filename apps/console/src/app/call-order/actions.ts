@@ -3,14 +3,20 @@ import { revalidatePath } from "next/cache";
 import { getApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { requireSession } from "@/lib/auth";
+import { requireRole } from "@/lib/auth/role";
 import { assertId, assertVersion, InvalidInputError } from "@/lib/validate";
 import { assertAddResponder, assertPagingInput, assertReachable, assertRole, assertScope } from "@/lib/call-order/input";
 import { levelOf, type CoScope, type Directory } from "@/lib/call-order/model";
 import { fail, type ActionResult } from "@/lib/action-result";
 
+/**
+ * Session first, then the role — every action here writes the call order or the Responders, which is for admins
+ * (security 재검토 권고 2; the API checks again and stays the authority) — then input, then the API call.
+ */
 async function run<T>(fn: () => Promise<T>): Promise<ActionResult<T>> {
   try {
     await requireSession();
+    await requireRole("ADMIN");
     const data = await fn();
     revalidatePath("/", "layout"); // the tree (OWN STEPS, call health), the list and the panel all show this
     return { ok: true, data };
