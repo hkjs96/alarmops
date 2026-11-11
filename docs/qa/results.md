@@ -602,3 +602,92 @@
 **머지 불가 — P1 0건, P2 2건, 보안 [차단] 0건.** 이전 P1-A는 고쳐졌다: Remove…는 사람과 고객 이름으로 묻고 기본이 "Keep …"이며, 같은 자리 두 번(90ms~3초)·확인 더블클릭·Enter 유지·스크롤·창 크기 변경·두 탭·필터 변경 어느 경로로도 이름이 뜨지 않은 사람이 빠지지 않았고, 제거된 사람은 제자리에 남아 각자 Undo를 가진다. UNREACHABLE·AT RISK 경고, P2-A(플랜 이름), P2-B(한도), 초안의 사용자 분리, 역할, Responders 409도 통과했고 회귀는 없다. 막는 것은 새로 생긴 로그아웃 경로의 P2-A다: 편집 중에 누른 Sign out이 "sign out"이라고 답하고도 세션을 남긴다. 고칠 범위는 좁다(폼이 메뉴와 함께 사라지지 않게) — 고친 뒤 "로그아웃" 두 줄과 가드의 세 버튼만 재실행하면 된다. P2-B는 같은 PR에서 고치거나(상태 띠·409 띠가 목록을 밀지 않게 자리 확보), 아이폰 Safari 실기기 확인을 조건으로 사유와 함께 백로그로 넘길 수 있다.
 
 점검 한계: 목 API 기준(역할·If-Match·검증의 실제 강제는 백엔드에서 확인 필요). 터치는 Playwright 에뮬레이션이고 Safari는 `overflow-anchor: none`으로 흉내만 냈다. 역할 선택 상자의 ↓ 반복은 헤드리스에서 값이 안 바뀌는 경우가 있어 Eunbi 한 건만 판정에 썼다. 대비는 눈으로만 확인. 샌드박스에서 Google Fonts가 막혀 대체 글꼴로 렌더링됨.
+
+---
+
+## Console Call order 최종 점검 — 2026-11-11
+
+대상: `apps/console` (feat/console-call-order, 커밋 `28e60b0`, origin/main은 `1eb757f` 그대로라 병합 없음). 고친 쪽과 무관한 독립 점검이며 제품 코드는 고치지 않았다. 재점검에서 실패한 것(P2-A, P2-B, P3-A~D)과 새 동작("Responders 편집 중 패널 나머지는 멈춰 있다가 Done에 갱신")만 다시 밟았고, 회귀는 빠르게만 봤다. 빌드본을 직접 기동(`E2E_ALLOW_MOCK=1 MOCK_API=1 next start -p 3142`, 묶음마다 재기동해 목 상태 초기화), Playwright 1440×900(마우스·키보드)·390×844(터치), 캡처를 직접 보고 판정했고 결과는 새 세션으로 다시 읽은 서버 상태로 확인했다. 행 위치는 `overflow-anchor: none`을 넣은 뒤 각 행의 화면 좌표(top·height, 소수점 그대로)와 모든 스크롤 위치를 조작 전후로 비교. 캡처: `docs/qa/shots/console-call-order-final/` (gitignore). 보안 검토는 `/home/claude/alarmops-security-review-callorder-3.md`.
+
+### 통합
+
+| 항목 | 결과 |
+|---|---|
+| 병합 | 필요 없음 (`origin/main`에 새 커밋 없음) |
+| `npm test` | 통과 — console 173, core 81, design-system 97, ingest 32 (합 383), db 스키마 검사 통과(샌드박스에서 Prisma 엔진 내려받기가 막혀 스크립트의 대체 경로로 검증) |
+| `npm run typecheck` | 통과 (console, core, design-system, ingest) |
+| console `eslint .` | 통과 (경고 0) |
+| `next build` | 통과 |
+| Playwright (`PORT=3141 PW_NO_REUSE=1`) | 133 / 133 통과 (직접 띄운 새 서버, 6.3분) |
+
+### 이전 실패 항목 재실행
+
+| # | 이전 문제 | 폭 | 결과 | 측정·관찰 | 캡처 |
+|---|---|---|---|---|---|
+| P2-A | 편집 중 Sign out — 가드 | 1440·390 | 통과 | 버튼이 셋으로 바뀜: "Save for Iruda Edu and sign out" / "Sign out without saving" / "Cancel"(초안 유지는 없앰 — 로그아웃이 초안을 지우므로). 본문이 그 이유와 "If the save does not go through, you stay signed in."을 말함. 가로 넘침 0 | P2A-1440-1-guard, P2A-390-1-guard |
+| P2-A | Sign out without saving | 1440·390 | 통과 | `/login?signedOut=1`, 세션 쿠키 없음, `ao-…` 키 0개(직전 초안 키 1개), 다시 `/call-order` → `/login?next=…`. 서버 값 그대로(5분), 다시 로그인해도 초안 없음 | P2A-1440-2-after-nosave |
+| P2-A | Save … and sign out (저장 성공) | 1440·390 | 통과 | 서버에 9분 저장된 뒤 로그아웃(쿠키 없음·키 0·`/login`) | — |
+| P2-A | 저장이 막힘 (2단계 0분) | 1440·390 | 통과 | 로그인 유지, 토스트 "Not signed out: Iruda Edu was not saved. Fix what is marked and save, or sign out without saving.", 문제 줄 "Step 2 (0 min) would not come after step 1 (0 min)…", 포커스는 2단계 분, 초안 유지 | P2A-1440-4-blocked |
+| P2-A | 저장이 서버에서 실패 (다른 세션이 먼저 저장 → 409) | 1440·390 | 통과 | 로그인 유지, 같은 토스트 + 패널 "Changed — reload. Someone else changed the call order of Iruda Edu while you were editing. Nothing was saved, and your draft is kept as you typed it." 서버는 다른 세션의 값(7분). 그 상태에서 "Sign out without saving"은 정상 로그아웃 | P2A-390-5-failed-409 |
+| P2-A | 저장 확인 상자에서 Cancel (여러 서비스에 닿는 저장, Cheong Media) | 1440·390 | 통과 (P3-F) | 로그인 유지, 편집 화면 그대로, 서버 변화 없음. 다만 이때는 "Not signed out" 안내가 없고, 확인 상자("Save for Cheong Media?")도 저장 뒤 로그아웃된다는 말이 없다 | P2A-1440-6-confirm-wide, -7-confirm-cancelled |
+| P2-A | 가드의 Cancel · Esc | 1440·390 | 통과 | 가드만 닫힘, 입력 값·세션 그대로 | — |
+| P2-A | 편집 중이 아닐 때 Sign out / 다른 고객 초안만 남아 있을 때 | 1440·390 | 통과 | 가드 없이 바로 로그아웃, 쿠키 없음·키 0, 다시 로그인해도 초안 없음. 메뉴에 "Signing out removes the drafts kept in this tab." | P2A-1440-8-menu |
+| P2-B | Responders 행 고정 (`overflow-anchor: none`) — 제거 → AT RISK → UNREACHABLE → 역할 복귀 → Undo 두 번 | 1440·390 | 통과 | 여섯 구간 모두 0.00px, 스크롤 위치도 그대로(재현 때는 225~269px·39px). 상태는 목록 위의 44px 고정 줄("Reach now: OK" → "AT RISK … harder to reach now" → "UNREACHABLE Nobody for Daon Retail is reached now")과 마지막 줄 아래 상세로 나옴. 가로 넘침 0 | P2B-1440-1-at-risk, P2B-390-2-unreachable |
+| P2-B | 409 띠 (다른 세션이 먼저 변경) | 1440·390 | 통과 | 0.00px. 고정 줄 "Changed — reload. The last change was not applied · details below the list [Reload]", 상세는 목록 아래. 남는 버튼은 Done·Reload 둘뿐. 서버 변화 없음 | CONF-1440-409, CONF-390-409 |
+| P2-B | 새 동작: 편집 중 패널 나머지는 멈춤, Done에 갱신 | 1440·390 | **P2-C** | Done을 누르면 패널이 최신이 된다(AT RISK 띠, "Paged (1): Soyeon Choi"). 그러나 편집 중에는 아래 문제 목록 P2-C | P2B-1440-3-held-top, P2B-390-3-held-top, P2B-1440-4-after-done |
+| P3-A | viewer가 폰에서 꺼진 Acknowledge의 이유 | 390 | 통과 | 목록 위에 글로 "Read only. Acknowledging needs the Operator role. You are signed in as Viewer."(13px, 첫 화면 y 431). operator에게는 안 나옴. Call order 패널에도 두 이유가 글로 보임 | P3A-390-viewer-incidents |
+| P3-B | 키보드로 제거·Undo 뒤 포커스 | 1440 | 통과 | Enter → (기본 "Keep Junho Park") Shift+Tab → Enter: 포커스가 Junho 줄(2px 테두리 보임). Tab → "Undo: put Junho Park back" → Enter: 다시 Junho 줄. 다음 Tab은 그 줄의 Remove… | P3B-1440-focus-after-remove |
+| P3-C | 다른 탭이 이미 제거한 사람을 제거 (404) | 1440·390 | 통과 | "Changed — reload. Someone else changed the Responders of Daon Retail …"(맨 "Not found" 없음), 0.00px, Reload 뒤 그 줄은 "Junho Park · No longer in Responders · changed by someone else" | P3C-1440-404 |
+| P3-D | 질문 위로 Ctrl/⌘K | 1440 | 통과 | Remove 확인, Unsaved changes 가드, Save 확인 세 상자 모두에서 Ctrl K·⌘K가 아무것도 열지 않고 상자·기본 포커스 유지. 질문이 없을 때는 전처럼 열림 | — |
+
+### 회귀 점검 (빠르게)
+
+| 시나리오 | 폭 | 결과 | 관찰 |
+|---|---|---|---|
+| 세 고객 키보드만으로 저장 (Mirae Pay, Daon Retail, Hanbit Logistics) | 1440 | 통과 | Ctrl K → 이름 → Enter → Tab → Enter → E(2단계 분에 포커스) → 숫자 → Ctrl+Enter → Shift+Tab → Enter, 16~18키. 확인 상자 기본 포커스 Cancel. 서버: 8·3·4분, Ara Games 그대로 |
+| Incidents Ack 안전 | 1440·390 | 통과 | 같은 자리 5번(90ms·0.7·1.5·3초 간격): 한 건만 Ack, 행 이동 0, 그 자리에는 글자만("Acknowledged ✓"), "1 acknowledged in place · Re-sort" |
+| 폰에서 읽기·수정 | 390 | 통과 | Daon Retail › Commerce › Checkout: 입력 요소 0, 가로 넘침 0, 44px 미만은 "Skip to content"뿐. Create own steps → 2단계 4분(숫자 자판, 16px) → 저장. 서버: Checkout 4분, 고객 값 그대로 |
+| 서비스 → 고객 전체로 넓히기 | 1440 | 통과 | 넓히기 상자 기본 포커스 "Stay on Hanbit Logistics › Fulfilment › Orders API"(Enter는 머무름). 넓힌 뒤 "Save for Hanbit Logistics", 확인에 "Wider than the row you opened". 서버: 고객 5분, Orders API own steps 그대로 |
+| 콘솔 오류 | 전 폭 | 통과 | 위 시나리오에서 앱 오류 0건 (세션이 사라진 경우 제외 — P2-D) |
+
+### 로그아웃·Responders 편집 주변의 새 시도
+
+| # | 시도 | 폭 | 결과 | 관찰 |
+|---|---|---|---|---|
+| A1 | 가드의 "Save … and sign out"을 60·40ms 간격 3번 / "Sign out without saving" 3번 | 1440·390 | 통과 | 저장 요청 1건 + 로그아웃 1건만 나감, 오류 0. 저장 안 함 쪽은 저장 요청 0건 |
+| A2 | 둘째 탭에서 로그아웃한 뒤 첫 탭에서 Save / Responders Remove 확인 | 1440·390 | **P2-D** | 서버에는 아무것도 안 바뀐다(좋음). 그런데 화면은 "Saving…" / "Removing…"에서 영원히 멈추고 아무 말이 없다. 아래 문제 목록 |
+| A3 | 로그아웃 뒤 뒤로가기 3번·앞으로 | 1440·390 | 통과 | 매번 `/login?next=…`, 고객·사람 이름 없음, 이전 문서가 되살아나지 않음(bfcache 복원 없음 — 응답이 `no-store`) |
+| A4 | 관리자 초안을 둔 채 같은 탭에서 `?as=operator` → `?as=viewer` → 관리자 | 1440·390 | 통과 | 초안 키 0, 초안 줄·"Draft for" 없음, 화면 값은 저장된 5분, 뒤로가기로도 관리자의 입력(9분)이 안 보임. 관리자로 돌아와도 초안은 돌아오지 않음. operator 세션에서 관리자 id의 키를 직접 심어도 안 보임 |
+| A5 | 저장이 진행 중(3초 지연)일 때 Sign out | 1440·390 | 통과 (P3-G) | 가드가 뜬다. "Sign out without saving" → 로그아웃. "Save … and sign out" → 아무 말 없이 무시되고 진행 중이던 저장만 끝나 "Saved for Iruda Edu" 토스트, 로그인 유지 |
+
+### 보안 재검토 요약 (`git diff d9e91b9..HEAD -- apps packages`, 읽기 전용)
+
+| 항목 | 결과 | 확인 |
+|---|---|---|
+| 로그아웃 폼(body에 붙임) | 통과 | GET 405. 다른 출처·`Origin: null`·다른 포트·`Sec-Fetch-Site: cross-site`/`same-site` 모두 403(세션 유지). 같은 출처 303 → 항상 `/login?signedOut=1`(`next`·본문 값은 읽지 않음 — 열린 리다이렉트 없음), `ao_session=; Max-Age=0; HttpOnly; SameSite=lax`. CSP `form-action 'self'` 유지 |
+| `TRUSTED_PROXY` | 통과 | 미설정: `X-Forwarded-Host`를 위조해도 403. `=1`: XFH(첫 값)와 Origin 비교, XFH 없으면 Host. README에 조건 명시 |
+| 서버 액션의 `requireRole` | 통과 | 서버 액션 11개 전부(`call-order/actions.ts` 5개 ADMIN, `incidents/actions.ts` 6개 OPERATOR) `run()` 안에서 세션 → 역할 → 입력 순서. 빠진 것 없음. 관리자의 실제 요청을 operator·viewer 세션으로 다시 보내면 없는 고객·없는 사람이어도 똑같이 `ROLE_REQUIRED`, 서버 변화 없음. 세션 없으면 `/login`으로 307 |
+| `/me` 실패 | 통과 | 예외는 `run()`의 catch로 가서 거부, 모르는 역할 값은 최하위 취급. 단위 테스트 있음 |
+| 로그아웃 뒤 캐시 | 통과 | 인증 페이지·RSC 응답 `Cache-Control: private, no-cache, no-store, max-age=0, must-revalidate`, 뒤로가기는 `/login`. localStorage에는 테마뿐 |
+| 헤더 | 통과 | CSP·X-Frame-Options·Referrer-Policy·nosniff·Permissions-Policy·HSTS 그대로 |
+| [차단] | 0건 | [권고] 4건: 세션이 사라진 뒤의 쓰기가 멈춤(P2-D), Origin 비교가 호스트만 봄(스킴 무시), 서명 쿠키라 로그아웃이 서버에서 토큰을 무효화하지는 않음(SSO 연결 때), 다른 탭에서 로그아웃하면 이 탭의 초안 키는 남음(다른 사용자가 로그인하면 읽기 전에 삭제됨 — 확인) |
+
+### 문제 목록
+
+| 등급 | # | 문제 | 재현 |
+|---|---|---|---|
+| P1 | — | 없음 | — |
+| P2 | A·B | 재점검의 P2-A(편집 중 로그아웃), P2-B(스크롤 보정 의존)는 해결 확인 | — |
+| P2 | C | (P2-B 수정으로 생김) Responders 편집 중 패널 위쪽이 거짓을 "지금"이라고 말한다. 두 명을 빼고 한 명을 Notify only로 바꿔 서버가 UNREACHABLE인 동안에도 패널 맨 위는 "IF SOMETHING BREAKS NOW — Slack everyone in Responders (3) now … Paged (3): Junho Park, Minjae Lee, Soyeon Choi"이고 STEPS도 "(3)"이다. 그 자리에는 "편집 시작 때 기준"이라는 표시가 전혀 없다(흐리게도, 문구도 없음). 설명은 아래 Responders 카드 안의 한 문장("…the summary above this card stays as it was, until you press Done")과 카드의 상태 줄뿐인데, 위로 스크롤하면 둘 다 화면 밖이다. 1440에서는 바로 옆 목록 행이 "UNREACHABLE · nobody · Responders (0)"라 같은 화면에서 답이 둘이고, 390에서는 틀린 쪽만 보인다. 준호가 사람을 뺀 뒤 "그래서 지금 누가 불리나"를 확인하려고 위로 올리면 방금 뺀 사람이 그대로 Paged에 있다 — 제거가 안 먹었다고 읽거나, Done 없이 "Back to the list"로 나가면서 3명이 불린다고 믿을 수 있다. 완화: UNREACHABLE·AT RISK로 만드는 변경은 그 전에 이름을 넣어 묻고, 카드의 줄은 맞게 말하며, 편집한 본인의 그 탭에서 Done 전까지만이다. 고칠 범위는 좁다: 멈춘 구간에 Edit을 누르는 순간부터 "As of when you started editing Responders · updates on Done" 같은 표시를 두거나(Edit 때 한 번 생기므로 행을 밀지 않는다) "NOW" 문장·Paged 줄을 가린다 | 1440·390: `/c/daon/call-order` → Edit responders → Junho Park, Minjae Lee 제거 → Soyeon Choi를 Notify only → 패널을 맨 위로 (P2B-1440-3-held-top, P2B-390-3-held-top) |
+| P2 | D | (이 브랜치에서 생긴 것이 아님 — main의 Incidents도 같음) 세션이 사라진 탭(다른 탭에서 로그아웃, 또는 8시간 만료)에서 쓰기를 누르면 화면이 "Saving…" / "Removing…" / "Acknowledging…"에서 영원히 멈추고 아무 안내가 없다. 서버에는 아무것도 적용되지 않으므로 잘못 저장되지는 않지만, 온콜이 밤새 열어 둔 탭에서 Acknowledge를 누르면 "처리 중"으로 보인 채 호출은 계속된다. 원인: 서버 액션 POST가 미들웨어에서 `/login`으로 307 → 클라이언트가 "An unexpected response was received from the server."를 던지는데 잡는 곳이 없다. 새로고침하면 `/login`으로 가고 초안은 남아 있다. 콘솔 전체 문제라 별도 이슈를 권함(액션 호출을 감싸 "Signed out — sign in again" 안내 + 로그인으로) | 두 탭: 첫 탭 `/c/iruda/call-order` Edit → 값 변경, 둘째 탭 Sign out, 첫 탭 Save (A2-390-save-after-other-tab-signout, A2-1440-remove-after-other-tab-signout, EXP-1440-ack-no-session) |
+| P3 | F | "Save … and sign out" 뒤의 저장 확인 상자가 로그아웃이 이어진다는 말을 하지 않고, 거기서 Cancel하면 "Not signed out" 안내가 없다(README는 "told"라고 적음). 로그인은 유지되고 편집 화면 그대로라 헷갈릴 여지는 작다 | `/c/cheong/call-order` Edit → 값 변경 → Sign out → Save for Cheong Media and sign out → Cancel |
+| P3 | G | 저장이 진행 중일 때 뜬 가드에서 "Save … and sign out"은 조용히 무시된다(저장은 끝나고 로그인 유지, 안내 없음). 같은 가드의 "Sign out without saving"은 이미 보낸 저장이 적용될 수 있는데도 그렇게 적혀 있다. 느린 망에서만 가능 | Save 직후 응답 전에 계정 → Sign out |
+| P3 | H | 409 뒤 아래쪽 "Reload the Responders of …"를 누르면 띠가 사라지고 묘비 줄 높이가 바뀌어(76→55px) 줄들이 화면에서 140~161px 움직인다. 명시적 새로고침이고 포인터 밑에 온 것은 줄의 글자(버튼 아님), 같은 자리 재누름은 아무 일 없음 | 두 탭 409 → 아래 Reload (CONF-1440-after-bottom-reload) |
+| P3 | I | 상태 줄이 한 줄 고정이라 뒷부분이 잘린다("… is reached now · d…"). 핵심 낱말(UNREACHABLE / AT RISK / Changed — reload)은 보임 | 390·1440 (P2B-390-2-unreachable) |
+| P3 | — | 재점검의 P3-A·B·C·D 해결 확인, P3-E는 `PW_NO_REUSE=1`로 해결. 이전 P3-F·G·H·I·K(첫 점검 번호)는 이번에도 다시 보지 않았다 | — |
+
+### 판정
+
+**머지 불가(조건부) — P1 0건, P2 2건(C: 이번 수정에서 생김, D: 기존·콘솔 전체), 보안 [차단] 0건.** 재점검에서 막았던 두 건은 고쳐졌다. 편집 중 로그아웃은 세 선택 모두 말한 대로 움직이고(저장 성공 → 로그아웃, 저장이 막히거나 실패 → 로그인 유지 + 안내, 저장 안 함 → 쿠키·초안 삭제 후 `/login`), Responders 줄은 스크롤 보정을 꺼도 1440·390 모두 0px이다. P3-A~D도 해결됐고 회귀는 없다. 남은 것은 P2-B를 고치는 방법에서 나온 P2-C다: 줄을 붙들기 위해 패널 위쪽을 멈춰 두었는데, 그 멈춘 구간이 "NOW"라는 제목 아래 방금 뺀 사람을 Paged로 보여 주면서 멈췄다는 표시가 없다. 이 화면이 답해야 하는 바로 그 질문("지금 터지면 누가 불리나")에 틀린 답이 표시 없이 남는 것이라 P2로 둔다. 표시 한 줄(또는 멈춘 구간 가리기)이면 되고, 고친 뒤에는 P2-B 묶음과 이 한 장면만 재실행하면 된다. P2-D는 이 PR이 만든 문제가 아니고 main에도 있으므로 별도 이슈로 넘기는 것을 권한다 — 그 경우 이 PR을 막는 것은 P2-C 하나다. 사용자가 P2-C를 사유와 함께 백로그로 받아들이면 그대로 머지할 수 있다.
+
+점검 한계: 목 API 기준(역할·If-Match의 실제 강제는 백엔드에서 확인 필요). 터치는 Playwright 에뮬레이션이고 Safari는 `overflow-anchor: none`으로 흉내만 냈다(WebKit 실기기 미확인). A5의 "저장 안 하고 로그아웃"은 지연을 브라우저 쪽에서 걸어 저장 요청이 서버에 닿기 전에 취소됐다 — 실제 느린 서버에서는 저장이 적용될 수 있다. 대비는 눈으로만 확인. 샌드박스에서 Google Fonts가 막혀 대체 글꼴로 렌더링됨.
