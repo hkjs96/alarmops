@@ -15,7 +15,7 @@
  */
 import { MAX_ALL_RESPONDERS, MAX_RENOTIFY, MAX_REPEAT, MAX_SENDS_PER_CYCLE, MAX_SENDS_PER_HOUR } from './limits.js';
 import { coveringWindow, type MaintenanceWindow } from './maintenance.js';
-import { isPageableFor, resolvePagingConfig, resolveStep, type EscalationStep, type PagingConfig, type PagingWorld, type ResolvedTarget, type ScopeLevel, type StepChannel, type TargetType } from './paging.js';
+import { allResponders, isPageableFor, resolvePagingConfig, resolveStep, type EscalationStep, type PagingConfig, type PagingWorld, type ResolvedTarget, type ScopeLevel, type StepChannel, type TargetType } from './paging.js';
 import type { Severity } from './types.js';
 
 export interface SnapshotStep {
@@ -53,9 +53,14 @@ export interface SendCapClamp {
   perHour: number;
   repeatCountBefore: number;
   repeatCountAfter: number;
-  /** People removed from steps (largest steps first, last-listed people first). */
+  /** People left out of steps (largest steps first; never someone on shift; last in Responder order first). */
   removedPeople: number;
   removedSteps: number;
+  /** Channels taken off multi-person steps BEFORE anyone was left out (e-mail first, then Slack DM; never SMS or voice). */
+  removedChannels?: number;
+  /** Who was left out, per step — written to the timeline (R-19). */
+  dropped?: Array<{ stepIndex: number; contactId: string; name: string }>;
+  droppedChannels?: Array<{ stepIndex: number; channel: StepChannel }>;
 }
 
 const STYLE_LABEL: Record<PagingConfig['style'], string> = {
@@ -78,8 +83,11 @@ export function buildSnapshot(
   const hit = resolvePagingConfig(configs, path);
   if (!hit) return null;
   const leaveApplied = new Set<string>();
+  const overLimit: NonNullable<SendCapClamp['dropped']> = [];
+  const everyone = hit.config.steps.some((s) => s.targetType === 'ALL_RESPONDERS') ? allResponders(w, at) : null;
   const steps: SnapshotStep[] = [...hit.config.steps].sort((a, b) => a.index - b.index).map((s, i) => {
     const resolved = resolveStep(s, w, at);
+    if (s.targetType === 'ALL_RESPONDERS' && everyone) for (const t of everyone.cut) overLimit.push({ stepIndex: i, contactId: t.contactId, name: t.name });
     if (s.targetType === 'PERSON' && s.targetId && resolved[0] && resolved[0].contactId !== s.targetId) leaveApplied.add(s.targetId);
     const label = s.targetType === 'ROTATION' ? w.rotations.get(s.targetId ?? '')?.name
       : s.targetType === 'ALL_RESPONDERS' ? `everyone in Responders (${resolved.length})` : undefined;
@@ -90,22 +98,37 @@ export function buildSnapshot(
   });
   // R-12: the caps are enforced HERE, with the people the steps reach right now — not only when the order was saved.
   // Responders added after the PUT, or a row written around the API, cannot make one incident send more than the caps.
-  return clampSnapshot({
+  const snap = clampSnapshot({
     capturedAt: at.toISOString(), pagingConfigId: hit.config.id, level: hit.inheritedFrom, planLabel: planLabel(hit.config),
     steps, repeatCount: clampRepeat(hit.config.repeatCount), renotifyAfterAckSec: hit.config.renotifyAfterAckSec ?? null,
     leaveApplied: [...leaveApplied],
   });
+  if (overLimit.length === 0) return snap;
+  // R-19: people beyond MAX_ALL_RESPONDERS are left out too — say who, in the same note.
+  const m = sendsOf(steps.map((s) => ({ atMin: s.atMin, n: stepSends(s) })), snap.repeatCount);
+  const c: SendCapClamp = snap.clamped ?? { perCycle: m.perCycle, perHour: m.perHour, repeatCountBefore: snap.repeatCount, repeatCountAfter: snap.repeatCount, removedPeople: 0, removedSteps: 0 };
+  const gone = new Set(snap.steps.map((s) => s.index));
+  const extra = overLimit.filter((d) => gone.has(d.stepIndex));
+  return { ...snap, clamped: { ...c, removedPeople: c.removedPeople + extra.length, dropped: [...extra, ...(c.dropped ?? [])] } };
 }
 
 const stepSends = (s: Pick<SnapshotStep, 'channels' | 'resolved'>): number => s.channels.reduce((n, ch) => n + (ch === 'SLACK_CHANNEL' ? 1 : s.resolved.length), 0);
 const MAX_SNAPSHOT_STEPS = 50;
 
+/** Channels a multi-person step may lose before a person does, in this order. SMS and voice are never taken off. */
+const DROPPABLE_CHANNELS: readonly StepChannel[] = ['EMAIL', 'SLACK_DM'];
+const personChannels = (s: Pick<SnapshotStep, 'channels'>): number => s.channels.filter((c) => c !== 'SLACK_CHANNEL').length;
+
 /**
- * Cut a frozen call order down to the send caps (R-12). Deterministic, so reading the same row twice gives the same
- * result. In order:
- * 1. while one pass sends more than MAX_SENDS_PER_CYCLE: remove the last-listed person from the step that sends
- *    the most (a step never loses its last person or its Slack channel); when no step can shrink, drop the last step;
- * 2. while the busiest hour sends more than MAX_SENDS_PER_HOUR: one repeat less.
+ * Cut a frozen call order down to the send caps (R-12, R-19). Deterministic, so reading the same row twice gives
+ * the same result. While one pass sends more than MAX_SENDS_PER_CYCLE, in this order:
+ * 1. CHANNELS before people: take e-mail, then Slack DM, off the multi-person step that sends the most (a step
+ *    keeps at least one person channel; SMS, voice and the Slack channel post are never taken off);
+ * 2. then PEOPLE: leave out the last person (Responder order) of the step that sends the most — never someone who
+ *    is on shift now (`onShift`), never a step's last person;
+ * 3. when no step can shrink, drop the last step.
+ * Then, while the busiest hour sends more than MAX_SENDS_PER_HOUR: one repeat less.
+ * Ties between steps go to the LATER step, so the first step stays the fullest.
  * Nothing changes when the order is inside the caps (every order the API accepts, unless responders were added since).
  */
 export function clampSnapshot(snap: AssignmentSnapshot): AssignmentSnapshot {
@@ -114,31 +137,73 @@ export function clampSnapshot(snap: AssignmentSnapshot): AssignmentSnapshot {
   const measure = () => sendsOf(steps.map((s) => ({ atMin: s.atMin, n: stepSends(s) })), repeat);
   const before = measure();
   if (steps === snap.steps && before.perCycle <= MAX_SENDS_PER_CYCLE && before.perHour <= MAX_SENDS_PER_HOUR) return repeat === snap.repeatCount ? snap : { ...snap, repeatCount: repeat };
-  let removedPeople = 0;
+  const dropped: NonNullable<SendCapClamp['dropped']> = [];
+  const droppedChannels: NonNullable<SendCapClamp['droppedChannels']> = [];
   let removedSteps = snap.steps.length - steps.length;
-  steps = steps.map((s) => ({ ...s, resolved: [...s.resolved] }));
-  for (let total = measure().perCycle; total > MAX_SENDS_PER_CYCLE; total = measure().perCycle) {
+  steps = steps.map((s) => ({ ...s, channels: [...s.channels], resolved: [...s.resolved] }));
+  const biggest = (ok: (s: SnapshotStep) => boolean): SnapshotStep | null => {
     let big: SnapshotStep | null = null;
-    for (const s of steps) if (s.resolved.length > 1 && s.channels.some((c) => c !== 'SLACK_CHANNEL') && (!big || stepSends(s) > stepSends(big))) big = s;
-    if (big) { big.resolved.pop(); removedPeople++; } else if (steps.length > 1) { steps = steps.slice(0, -1); removedSteps++; } else break;
+    for (const s of steps) if (ok(s) && (!big || stepSends(s) >= stepSends(big))) big = s;
+    return big;
+  };
+  const over = (): boolean => measure().perCycle > MAX_SENDS_PER_CYCLE;
+  for (const ch of DROPPABLE_CHANNELS) {
+    while (over()) {
+      const s = biggest((x) => x.resolved.length > 1 && x.channels.includes(ch) && personChannels(x) > 1);
+      if (!s) break;
+      s.channels = s.channels.filter((c) => c !== ch);
+      droppedChannels.push({ stepIndex: s.index, channel: ch });
+    }
+  }
+  while (over()) {
+    const s = biggest((x) => x.resolved.length > 1 && personChannels(x) > 0 && x.resolved.some((t) => !t.onShift));
+    if (s) {
+      let i = s.resolved.length - 1;
+      while (s.resolved[i]!.onShift) i--;
+      const [gone] = s.resolved.splice(i, 1);
+      dropped.push({ stepIndex: s.index, contactId: gone!.contactId, name: gone!.name });
+    } else if (steps.length > 1) { steps = steps.slice(0, -1); removedSteps++; } else break;
   }
   const repeatBefore = repeat;
   while (repeat > 0 && measure().perHour > MAX_SENDS_PER_HOUR) repeat--;
-  if (removedPeople === 0 && removedSteps === 0 && repeat === repeatBefore) return repeat === snap.repeatCount ? snap : { ...snap, repeatCount: repeat };
+  if (dropped.length === 0 && droppedChannels.length === 0 && removedSteps === 0 && repeat === repeatBefore) return repeat === snap.repeatCount ? snap : { ...snap, repeatCount: repeat };
+  // people of a step that was dropped as a whole are not "left out of a step"
+  const kept = new Set(steps.map((s) => s.index));
+  const people = dropped.filter((d) => kept.has(d.stepIndex));
+  const channels = droppedChannels.filter((d) => kept.has(d.stepIndex));
   return {
     ...snap, steps, repeatCount: repeat,
-    clamped: snap.clamped ?? { perCycle: before.perCycle, perHour: before.perHour, repeatCountBefore: repeatBefore, repeatCountAfter: repeat, removedPeople, removedSteps },
+    clamped: snap.clamped ?? {
+      perCycle: before.perCycle, perHour: before.perHour, repeatCountBefore: repeatBefore, repeatCountAfter: repeat, removedPeople: people.length, removedSteps,
+      ...(channels.length ? { removedChannels: channels.length, droppedChannels: channels } : {}), ...(people.length ? { dropped: people } : {}),
+    },
   };
 }
 
-/** The timeline line for a clamped order. */
+const CHANNEL_WORD: Record<StepChannel, string> = { SLACK_CHANNEL: 'Slack', SLACK_DM: 'Slack DM', SMS: 'SMS', VOICE: 'call', EMAIL: 'e-mail' };
+const MAX_NAMES_IN_NOTE = 25;
+
+/** The timeline line for a clamped order: what was cut, and WHO is not paged (R-19). Internal staff only — the portal gets a fixed sentence. */
 export function clampMessage(c: SendCapClamp): string {
+  const byStep = <T extends { stepIndex: number }>(xs: T[], word: (x: T) => string): string => {
+    const m = new Map<number, string[]>();
+    for (const x of xs) { const l = m.get(x.stepIndex); if (l) l.push(word(x)); else m.set(x.stepIndex, [word(x)]); }
+    return [...m].sort((a, b) => a[0] - b[0]).map(([i, l]) => `step ${i + 1}: ${[...new Set(l)].join(', ')}`).join('; ');
+  };
+  const people = c.dropped ?? [];
+  const shown = people.slice(0, MAX_NAMES_IN_NOTE);
   const cut = [
-    c.removedPeople ? `${c.removedPeople} ${c.removedPeople === 1 ? 'person was' : 'people were'} left out of the largest steps` : '',
+    c.droppedChannels?.length ? `channels taken off (${byStep(c.droppedChannels, (x) => CHANNEL_WORD[x.channel])})` : '',
+    c.removedPeople ? `${c.removedPeople} ${c.removedPeople === 1 ? 'person was' : 'people were'} left out` : '',
     c.removedSteps ? `${c.removedSteps} step${c.removedSteps === 1 ? ' was' : 's were'} dropped` : '',
     c.repeatCountAfter !== c.repeatCountBefore ? `repeats were reduced from ${c.repeatCountBefore} to ${c.repeatCountAfter}` : '',
   ].filter(Boolean).join('; ');
-  return `Send limit applied: this call order would send ${c.perCycle} notifications per pass and ${c.perHour} in one hour (limits ${MAX_SENDS_PER_CYCLE} / ${MAX_SENDS_PER_HOUR}) — ${cut}. Review the call order or the Responders list.`;
+  const overCaps = c.perCycle > MAX_SENDS_PER_CYCLE || c.perHour > MAX_SENDS_PER_HOUR;
+  const why = overCaps
+    ? `this call order would send ${c.perCycle} notifications per pass and ${c.perHour} in one hour (limits ${MAX_SENDS_PER_CYCLE} / ${MAX_SENDS_PER_HOUR})`
+    : `an "everyone in Responders" step reaches at most ${MAX_ALL_RESPONDERS} people`;
+  const who = shown.length ? ` Not paged — ${byStep(shown, (x) => x.name)}${people.length > shown.length ? ` and ${people.length - shown.length} more` : ''}.` : '';
+  return `Send limit applied: ${why} — ${cut}.${who} People on shift now are always kept. Review the call order or the Responders list.`;
 }
 
 /** R3-3: a broken snapshot is "no snapshot" (the screen must not crash and nobody is paged from garbage). */

@@ -6,9 +6,12 @@
 import { PORTAL_SHOWS_STAFF_NAMES, SMS_VOICE_REQUIRE_VERIFIED } from './limits.js';
 
 const TRUE = new Set(['true', '1', 'yes', 'on']);
-const FALSE = new Set(['false', '0', 'no', 'off', '']);
+const FALSE = new Set(['false', '0', 'no', 'off']);
 
-/** boolean → itself; a clear true/false string → that; anything else (number, object, typo) → undefined. */
+/**
+ * boolean → itself; a clear true/false string → that; anything else (number, object, typo, AND the empty string —
+ * R-21: `SMS_VOICE_REQUIRE_VERIFIED=` in an env file is not a decision to switch the rule off) → undefined.
+ */
 export function parseFlag(v: unknown): boolean | undefined {
   if (v === true || v === false) return v;
   if (typeof v !== 'string') return undefined;
@@ -28,7 +31,9 @@ export const FLAG_ENV = { portalShowsStaffNames: 'PORTAL_SHOWS_STAFF_NAMES', sms
 
 /**
  * Read the flags from an env-like record (the caller passes `process.env`; this package never reads it itself).
- * Unset → default. Unparseable → default + a warning naming the variable (never its value).
+ * Unset → default. Empty or unparseable → default + a warning naming the variable (never its value).
+ * The caller MUST print `warnings` at startup (`for (const w of warnings) console.warn(w)`): they are the only sign
+ * that a flag in the environment was ignored.
  */
 export function loadPolicyFlags(env: Record<string, unknown> = {}): { flags: PolicyFlags; warnings: string[] } {
   const warnings: string[] = [];
@@ -37,7 +42,10 @@ export function loadPolicyFlags(env: Record<string, unknown> = {}): { flags: Pol
     const name = FLAG_ENV[key];
     if (!Object.hasOwn(env, name) || env[name] === undefined) continue;
     const v = parseFlag(env[name]);
-    if (v === undefined) warnings.push(`${name} is not a boolean ("true" / "false"); using the safe default ${String(DEFAULT_FLAGS[key])}.`);
+    if (v === undefined) {
+      const empty = typeof env[name] === 'string' && (env[name] as string).trim() === '';
+      warnings.push(`${name} is ${empty ? 'set but empty' : 'not a boolean ("true" / "false")'}; using the safe default ${String(DEFAULT_FLAGS[key])}.`);
+    }
     else flags[key] = v;
   }
   return { flags, warnings };

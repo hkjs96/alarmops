@@ -22,7 +22,18 @@ export interface Contact {
   phoneVerifiedAt?: Date | null;
   slackVerifiedAt?: Date | null;
 }
-export interface Responder { customerId: string; contactId: string; role: 'PAGEABLE' | 'NOTIFY_ONLY' }
+export interface Responder {
+  customerId: string;
+  contactId: string;
+  role: 'PAGEABLE' | 'NOTIFY_ONLY';
+  /**
+   * Position in the customer's Responders list, 0 = first (R-19). It decides who an ALL_RESPONDERS step keeps when
+   * the list is longer than the limits allow. The store returns responders `ORDER BY "order", "contactId"`; core
+   * sorts by the same key again, so the result never depends on the order rows happen to arrive in. A row without
+   * `order` sorts after every row that has one.
+   */
+  order?: number;
+}
 export interface EscalationStep { index: number; atMin: number; targetType: TargetType; targetId: string | null; channels: StepChannel[]; advanceOnAllFail?: boolean }
 export interface PagingConfig {
   id: string;
@@ -135,7 +146,39 @@ export function isPageableFor(w: PagingWorld, contactId: string): boolean {
 }
 
 /** `kind` lets a serializer tell MSP staff from the customer's own people without another lookup (absent = treat as staff). */
-export interface ResolvedTarget { contactId: string; name: string; via: string; kind?: 'INTERNAL' | 'CUSTOMER' }
+export interface ResolvedTarget {
+  contactId: string; name: string; via: string; kind?: 'INTERNAL' | 'CUSTOMER';
+  /** ALL_RESPONDERS only: this person is on shift in one of the customer's rotations right now. Never cut (R-19). */
+  onShift?: true;
+}
+
+/**
+ * Everyone an ALL_RESPONDERS step would reach at `at`, in the order the limits cut from the END of (R-19):
+ * people on shift now (in any rotation this customer can use) first, then `Responder.order`, then contactId.
+ * PAGEABLE responders only, leave applied (absent person out, replacement in, no duplicates). `kept` is the first
+ * MAX_ALL_RESPONDERS; `cut` is who the limit leaves out — reported, never silent.
+ */
+export function allResponders(w: PagingWorld, at: Date): { kept: ResolvedTarget[]; cut: ResolvedTarget[] } {
+  const onShift = new Set<string>();
+  for (const r of w.rotations.values()) {
+    if (r.scope !== 'MSP' && r.customerId !== w.customerId) continue;
+    const id = onCallAt(r, w, at).contactId;
+    if (id) onShift.add(id);
+  }
+  const listed = w.responders
+    .filter((r) => r.customerId === w.customerId && r.role === 'PAGEABLE')
+    .sort((a, b) => (a.order ?? Infinity) - (b.order ?? Infinity) || (a.contactId < b.contactId ? -1 : a.contactId > b.contactId ? 1 : 0));
+  const out = new Map<string, ResolvedTarget>();
+  for (const r of listed) {
+    const id = applyLeave(w.leaves, r.contactId, at);
+    if (out.has(id) || !isPageableFor(w, id)) continue;
+    const c = w.contacts.get(id);
+    out.set(id, { contactId: id, name: c?.name ?? id, via: id === r.contactId ? 'responders' : 'leave', kind: c?.kind ?? 'INTERNAL', ...(onShift.has(id) ? { onShift: true as const } : {}) });
+  }
+  const all = [...out.values()];
+  const ordered = [...all.filter((t) => t.onShift), ...all.filter((t) => !t.onShift)];
+  return { kept: ordered.slice(0, MAX_ALL_RESPONDERS), cut: ordered.slice(MAX_ALL_RESPONDERS) };
+}
 
 /** Resolve one step to concrete people at `at`. Invalid or inactive targets drop out (they show in health). */
 export function resolveStep(step: EscalationStep, w: PagingWorld, at: Date): ResolvedTarget[] {
@@ -158,14 +201,9 @@ export function resolveStep(step: EscalationStep, w: PagingWorld, at: Date): Res
       push(oc.contactId, oc.via.join('+'));
     }
   } else {
-    // ALL_RESPONDERS: PAGEABLE responders, leave applied (remove absent, add replacement, no dupes).
-    // Cut at MAX_ALL_RESPONDERS (R-1): the API refuses to save such a step, this covers people added afterwards.
-    for (const r of w.responders) {
-      if (out.size >= MAX_ALL_RESPONDERS) break;
-      if (r.customerId !== w.customerId || r.role !== 'PAGEABLE') continue;
-      const rep = applyLeave(w.leaves, r.contactId, at);
-      push(rep, rep === r.contactId ? 'responders' : 'leave');
-    }
+    // ALL_RESPONDERS: cut at MAX_ALL_RESPONDERS (R-1) — the API refuses to save such a step, this covers people
+    // added afterwards. Who stays is decided by `allResponders` (R-19), not by the order of the rows.
+    return allResponders(w, at).kept;
   }
   return [...out.values()];
 }

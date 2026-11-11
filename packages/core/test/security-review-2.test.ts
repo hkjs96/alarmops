@@ -371,7 +371,7 @@ describe('R-12: send caps are enforced when the incident is planned, not only wh
     expect(jobs.length).toBeLessThanOrEqual(MAX_SENDS_PER_HOUR);
     const snap = sim.incident().assignmentSnapshot!;
     expect(snap.clamped).toMatchObject({ perCycle: 4 * 81, repeatCountBefore: 5 });
-    expect(snap.steps.every((st) => st.resolved.length >= 1 && st.channels.length === 5)).toBe(true); // nobody's step is emptied
+    expect(snap.steps.every((st) => st.resolved.length >= 1 && st.channels.includes('SMS') && st.channels.includes('VOICE') && st.channels.includes('SLACK_CHANNEL'))).toBe(true); // nobody's step is emptied; SMS and voice stay (R-19)
     const note = s.eventsOf(sim.incident().id).filter((e) => e.data?.note === 'SEND_CAP_CLAMPED');
     expect(note).toHaveLength(1);
     expect(note[0]!.message).toMatch(/^Send limit applied: this call order would send 324 notifications per pass and \d+ in one hour \(limits 60 \/ 120\)/);
@@ -487,7 +487,7 @@ describe('R-14: due / lease / retry times come from the store’s clock, not fro
 describe('R-15: flags are booleans; env strings go through the typed loader', () => {
   it('parseFlag / loadPolicyFlags: clear values are read, anything else keeps the safe default and is reported', () => {
     expect(['true', 'TRUE', ' 1 ', 'yes', 'on', true].map(parseFlag)).toEqual([true, true, true, true, true, true]);
-    expect(['false', 'False', '0', 'no', 'off', '', false].map(parseFlag)).toEqual([false, false, false, false, false, false, false]);
+    expect(['false', 'False', '0', 'no', 'off', false].map(parseFlag)).toEqual([false, false, false, false, false, false]);
     expect(['flase', 'null', 1, 0, null, undefined, {}, []].map(parseFlag)).toEqual(Array(8).fill(undefined));
     expect(loadPolicyFlags({})).toEqual({ flags: { portalShowsStaffNames: false, smsVoiceRequireVerified: true }, warnings: [] });
     expect(loadPolicyFlags({ PORTAL_SHOWS_STAFF_NAMES: 'false', SMS_VOICE_REQUIRE_VERIFIED: 'true' }).flags).toEqual({ portalShowsStaffNames: false, smsVoiceRequireVerified: true });

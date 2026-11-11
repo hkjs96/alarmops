@@ -79,13 +79,17 @@ describe('R-1: one customer’s call order cannot delay another customer’s pag
     const snap = buildSnapshot([cfg], { customerId: 'cus_mirae' }, s.worldOf('cus_mirae'), T0)!;
     // 999 → MAX_REPEAT → 1: six passes of 57 five minutes apart would be 342 in an hour (cap 120) — R-12
     expect(snap.repeatCount).toBe(1);
-    expect(snap.clamped).toEqual({ perCycle: 1 + MAX_ALL_RESPONDERS * 4, perHour: 6 * (1 + MAX_ALL_RESPONDERS * 4), repeatCountBefore: MAX_REPEAT, repeatCountAfter: 1, removedPeople: 6, removedSteps: 0 });
-    expect(snap.steps[0]!.resolved).toHaveLength(14); // 30 + 3 responders → 20 (MAX_ALL_RESPONDERS) → 14 so that 1 + 14 × 4 ≤ 60
+    // review 3 (R-19): channels go before people — e-mail and Slack DM are taken off, all 20 people keep SMS + call.
+    // The 13 people beyond MAX_ALL_RESPONDERS are named in the note.
+    expect(snap.clamped).toMatchObject({ perCycle: 1 + MAX_ALL_RESPONDERS * 4, perHour: 6 * (1 + MAX_ALL_RESPONDERS * 4), repeatCountBefore: MAX_REPEAT, repeatCountAfter: 1, removedPeople: 13, removedSteps: 0, removedChannels: 2 });
+    expect(snap.clamped!.dropped).toHaveLength(13);
+    expect(snap.steps[0]!.resolved).toHaveLength(MAX_ALL_RESPONDERS); // 30 + 3 responders → 20
+    expect(snap.steps[0]!.channels).toEqual(['SLACK_CHANNEL', 'SMS', 'VOICE']);
     const sim = new Sim(s);
     s.configs.push(cfg);
     closedGroup(s, { customerId: 'cus_mirae', at: T0, alerts: [{ id: 'a' }] });
     return sim.tick(['group', 'escalation']).then(() => {
-      expect(s.jobList()).toHaveLength(57); // 1 + 14 × 4; 1 + 20 × 4 = 81 without the cut
+      expect(s.jobList()).toHaveLength(41); // 1 + 20 × 2; 1 + 20 × 4 = 81 without the cut
       expect(s.jobList().length).toBeLessThanOrEqual(MAX_SENDS_PER_CYCLE);
       // a snapshot row edited by hand is clamped when it is read
       const inc = sim.incident();

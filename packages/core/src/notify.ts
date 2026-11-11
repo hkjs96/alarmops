@@ -88,27 +88,51 @@ export type SendResult =
  *    is bounded whatever the provider sends (a 100k-character body used to hold the event loop for 12 s).
  * 2. NFKC-normalise (full-width digits, `＠`, compatibility hyphens become ASCII) and undo the percent-encodings
  *    that split an address (%40, %20, %2B).
- * 3. Mask, most specific first: JWTs, AWS access key ids, `Bearer …`, `name=value` / `name: value` / `name is value`
- *    for common secret names, e-mail-like `x@y` (no TLD needed, any script), Slack ids, long opaque tokens, and
- *    any run of 7+ digits of ANY script (`\p{Nd}`) with separators between them.
- * Patterns have no nested unbounded repetition over the same characters. Over-masking is accepted; leaking is not.
+ * 3. Remove invisible characters (\p{Cf}: zero-width spaces, soft hyphen, bidi marks) and undo HTML entities and
+ *    double percent-encoding, so what is matched is what a person would read (R-20).
+ * 4. Mask, most specific first: JWTs, AWS access key ids, `sk-…` / `xoxb-…` tokens, Slack webhook paths, `Bearer …`;
+ *    `"name": "value"` / `name=value` / `name(value)` for any name that CONTAINS key, token, secret, password, auth
+ *    (so authorization too), credential, signature, session or cookie — JSON, snake_case, camelCase, any case (R-20);
+ *    `name value` / `name is value` for common secret names; e-mail-like `x@y` and `x at y.z` (no TLD needed, any
+ *    script); Slack ids; long opaque tokens; any run of 7+ digits of ANY script (`\p{Nd}`) with up to 6 separator
+ *    characters between them.
+ * Every repetition is bounded and the input is at most 300 characters. Over-masking is accepted; leaking is not.
  */
-const SECRET_NAME = '(?:apikey|api|key|secret|token|password|passwd|pwd|pw|pass|auth|authorization|bearer|basic|session|sid|cookie|signature|credentials?|acct|account)';
+const SECRET_NAME = '(?:apikey|api|key|secret|token|password|passwd|pwd|pw|pass|auth|authorization|bearer|basic|session|sid|cookie|signature|sig|otp|pin|credentials?|acct|account)';
+/** R-20: a name that CONTAINS one of these, in any case and any style (api_key, authToken, clientSecret, X-Authorization). */
+const SECRET_PART = '(?:key|token|secret|passw(?:or)?d|pwd|auth|credential|signature|session|cookie)';
+const VALUE = `(?:"[^"]{0,200}"?|'[^']{0,200}'?|\\[(?:secret|email|number|id)\\]|[^\\s"',;&)\\]}]{1,200})`;
+const DIGIT_GAP = '[\\s().\\-\\u2010-\\u2015\\u2212/_,:*|~\\[\\]]{0,6}';
 const MASKS: Array<[RegExp, string]> = [
   [/eyJ[\w-]{4,}\.[\w-]{4,}(?:\.[\w-]*)?/g, '[secret]'],
   [/(?<![A-Za-z0-9])(?:AKIA|ASIA|AIDA|AROA|AGPA|ANPA)[A-Z0-9]{12,}/g, '[secret]'],
   [/(?<![A-Za-z0-9])(?:sk|pk|rk)_[A-Za-z0-9_]{3,}/g, '[secret]'],
+  [/(?<![A-Za-z0-9])(?:xox[a-z]|sk|pk|rk)-[A-Za-z0-9-]{4,}/gi, '[secret]'],
+  [/(?:hooks\.slack\.com|\/services\/)[^\s"',;]{1,200}/gi, '[secret]'],
   [/(?<![A-Za-z0-9])(?:bearer|basic)\s+[^\s"',;]+/gi, '[secret]'],
-  [new RegExp(`(?<![A-Za-z0-9])(?:[A-Za-z0-9]+[_.-])*${SECRET_NAME}(?:[_.-][A-Za-z0-9]+)*\\s*(?:[:=]\\s*|\\s+is\\s+|\\s+)["']?(?:\\[(?:secret|email|number|id)\\]|[^\\s"',;&)\\]]+)`, 'gi'), '[secret]'],
-  [/[^\s@<>()"',;:[\]]{1,64}@[^\s@<>()"',;[\]]{1,255}/gu, '[email]'],
+  // R-20: JSON bodies and camelCase — `{"api_key":"…"}`, `{'token': '…'}`, `authToken=…`, `clientSecret: …`, `token(…)`.
+  // The name may be quoted, the value may be a quoted string with spaces in it.
+  [new RegExp(`["']?(?<![A-Za-z0-9])[A-Za-z0-9_.-]{0,40}${SECRET_PART}[A-Za-z0-9_.-]{0,40}["']?\\s{0,3}[:=(]\\s{0,3}${VALUE}`, 'gi'), '[secret]'],
+  [new RegExp(`(?<![A-Za-z0-9])(?:[A-Za-z0-9]+[_.-])*${SECRET_NAME}(?:[_.-][A-Za-z0-9]+)*["']?\\s*(?:[:=(]\\s*|\\s+is\\s+|\\s+)${VALUE}`, 'gi'), '[secret]'],
+  [/[^\s@<>()"',;:[\]]{1,64}\s{0,2}@(?:\s{0,2}[^\s@<>()"',;[\]]{1,255})?/gu, '[email]'],
+  [/[\w.+-]{1,64}\s{0,2}(?:\(at\)|\[at\]|\bat\b)\s{0,2}[\w-]{1,63}(?:\.[\w-]{1,63}){1,4}/gi, '[email]'],
   [/(?<![A-Za-z0-9])[CUWDGTB](?=[A-Z0-9]{8,11}(?![A-Za-z0-9]))[A-Z]*\d[A-Z0-9]*/g, '[id]'],
   [/[A-Za-z0-9_\-+=]{24,}/g, '[secret]'],
-  [/\+?\p{Nd}(?:[\s().\-\u2010-\u2015\u2212/_]{0,3}\p{Nd}){6,}/gu, '[number]'],
+  [new RegExp(`\\+?\\p{Nd}(?:${DIGIT_GAP}\\p{Nd}){6,}`, 'gu'), '[number]'],
 ];
+const ENTITIES: Record<string, string> = { '&nbsp;': ' ', '&#64;': '@', '&#x40;': '@', '&commat;': '@', '&#43;': '+', '&#45;': '-', '&amp;': '&', '&quot;': '"', '&#34;': '"', '&#39;': "'", '&apos;': "'" };
+const PERCENT: Record<string, string> = { '%40': '@', '%20': ' ', '%2b': '+', '%3d': '=', '%3a': ':', '%22': '"', '%27': "'" };
 
 export function sanitizeProviderError(raw: unknown): string {
   let s = (typeof raw === 'string' ? raw : String(raw)).slice(0, PROVIDER_ERROR_MAX_CHARS);
-  s = s.normalize('NFKC').slice(0, PROVIDER_ERROR_MAX_CHARS).replace(/%(?:40|20|2[bB])/g, (m) => (m === '%40' ? '@' : m === '%20' ? ' ' : '+'));
+  s = s.normalize('NFKC').slice(0, PROVIDER_ERROR_MAX_CHARS);
+  // R-20: characters that are not shown (zero-width spaces and joiners, soft hyphen, bidi marks, BOM — \p{Cf}) are
+  // removed BEFORE anything is matched: `010<ZWSP>1234<ZWSP>5678` reads as one number on screen.
+  s = s.replace(/[\p{Cf}͏ᅟᅠㅤﾠ]/gu, '');
+  // the encodings that split an address or hide a separator: %25xx (double-encoded), %40 %20 %2B %3D %3A, &nbsp; &#64; …
+  s = s.replace(/%25(?=[0-9a-fA-F]{2})/g, '%').replace(/%25(?=[0-9a-fA-F]{2})/g, '%');
+  s = s.replace(/%(?:40|20|2[bB]|3[dD]|3[aA]|22|27)/g, (m) => PERCENT[m.toLowerCase()]!);
+  s = s.replace(/&(?:nbsp|commat|amp|quot|apos|#64|#x40|#43|#45|#34|#39);/gi, (m) => ENTITIES[m.toLowerCase()] ?? ' ');
   for (const [re, to] of MASKS) s = s.replace(re, to);
   return s.slice(0, PROVIDER_ERROR_MAX_CHARS);
 }
