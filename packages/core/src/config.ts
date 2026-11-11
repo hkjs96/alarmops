@@ -3,7 +3,7 @@
  * 'false' is truthy, so a flag must never be passed through as-is. Every flag is parsed here, and a value that is
  * not clearly true or false becomes the SAFE value with a warning — it never switches a protection off.
  */
-import { PORTAL_SHOWS_STAFF_NAMES, SMS_VOICE_REQUIRE_VERIFIED } from './limits.js';
+import { PORTAL_SHOWS_STAFF_NAMES, SMS_VOICE_REQUIRE_VERIFIED, STORE_PROVIDER_TEXT } from './limits.js';
 
 const TRUE = new Set(['true', '1', 'yes', 'on']);
 const FALSE = new Set(['false', '0', 'no', 'off']);
@@ -24,10 +24,12 @@ export interface PolicyFlags {
   portalShowsStaffNames: boolean;
   /** D-37. false only when explicitly switched off. */
   smsVoiceRequireVerified: boolean;
+  /** R-20 (review 4, PROPOSED). true only when explicitly switched on: keep the masked provider text (300) for OPERATOR+. */
+  storeProviderText: boolean;
 }
-export const DEFAULT_FLAGS: Readonly<PolicyFlags> = Object.freeze({ portalShowsStaffNames: PORTAL_SHOWS_STAFF_NAMES, smsVoiceRequireVerified: SMS_VOICE_REQUIRE_VERIFIED });
+export const DEFAULT_FLAGS: Readonly<PolicyFlags> = Object.freeze({ portalShowsStaffNames: PORTAL_SHOWS_STAFF_NAMES, smsVoiceRequireVerified: SMS_VOICE_REQUIRE_VERIFIED, storeProviderText: STORE_PROVIDER_TEXT });
 
-export const FLAG_ENV = { portalShowsStaffNames: 'PORTAL_SHOWS_STAFF_NAMES', smsVoiceRequireVerified: 'SMS_VOICE_REQUIRE_VERIFIED' } as const;
+export const FLAG_ENV = { portalShowsStaffNames: 'PORTAL_SHOWS_STAFF_NAMES', smsVoiceRequireVerified: 'SMS_VOICE_REQUIRE_VERIFIED', storeProviderText: 'STORE_PROVIDER_TEXT' } as const;
 
 /**
  * Read the flags from an env-like record (the caller passes `process.env`; this package never reads it itself).

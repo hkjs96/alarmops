@@ -112,11 +112,18 @@ export function shiftAt(r: Rotation, at: Date): ShiftInfo {
   const len = SHIFT_MS[r.cadence];
   const index = Math.floor((at.getTime() - r.anchorAt.getTime()) / len);
   const start = new Date(r.anchorAt.getTime() + index * len);
-  const members = [...r.members].sort((a, b) => a.order - b.order);
+  const members = [...r.members].sort((a, b) => cmpOrder(a.order, b.order) || (a.contactId < b.contactId ? -1 : a.contactId > b.contactId ? 1 : 0));
   const n = members.length;
   const m = n ? members[((index % n) + n) % n] : undefined;
   return { index, start, end: new Date(start.getTime() + len), scheduledContactId: m?.contactId ?? null };
 }
+
+/**
+ * N-37: an `order` counts only when it is a finite number. NaN, ±Infinity, null, a string or a missing value all
+ * mean "no order" and sort after every real one — `NaN - x` is NaN, which made the sort depend on the row order.
+ */
+export const orderKey = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : Infinity);
+const cmpOrder = (a: unknown, b: unknown): number => { const x = orderKey(a); const y = orderKey(b); return x < y ? -1 : x > y ? 1 : 0; };
 
 /** On-call = members[shift mod N] → accepted override (latest start wins, R2-3) → active leave (DATA-MODEL §5). */
 export function onCallAt(r: Rotation, w: Pick<PagingWorld, 'overrides' | 'leaves'>, at: Date): { contactId: string | null; via: string[] } {
@@ -148,7 +155,11 @@ export function isPageableFor(w: PagingWorld, contactId: string): boolean {
 /** `kind` lets a serializer tell MSP staff from the customer's own people without another lookup (absent = treat as staff). */
 export interface ResolvedTarget {
   contactId: string; name: string; via: string; kind?: 'INTERNAL' | 'CUSTOMER';
-  /** ALL_RESPONDERS only: this person is on shift in one of the customer's rotations right now. Never cut (R-19). */
+  /**
+   * ALL_RESPONDERS only: this person is on shift in one of the customer's rotations right now. Kept before everyone
+   * else (R-19) — up to MAX_ALL_RESPONDERS; with more people on shift than that, the last ones in Responder order
+   * are cut like anyone else and reported as such.
+   */
   onShift?: true;
 }
 
@@ -156,7 +167,8 @@ export interface ResolvedTarget {
  * Everyone an ALL_RESPONDERS step would reach at `at`, in the order the limits cut from the END of (R-19):
  * people on shift now (in any rotation this customer can use) first, then `Responder.order`, then contactId.
  * PAGEABLE responders only, leave applied (absent person out, replacement in, no duplicates). `kept` is the first
- * MAX_ALL_RESPONDERS; `cut` is who the limit leaves out — reported, never silent.
+ * MAX_ALL_RESPONDERS; `cut` is who the limit leaves out — reported, never silent. When MORE than MAX_ALL_RESPONDERS
+ * people are on shift, `cut` contains on-shift people (they keep their `onShift` mark so the note can say so).
  */
 export function allResponders(w: PagingWorld, at: Date): { kept: ResolvedTarget[]; cut: ResolvedTarget[] } {
   const onShift = new Set<string>();
@@ -167,7 +179,7 @@ export function allResponders(w: PagingWorld, at: Date): { kept: ResolvedTarget[
   }
   const listed = w.responders
     .filter((r) => r.customerId === w.customerId && r.role === 'PAGEABLE')
-    .sort((a, b) => (a.order ?? Infinity) - (b.order ?? Infinity) || (a.contactId < b.contactId ? -1 : a.contactId > b.contactId ? 1 : 0));
+    .sort((a, b) => cmpOrder(a.order, b.order) || (a.contactId < b.contactId ? -1 : a.contactId > b.contactId ? 1 : 0));
   const out = new Map<string, ResolvedTarget>();
   for (const r of listed) {
     const id = applyLeave(w.leaves, r.contactId, at);

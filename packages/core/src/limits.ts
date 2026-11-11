@@ -60,9 +60,22 @@ export const NON_SEV1_RESERVE_PCT = 20;
 /** A page held by a maintenance window is looked at again at least this often (a window may be revoked early) — N-13. */
 export const MAINTENANCE_RECHECK_SEC = 300;
 
-// ── provider text (R-13) ──
+// ── provider text (R-13, R-20) ──
 /** Provider error text is cut to this BEFORE any pattern runs. */
 export const PROVIDER_ERROR_MAX_CHARS = 300;
+/**
+ * R-20 (security review 4) — is the provider's own error text kept? PROPOSED default, the real decision belongs to
+ * the PR that adds the first real provider (that is when real error bodies start to arrive).
+ * - false (default): what is stored (`NotificationJob.lastError`, `NotificationLog.error`) is the masked text cut
+ *   to PROVIDER_EXCERPT_MAX_CHARS, and the API shows it to ADMIN only. Everyone else works with the reason code
+ *   (`errorCode` / `reason`). Masking by patterns can never be complete; a short excerpt for few readers limits
+ *   what a miss can leak.
+ * - true: the masked text up to PROVIDER_ERROR_MAX_CHARS is stored and shown to OPERATOR and ADMIN (the behaviour
+ *   before review 4).
+ * Only the boolean `true` (env: true / 1 / yes / on) switches it on. Core never stores or logs the raw text.
+ */
+export const STORE_PROVIDER_TEXT = false;
+export const PROVIDER_EXCERPT_MAX_CHARS = 120;
 
 // ── idempotency store (N-19) ──
 /** Live Idempotency-Key entries one user may hold; the oldest is dropped when a new one is stored. */

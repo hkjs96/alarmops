@@ -123,7 +123,8 @@ describe('R-19: who the send limits leave out does not depend on the order of th
     expect(msg).toMatch(/channels taken off \(step 1: e-mail, Slack DM; step 2: e-mail, Slack DM; step 3: e-mail, Slack DM; step 4: e-mail, Slack DM\)/);
     expect(msg).toMatch(/Not paged — step 1: .*Staff 39/);
     expect(msg).toMatch(/and \d+ more\./);
-    expect(msg).toContain('People on shift now are always kept.');
+    expect(msg).toContain('People on shift are kept first, up to 20 per step.'); // review 4: the old sentence ("always kept") was not true for more than 20 on shift
+    expect(msg).toMatch(/Not paged in ANY step: Staff 05/);
     expect(msg).not.toContain('Haeun');
     // every dropped person is in the event data, by step
     const dropped = note[0]!.data!.dropped as Array<{ stepIndex: number; contactId: string; name: string }>;
@@ -217,7 +218,7 @@ describe('R-21: an empty value for a safety flag keeps the safe default and is r
     for (const v of ['', ' ', '\t', '\n']) {
       expect(parseFlag(v)).toBeUndefined();
       const r = loadPolicyFlags({ SMS_VOICE_REQUIRE_VERIFIED: v, PORTAL_SHOWS_STAFF_NAMES: v });
-      expect(r.flags).toEqual({ smsVoiceRequireVerified: true, portalShowsStaffNames: false });
+      expect(r.flags).toEqual({ smsVoiceRequireVerified: true, portalShowsStaffNames: false, storeProviderText: false });
       expect(r.warnings).toEqual([
         'PORTAL_SHOWS_STAFF_NAMES is set but empty; using the safe default false.',
         'SMS_VOICE_REQUIRE_VERIFIED is set but empty; using the safe default true.',
@@ -233,7 +234,7 @@ describe('R-21: an empty value for a safety flag keeps the safe default and is r
       expect(r.warnings[0]).toMatch(/^SMS_VOICE_REQUIRE_VERIFIED is not a boolean/);
       if (typeof v === 'string') expect(r.warnings[0]).not.toContain(v);
     }
-    expect(loadPolicyFlags({ SMS_VOICE_REQUIRE_VERIFIED: 'false' })).toEqual({ flags: { smsVoiceRequireVerified: false, portalShowsStaffNames: false }, warnings: [] });
+    expect(loadPolicyFlags({ SMS_VOICE_REQUIRE_VERIFIED: 'false' })).toEqual({ flags: { smsVoiceRequireVerified: false, portalShowsStaffNames: false, storeProviderText: false }, warnings: [] });
     expect(loadPolicyFlags({ SMS_VOICE_REQUIRE_VERIFIED: ' OFF ' }).flags.smsVoiceRequireVerified).toBe(false);
     expect(loadPolicyFlags({}).warnings).toEqual([]);
     expect(loadPolicyFlags({ SMS_VOICE_REQUIRE_VERIFIED: undefined }).warnings).toEqual([]);

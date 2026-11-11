@@ -492,11 +492,11 @@ describe('R-15: flags are booleans; env strings go through the typed loader', ()
     expect(['true', 'TRUE', ' 1 ', 'yes', 'on', true].map(parseFlag)).toEqual([true, true, true, true, true, true]);
     expect(['false', 'False', '0', 'no', 'off', false].map(parseFlag)).toEqual([false, false, false, false, false, false]);
     expect(['flase', 'null', 1, 0, null, undefined, {}, []].map(parseFlag)).toEqual(Array(8).fill(undefined));
-    expect(loadPolicyFlags({})).toEqual({ flags: { portalShowsStaffNames: false, smsVoiceRequireVerified: true }, warnings: [] });
-    expect(loadPolicyFlags({ PORTAL_SHOWS_STAFF_NAMES: 'false', SMS_VOICE_REQUIRE_VERIFIED: 'true' }).flags).toEqual({ portalShowsStaffNames: false, smsVoiceRequireVerified: true });
-    expect(loadPolicyFlags({ PORTAL_SHOWS_STAFF_NAMES: 'true', SMS_VOICE_REQUIRE_VERIFIED: 'false' }).flags).toEqual({ portalShowsStaffNames: true, smsVoiceRequireVerified: false });
+    expect(loadPolicyFlags({})).toEqual({ flags: { portalShowsStaffNames: false, smsVoiceRequireVerified: true, storeProviderText: false }, warnings: [] });
+    expect(loadPolicyFlags({ PORTAL_SHOWS_STAFF_NAMES: 'false', SMS_VOICE_REQUIRE_VERIFIED: 'true' }).flags).toEqual({ portalShowsStaffNames: false, smsVoiceRequireVerified: true, storeProviderText: false });
+    expect(loadPolicyFlags({ PORTAL_SHOWS_STAFF_NAMES: 'true', SMS_VOICE_REQUIRE_VERIFIED: 'false' }).flags).toEqual({ portalShowsStaffNames: true, smsVoiceRequireVerified: false, storeProviderText: false });
     const typo = loadPolicyFlags({ PORTAL_SHOWS_STAFF_NAMES: 'ture', SMS_VOICE_REQUIRE_VERIFIED: 'nope' });
-    expect(typo.flags).toEqual({ portalShowsStaffNames: false, smsVoiceRequireVerified: true });
+    expect(typo.flags).toEqual({ portalShowsStaffNames: false, smsVoiceRequireVerified: true, storeProviderText: false });
     expect(typo.warnings).toHaveLength(2);
     expect(typo.warnings.join(' ')).not.toMatch(/ture|nope/); // the value is never echoed
     // inherited keys are not configuration

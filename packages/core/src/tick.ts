@@ -19,7 +19,7 @@ import { protectUnlessFalse } from './config.js';
 import { LANE_CONCURRENCY, NOTIFY_RESERVE_MS, SEND_TIMEOUT_MS, STORE_CALL_TIMEOUT_MS, TICK_RESPONSE_LIMIT_MS } from './limits.js';
 import type { MaintenanceWindow } from './maintenance.js';
 import {
-  dispatchJob, LANES, MAX_ATTEMPTS, NOTIFY_BATCH, sanitizeProviderError,
+  dispatchJob, LANES, MAX_ATTEMPTS, NOTIFY_BATCH, providerText,
   type DeliveryLog, type DeliveryReason, type NotificationJob, type SenderKind, type Senders,
 } from './notify.js';
 import type { Contact, PagingConfig, PagingWorld } from './paging.js';
@@ -245,6 +245,8 @@ export interface TickDeps {
   sendTimeoutMs?: number;
   /** Q-DM-16 / D-37 switch (default SMS_VOICE_REQUIRE_VERIFIED). Only the boolean `false` switches it off (R-15). */
   smsVoiceRequireVerified?: boolean;
+  /** R-20 / STORE_PROVIDER_TEXT (default false). Only the boolean `true` keeps the masked provider text beyond the excerpt. */
+  storeProviderText?: boolean;
   /** Provider calls in flight per lane (default LANE_CONCURRENCY). */
   laneConcurrency?: number;
   log?: (level: 'info' | 'warn' | 'error', msg: string, data?: Record<string, unknown>) => void;
@@ -825,7 +827,7 @@ async function sendOne(c: Ctx, job: NotificationJob, windows: Map<string, Promis
     }
     const out = await dispatchJob(job, {
       now, senders: c.senders, incidentStatus: inc?.status ?? null, contact: person, slackChannels: slack.channels, slackOwner: slack.owner, mutedUntil,
-      requireVerifiedPhone: protectUnlessFalse(c.smsVoiceRequireVerified), sendTimeoutMs: c.sendTimeoutMs,
+      requireVerifiedPhone: protectUnlessFalse(c.smsVoiceRequireVerified), sendTimeoutMs: c.sendTimeoutMs, storeProviderText: c.storeProviderText === true,
       beginSend: async () => (attempt = await c.repo.beginSend(job.id, job.claimSeq)),
     });
     if (out.status === 'LOST') return 'NONE';
@@ -866,7 +868,7 @@ async function sendOne(c: Ctx, job: NotificationJob, windows: Map<string, Promis
     try {
       if (attempt === undefined) attempt = await c.repo.beginSend(job.id, job.claimSeq);
       if (attempt != null) {
-        const error = sanitizeProviderError(`internal error before or after the send: ${errMsg(err)}`);
+        const error = providerText(`internal error before or after the send: ${errMsg(err)}`, c.storeProviderText);
         if (attempt >= MAX_ATTEMPTS) {
           const channel = job.channel === 'SLACK_BOT' || job.channel === 'SLACK_WEBHOOK';
           const ok = await c.repo.completeJob(job.id, job.claimSeq, { status: 'FAILED', error, errorCode: 'GAVE_UP' }, {

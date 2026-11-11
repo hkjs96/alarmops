@@ -5,8 +5,8 @@
  * provider kind (Slack, SMS, voice, email). Providers are adapters behind this port; core has no SDK imports.
  */
 import type { NotificationIntent, NotifyChannel, NotifyPurpose } from './escalation.js';
-import { protectUnlessFalse } from './config.js';
-import { MAINTENANCE_RECHECK_SEC, NON_SEV1_RESERVE_PCT, PROVIDER_ERROR_MAX_CHARS, SEND_TIMEOUT_MS, SMS_VOICE_REQUIRE_VERIFIED } from './limits.js';
+import { allowOnlyIfTrue, protectUnlessFalse } from './config.js';
+import { MAINTENANCE_RECHECK_SEC, NON_SEV1_RESERVE_PCT, PROVIDER_ERROR_MAX_CHARS, PROVIDER_EXCERPT_MAX_CHARS, SEND_TIMEOUT_MS, SMS_VOICE_REQUIRE_VERIFIED } from './limits.js';
 import type { Contact } from './paging.js';
 import type { Severity } from './types.js';
 
@@ -30,7 +30,7 @@ export interface NotificationJob extends NotificationIntent {
    * keeps its place in the queue instead of being re-stamped "now".
    */
   dueAt: Date;
-  /** Sanitised text (never a phone number or a key); for SKIPPED jobs the skip reason. */
+  /** Masked provider text (`providerText`; an excerpt unless STORE_PROVIDER_TEXT is on); for SKIPPED jobs the skip reason. */
   lastError: string | null;
   providerMessageId: string | null;
   createdAt: Date;
@@ -96,13 +96,27 @@ export type SendResult =
  *    `name value` / `name is value` for common secret names; e-mail-like `x@y` and `x at y.z` (no TLD needed, any
  *    script); Slack ids; long opaque tokens; any run of 7+ digits of ANY script (`\p{Nd}`) with up to 6 separator
  *    characters between them.
+ * 5. Security review 4 (R-20): `\"` and `\uXXXX` / `\xXX` escapes are undone first (JSON inside a JSON string);
+ *    a value may be an ARRAY (`"token":["…","…"]`); `name => value`, `name[value]`, `name{value}`; XML elements and
+ *    attributes whose tag name contains a secret word (`<apiKey>…</apiKey>`, `<token value="…"/>`); more names
+ *    (passphrase, passcode, jwt, csrf, nonce, client_id, 비밀번호, 암호, 토큰, 인증, пароль, токен, ключ); digit runs
+ *    separated by middle dots (`010·1234·5678`, also ㆍ ‧ • ∙ ・) and by `= + # " ' \ →`.
  * Every repetition is bounded and the input is at most 300 characters. Over-masking is accepted; leaking is not.
+ *
+ * THIS IS NOT COMPLETE AND CANNOT BE. Known to pass (review 4): a secret under a neutral key
+ * (`{"name":"api_key","value":"…"}`, `{"k":"…"}`), prose (`the secret was …`), short vendor prefixes (`glpat-…`),
+ * numbers written as words or split by 7+ separators, e-mail addresses written `x AT y DOT z`. That is why the text
+ * is, by default, stored only as a 120-character excerpt for ADMIN (`STORE_PROVIDER_TEXT`, limits.ts).
  */
-const SECRET_NAME = '(?:apikey|api|key|secret|token|password|passwd|pwd|pw|pass|auth|authorization|bearer|basic|session|sid|cookie|signature|sig|otp|pin|credentials?|acct|account)';
+const SECRET_NAME = '(?:apikey|api|key|secret|token|password|passwd|pwd|pw|pass|auth|authorization|bearer|basic|digest|session|sid|cookie|signature|sig|otp|pin|code|credentials?|acct|account)';
 /** R-20: a name that CONTAINS one of these, in any case and any style (api_key, authToken, clientSecret, X-Authorization). */
-const SECRET_PART = '(?:key|token|secret|passw(?:or)?d|pwd|auth|credential|signature|session|cookie)';
-const VALUE = `(?:"[^"]{0,200}"?|'[^']{0,200}'?|\\[(?:secret|email|number|id)\\]|[^\\s"',;&)\\]}]{1,200})`;
-const DIGIT_GAP = '[\\s().\\-\\u2010-\\u2015\\u2212/_,:*|~\\[\\]]{0,6}';
+const SECRET_PART = '(?:key|token|secret|pass(?:w(?:or)?d|phrase|code)|pwd|auth|credential|signature|session|cookie|jwt|csrf|nonce|client[_-]?id|비밀번호|암호|토큰|인증|пароль|токен|ключ|секрет)';
+/** A value: a quoted string, an ARRAY (review 4), or a bare run. */
+const VALUE = `(?:"[^"]{0,200}"?|'[^']{0,200}'?|\\[[^\\]]{0,200}\\]?|[^\\s"',;&)\\]}]{1,200})`;
+/** name → value separators: `:` `=` `(` and, since review 4, `=>` `[` `{` (not the `[` of a mask that is already there). */
+const SEP = '(?:=>|[:=({]|\\[(?!(?:secret|email|number|id)\\]))';
+/** Between two digits of one number. Review 4: middle dots (· ㆍ ᆞ ‧ • ∙ ・) and = + # " ' \\ →. */
+const DIGIT_GAP = '[\\s().\\-\\u2010-\\u2015\\u2212/_,:*|~\\[\\]\\u00b7\\u318d\\u119e\\u2027\\u2022\\u2219\\u30fb=+#"\'\\\\\\u2192]{0,6}';
 const MASKS: Array<[RegExp, string]> = [
   [/eyJ[\w-]{4,}\.[\w-]{4,}(?:\.[\w-]*)?/g, '[secret]'],
   [/(?<![A-Za-z0-9])(?:AKIA|ASIA|AIDA|AROA|AGPA|ANPA)[A-Z0-9]{12,}/g, '[secret]'],
@@ -112,15 +126,17 @@ const MASKS: Array<[RegExp, string]> = [
   [/(?<![A-Za-z0-9])(?:bearer|basic)\s+[^\s"',;]+/gi, '[secret]'],
   // R-20: JSON bodies and camelCase — `{"api_key":"…"}`, `{'token': '…'}`, `authToken=…`, `clientSecret: …`, `token(…)`.
   // The name may be quoted, the value may be a quoted string with spaces in it.
-  [new RegExp(`["']?(?<![A-Za-z0-9])[A-Za-z0-9_.-]{0,40}${SECRET_PART}[A-Za-z0-9_.-]{0,40}["']?\\s{0,3}[:=(]\\s{0,3}${VALUE}`, 'gi'), '[secret]'],
-  [new RegExp(`(?<![A-Za-z0-9])(?:[A-Za-z0-9]+[_.-])*${SECRET_NAME}(?:[_.-][A-Za-z0-9]+)*["']?\\s*(?:[:=(]\\s*|\\s+is\\s+|\\s+)${VALUE}`, 'gi'), '[secret]'],
+  // review 4: XML — an element or an attribute-only tag whose NAME contains a secret word, with its text.
+  [new RegExp(`<[A-Za-z0-9_.:-]{0,40}${SECRET_PART}[^<>]{0,200}>[^<]{0,200}`, 'gi'), '[secret]'],
+  [new RegExp(`["']?(?<![A-Za-z0-9])[A-Za-z0-9_.-]{0,40}${SECRET_PART}[A-Za-z0-9_.-]{0,40}["']?\\s{0,3}${SEP}\\s{0,3}${VALUE}`, 'gi'), '[secret]'],
+  [new RegExp(`(?<![A-Za-z0-9])(?:[A-Za-z0-9]+[_.-])*${SECRET_NAME}(?:[_.-][A-Za-z0-9]+)*["']?\\s*(?:${SEP}\\s*|\\s+is\\s+|\\s+)${VALUE}`, 'gi'), '[secret]'],
   [/[^\s@<>()"',;:[\]]{1,64}\s{0,2}@(?:\s{0,2}[^\s@<>()"',;[\]]{1,255})?/gu, '[email]'],
   [/[\w.+-]{1,64}\s{0,2}(?:\(at\)|\[at\]|\bat\b)\s{0,2}[\w-]{1,63}(?:\.[\w-]{1,63}){1,4}/gi, '[email]'],
   [/(?<![A-Za-z0-9])[CUWDGTB](?=[A-Z0-9]{8,11}(?![A-Za-z0-9]))[A-Z]*\d[A-Z0-9]*/g, '[id]'],
   [/[A-Za-z0-9_\-+=]{24,}/g, '[secret]'],
   [new RegExp(`\\+?\\p{Nd}(?:${DIGIT_GAP}\\p{Nd}){6,}`, 'gu'), '[number]'],
 ];
-const ENTITIES: Record<string, string> = { '&nbsp;': ' ', '&#64;': '@', '&#x40;': '@', '&commat;': '@', '&#43;': '+', '&#45;': '-', '&amp;': '&', '&quot;': '"', '&#34;': '"', '&#39;': "'", '&apos;': "'" };
+const ENTITIES: Record<string, string> = { '&lt;': '<', '&gt;': '>', '&#60;': '<', '&#62;': '>', '&nbsp;': ' ', '&#64;': '@', '&#x40;': '@', '&commat;': '@', '&#43;': '+', '&#45;': '-', '&amp;': '&', '&quot;': '"', '&#34;': '"', '&#39;': "'", '&apos;': "'" };
 const PERCENT: Record<string, string> = { '%40': '@', '%20': ' ', '%2b': '+', '%3d': '=', '%3a': ':', '%22': '"', '%27': "'" };
 
 export function sanitizeProviderError(raw: unknown): string {
@@ -132,9 +148,26 @@ export function sanitizeProviderError(raw: unknown): string {
   // the encodings that split an address or hide a separator: %25xx (double-encoded), %40 %20 %2B %3D %3A, &nbsp; &#64; …
   s = s.replace(/%25(?=[0-9a-fA-F]{2})/g, '%').replace(/%25(?=[0-9a-fA-F]{2})/g, '%');
   s = s.replace(/%(?:40|20|2[bB]|3[dD]|3[aA]|22|27)/g, (m) => PERCENT[m.toLowerCase()]!);
-  s = s.replace(/&(?:nbsp|commat|amp|quot|apos|#64|#x40|#43|#45|#34|#39);/gi, (m) => ENTITIES[m.toLowerCase()] ?? ' ');
+  s = s.replace(/&(?:nbsp|commat|amp|quot|apos|lt|gt|#60|#62|#64|#x40|#43|#45|#34|#39);/gi, (m) => ENTITIES[m.toLowerCase()] ?? ' ');
+  // R-20 (review 4): JSON inside a JSON string — `{\"api_key\":\"…\"}`, `\u0040`, `\x40`. Undo the escapes (twice:
+  // doubly escaped bodies exist) so the patterns see the text a person would read after one JSON.parse.
+  for (let i = 0; i < 2; i++) {
+    s = s.replace(/\\u([0-9a-fA-F]{4})/g, (_m, h: string) => String.fromCharCode(parseInt(h, 16)))
+      .replace(/\\x([0-9a-fA-F]{2})/g, (_m, h: string) => String.fromCharCode(parseInt(h, 16)))
+      .replace(/\\+(["'/])/g, '$1');
+  }
+  s = s.replace(/[\p{Cf}͏ᅟᅠㅤﾠ]/gu, '');
   for (const [re, to] of MASKS) s = s.replace(re, to);
   return s.slice(0, PROVIDER_ERROR_MAX_CHARS);
+}
+
+/**
+ * What is kept of a provider's error text (R-20, `STORE_PROVIDER_TEXT`): always masked; the whole 300 characters
+ * only when `storeFull` is the boolean true, otherwise an excerpt of PROVIDER_EXCERPT_MAX_CHARS.
+ */
+export function providerText(raw: unknown, storeFull?: unknown): string {
+  const s = sanitizeProviderError(raw);
+  return allowOnlyIfTrue(storeFull) ? s : s.slice(0, PROVIDER_EXCERPT_MAX_CHARS);
 }
 
 /**
@@ -238,7 +271,7 @@ export interface DeliveryLog {
   attempt: number;
   /** Internal only. */
   providerMessageId: string | null;
-  /** Internal only: sanitised provider text (sanitizeProviderError). */
+  /** Internal only: masked provider text (`providerText`): a 120-character excerpt for ADMIN unless STORE_PROVIDER_TEXT is on. */
   error: string | null;
   /** The reason code every audience may see. */
   errorCode: DeliveryReason | null;
@@ -274,6 +307,8 @@ export interface DispatchContext {
   requireVerifiedPhone?: boolean;
   /** Default: SEND_TIMEOUT_MS. */
   sendTimeoutMs?: number;
+  /** R-20, STORE_PROVIDER_TEXT (default false): only the boolean true keeps the masked text beyond the 120-character excerpt. */
+  storeProviderText?: boolean;
   /**
    * Called once, right before the first provider call: counts the attempt and writes the retry time, guarded by the
    * claim token. Returns the attempt number, or null when the claim was lost (then nothing is sent).
@@ -348,21 +383,23 @@ export async function dispatchJob(job: NotificationJob, ctx: DispatchContext): P
   for (const r of results) {
     if (r.ok) ids.push(r.providerMessageId);
     else {
-      errors.push(sanitizeProviderError(r.error));
+      errors.push(providerText(r.error, ctx.storeProviderText));
       retryable ||= r.retryable;
       code ??= r.code ?? (r.retryable ? 'PROVIDER_ERROR' : 'PROVIDER_REJECTED');
     }
   }
-  if (ids.length) return { status: 'SENT', providerMessageId: ids.join(','), warnings: dest.warnings, log: log('SENT', ids.join(','), errors.length ? errors.join('; ') : null, null) };
-  const error = errors.join('; ');
+  if (ids.length) return { status: 'SENT', providerMessageId: ids.join(','), warnings: dest.warnings, log: log('SENT', ids.join(','), errors.length ? providerText(errors.join('; '), ctx.storeProviderText) : null, null) };
+  const error = providerText(errors.join('; '), ctx.storeProviderText);
   const errorCode = code ?? 'PROVIDER_ERROR';
   if (retryable && attempt < MAX_ATTEMPTS) return { status: 'RETRY', error, errorCode };
   return { status: 'FAILED', error, errorCode, log: log('FAILED', null, error, errorCode) };
 }
 
 /**
- * Order in which due jobs are claimed (R-1, R-11): round-robin over customers, so one tenant's backlog cannot hold
- * back another tenant's page by more than a tick. Inside a customer: SEV-1 first, then jobs that were NEVER
+ * Order in which due jobs are claimed (R-1, R-11): round-robin over customers, so one tenant's backlog cannot fill
+ * the claim. This order alone does NOT bound how long another tenant's page waits when calls hang (security review
+ * 4, R-22: it was 80 ticks behind 24 hanging tenants); that is the job of the send order in `drainLane` (tick.ts),
+ * which states its own limit. Inside a customer: SEV-1 first, then jobs that were NEVER
  * attempted before retries (a retry storm cannot push fresh pages back), then the original due time (`dueAt`,
  * which a release does not re-stamp), then creation. Customers whose next job is SEV-1 lead each round.
  * The SQL adapter must produce the same order:
