@@ -309,7 +309,9 @@ describe('N-7: slugs — format and reserved words, in the application and in th
     const lists = [...MIGRATION.matchAll(/"(Customer|Project|Service)_slug_reserved_chk" CHECK \("slug" NOT IN \(([^)]*)\)\)/g)];
     expect(lists.map((m) => m[1])).toEqual(['Customer', 'Project', 'Service']);
     for (const m of lists) expect(m[2]!.split(',').map((x) => x.trim().replace(/^'|'$/g, ''))).toEqual([...RESERVED_SLUGS]);
-    expect([...RESERVED_SLUGS].sort()).toEqual(['-', 'admin', 'all', 'api', 'auth', 'c', 'call-order', 'customers', 'incident', 'login', 'maintenance', 'monitoring', 'new', 'people', 'settings', 'unmapped'].sort());
+    // the words of the review (N-7) and the screen names of DATA-MODEL "slug 규칙" are all in it
+    for (const w of ['new', 'api', 'admin', 'all', 'unmapped', 'auth', 'c', 'incident', 'call-order', 'people', 'monitoring', 'maintenance', 'settings', 'customers', 'login', '-', 'incidents', 'thresholds', 'alarms', 'resources']) expect(RESERVED_SLUGS, w).toContain(w);
+    expect(new Set(RESERVED_SLUGS).size).toBe(RESERVED_SLUGS.length);
   });
 
   it('every reserved word is refused by slugProblem and by the database on Customer, Project and Service; ordinary slugs pass both', async () => {

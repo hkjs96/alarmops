@@ -7,7 +7,10 @@
 export const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 /** Keep in sync with the `*_slug_reserved_chk` constraints in db/prisma/migrations/0001_init/migration.sql (a test compares them). */
 export const RESERVED_SLUGS: readonly string[] = [
-  'new', 'api', 'admin', 'all', 'unmapped', 'auth', 'c', 'incident', 'call-order', 'people', 'monitoring', 'maintenance', 'settings', 'customers', 'login', '-',
+  // screen names and the unmapped marker (DATA-MODEL "slug 규칙", D-33)
+  'incidents', 'incident', 'monitoring', 'call-order', 'people', 'maintenance', 'thresholds', 'alarms', 'resources', 'settings', 'new', '-',
+  // words the API and the console shell own (security review SQL, N-7)
+  'api', 'admin', 'all', 'unmapped', 'auth', 'c', 'customers', 'login',
 ];
 
 export type SlugProblem = 'FORMAT' | 'RESERVED';

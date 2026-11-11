@@ -4,8 +4,12 @@
  * Before: while the provider answered nothing, every tick probed the SAME first 25 customers of the fair order
  * (5 at once × 5 rounds), so the 26th customer waited until the backlog of the 25 was used up (25 × 20 pages:
  * 20 ticks), and with a slow store (0.4 s a call) the fifth round did not start, so the cliff was at 20 customers.
- * Now the customer the probing starts with moves on by 25 every minute: `(minute × 25) mod nCustomers`. Nothing is
- * stored. Worst case after the change: ⌈(H + 1) ÷ 25⌉ − 1 ticks (H = hanging customers in front, up to the claim of 50).
+ * Review 5 moved the starting customer by a fixed stride every minute (`minute × 25 mod n`); the security review of
+ * the SQL store (R-1) showed that this stands still or skips positions when a tick makes fewer probes than the
+ * stride. Now a tick that got no answer stores the customer it reached (probe cursor, notify heartbeat) and the
+ * next tick starts after it. Worst case: ⌈n ÷ P⌉ − 1 ticks for n due customers and P probes a tick — with a fast
+ * store ⌈(H + 1) ÷ 25⌉ − 1 for H hanging customers in front. The sweep over every position and four store
+ * latencies is test/r24-rotation.test.ts; this file keeps the scenarios of review 5.
  *
  * Same harness as review 4: the REAL `runTick` + `MemoryTickStore`, fake provider, fake timers.
  */

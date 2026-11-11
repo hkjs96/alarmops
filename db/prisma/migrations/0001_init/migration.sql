@@ -1575,10 +1575,12 @@ ALTER TABLE "Customer" ADD CONSTRAINT "Customer_slug_chk" CHECK ("slug" ~ '^[a-z
 ALTER TABLE "Project" ADD CONSTRAINT "Project_slug_chk" CHECK ("slug" ~ '^[a-z0-9][a-z0-9-]{0,63}$');
 ALTER TABLE "Service" ADD CONSTRAINT "Service_slug_chk" CHECK ("slug" ~ '^[a-z0-9][a-z0-9-]{0,63}$');
 -- slug reserved words (security review SQL, N-7): a slug is a path segment of the console, so it must not be a word
--- the router or the API owns. Same list as RESERVED_SLUGS in packages/api/src/slug.ts (a test compares the two).
-ALTER TABLE "Customer" ADD CONSTRAINT "Customer_slug_reserved_chk" CHECK ("slug" NOT IN ('new', 'api', 'admin', 'all', 'unmapped', 'auth', 'c', 'incident', 'call-order', 'people', 'monitoring', 'maintenance', 'settings', 'customers', 'login', '-'));
-ALTER TABLE "Project" ADD CONSTRAINT "Project_slug_reserved_chk" CHECK ("slug" NOT IN ('new', 'api', 'admin', 'all', 'unmapped', 'auth', 'c', 'incident', 'call-order', 'people', 'monitoring', 'maintenance', 'settings', 'customers', 'login', '-'));
-ALTER TABLE "Service" ADD CONSTRAINT "Service_slug_reserved_chk" CHECK ("slug" NOT IN ('new', 'api', 'admin', 'all', 'unmapped', 'auth', 'c', 'incident', 'call-order', 'people', 'monitoring', 'maintenance', 'settings', 'customers', 'login', '-'));
+-- the router or the API owns: the screen names of DATA-MODEL "slug 규칙" (D-33) plus the words the API and the
+-- console shell use (api, admin, all, unmapped, auth, c, customers, login). Same list as RESERVED_SLUGS in
+-- packages/api/src/slug.ts (a test compares the two). A new screen name = a new migration that replaces these CHECKs.
+ALTER TABLE "Customer" ADD CONSTRAINT "Customer_slug_reserved_chk" CHECK ("slug" NOT IN ('incidents', 'incident', 'monitoring', 'call-order', 'people', 'maintenance', 'thresholds', 'alarms', 'resources', 'settings', 'new', '-', 'api', 'admin', 'all', 'unmapped', 'auth', 'c', 'customers', 'login'));
+ALTER TABLE "Project" ADD CONSTRAINT "Project_slug_reserved_chk" CHECK ("slug" NOT IN ('incidents', 'incident', 'monitoring', 'call-order', 'people', 'maintenance', 'thresholds', 'alarms', 'resources', 'settings', 'new', '-', 'api', 'admin', 'all', 'unmapped', 'auth', 'c', 'customers', 'login'));
+ALTER TABLE "Service" ADD CONSTRAINT "Service_slug_reserved_chk" CHECK ("slug" NOT IN ('incidents', 'incident', 'monitoring', 'call-order', 'people', 'maintenance', 'thresholds', 'alarms', 'resources', 'settings', 'new', '-', 'api', 'admin', 'all', 'unmapped', 'auth', 'c', 'customers', 'login'));
 
 -- Tick ③: incidents the escalation phase must look at (listEscalationDue) — only rows with something scheduled.
 CREATE INDEX "Incident_nextEscalationAt_due_idx" ON "Incident"("nextEscalationAt", "id")

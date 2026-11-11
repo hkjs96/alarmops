@@ -42,7 +42,7 @@ export const CLAIM_LEASE_SEC = 60;
  */
 export const TICK_RESPONSE_LIMIT_MS = 60_000;
 /**
- * N-33: a store call outside the phases (claimTick, loadPolicy, outboxBacklog, writeHeartbeat) is given up after
+ * N-33: a store call outside the phases (now, claimTick, loadPolicy, outboxBacklog, writeHeartbeat, purgeExpired) is given up after
  * this long (less near the end of the tick). The SQL adapter should set a `statement_timeout` below it.
  */
 export const STORE_CALL_TIMEOUT_MS = 5_000;

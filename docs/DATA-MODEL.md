@@ -144,9 +144,9 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 
 **slug 규칙 (Customer · Project · Service, D-33).**
 - 형식 `^[a-z0-9][a-z0-9-]{0,63}$`. **부모 안에서 유일**: Customer는 MSP 전체, Project는 고객 안, Service는 프로젝트 안.
-- **예약어는 쓸 수 없다**(세 단계 모두 같은 목록): `incidents` `incident` `monitoring` `call-order` `people` `maintenance` `thresholds` `alarms` `resources` `settings` `new` `-`. 주소에서 slug 자리와 화면 이름 자리가 겹치기 때문이다(`/c/<customer>/<project>/<service>/incident/<id>`, 포털 `/<project>/<service>/<screen>`). `-`는 미매핑 계정 인시던트의 고객 자리(`/c/-/incident/<id>`)다.
+- **예약어는 쓸 수 없다**(세 단계 모두 같은 목록): `incidents` `incident` `monitoring` `call-order` `people` `maintenance` `thresholds` `alarms` `resources` `settings` `new` `-`, 그리고 API·콘솔 셸이 쓰는 `api` `admin` `all` `unmapped` `auth` `c` `customers` `login`(SQL 보안 검토 N-7에서 추가). 주소에서 slug 자리와 화면 이름 자리가 겹치기 때문이다(`/c/<customer>/<project>/<service>/incident/<id>`, 포털 `/<project>/<service>/<screen>`). `-`는 미매핑 계정 인시던트의 고객 자리(`/c/-/incident/<id>`)다.
 - 만들 때 이름에서 만든다(소문자, 영숫자 밖은 `-`, 한글 등으로 비면 `customer`·`project`·`service` + 짧은 접미사). 예약어이거나 부모 안에서 겹치면 `-2`, `-3`… 접미사를 붙인다. 직접 넣은 slug가 예약어·중복이면 400 `VALIDATION_FAILED` / 409 `ALREADY_EXISTS`.
-- DB는 UQ와 형식 CHECK, 예약어는 서비스 계층에서 검증한다(목록이 화면 추가로 늘 수 있다).
+- DB는 UQ, 형식 CHECK(`*_slug_chk`), **예약어 CHECK(`*_slug_reserved_chk`)**를 둔다. 앱은 같은 규칙을 `packages/api/src/slug.ts`(`slugProblem`, `RESERVED_SLUGS`)로 먼저 검사해 400을 낸다. 두 목록이 같은지는 테스트가 비교한다(`packages/store-sql/test/review-sql.test.ts`). 화면이 늘어 예약어가 늘면 목록과 CHECK를 새 마이그레이션에서 함께 바꾼다.
 - 만든 뒤에는 바꾸지 않는다(이름만 바뀐다). 이름 변경 때 slug도 바꿀지와 옛 주소 처리는 미결(API-CONTRACT Q-API-09).
 - 마이그레이션: 기존 행은 이름에서 채운 뒤 NOT NULL.
 
@@ -747,12 +747,13 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 | key | text PK | 요청 헤더 값이 아니라 **사용자 + 범위·역할 + 헤더 값**으로 만든 저장 키 |
 | ownerUserId | text | **소유자 = 요청한 로그인 사용자(`AuthContext.userId`)**. 사용자당 살아 있는 항목 200개 상한의 기준이며, 넘으면 그 사용자의 가장 오래된 것부터 지운다(다른 사용자 것은 건드리지 않는다). preview 요청은 저장하지 않는다 |
 | fingerprint | text | 메서드 + 경로 + `If-Match` + 본문 해시. 다르면 422 `IDEMPOTENCY_KEY_REUSED` |
-| response | **json**(jsonb 아님) | 첫 응답(상태·헤더·본문), 최대 약 24KB. jsonb는 키 순서를 바꾸므로 재생 응답이 첫 응답과 바이트가 달라진다 — `json`으로 쓴 그대로 둔다 |
-| expiresAt | timestamptz | 24시간. IX(ownerUserId, expiresAt) |
+| response | **json**(jsonb 아님) | 첫 응답(상태·헤더·본문), 최대 약 24KB. jsonb는 키 순서를 바꾸므로 재생 응답이 첫 응답과 바이트가 달라진다 — `json`으로 쓴 그대로 둔다. **`undoToken`은 저장하지 않는다**(SQL 보안 검토 R-7: 본문에서 빼고 저장 — `UndoRecord`가 해시만 두는 것과 같은 이유). **연락처 값(전화·이메일·Slack id)이 든 응답은 이 표에 들어오면 안 된다**: 그런 라우트는 `replayable: false`로 등록한다(API-CONTRACT §2 "멱등") |
+| expiresAt | timestamptz | 24시간. IX(ownerUserId, expiresAt), IX(expiresAt) — 뒤의 것은 틱의 전역 만료 청소용 |
 | createdAt | timestamptz | |
 | seq | serial | 넣은 순서. 상한을 넘으면 `seq`가 작은 것부터 지운다. IX(ownerUserId, seq) |
 
 - 상한 처리(만료 삭제 → 초과분 삭제 → 삽입)는 한 트랜잭션으로 한다. 같은 사용자의 동시 요청은 `pg_advisory_xact_lock(hashtext('idem:' || ownerUserId))`로 줄 세운다. 만료 판정은 DB 시각.
+- **만료 행 청소는 틱이 한다**(R-7): `purgeExpired`가 매 틱 끝에 모든 사용자의 만료된 `IdempotencyKey`, 만료 후 하루 지난 `UndoRecord`, 이틀 지난 `TickClaim`을 지운다(표마다 한 번에 최대 5,000행, DB 시각 기준). 다시 쓰지 않는 사용자의 행도 24시간 + 1분 안에 사라진다. 사용자가 다음에 쓸 때 자기 만료 행을 지우는 것은 그대로 둔다.
 
 ### UndoRecord (Ack·일괄 처리의 Undo 토큰, API-CONTRACT §8.1)
 | 필드 | 타입 | 비고 |
@@ -815,7 +816,7 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 | minute | timestamptz PK. 틱이 맡은 분(`scheduledAt`을 분으로 자른 값). `INSERT … ON CONFLICT DO NOTHING`이 성공한 호출만 그 분을 실행한다 |
 | claimedAt | DB 시각 |
 
-- 이틀 지난 행은 선점 문장이 같이 지운다. `TickHeartbeat.lastScheduledAt`은 쓰지 않는다(늦게 온 이전 분도 한 번은 돌아야 하므로 "마지막 분" 하나로는 부족하다).
+- `claimTick(minute, at)`은 호출자 시계 `at`이 DB `now()`와 30초 넘게 다르면 행을 넣지 않고 `CLOCK_SKEW`를 돌려준다(SQL 보안 검토 R-2). 이틀 지난 행은 틱 끝의 `purgeExpired`가 지운다 — 기준은 **`claimedAt`(DB 시각)과 `minute` 둘 다** 이틀 전이어서, 시계가 틀린 호출자가 현재 분의 행을 지우게 만들 수 없다. IX(claimedAt). `TickHeartbeat.lastScheduledAt`은 쓰지 않는다(늦게 온 이전 분도 한 번은 돌아야 하므로 "마지막 분" 하나로는 부족하다).
 
 ### TickHeartbeat (D-10)
 | 필드 | 비고 |
