@@ -26,12 +26,12 @@ export function scopeSql(p: Params, s: ScopeFilter, alias: string, cols: { proje
   const all = s.customerIds === '*';
   const ids = p.add(all ? [] : [...s.customerIds]);
   const subs = p.add(JSON.stringify(s.subScopes.map((x) => ({ customerId: x.customerId, projectId: x.projectId || null, serviceId: x.serviceId || null }))));
-  const sub = `jsonb_array_elements(${subs}::jsonb) AS s(x)`;
+  const sub = `jsonb_array_elements(${subs}::jsonb) AS sc_(x)`;
   return `((${c} IS NULL AND ${s.unmapped ? 'true' : 'false'}) OR (${c} IS NOT NULL AND (${all ? 'true' : 'false'} OR ${c} = ANY(${ids}::text[]))
-    AND (NOT EXISTS (SELECT 1 FROM ${sub} WHERE s.x->>'customerId' = ${c})
-      OR EXISTS (SELECT 1 FROM ${sub} WHERE s.x->>'customerId' = ${c} AND (CASE
-           WHEN s.x->>'serviceId' IS NOT NULL THEN s.x->>'serviceId' = ${svc} AND (s.x->>'projectId' IS NULL OR s.x->>'projectId' = ${prj})
-           WHEN s.x->>'projectId' IS NOT NULL THEN s.x->>'projectId' = ${prj}
+    AND (NOT EXISTS (SELECT 1 FROM ${sub} WHERE sc_.x->>'customerId' = ${c})
+      OR EXISTS (SELECT 1 FROM ${sub} WHERE sc_.x->>'customerId' = ${c} AND (CASE
+           WHEN sc_.x->>'serviceId' IS NOT NULL THEN sc_.x->>'serviceId' = ${svc} AND (sc_.x->>'projectId' IS NULL OR sc_.x->>'projectId' = ${prj})
+           WHEN sc_.x->>'projectId' IS NOT NULL THEN sc_.x->>'projectId' = ${prj}
            ELSE true END)))))`;
 }
 
@@ -349,7 +349,7 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
         [cap.owner, key, Math.max(0, cap.maxPerOwner - 1)]);
       await tx.query(`DELETE FROM "IdempotencyKey" WHERE "key" = $1`, [key]);
       await tx.query(
-        `INSERT INTO "IdempotencyKey"("key", "ownerUserId", "fingerprint", "response", "expiresAt", "createdAt") VALUES ($1, $2, $3, $4::jsonb, $5::timestamptz, ${now})`,
+        `INSERT INTO "IdempotencyKey"("key", "ownerUserId", "fingerprint", "response", "expiresAt", "createdAt") VALUES ($1, $2, $3, $4::json, $5::timestamptz, ${now})`,
         [key, cap.owner, entry.fingerprint, js(entry.res), iso(expiresAt)]);
     });
   }

@@ -1409,7 +1409,8 @@ model IdempotencyKey {
   key         String   @id
   ownerUserId String
   fingerprint String
-  response    Json
+  /// `json`, not `jsonb`: a replay must return the first response as it was written (key order included).
+  response    Json     @db.Json
   expiresAt   DateTime @db.Timestamptz(3)
   createdAt   DateTime @default(now()) @db.Timestamptz(3)
   /// Insertion order inside one owner ("oldest first" when the cap is reached).

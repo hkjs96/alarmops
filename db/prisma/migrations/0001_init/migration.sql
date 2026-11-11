@@ -1030,7 +1030,7 @@ CREATE TABLE "IdempotencyKey" (
     "key" TEXT NOT NULL,
     "ownerUserId" TEXT NOT NULL,
     "fingerprint" TEXT NOT NULL,
-    "response" JSONB NOT NULL,
+    "response" JSON NOT NULL,
     "expiresAt" TIMESTAMPTZ(3) NOT NULL,
     "createdAt" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "seq" SERIAL NOT NULL,
