@@ -691,3 +691,89 @@
 **머지 불가(조건부) — P1 0건, P2 2건(C: 이번 수정에서 생김, D: 기존·콘솔 전체), 보안 [차단] 0건.** 재점검에서 막았던 두 건은 고쳐졌다. 편집 중 로그아웃은 세 선택 모두 말한 대로 움직이고(저장 성공 → 로그아웃, 저장이 막히거나 실패 → 로그인 유지 + 안내, 저장 안 함 → 쿠키·초안 삭제 후 `/login`), Responders 줄은 스크롤 보정을 꺼도 1440·390 모두 0px이다. P3-A~D도 해결됐고 회귀는 없다. 남은 것은 P2-B를 고치는 방법에서 나온 P2-C다: 줄을 붙들기 위해 패널 위쪽을 멈춰 두었는데, 그 멈춘 구간이 "NOW"라는 제목 아래 방금 뺀 사람을 Paged로 보여 주면서 멈췄다는 표시가 없다. 이 화면이 답해야 하는 바로 그 질문("지금 터지면 누가 불리나")에 틀린 답이 표시 없이 남는 것이라 P2로 둔다. 표시 한 줄(또는 멈춘 구간 가리기)이면 되고, 고친 뒤에는 P2-B 묶음과 이 한 장면만 재실행하면 된다. P2-D는 이 PR이 만든 문제가 아니고 main에도 있으므로 별도 이슈로 넘기는 것을 권한다 — 그 경우 이 PR을 막는 것은 P2-C 하나다. 사용자가 P2-C를 사유와 함께 백로그로 받아들이면 그대로 머지할 수 있다.
 
 점검 한계: 목 API 기준(역할·If-Match의 실제 강제는 백엔드에서 확인 필요). 터치는 Playwright 에뮬레이션이고 Safari는 `overflow-anchor: none`으로 흉내만 냈다(WebKit 실기기 미확인). A5의 "저장 안 하고 로그아웃"은 지연을 브라우저 쪽에서 걸어 저장 요청이 서버에 닿기 전에 취소됐다 — 실제 느린 서버에서는 저장이 적용될 수 있다. 대비는 눈으로만 확인. 샌드박스에서 Google Fonts가 막혀 대체 글꼴로 렌더링됨.
+
+---
+
+## Console Call order 3차 점검 — 2026-11-11
+
+대상: `apps/console` (feat/console-call-order, 커밋 `57ac28c`, origin/main은 `1eb757f` 그대로라 병합 없음). 고친 쪽과 무관한 독립 점검이며 제품 코드는 고치지 않았다. 최종 점검에서 남은 것(P2-C, P2-D, P3-F·G·H·I)만 다시 밟았고 회귀는 빠르게만 봤다. 빌드본을 직접 기동(`E2E_ALLOW_MOCK=1 MOCK_API=1 next start -p 3162`, 묶음마다 재기동해 목 상태 초기화, 끝난 뒤 내 프로세스만 종료), Playwright 1440×900(마우스·키보드)·390×844(터치), 캡처를 직접 보고 판정했고 "서버에 안 바뀜"은 매번 새 세션으로 다시 읽어 확인했다. 행 위치는 `overflow-anchor: none`을 넣고 측정. 캡처는 커밋하지 않았다(세션 작업 폴더에만 있음).
+
+### 통합
+
+| 항목 | 결과 |
+|---|---|
+| 병합 | 필요 없음 (`origin/main`에 새 커밋 없음) |
+| `npm test` | 통과 — console 198, core 81, design-system 97, ingest 32 (합 408), db 스키마 검사 통과(샌드박스에서 Prisma 엔진 내려받기가 막혀 스크립트의 대체 경로로 검증) |
+| `npm run typecheck` | 통과 (console, core, design-system, ingest) |
+| console `eslint .` | 통과 (경고 0) |
+| `next build` | 통과 |
+| Playwright (`PORT=3161 PW_NO_REUSE=1`) | 152 / 152 통과 (직접 띄운 새 서버, 7.8분) |
+
+### 이전 실패 항목 재실행
+
+| # | 이전 문제 | 폭 | 결과 | 측정·관찰 |
+|---|---|---|---|---|
+| P2-C | 멈춘 패널 위쪽의 표시 | 1440·390 | 통과 | Edit을 누르면 위쪽 묶음 맨 위에 "▲ Before your changes — updates when you press Done"(13px 굵게), 그 아래 살아 있는 줄, 그 아래 옛 내용은 opacity 0.5 + inert. 위쪽 묶음의 위치·높이는 Edit 전후 동일(1440: 170.09/434.34, 390: 250.39/608.78) |
+| P2-C | 살아 있는 "Now:" 줄 — 상태마다 | 1440·390 | 통과 | 3명 "Now: OK — paged (3): Junho Park, Minjae Lee, Soyeon Choi" → Junho 제거 "Now: OK — paged (2): Minjae Lee, Soyeon Choi" → Minjae 제거 "Now: AT RISK — paged (1): Soyeon Choi"(노란 바탕) → Soyeon Notify only "Now: UNREACHABLE — nobody is paged"(붉은 바탕). 줄 높이는 내내 52px(1440)·70px(390), 글자 잘림 없음. 1440에서는 옆 목록 행(AT RISK · Soyeon)과 같은 답 |
+| P2-C | 폰 첫 화면 | 390 | 통과 | 패널을 맨 위로 올리면 라벨 y 250~270, Now 줄 y 276~346 (화면 높이 844). 옛 "Paged (3)…"은 그 아래 y 504, 흐리게 |
+| P2-C | 행 이동 (`overflow-anchor: none`) | 1440·390 | 통과 | 제거 2번·역할 변경 1번 모두 Responders 다섯 줄과 위쪽 묶음의 위치·높이 0.00px, 스크롤 위치도 그대로 |
+| P2-C | Done 없이 나가기 | 1440·390 | 통과 | UNREACHABLE 상태에서 Close(1440)·← Back to the list(390): 목록 행 "UNREACHABLE · nobody · Responders (0)". 다시 열면 멈춤 표시 없이 "UNREACHABLE … Paged (0) · Also notified (3)". 새 세션으로 읽은 서버 값과 같음 |
+| P2-D | 세션이 사라진 뒤의 쓰기 — 목록 Acknowledge | 1440·390 | 통과 | 아래 공통 결과. 행은 "Acknowledge" 버튼으로 돌아옴, 서버는 미확인 그대로 |
+| P2-D | 패널 Acknowledge / Escalate now / Undo / Resolve | 1440·390 | 통과 | Escalate는 켜져 있는 건(Mirae Pay › Core › Payments API, 열린 3건 모두 켜져 있었음)에서 실제로 POST가 나가 401 `SESSION_ENDED`를 받은 것을 확인. 패널 서버 상태는 Ack·Escalate 시도 전후 동일. 실제 Ack 뒤 Undo는 거부되고 건은 Ack 상태 그대로, Resolve도 미적용. 패널 안에도 "Your session ended — sign in again. Nothing was changed. [Reload]" |
+| P2-D | 토스트의 Undo (Incidents) | 1440·390 | 통과 | 거부, 건은 Ack 상태 그대로 |
+| P2-D | Call order Save | 1440·390 | 통과 | 버튼은 "Save for Iruda Edu"로 돌아옴, "Could not save: Your session ended — sign in again. Nothing was changed.", 토스트 없음, 입력 값(8)·초안 키 1개 유지, 서버 5분 그대로. Sign in → 같은 주소 → "Draft for Iruda Edu … Resume" → 8이 되살아나고 그대로 저장하면 서버 8분 |
+| P2-D | Responders 제거 / 역할 / 추가 / 줄의 Undo | 1440·390 | 통과 | 네 가지 모두 401 → 안내. 줄은 그대로("Remove…" 버튼, 역할 PAGEABLE, 추가한 줄 없음), Now 줄은 바뀌지 않음, 서버 "Paged (3)…" 그대로. 실제 제거 뒤 Undo는 거부되고 서버는 "Paged (2)" 그대로 |
+| P2-D | 세션이 없는 채 Sign out | 1440·390 | 통과 | `/login?signedOut=1` |
+| P2-D | 공통 (위 13가지 × 폭) | 1440·390 | 통과 | 매번 가운데에 "Your session ended — sign in again. Nothing was changed." + 본문 + Sign in 하나(포커스가 거기, 390에서 높이 44px). Esc·바깥 누름·Ctrl K로 안 닫힘. "…ing…" 글자 0개, 가로 넘침 0. Sign in의 주소는 매번 `/login?next=<지금 주소>`이고 로그인하면 같은 주소로 돌아옴. 페이지 오류는 401 응답의 콘솔 줄뿐 |
+| P2-D | 둘째 탭에서 로그아웃 | 1440·390 | 통과 | 첫 탭은 건드리지 않아도 195ms(1440)·300ms(390) 뒤 "You signed out in another tab — sign in again. … The drafts kept in this tab were removed, as signing out does." `ao-` 키 3개 → 0개. Sign in → 같은 주소, 초안 없음, 서버 값 그대로 |
+| P2-D | 답이 없는 경우(NO_ANSWER) 문구 | 1440 | 통과 | 세션은 살아 있고 응답만 끊김(요청 차단 / 서버 500 / 서버에는 적용됐는데 응답 유실) 세 경우 모두 세션 종료 상자는 안 뜨고 "No answer from the server, so it is not known whether this was applied. Reload to see how things are now." 대기 글자 0개. 적용 후 유실된 경우 서버는 Ack됐고 행도 ACK'D로 보임 — 문구가 "적용 여부를 모른다"고 말하므로 거짓이 아님 |
+| P3-F | 저장 확인 상자가 로그아웃을 말하지 않음 | 1440·390 | 통과 | 제목 "Save for Cheong Media and sign out?", "You are signed out after this save. If the save does not go through, you stay signed in and are told." Cancel → 토스트 "Not signed out: the save for Cheong Media was cancelled. Nothing was saved; your edit is still open." 로그인·입력 유지, 서버 2분 그대로 |
+| P3-G | 저장이 진행 중일 때의 가드 | 1440 | 통과 | 가드 본문 "A save for Iruda Edu is being sent right now. "Save … and sign out" waits for it and signs out once it is saved. "Sign out without saving" signs out now — the save that is already on its way may still be applied." 누르면 "Saving for Iruda Edu… You are signed out as soon as it is saved…" → 저장 후 `/login?signedOut=1`(서버 6분). 저장이 거부되는 경우(다른 세션이 먼저 9분 저장): 로그인 유지, "Not signed out: Iruda Edu was not saved. …", 서버 9분 |
+| P3-H | 409 뒤 Reload에서 줄이 움직임 | 1440·390 | 통과 | Reload 전후 다섯 줄 모두 dy 0.0 / dh 0.0. 누른 자리 밑은 글자("Reloaded. These are the Responders of Daon Retail"), 버튼 아님 |
+| P3-I | 상태 줄이 잘림 | 1440·390 | 통과 | 손으로 잰 것은 "AT RISK Daon Retail is harder to reach now · details below · 2 removed, shown until Done"과 Now 줄: 세로·가로 잘림 0, 말줄임 없음(줄 높이 52·70px). 가장 긴 UNREACHABLE 문장은 자동 테스트(137번)가 같은 방법으로 확인하고, Now 줄의 UNREACHABLE은 캡처로 확인 |
+
+### 회귀 점검 (빠르게)
+
+| 시나리오 | 폭 | 결과 | 관찰 |
+|---|---|---|---|
+| Incidents Ack 안전 | 1440·390 | 통과 | 같은 자리 5번(0·90ms·0.7·1.5·3초 간격): 한 건만 Ack, 행 이동 없음, 그 자리 밑은 글자("Acknowledged ✓"), "1 acknowledged in place". 서버의 열린 건 수도 1만 줄었다 |
+| 세 고객 키보드만으로 저장 (Mirae Pay, Bora Foods, Hanbit Logistics) | 1440 | 통과 | Ctrl K → 이름 → Enter → Tab×4 → Enter → E(포커스 "Step 2 minutes") → 숫자 → Ctrl+Enter → (확인 상자 기본 포커스 Cancel) Shift+Tab → Enter. 서버 10→8, 2→3, 2→4분 |
+| 폰에서 읽기·수정 | 390 | 통과 | Daon Retail › Commerce › Checkout: 읽기 화면 입력 요소 0, 가로 넘침 0. Create own steps → 2단계 4분(숫자 자판, 16px) → "Save own steps for …" → 서버 Checkout 4분, 고객 값 2분 그대로 |
+
+### 새 시도 세 가지
+
+| # | 시도 | 폭 | 결과 | 관찰 |
+|---|---|---|---|---|
+| B1 | 질문 상자가 떠 있는 동안 세션이 끝남 — (a) 여러 서비스 저장 확인 상자에서 "Save for Cheong Media", (b) 로그아웃 가드에서 "Save … and sign out" | 1440·390 | 통과 | 둘 다 세션 종료 상자가 뜨고 확인 상자·가드는 닫힘. 로그아웃 처리(초안 삭제)로 넘어가지 않아 초안 1개 유지, 서버 그대로. (b)에서 Sign in → 같은 주소 → "Draft for Iruda Edu … Resume" |
+| B2 | Sign in 버튼의 `next` 조작 — 주소에 `?next=https://evil.example`·`#//evil.example`, 경로 `//evil.example/x`, `/%5Cevil.example`, `..%2f..%2f%2fevil.example`, CRLF | 1440 | 통과 (P3-L) | 링크는 `/login`(되돌아갈 주소를 버림) 또는 콘솔 안 경로(`/login?next=%2Fevil.example%2Fx` → 콘솔의 404)뿐. 로그인 뒤 항상 콘솔 출처에 머묾. `/auth/dev-login?next=`에 `//evil`·`/\evil`·`https://`·`/%5C…`·`/%2F%2F…`·탭 문자·`/login?next=//…`를 직접 넣어도 모두 `/incidents`로 감 |
+| B3 | 개발자 도구에서 `BroadcastChannel("ao-auth")`에 `signed-out` 위조(여분 필드 포함), `ao-session-ended` 이벤트 위조, 잘못된 모양의 메시지 | 1440 | 통과 | 위조한 브라우저 자신의 탭들만 "signed out" 상자 + 자기 초안 삭제(쿠키는 그대로 유효). 다른 사람의 브라우저(별도 컨텍스트, operator)는 상자 없음·저장소 키 2→2·쿠키 유지. 서버 변화 없음. 상자 뒤의 Save를 스크립트로 눌러도 POST 0건. 이벤트만 위조하거나 모양이 틀린 메시지는 아무 일도 없음. 채널은 같은 출처·같은 브라우저 프로필에만 닿으므로 남의 데이터에는 닿지 않는다 |
+
+### 보안 재검토 요약 (`git diff 28e60b0..HEAD -- apps packages`, 읽기 전용)
+
+| 항목 | 결과 | 확인 |
+|---|---|---|
+| 미들웨어 | 통과 | 세션 없는 요청 중 `POST` + `next-action` 헤더만 401 `SESSION_ENDED`(text/plain, `no-store`, 보안 헤더 그대로). GET+헤더, 헤더 없는 POST, PUT·DELETE+헤더, 변조 쿠키는 전처럼 307 `/login?next=…`. 새로 공개된 경로는 `/auth/session` 하나(정확히 일치 — `/auth/session/x`, `/auth/sessions`는 307). `x-middleware-subrequest` 우회 안 됨 |
+| `GET /auth/session` | 통과 | 204 또는 401, 본문 0바이트, `Cache-Control: no-store`, Set-Cookie 없음, CORS 허용 헤더 없음. 쿼리(`as`, `next`)는 읽지 않음. POST·PUT 405. 쿠키가 SameSite=Lax라 다른 사이트의 요청에는 쿠키가 안 실리고 응답도 읽을 수 없어 자기 쿠키 밖의 로그인 여부는 알 수 없다. 상태를 바꾸지 않으므로 CSRF 대상이 아님 |
+| `callAction` 적용 범위 | 통과 | 서버 액션 11개(`"use server"` 파일 2개)의 호출 15곳 모두 `callAction(() => …)` 안. 맨 호출 0건(직접 grep). 같은 것을 검사하는 단위 테스트 있음 |
+| Origin 비교 (`CONSOLE_ORIGIN` / `X-Forwarded-Proto`) | 통과 | 미설정: 같은 출처 303, `https://` 같은 호스트·다른 포트·`null`·cross-site·XFH 위조 403. `CONSOLE_ORIGIN=https://console.example`: 그 값만 303, localhost·다른 포트·http·접미사 도메인·XFH/XFP 위조·same-site 403 |
+| Sign in 링크의 `next` | 통과 | `safeNextPath`를 거침. B2 참고 |
+| 헤더 | 통과 | CSP·X-Frame-Options·Referrer-Policy·nosniff·Permissions-Policy·HSTS가 `/login`, `/auth/session`, 401 응답에 그대로 |
+| [차단] | 0건 | [권고] 3건: ① `CONSOLE_ORIGIN` 미설정 시 `X-Forwarded-Proto: https`를 직접 보내면 `https://` Origin이 통과(브라우저의 폼 전송으로는 불가, 대상은 로그아웃뿐) — 운영에서는 `CONSOLE_ORIGIN`을 필수로. ② 서명 쿠키라 로그아웃이 서버에서 토큰을 무효화하지 않음(이전 권고 유지, SSO 연결 때). ③ `/auth/session`에 요청 수 제한 없음(정보는 안 나감, 운영 프록시에서) |
+
+### 문제 목록
+
+| 등급 | # | 문제 | 재현 |
+|---|---|---|---|
+| P1 | — | 없음 | — |
+| P2 | — | 없음. 최종 점검의 P2-C, P2-D 해결 확인 | — |
+| P3 | J | 다른 관리자가 먼저 바꿔 409/404가 난 뒤, 맨 위 "Now:" 줄은 Reload를 누를 때까지 충돌 전 값을 말한다("Now: OK — paged (3): Junho Park, Minjae Lee, Soyeon Choi" — 서버는 Minjae가 빠진 2명). "Changed — reload" 안내는 아래 Responders 카드에만 있어 폰에서 맨 위로 올리면 안 보인다. Reload 뒤에는 "Now: OK — paged (2): Junho Park, Soyeon Choi"로 맞다. 두 관리자가 같은 고객을 동시에 고칠 때만 생기고 누른 자리에는 안내가 뜨므로 P3로 두었지만, 준호·민재가 아직 잘못 읽을 수 있는 유일한 자리다. 충돌 상태에서는 Now 줄도 "changed by someone else — reload"로 바꾸기를 권함 | 두 세션: A가 Daon Retail Responders Edit → B가 Minjae 제거 → A가 Minjae 제거 확인 → A에서 맨 위로 스크롤 |
+| P3 | K | Responders의 Edit을 누르는 순간 Responders 줄들이 아래로 239px(1440)·281px(390) 내려가고 줄 높이가 커진다(위쪽 묶음은 0px). 편집 모드로 들어가는 명시적 전환이고 이후 변경은 모두 0px. 누른 자리 밑에 무엇이 오는지는 이번에 재지 않았다 | `/c/daon/call-order` → Responders Edit |
+| P3 | L | 주소의 쿼리·해시에 `//`나 `next=https://…` 같은 것이 있으면 Sign in 링크가 되돌아갈 주소를 버리고 `/login`이 된다(안전한 쪽). 로그인 뒤 `/incidents`로 감 | B2 |
+| P3 | M | 문구: ① 흐린 옛 묶음의 제목이 여전히 "IF SOMETHING BREAKS NOW"다(라벨·흐림·바로 위 Now 줄이 있어 오독 여지는 작음). ② 세션 종료 상자가 Incidents에서도 "A draft you were writing is kept…"라고 말하고, Acknowledge가 적용되지 않아 호출이 계속된다는 말은 없다("What you just pressed was not applied"는 있음). ③ 다른 탭에서 로그아웃 후 다시 로그인한 경우, 이 탭의 Sign in은 유효한 세션인데도 로그인 화면을 한 번 거친다 | — |
+| P3 | — | 최종 점검의 P3-F·G·H·I 해결 확인 | — |
+
+### 판정
+
+**머지 가능 (MERGE-READY) — P1 0건, P2 0건, 보안 [차단] 0건.** 최종 점검에서 막았던 두 건이 고쳐졌다. 멈춘 패널 위쪽은 "Before your changes"라고 표시되고 흐려지며, 그 위에 지금의 도달 상태가 OK / AT RISK(이름) / UNREACHABLE로 한 줄에 나오고 폰 첫 화면에 들어온다. 세션이 사라진 탭에서는 모든 쓰기(13가지)가 "Saving…"에 멈추지 않고 세션 종료를 말하며, 서버는 바뀌지 않고 초안은 남아 로그인 뒤 같은 주소에서 이어 쓸 수 있다. 남은 것은 P3 네 건이고 그중 J(충돌 뒤 Now 줄)는 파일럿 전에 고치기를 권한다. 머지 전 관문 4(사용자 승인)는 남아 있다.
+
+점검 한계: 목 API 기준(역할·If-Match·세션 만료의 실제 강제는 백엔드·SSO 연결 뒤 확인 필요). 세션 만료는 쿠키 삭제로 흉내 냈다(8시간 만료 자체는 기다리지 않음). 터치는 Playwright 에뮬레이션, Safari는 `overflow-anchor: none`으로 흉내만 냈다(WebKit 실기기 미확인). P3-G·NO_ANSWER는 브라우저 쪽에서 지연·차단을 걸어 만들었다. 키보드 회귀의 둘째 고객은 지난번의 Daon Retail 대신 Bora Foods로 했다. 대비는 눈으로만 확인. 샌드박스에서 Google Fonts가 막혀 대체 글꼴로 렌더링됨.
