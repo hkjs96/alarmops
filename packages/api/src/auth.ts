@@ -87,6 +87,18 @@ const own = (o: object, k: string): unknown => {
   const d = Object.getOwnPropertyDescriptor(o, k);
   return d && 'value' in d ? d.value : undefined;
 };
+const SUB_KEYS: readonly string[] = ['customerId', 'projectId', 'serviceId'];
+function isExactSubScope(x: object): boolean {
+  for (const k of Reflect.ownKeys(x)) {
+    if (typeof k !== 'string' || !SUB_KEYS.includes(k)) return false;
+    const d = Object.getOwnPropertyDescriptor(x, k);
+    if (!d || !('value' in d) || !isStr(d.value)) return false;
+  }
+  if (!Object.hasOwn(x, 'customerId')) return false;
+  // not own, but visible through the prototype chain (class getter, Object.create({ projectId }), polluted prototype)
+  for (const k of SUB_KEYS) if (!Object.hasOwn(x, k) && k in x) return false;
+  return true;
+}
 const nullProto = <T extends object>(fields: T): T => Object.freeze(Object.assign(Object.create(null) as T, fields));
 
 /**
@@ -98,6 +110,7 @@ const nullProto = <T extends object>(fields: T): T => Object.freeze(Object.assig
  *   is left out, so the user reads as the scope allows and every write answers 403.
  * - `subScopes` may only narrow customers the user has: an entry for a customer that is not in `customerIds`
  *   (wrong case, typo, another tenant) used to be ignored — which WIDENED the view to the whole customer. It is 401 now.
+ *   So is an entry that is not exactly { customerId, projectId?, serviceId? } as own string data properties (R-18).
  * - The result is a frozen copy on a null prototype: later mutation of the adapter's object, or of
  *   Object.prototype, cannot change what was checked.
  */
@@ -122,10 +135,14 @@ export function normalizeAuth(a: unknown): AuthContext | null {
     const list: Array<{ customerId: string; projectId?: string; serviceId?: string }> = [];
     for (const x of rawSubs) {
       if (!isRecord(x)) return null;
-      const customerId = own(x, 'customerId');
-      const projectId = own(x, 'projectId');
-      const serviceId = own(x, 'serviceId');
-      if (!isStr(customerId) || (projectId !== undefined && !isStr(projectId)) || (serviceId !== undefined && !isStr(serviceId))) return null;
+      // R-18: an entry is exactly { customerId, projectId?, serviceId? }, each an OWN DATA property holding a
+      // non-empty string. "Key absent" means "the whole customer", so anything that could make a key look absent
+      // while the adapter meant to narrow — a getter, an inherited property, `projectId: undefined`, a wrong type,
+      // a misspelt or extra key (`project_id`), a symbol key — is refused (401), never dropped.
+      if (!isExactSubScope(x)) return null;
+      const customerId = own(x, 'customerId') as string;
+      const projectId = own(x, 'projectId') as string | undefined;
+      const serviceId = own(x, 'serviceId') as string | undefined;
       // N-15: a narrowing for a customer the user does not have. '*' is honoured for INTERNAL staff only.
       const has = customerIds === '*' ? kind === 'INTERNAL' : customerIds.includes(customerId);
       if (!has) return null;
