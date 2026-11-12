@@ -16,6 +16,7 @@ import { MSP_DEFAULT_TARGET, buildSnapshot, clampMessage, incidentMute, planEsca
 import { GROUP_GRACE_SEC, representative, type GroupRow } from './grouping.js';
 import { addMember, mergeOrOpen, newIncident, incidentId, resolve, type IncidentRow } from './incident.js';
 import { protectUnlessFalse } from './config.js';
+import { errorTag } from './errorTag.js';
 import { CLOCK_SKEW_LIMIT_MS, LANE_CONCURRENCY, NOTIFY_RESERVE_MS, SEND_TIMEOUT_MS, STORE_CALL_TIMEOUT_MS, TICK_RESPONSE_LIMIT_MS } from './limits.js';
 import type { MaintenanceWindow } from './maintenance.js';
 import {
@@ -540,7 +541,8 @@ const policyOf = (c: Ctx): SuppressionPolicy => {
   if (!c.policy) throw new Error('suppression policy was not loaded');
   return c.policy;
 };
-const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+/** What a thrown error becomes in the summary, the log and the job record: its name/code tag, never its raw message. */
+const errMsg = (e: unknown): string => errorTag(e);
 const overBudget = (c: Ctx, phase: TickJob = 'group'): boolean => {
   if (c.clock().getTime() < (phase === 'notify' ? c.deadline : c.softDeadline)) return false;
   c.sum.truncated = true;

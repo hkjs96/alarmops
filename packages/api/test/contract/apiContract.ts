@@ -26,8 +26,8 @@ interface CWorld {
 /** The world of test/helpers.ts (two customers + one unmapped account, one open incident each), built through the fixture. */
 async function cworld(make: MakeApiFixture, extra: (s: MemoryApiStore) => void = () => undefined): Promise<CWorld> {
   const seed = seedWorld(new MemoryApiStore()) as MemoryApiStore;
-  for (const [id, name, contactId] of [['usr_haeun', 'Haeun Kim', 'ct_haeun'], ['usr_minjae', 'Minjae Lee', 'ct_minjae'], ['usr_viewer', 'Viewer', null], ['usr_yuna', 'Yuna Seo', 'ct_yuna'], ['usr_dohyun', 'Dohyun Han', 'ct_dohyun']] as const) {
-    seed.users.set(id, { id, name, contactId });
+  for (const [id, name, contactId, customerId] of [['usr_haeun', 'Haeun Kim', 'ct_haeun', null], ['usr_minjae', 'Minjae Lee', 'ct_minjae', null], ['usr_viewer', 'Viewer', null, null], ['usr_yuna', 'Yuna Seo', 'ct_yuna', 'cus_mirae'], ['usr_dohyun', 'Dohyun Han', 'ct_dohyun', 'cus_hanbit']] as const) {
+    seed.users.set(id, { id, name, contactId, customerId });
   }
   seed.configs.push(PATTERNS.templateStandard(), PATTERNS.customerRotation());
   seed.contactScopes.push({ contactId: 'ct_seojun', customerId: 'cus_mirae', scopeType: 'SERVICE', scopeId: 'svc_pay', role: 'NOTIFY' });

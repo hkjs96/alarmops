@@ -214,7 +214,10 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     const u = this.users.get(userId);
     if (!u || (u.status ?? 'ACTIVE') !== 'ACTIVE') return null;
     const contact = u.contactId ? this.contacts.get(u.contactId) : undefined;
-    const customerId = u.customerId !== undefined ? u.customerId : contact?.kind === 'CUSTOMER' ? contact.customerId : null;
+    const customerId = u.customerId ?? null;
+    // Fail closed (same as the SQL store): a CUSTOMER contact's user must be bound to that very customer. The
+    // customer is never filled in from the contact — a missing or different User.customerId is no session at all.
+    if (contact?.kind === 'CUSTOMER' && contact.customerId !== customerId) return null;
     // D-42: a portal user of a customer that is not ACTIVE (or that does not exist) has no session. Staff are unaffected.
     if (customerId) {
       const cust = this.customers.get(customerId);

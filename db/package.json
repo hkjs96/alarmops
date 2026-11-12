@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "scripts": {
     "validate": "node scripts/check.mjs",
-    "test": "node scripts/check.mjs",
+    "test": "node scripts/check.mjs && node --test scripts/seed-phones.test.mjs",
     "migrate:diff": "node scripts/migrate-diff-offline.mjs prisma/schema.prisma",
     "seed": "tsx prisma/seed.ts",
     "check:rls": "node scripts/check-rls.mjs",

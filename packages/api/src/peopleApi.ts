@@ -21,8 +21,8 @@ interface Deps { repo: ApiRepository; now: () => Date }
 /** The AuthContext a console session's user gets (adapter side). Staff: every customer (D-34); portal: its customer. */
 export function authFromPrincipal(p: Principal): AuthContext {
   return p.customerId
-    ? { userId: p.userId, name: p.name, kind: 'CUSTOMER', customerIds: [p.customerId], role: p.role, ...(p.subScopes.length ? { subScopes: p.subScopes } : {}) }
-    : { userId: p.userId, name: p.name, kind: 'INTERNAL', customerIds: '*', role: p.role };
+    ? { userId: p.userId, name: p.name, email: p.email, kind: 'CUSTOMER', customerIds: [p.customerId], role: p.role, ...(p.subScopes.length ? { subScopes: p.subScopes } : {}) }
+    : { userId: p.userId, name: p.name, email: p.email, kind: 'INTERNAL', customerIds: '*', role: p.role };
 }
 
 const internalOnly = (auth: AuthContext): void => { if (auth.kind !== 'INTERNAL') throw notFound(); };
@@ -31,9 +31,12 @@ const internalOnly = (auth: AuthContext): void => { if (auth.kind !== 'INTERNAL'
 
 export async function getMe(req: ApiRequest, deps: Deps): Promise<ApiResponse> {
   const auth = requireAuth(req);
-  const p = await deps.repo.sessionPrincipal(auth.userId);
+  // The console adapter built `auth` from sessionPrincipal (authFromPrincipal) a moment ago, email included: no second
+  // lookup. Only an adapter that did not pass the email gets it read here (display only; the gate was the adapter's).
+  const p = auth.email === undefined ? await deps.repo.sessionPrincipal(auth.userId) : null;
+  const email = auth.email ?? p?.email ?? '';
   // `role`: the one that counts (effectiveRole). Staff without a valid role read as VIEWER here; the API still refuses their writes.
-  return ok({ id: auth.userId, name: auth.name ?? p?.name ?? '', email: p?.email ?? '', role: effectiveRole(auth) ?? 'VIEWER', kind: auth.kind });
+  return ok({ id: auth.userId, name: auth.name ?? p?.name ?? '', email, role: effectiveRole(auth) ?? 'VIEWER', kind: auth.kind });
 }
 
 // ───────────────────────────── display helpers ─────────────────────────────

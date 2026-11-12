@@ -3,7 +3,7 @@
  * `createApi(deps).handle(request)` is all an adapter needs.
  */
 import { createHash } from 'node:crypto';
-import { IDEMPOTENCY_MAX_PER_USER } from '@alarmops/core';
+import { IDEMPOTENCY_MAX_PER_USER, errorTag } from '@alarmops/core';
 import { strictApiConfig, type ApiConfig } from './audience.js';
 import { requireAuth, scopeKey } from './auth.js';
 import { ApiError, assertCleanInput, errorResponse, header, isRecord, notFound, type ApiRequest, type ApiResponse } from './http.js';
@@ -135,7 +135,7 @@ export function createApi(deps: ApiDeps) {
       return res;
     } catch (err) {
       if (err instanceof ApiError) return errorResponse(err, req.requestId);
-      deps.log?.('error', 'unhandled', { requestId: req.requestId, path: req.path, error: err instanceof Error ? err.message : String(err) });
+      deps.log?.('error', 'unhandled', { requestId: req.requestId, path: req.path, error: errorTag(err) });
       return errorResponse(new ApiError(500, 'INTERNAL', 'Something went wrong.'), req.requestId);
     }
   }

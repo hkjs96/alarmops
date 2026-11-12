@@ -81,6 +81,23 @@ export function peopleContract(make: MakeFixture<Repo>): void {
     });
   });
 
+  describe('session principal fails closed on a CUSTOMER contact not bound to its customer', () => {
+    const mislinked = (seed: MemoryApiStore) => {
+      // ct_yuna / ct_dohyun are CUSTOMER contacts of cus_mirae / cus_hanbit
+      seed.users.set('usr_nocust', { id: 'usr_nocust', name: 'Yuna (unbound)', contactId: 'ct_yuna', email: 'usr_nocust@example.test', role: 'ADMIN', customerId: null });
+      seed.users.set('usr_other', { id: 'usr_other', name: 'Dohyun (wrong customer)', contactId: 'ct_dohyun', email: 'usr_other@example.test', role: 'VIEWER', customerId: 'cus_mirae' });
+      seed.users.delete('usr_yuna');
+    };
+    it('User.customerId NULL → null (never staff); a different customer → null; both are 401', async () => {
+      w = await pworld(make, mislinked);
+      expect(await w.fx.repo.sessionPrincipal('usr_nocust')).toBeNull();
+      expect(await w.fx.repo.sessionPrincipal('usr_other')).toBeNull();
+      expect((await w.call(null, 'GET', '/me')).status).toBe(401);
+      // staff linked to INTERNAL contacts are unaffected
+      expect(await w.fx.repo.sessionPrincipal('usr_haeun')).toMatchObject({ userId: 'usr_haeun', customerId: null });
+    });
+  });
+
   describe('roles on Responders, paging-health, /oncall/now, /rotations, /staff (D-41)', () => {
     const PORTAL_ADMIN: AuthContext = { userId: 'usr_yuna', name: 'Yuna Seo', kind: 'CUSTOMER', customerIds: ['cus_mirae'], role: 'ADMIN' };
     const READS = ['/customers/cus_mirae/responders', '/customers/cus_mirae/paging-health', '/oncall/now', '/rotations', '/staff'];

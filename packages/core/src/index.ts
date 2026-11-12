@@ -2,6 +2,7 @@ export * from './types.js';
 export * from './limits.js';
 export * from './config.js';
 export * from './hash.js';
+export * from './errorTag.js';
 export * from './severity.js';
 export * from './fingerprint.js';
 export * from './raw.js';

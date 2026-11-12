@@ -4,7 +4,7 @@ import { SESSION_COOKIE, sessionSecret, verifySession } from "@/lib/auth/session
 import { SESSION_ENDED } from "@/lib/session-ended";
 
 /** Default deny (security review C-2): everything except /login and static assets needs a valid session. */
-const PUBLIC = [/^\/login(\/|$)/, /^\/auth\/dev-login$/, /^\/auth\/sign-out$/, /^\/auth\/session$/,
+const PUBLIC = [/^\/login(\/|$)/, /^\/auth\/dev-login$/, /^\/auth\/sign-out$/, /^\/auth\/session$/, /^\/auth\/ended$/,
   // the 1-minute tick: no session, its own shared secret (app/api/internal/tick, fail closed without TICK_SECRET)
   /^\/api\/internal\/tick$/];
 

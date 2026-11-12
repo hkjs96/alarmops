@@ -103,7 +103,7 @@ describe('N-33: runTick answers within 60 s whatever the store does', () => {
     const { store } = await tenants(1, () => 'VOICE');
     store.outboxBacklog = boom;
     const r = await runTick({ scheduledAt: at(1), jobs: ['notify'] }, { repo: store, senders: {}, now }) as TickSummary;
-    expect(r.errors).toEqual([{ phase: 'notify', id: 'backlog', message: 'db down' }]);
+    expect(r.errors).toEqual([{ phase: 'notify', id: 'backlog', message: 'Error' }]); // name only: the raw message ('db down') is neither returned nor logged
   });
 });
 

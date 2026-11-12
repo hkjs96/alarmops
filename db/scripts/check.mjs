@@ -6,6 +6,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { badSeedPhones, phoneLiterals } from './seed-phones.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const offline = 'postgresql://offline@localhost:5432/none';
@@ -112,8 +113,9 @@ if (missing.length) { console.error('missing required constraints:\n- ' + missin
 console.log(`hand-written constraints present (${required.length})`);
 
 // 4. Seed phones must be non-dialable (+82 10-0000-00NN, an exchange never issued in KR) so no sender can ever page a real person.
+//    Any quote style, and phone-shaped numbers without + as well (seed-phones.mjs).
 const seed = fs.readFileSync(new URL('../prisma/seed.ts', import.meta.url), 'utf8');
-const phones = [...seed.matchAll(/[`']\+\d[^`']*[`']/g)].map((m) => m[0]);
-const bad = phones.filter((p) => !/^[`']\+8210000000(\d{2}|\$\{[^}]+\})[`']$/.test(p));
+const phones = phoneLiterals(seed);
+const bad = badSeedPhones(seed);
 if (!phones.length || bad.length) { console.error('seed phones must match +8210000000NN (non-dialable):\n- ' + (bad.join('\n- ') || 'none found')); process.exit(1); }
 console.log(`seed phones non-dialable (${phones.length})`);

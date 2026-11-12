@@ -338,12 +338,15 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
   /**
    * The session gate: User.status must be ACTIVE, and for a portal user (customer-bound) the customer must be ACTIVE
    * too (D-42: SUSPENDED / TERMINATED → null → 401). MSP staff (customerId null) do not depend on any customer.
+   * Fail closed on an inconsistent link: a user whose Contact is a CUSTOMER contact must be bound to that same
+   * customer (User.customerId = Contact.customerId); NULL or another customer → null (401), never staff access.
    */
   async sessionPrincipal(userId: string): Promise<Principal | null> {
     const [u] = await this.sql.query(
       `SELECT u."id", u."email"::text AS "email", u."name", u."customerId", u."role", c."id" AS "contactId" FROM "User" u LEFT JOIN "Contact" c ON c."userId" = u."id"
         WHERE u."id" = $1 AND u."status" = 'ACTIVE'
-          AND (u."customerId" IS NULL OR EXISTS (SELECT 1 FROM "Customer" cu WHERE cu."id" = u."customerId" AND cu."status" = 'ACTIVE'))`, [userId]);
+          AND (u."customerId" IS NULL OR EXISTS (SELECT 1 FROM "Customer" cu WHERE cu."id" = u."customerId" AND cu."status" = 'ACTIVE'))
+          AND (c."id" IS NULL OR c."kind" <> 'CUSTOMER' OR c."customerId" IS NOT DISTINCT FROM u."customerId")`, [userId]);
     if (!u) return null;
     const customerId = (u.customerId ?? null) as string | null;
     let subScopes: Principal['subScopes'] = [];

@@ -7,6 +7,8 @@ import { shellInitScript } from "@/lib/shell-prefs";
 import { themeInitScript } from "@/components/ThemeToggle";
 import { getApi } from "@/lib/api";
 import { getSession } from "@/lib/auth";
+import { ApiError } from "@/lib/api/client";
+import { redirect } from "next/navigation";
 
 export const metadata: Metadata = { title: "AlarmOps", description: "AlarmOps console" };
 export const dynamic = "force-dynamic";
@@ -16,7 +18,16 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   let shell: { user: { id: string; name: string; role: "VIEWER" | "OPERATOR" | "ADMIN" }; open: number; customers: Awaited<ReturnType<Awaited<ReturnType<typeof getApi>>["scopeTree"]>>["customers"] } | null = null;
   if (await getSession()) {
     const api = await getApi();
-    const [me, list, tree] = await Promise.all([api.me(), api.listIncidents({ status: "active" }), api.scopeTree()]);
+    let loaded: [Awaited<ReturnType<typeof api.me>>, Awaited<ReturnType<typeof api.listIncidents>>, Awaited<ReturnType<typeof api.scopeTree>>] | null = null;
+    try {
+      loaded = await Promise.all([api.me(), api.listIncidents({ status: "active" }), api.scopeTree()]);
+    } catch (e) {
+      // A signed cookie whose user the API no longer accepts (suspended customer, disabled user): not signed in, not
+      // an error page. /auth/ended removes the dead cookie (or /login would send it straight back here) → /login.
+      if (!(e instanceof ApiError && e.status === 401)) throw e;
+    }
+    if (!loaded) redirect("/auth/ended");
+    const [me, list, tree] = loaded;
     // badge = open in ALL customers, whatever the list filter is
     shell = { user: { id: me.id, name: me.name, role: me.role }, open: list.counts.open, customers: tree.customers };
   }
