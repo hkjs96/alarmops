@@ -9,6 +9,7 @@ import { getApi } from "@/lib/api";
 import { getSession } from "@/lib/auth";
 import { ApiError } from "@/lib/api/client";
 import { redirect } from "next/navigation";
+import { ENDED_FROM_LAYOUT } from "@/lib/auth/ended-flags";
 
 export const metadata: Metadata = { title: "AlarmOps", description: "AlarmOps console" };
 export const dynamic = "force-dynamic";
@@ -26,7 +27,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       // an error page. /auth/ended removes the dead cookie (or /login would send it straight back here) → /login.
       if (!(e instanceof ApiError && e.status === 401)) throw e;
     }
-    if (!loaded) redirect("/auth/ended");
+    // ?from=layout (fixed flag): /auth/ended shows a plain page instead of sending a session it finds alive back here
+    if (!loaded) redirect(ENDED_FROM_LAYOUT);
     const [me, list, tree] = loaded;
     // badge = open in ALL customers, whatever the list filter is
     shell = { user: { id: me.id, name: me.name, role: me.role }, open: list.counts.open, customers: tree.customers };

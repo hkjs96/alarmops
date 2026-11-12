@@ -21,8 +21,8 @@ describe("RootLayout", () => {
   beforeEach(() => { me.mockReset(); redirect.mockClear(); });
   it("401 from me() → /auth/ended (cookie removed there, then /login)", async () => {
     me.mockRejectedValue(new ApiError(401, "UNAUTHENTICATED", "Sign in to continue.", "", {}));
-    await expect(RootLayout({ children: null })).rejects.toMatchObject({ to: "/auth/ended" });
-    expect(redirect).toHaveBeenCalledWith("/auth/ended");
+    await expect(RootLayout({ children: null })).rejects.toMatchObject({ to: "/auth/ended?from=layout" });
+    expect(redirect).toHaveBeenCalledWith("/auth/ended?from=layout");
   });
   it("any other failure is still an error", async () => {
     me.mockRejectedValue(new ApiError(500, "INTERNAL", "x", "", {}));

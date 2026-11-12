@@ -28,3 +28,13 @@ it('GET /me with an AuthContext from authFromPrincipal does not look the princip
   expect(res.body).toEqual({ id: 'usr_minjae', name: 'Minjae Lee', email: 'minjae@example.test', role: 'ADMIN', kind: 'INTERNAL' });
   expect(lookups).toBe(0);
 });
+
+it('memory sessionPrincipal mirrors SQL: a User.contactId with no Contact row is no contact (contactId null)', async () => {
+  const repo = seedWorld(new MemoryApiStore()) as MemoryApiStore;
+  repo.users.set('usr_dangling', { id: 'usr_dangling', name: 'D', contactId: 'ct_missing', email: 'd@example.test', role: 'OPERATOR', customerId: null });
+  const p = await repo.sessionPrincipal('usr_dangling');
+  expect(p?.contactId).toBeNull();
+  expect(p?.subScopes).toEqual([]);
+  repo.users.set('usr_minjae', { id: 'usr_minjae', name: 'Minjae Lee', contactId: 'ct_minjae', email: 'minjae@example.test', role: 'ADMIN', customerId: null });
+  expect((await repo.sessionPrincipal('usr_minjae'))?.contactId).toBe('ct_minjae');
+});

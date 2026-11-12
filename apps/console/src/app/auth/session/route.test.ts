@@ -46,8 +46,37 @@ describe("GET /auth/ended", () => {
     authForSession.mockResolvedValue(null);
     const res = await endedGET(await req("/auth/ended", "usr_suspended"));
     expect(res.status).toBe(303);
-    expect(res.headers.get("location")).toBe("/login");
+    expect(res.headers.get("location")).toBe("/login?ended=1");
     expect(res.cookies.get(SESSION_COOKIE)?.value).toBe("");
+  });
+  it("a principal the API would refuse (normalizeAuth fails) is signed out, not bounced back to /incidents", async () => {
+    authForSession.mockResolvedValue({ userId: "usr_a", kind: "ROBOT", customerIds: "*", role: "ADMIN" });
+    const res = await endedGET(await req("/auth/ended?from=layout", "usr_a"));
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe("/login?ended=1");
+    expect(res.cookies.get(SESSION_COOKIE)?.value).toBe("");
+    expect((await sessionGET(await req("/auth/session", "usr_a"))).status).toBe(401);
+  });
+  it("live session sent by the layout's 401 (?from=layout): a plain 200 page, no redirect, cookie kept", async () => {
+    authForSession.mockResolvedValue({ userId: "usr_a", kind: "INTERNAL", customerIds: "*", role: "ADMIN" });
+    const res = await endedGET(await req("/auth/ended?from=layout", "usr_a"));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("location")).toBeNull();
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(res.cookies.get(SESSION_COOKIE)).toBeUndefined();
+    const html = await res.text();
+    expect(html).toContain("Something went wrong — try again");
+    expect(html).toContain('href="/incidents"');
+    expect(html).toMatch(/<form method="post" action="\/auth\/sign-out"><button type="submit">Sign out<\/button><\/form>/);
+    expect(html).toContain("min-height:44px");
+  });
+  it("only the fixed flag value counts: any other ?from= is a normal redirect to /incidents", async () => {
+    authForSession.mockResolvedValue({ userId: "usr_a", kind: "INTERNAL", customerIds: "*", role: "ADMIN" });
+    for (const v of ["https://evil.example", "/x", "Layout", ""]) {
+      const res = await endedGET(await req(`/auth/ended?from=${encodeURIComponent(v)}`, "usr_a"));
+      expect(res.status).toBe(303);
+      expect(res.headers.get("location")).toBe("/incidents");
+    }
   });
   it("live session (a link from elsewhere): nothing is removed", async () => {
     authForSession.mockResolvedValue({ userId: "usr_a", kind: "INTERNAL", customerIds: "*", role: "ADMIN" });
