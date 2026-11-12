@@ -1402,6 +1402,8 @@ model TickHeartbeat {
 model TickClaim {
   minute    DateTime @id @db.Timestamptz(3)
   claimedAt DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([claimedAt])
 }
 
 /// API idempotency store (API-CONTRACT §2 "멱등"): 24 h, at most 200 live entries per user (N-19).
@@ -1419,6 +1421,7 @@ model IdempotencyKey {
 
   @@index([ownerUserId, expiresAt])
   @@index([ownerUserId, seq])
+  @@index([expiresAt])
 }
 
 /// Undo token of an ack / bulk action (API-CONTRACT §8.1): 5 minutes, the acting user only, single use (taken = deleted).

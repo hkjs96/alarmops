@@ -1298,10 +1298,16 @@ CREATE INDEX "AuditLog_customerId_at_idx" ON "AuditLog"("customerId", "at" DESC)
 CREATE INDEX "AuditLog_targetType_targetId_idx" ON "AuditLog"("targetType", "targetId");
 
 -- CreateIndex
+CREATE INDEX "TickClaim_claimedAt_idx" ON "TickClaim"("claimedAt");
+
+-- CreateIndex
 CREATE INDEX "IdempotencyKey_ownerUserId_expiresAt_idx" ON "IdempotencyKey"("ownerUserId", "expiresAt");
 
 -- CreateIndex
 CREATE INDEX "IdempotencyKey_ownerUserId_seq_idx" ON "IdempotencyKey"("ownerUserId", "seq");
+
+-- CreateIndex
+CREATE INDEX "IdempotencyKey_expiresAt_idx" ON "IdempotencyKey"("expiresAt");
 
 -- CreateIndex
 CREATE INDEX "UndoRecord_expiresAt_idx" ON "UndoRecord"("expiresAt");
@@ -1598,9 +1604,7 @@ ALTER TABLE "ContactRevealLog" ADD CONSTRAINT "ContactRevealLog_emergency_reason
   CHECK ("mode" <> 'EMERGENCY' OR length(btrim("reason")) > 0);
 
 -- Housekeeping (security review SQL, R-7): the tick deletes expired rows of every owner (purgeExpired).
-CREATE INDEX "IdempotencyKey_expiresAt_idx" ON "IdempotencyKey"("expiresAt");
 -- (UndoRecord already has its expiresAt index in the generated part.)
-CREATE INDEX "TickClaim_claimedAt_idx" ON "TickClaim"("claimedAt");
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Supabase Data API (security review SQL, R-4). On Supabase the roles `anon` and `authenticated` are what the
