@@ -4,10 +4,10 @@
  * Production: Prisma. Tests/local: MemoryApiStore.
  */
 import type {
-  AuditInput, Contact, DeliveryLog, IncidentCommit, IncidentEventInput, IncidentRow, MaintenanceWindow, PagingConfig, PagingWorld, Severity, Source, SuppressionPolicy,
+  AuditInput, Contact, Leave, Override, Rotation, DeliveryLog, IncidentCommit, IncidentEventInput, IncidentRow, MaintenanceWindow, PagingConfig, PagingWorld, Severity, Source, SuppressionPolicy,
 } from '@alarmops/core';
 import type { UserInfo } from './audience.js';
-import type { ScopeFilter } from './auth.js';
+import type { Role, ScopeFilter } from './auth.js';
 
 export interface OrgNode { id: string; name: string; slug: string }
 export interface ProjectNode extends OrgNode { customerId: string }
@@ -73,6 +73,53 @@ export interface StoredResponse { status: number; headers: Record<string, string
 /** `fingerprint` binds the key to the request it was first used for (method + path + If-Match + body hash, R-5). */
 export interface IdempotentEntry { fingerprint: string; res: StoredResponse }
 
+
+/**
+ * A console session's user as the store knows it (GET /me, and the adapter that turns a session into an AuthContext).
+ * Only ACTIVE users are returned. `customerId` set = portal user of that customer; null = MSP staff.
+ * `subScopes`: a portal user's PORTAL_USER grants on a project or service of its customer (narrowing, §8.0 rule 1).
+ */
+export interface Principal {
+  userId: string;
+  email: string;
+  name: string;
+  customerId: string | null;
+  role: Role;
+  contactId: string | null;
+  subScopes: Array<{ customerId: string; projectId?: string; serviceId?: string }>;
+}
+
+export type ResponderSourceKind = 'DIRECT' | 'TEMPLATE';
+export interface ResponderEntry {
+  contactId: string;
+  role: 'PAGEABLE' | 'NOTIFY_ONLY';
+  source: ResponderSourceKind;
+  templateId: string | null;
+  templateName: string | null;
+  order: number;
+}
+/** ContactScope rows of the customer's own people (NOTIFY / APPROVER / PORTAL_USER), with the scope's name. */
+export interface PersonScopeRow { contactId: string; scopeType: 'CUSTOMER' | 'PROJECT' | 'SERVICE'; scopeId: string; scopeName: string; role: 'NOTIFY' | 'APPROVER' | 'PORTAL_USER' }
+/**
+ * The Responders list of one customer. `version` is the list's optimistic-lock version (API-CONTRACT §8.3
+ * "Responders 버전"): it goes up by one with every write through `writeResponders` and never restarts.
+ */
+export interface RespondersState { version: number; templateId: string | null; entries: ResponderEntry[]; scopes: PersonScopeRow[] }
+
+export type ResponderOp =
+  | { kind: 'add'; contactId: string; role: 'PAGEABLE' | 'NOTIFY_ONLY' }
+  | { kind: 'create'; name: string; email: string | null; phone: string | null; role: 'PAGEABLE' | 'NOTIFY_ONLY'; extras: Array<'APPROVER' | 'PORTAL_USER'> }
+  | { kind: 'role'; contactId: string; role: 'PAGEABLE' | 'NOTIFY_ONLY' }
+  | { kind: 'remove'; contactId: string };
+/**
+ * 'CONFLICT': the list is no longer at `expectedVersion`. 'EXISTS': the contact is already a responder (add).
+ * 'GONE': the contact is not a responder (role / remove).
+ */
+export type ResponderWriteOutcome = { contactId: string; version: number } | 'CONFLICT' | 'EXISTS' | 'GONE';
+
+/** Rotations a caller may see (MSP ones + those of customers in the scope) with what decides who is on shift. */
+export interface RotationsWorld { rotations: Rotation[]; overrides: Override[]; leaves: Leave[]; contacts: Map<string, Contact> }
+
 export interface ApiRepository {
   // ── org / scope ──
   orgTree(scope: ScopeFilter): Promise<OrgTree>;
@@ -117,6 +164,21 @@ export interface ApiRepository {
   rotationOwner(rotationId: string): Promise<{ scope: 'MSP' | 'CUSTOMER'; customerId: string | null } | null>;
   /** Notify-only customer people for a path (ContactScope NOTIFY, all levels merged — DATA-MODEL ContactScope). */
   notifiedPeople(customerId: string, path: { projectId?: string | null; serviceId?: string | null }): Promise<NotifiedPerson[]>;
+
+  // ── people (GET /me, Responders, rotations, staff) ──
+  /** ACTIVE user by id, or null. Never takes anything from the request but the session's user id. */
+  sessionPrincipal(userId: string): Promise<Principal | null>;
+  /** Caller has already checked the customer is visible (and customer-wide). */
+  respondersState(customerId: string): Promise<RespondersState>;
+  /**
+   * One transaction: the list must still be at `expectedVersion` (row lock on the customer), the change is applied,
+   * the version goes up by one and `audit` is written. The audit row is what carries the version (SQL store).
+   */
+  writeResponders(customerId: string, expectedVersion: number, op: ResponderOp, audit: AuditInput): Promise<ResponderWriteOutcome>;
+  /** MSP rotations + rotations of the customers in `scope` (CUSTOMER rotations only inside the scope). */
+  rotationsWorld(scope: ScopeFilter): Promise<RotationsWorld>;
+  /** Active MSP staff contacts (kind INTERNAL), name order. */
+  staffContacts(): Promise<Contact[]>;
 
   // ── idempotency (API-CONTRACT §2 "멱등", 24h) ──
   getIdempotent(key: string, now: Date): Promise<IdempotentEntry | null>;

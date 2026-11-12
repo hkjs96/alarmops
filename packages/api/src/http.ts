@@ -111,9 +111,12 @@ const CONTROL = /[\u0000-\u001f\u007f]/;
 export const ID_MAX_CHARS = 200;
 /** An id or slug as it may appear in a path, a cursor or a filter: no control characters (NUL included), at most 200 characters. */
 export const isCleanId = (v: unknown): v is string => typeof v === 'string' && v.length > 0 && v.length <= ID_MAX_CHARS && !CONTROL.test(v);
-/** `2026-11-09T03:00:00.000Z` — exactly what `Date.prototype.toISOString` writes, and a real instant. */
+/**
+ * `2026-11-09T03:00:00.000Z` — exactly what `Date.prototype.toISOString` writes, and a real instant.
+ * Year 0000 is refused (issue #10 P-2): JavaScript accepts it, Postgres has no year 0 and answered with an error (500).
+ */
 export const isIsoInstant = (v: unknown): v is string =>
-  typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(v) && !Number.isNaN(Date.parse(v)) && new Date(v).toISOString() === v;
+  typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(v) && !v.startsWith('0000-') && !Number.isNaN(Date.parse(v)) && new Date(v).toISOString() === v;
 
 function hasNul(v: unknown, depth = 0): boolean {
   if (typeof v === 'string') return v.includes('\u0000');

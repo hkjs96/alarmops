@@ -2,15 +2,20 @@
  * In-memory ApiRepository on top of the tick store, so the API and the tick see one world.
  * Scope is applied inside every read, the same way the SQL adapter must do it. Tests and local runs only.
  */
-import { MemoryTickStore, incidentMute, parseSnapshot, type AuditInput, type IncidentRow, type PagingConfig } from '@alarmops/core';
-import { inScope, nodeVisible, seesCustomer, type ScopeFilter } from './auth.js';
+import { MemoryTickStore, incidentMute, parseSnapshot, type AuditInput, type Contact, type IncidentRow, type PagingConfig } from '@alarmops/core';
+import { inScope, nodeVisible, seesCustomer, type Role, type ScopeFilter } from './auth.js';
 import type { UserInfo } from './audience.js';
-import type { AlertMemberRow, ApiRepository, IdempotentEntry, IncidentFilter, IncidentPage, NodeFilter, NotifiedPerson, OpenCounts, StatusCounts, UndoRecord } from './repo.js';
+import type { Principal, ResponderOp, ResponderWriteOutcome, RespondersState, RotationsWorld, AlertMemberRow, ApiRepository, IdempotentEntry, IncidentFilter, IncidentPage, NodeFilter, NotifiedPerson, OpenCounts, StatusCounts, UndoRecord } from './repo.js';
 
 export interface ContactScopeRow { contactId: string; customerId: string; scopeType: 'CUSTOMER' | 'PROJECT' | 'SERVICE'; scopeId: string; role: 'NOTIFY' | 'APPROVER' | 'PORTAL_USER' }
 
 export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
-  users = new Map<string, { id: string; name: string; contactId: string | null }>();
+  users = new Map<string, { id: string; name: string; contactId: string | null; email?: string; role?: Role; customerId?: string | null; status?: 'ACTIVE' | 'PENDING' | 'DISABLED' }>();
+  /** Responders list versions (never restart) and the source of each responder row (DIRECT unless set). */
+  respondersVersion = new Map<string, number>();
+  responderSource = new Map<string, { source: 'DIRECT' | 'TEMPLATE'; templateId: string; templateName: string }>();
+  customerTemplate = new Map<string, string>();
+  private newContactSeq = 0;
   contactScopes: ContactScopeRow[] = [];
   resources = new Map<string, { id: string; name: string; customerId: string; serviceId: string | null }>();
   verifiedSlack = new Set<string>();
@@ -202,5 +207,70 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     for (const [k] of live.slice(0, Math.max(0, live.length - (cap.maxPerOwner - 1)))) this.idempotent.delete(k);
     this.idempotent.delete(key);
     this.idempotent.set(key, { entry: structuredClone(entry), expiresAt, owner: cap.owner });
+  }
+
+  // ───────────── people ─────────────
+  async sessionPrincipal(userId: string): Promise<Principal | null> {
+    const u = this.users.get(userId);
+    if (!u || (u.status ?? 'ACTIVE') !== 'ACTIVE') return null;
+    const contact = u.contactId ? this.contacts.get(u.contactId) : undefined;
+    const customerId = u.customerId !== undefined ? u.customerId : contact?.kind === 'CUSTOMER' ? contact.customerId : null;
+    const subScopes = customerId && u.contactId ? this.contactScopes.filter((s) => s.contactId === u.contactId && s.role === 'PORTAL_USER' && s.scopeType !== 'CUSTOMER')
+      .map((s) => (s.scopeType === 'PROJECT' ? { customerId, projectId: s.scopeId } : { customerId, projectId: this.services.get(s.scopeId)?.projectId, serviceId: s.scopeId }))
+      .map((x) => (x.projectId === undefined ? { customerId: x.customerId, serviceId: (x as { serviceId: string }).serviceId } : x)) : [];
+    return { userId: u.id, email: u.email ?? `${u.id}@example.test`, name: u.name, customerId: customerId ?? null, role: u.role ?? (customerId ? 'VIEWER' : 'OPERATOR'), contactId: u.contactId, subScopes };
+  }
+  async respondersState(customerId: string): Promise<RespondersState> {
+    const name = (t: string, id: string) => (t === 'CUSTOMER' ? this.customers.get(id)?.name : t === 'PROJECT' ? this.projects.get(id)?.name : this.services.get(id)?.name) ?? id;
+    const entries = this.responders.filter((r) => r.customerId === customerId)
+      .map((r, i) => ({ r, i, src: this.responderSource.get(`${customerId}|${r.contactId}`) }))
+      .sort((a, b) => (a.r.order ?? 0) - (b.r.order ?? 0) || (a.r.contactId < b.r.contactId ? -1 : 1))
+      .map(({ r, src }) => ({ contactId: r.contactId, role: r.role, source: src?.source ?? 'DIRECT' as const, templateId: src?.templateId ?? null, templateName: src?.templateName ?? null, order: r.order ?? 0 }));
+    const scopes = this.contactScopes.filter((s) => s.customerId === customerId).map((s) => ({ contactId: s.contactId, scopeType: s.scopeType, scopeId: s.scopeId, scopeName: name(s.scopeType, s.scopeId), role: s.role }));
+    return { version: this.respondersVersion.get(customerId) ?? 0, templateId: this.customerTemplate.get(customerId) ?? null, entries, scopes };
+  }
+  async writeResponders(customerId: string, expectedVersion: number, op: ResponderOp, audit: AuditInput): Promise<ResponderWriteOutcome> {
+    if (audit.customerId !== customerId) throw new Error('writeResponders: audit must be for the same customer');
+    if ((this.respondersVersion.get(customerId) ?? 0) !== expectedVersion) return 'CONFLICT';
+    const has = (id: string) => this.responders.some((r) => r.customerId === customerId && r.contactId === id);
+    const nextOrder = () => Math.max(-1, ...this.responders.filter((r) => r.customerId === customerId).map((r) => r.order ?? 0)) + 1;
+    let contactId: string;
+    if (op.kind === 'add') {
+      if (has(op.contactId)) return 'EXISTS';
+      this.responders.push({ customerId, contactId: op.contactId, role: op.role, order: nextOrder() });
+      contactId = op.contactId;
+    } else if (op.kind === 'create') {
+      contactId = `ct_new_${++this.newContactSeq}`;
+      const c: Contact = { id: contactId, kind: 'CUSTOMER', customerId, name: op.name, active: true, email: op.email, phone: op.phone };
+      this.contacts.set(contactId, c);
+      this.responders.push({ customerId, contactId, role: op.role, order: nextOrder() });
+      for (const role of op.extras) this.contactScopes.push({ contactId, customerId, scopeType: 'CUSTOMER', scopeId: customerId, role });
+    } else if (op.kind === 'role') {
+      const r = this.responders.find((x) => x.customerId === customerId && x.contactId === op.contactId);
+      if (!r) return 'GONE';
+      r.role = op.role;
+      contactId = op.contactId;
+    } else {
+      if (!has(op.contactId)) return 'GONE';
+      this.responders = this.responders.filter((x) => !(x.customerId === customerId && x.contactId === op.contactId));
+      contactId = op.contactId;
+    }
+    const version = expectedVersion + 1;
+    this.respondersVersion.set(customerId, version);
+    this.audits.push({ ...audit, targetId: contactId });
+    return { contactId, version };
+  }
+  async rotationsWorld(scope: ScopeFilter): Promise<RotationsWorld> {
+    const rotations = [...this.rotations.values()].filter((r) => r.scope === 'MSP' || (r.customerId != null && seesCustomer(scope, r.customerId))).map((r) => structuredClone(r));
+    const ids = new Set(rotations.flatMap((r) => r.members.map((m) => m.contactId)));
+    const ovs = this.overrides.filter((o) => rotations.some((r) => r.id === o.rotationId));
+    for (const o of ovs) ids.add(o.contactId);
+    const leaves = this.leaves.filter((l) => ids.has(l.contactId));
+    for (const l of leaves) ids.add(l.replacementId);
+    const contacts = new Map([...ids].map((id) => this.contacts.get(id)).filter((c): c is Contact => !!c).map((c) => [c.id, structuredClone(c)]));
+    return { rotations, overrides: structuredClone(ovs), leaves: structuredClone(leaves), contacts };
+  }
+  async staffContacts(): Promise<Contact[]> {
+    return [...this.contacts.values()].filter((c) => c.kind === 'INTERNAL' && c.active).sort((a, b) => a.name.localeCompare(b.name) || (a.id < b.id ? -1 : 1)).map((c) => structuredClone(c));
   }
 }

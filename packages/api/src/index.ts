@@ -8,3 +8,4 @@ export { resolveSlugs, resolveNodeFilter, getScopeTree, SLUG_RE } from './scope.
 export { displayKey } from './incidents.js';
 export { MAX_STEPS, MAX_AT_MIN, MAX_REPEAT } from './pagingApi.js';
 export * from './slug.js';
+export { authFromPrincipal, channelStates, maskEmail, maskPhone } from './peopleApi.js';
