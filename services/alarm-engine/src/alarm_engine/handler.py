@@ -28,6 +28,40 @@ class InvalidCommand(ValueError):
     pass
 
 
+# Per-type required payload keys and their types (API-CONTRACT §6). Missing/mistyped → poison (not retried).
+_STR, _BOOL = (str,), (bool,)
+_NUM = (int, float)
+REQUIRED: dict[str, dict[str, tuple[type, ...]]] = {
+    "SYNC_ACCOUNT": {},
+    "SYNC_RESOURCE": {"resourceId": _STR},
+    "APPLY_THRESHOLD": {"thresholdChangeId": _STR, "managedAlarmId": _STR},
+    "APPLY_CUSTOMER_DEFAULT": {"resourceType": _STR, "metricKey": _STR},
+    "SET_SEVERITY": {"managedAlarmId": _STR, "severity": _STR},
+    "SET_MONITORING_TAG": {"resourceId": _STR, "value": _STR},
+    "STOP_MONITORING": {"resourceId": _STR, "deleteAlarms": _BOOL},
+    "CHECK_ALARM_LIVENESS": {"incidentId": _STR, "alarmNames": (list,)},
+    "EXECUTE_REMEDIATION": {"remediationRequestId": _STR},
+    "CHECK_CONNECTION": {},
+}
+NEEDS_ACCOUNT = frozenset({"SYNC_ACCOUNT", "CHECK_ALARM_LIVENESS", "CHECK_CONNECTION"})
+OPTIONAL: dict[str, dict[str, tuple[type, ...]]] = {
+    "SYNC_ACCOUNT": {"mode": _STR},
+    "SYNC_RESOURCE": {"restoreDrift": _BOOL},
+    "APPLY_THRESHOLD": {"threshold": _NUM, "off": _BOOL, "evalM": (int,), "evalN": (int,), "periodSec": (int,),
+                        "statistic": _STR},
+    "CHECK_ALARM_LIVENESS": {"region": _STR},
+}
+MAX_LIVENESS_ALARMS = 100
+
+
+def _check_type(name: str, v: Any, types: tuple[type, ...]) -> None:
+    # bool is a subclass of int: never accept it where a number is expected
+    if not isinstance(v, types) or (isinstance(v, bool) and bool not in types):
+        raise InvalidCommand(f"{name} has wrong type")
+    if isinstance(v, str) and not v:
+        raise InvalidCommand(f"{name} is empty")
+
+
 def parse(body: str) -> dict[str, Any]:
     try:
         cmd = json.loads(body)
@@ -40,8 +74,26 @@ def parse(body: str) -> dict[str, Any]:
             raise InvalidCommand(f"missing {k}")
     if cmd["type"] not in COMMAND_TYPES:
         raise InvalidCommand(f"unknown type {cmd['type']}")
-    if not isinstance(cmd.get("payload", {}), dict):
+    p = cmd.get("payload", {})
+    if p is None:
+        p = cmd["payload"] = {}
+    if not isinstance(p, dict):
         raise InvalidCommand("payload must be an object")
+    t = cmd["type"]
+    for k, types in REQUIRED[t].items():
+        if k not in p or p[k] is None:
+            raise InvalidCommand(f"{t}: missing payload.{k}")
+        _check_type(f"payload.{k}", p[k], types)
+    for k, types in OPTIONAL.get(t, {}).items():
+        if p.get(k) is not None:
+            _check_type(f"payload.{k}", p[k], types)
+    if t in NEEDS_ACCOUNT:
+        if not isinstance(cmd.get("cloudAccountId"), str) or not cmd["cloudAccountId"]:
+            raise InvalidCommand(f"{t}: cloudAccountId required")
+    if t == "CHECK_ALARM_LIVENESS":
+        names = p["alarmNames"]
+        if len(names) > MAX_LIVENESS_ALARMS or not all(isinstance(n, str) and n for n in names):
+            raise InvalidCommand(f"alarmNames must be ≤{MAX_LIVENESS_ALARMS} non-empty strings")
     return cmd
 
 
@@ -49,7 +101,11 @@ def _account_of(engine: Engine, cmd: dict) -> str:
     acc = cmd.get("cloudAccountId")
     if not acc:
         raise InvalidCommand("cloudAccountId required")
-    if engine.repo.get_account(acc).customer_id != cmd["customerId"]:
+    try:
+        account = engine.repo.get_account(acc)
+    except LookupError as e:   # KeyError included: unknown account is poison, retry cannot help
+        raise InvalidCommand(f"unknown cloudAccountId {acc}") from e
+    if account.customer_id != cmd["customerId"]:
         raise InvalidCommand("cloudAccountId does not belong to customerId")   # tenant guard
     return str(acc)
 
@@ -83,21 +139,27 @@ def dispatch(engine: Engine, cmd: dict, liveness_sink: Callable[[str, str, dict]
             return {"status": "OK", "deleted": engine.stop_monitoring(cus, p["resourceId"])}
         if t == "CHECK_ALARM_LIVENESS":
             acc = engine.repo.get_account(_account_of(engine, cmd))
-            cw = engine.sessions.client(acc, "reader", "cloudwatch", p.get("region", acc.regions[0]))
-            result = classify_liveness(cw, list(p.get("alarmNames") or []))
+            region = p.get("region") or acc.regions[0]
+            if region not in (*acc.regions, "us-east-1"):
+                raise InvalidCommand(f"region {region} not enabled for account")
+            cw = engine.sessions.client(acc, "reader", "cloudwatch", region)
+            result = classify_liveness(cw, list(p["alarmNames"]))
             if liveness_sink:
                 liveness_sink(cus, p["incidentId"], result)
             return {"status": "OK", "liveness": result}
         if t == "EXECUTE_REMEDIATION":
+            # customer guard is inside get_remediation_request(cus, ...); execute() re-checks tenant on the row
             req = engine.repo.get_remediation_request(cus, p["remediationRequestId"])
             if req is None:
                 return {"status": "REFUSED", "reason": "not found"}
-            ex = remediation.execute(engine.repo, engine.sessions, req.id)
+            ex = remediation.execute(engine.repo, engine.sessions, req.id, customer_id=cus)
             return {"status": ex.status, "reason": ex.reason}
         if t == "CHECK_CONNECTION":
             return {"status": "OK", "roles": engine.check_connection(_account_of(engine, cmd))}
     except CapabilityDisabled as e:
         return {"status": "CAPABILITY_DISABLED", "role": e.role}
+    except (KeyError, LookupError) as e:   # unknown resource/alarm/account for this customer: poison
+        raise InvalidCommand(f"not found: {e}") from e
     raise InvalidCommand(t)
 
 
@@ -111,11 +173,12 @@ def handle_batch(engine: Engine, event: dict) -> dict:
             continue
         try:
             out = dispatch(engine, cmd)
-            logger.info("command %s %s → %s", cmd["commandId"], cmd["type"], out.get("status"))
+            logger.info("command %s %s customer=%s → %s", cmd["commandId"], cmd["type"], cmd["customerId"],
+                        out.get("status"))
         except InvalidCommand as e:
-            logger.error("invalid command %s: %s", cmd["commandId"], e)
+            logger.error("invalid command %s customer=%s: %s", cmd["commandId"], cmd["customerId"], e)
         except Exception:  # noqa: BLE001
-            logger.exception("command %s failed", cmd["commandId"])
+            logger.exception("command %s customer=%s failed", cmd["commandId"], cmd["customerId"])
             failures.append({"itemIdentifier": rec["messageId"]})
     return {"batchItemFailures": failures}
 

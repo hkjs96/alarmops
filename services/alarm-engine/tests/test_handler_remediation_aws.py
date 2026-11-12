@@ -53,10 +53,62 @@ def test_sync_account_via_sqs_and_tenant_guard(world):
     assert len(repo.runs) == 1        # the cross-tenant one was dropped
 
 
-def test_failed_record_reported_for_retry(world):
+def test_failed_record_reported_for_retry(world, monkeypatch):
     repo, sessions, disc, eng, acc = world
-    out = handle_batch(eng, {"Records": [msg("SYNC_RESOURCE", {"resourceId": "missing"})]})
+    repo.resources["r1"] = ResourceRow("r1", "cus_1", acc.id, "ap-northeast-2", "EC2", "arn", "i-1",
+                                       monitoring_state="MONITORED")
+
+    def boom(*a, **k):
+        raise RuntimeError("throttled")
+    monkeypatch.setattr(eng, "sync_resource", boom)
+    out = handle_batch(eng, {"Records": [msg("SYNC_RESOURCE", {"resourceId": "r1"})]})
     assert out == {"batchItemFailures": [{"itemIdentifier": "m_SYNC_RESOURCE"}]}
+
+
+def test_unknown_resource_or_account_is_poison_not_retried(world):
+    repo, sessions, disc, eng, acc = world
+    out = handle_batch(eng, {"Records": [msg("SYNC_RESOURCE", {"resourceId": "missing"}),
+                                         msg("CHECK_CONNECTION", cloudAccountId="acc_nope")]})
+    assert out == {"batchItemFailures": []}
+
+
+@pytest.mark.parametrize("type_,payload", [
+    ("SYNC_RESOURCE", {}), ("SYNC_RESOURCE", {"resourceId": 5}), ("APPLY_THRESHOLD", {"managedAlarmId": "m"}),
+    ("APPLY_THRESHOLD", {"managedAlarmId": "m", "thresholdChangeId": "c", "threshold": "90"}),
+    ("APPLY_THRESHOLD", {"managedAlarmId": "m", "thresholdChangeId": "c", "evalM": True}),
+    ("SET_SEVERITY", {"managedAlarmId": "m"}), ("STOP_MONITORING", {"resourceId": "r", "deleteAlarms": "yes"}),
+    ("EXECUTE_REMEDIATION", {}), ("APPLY_CUSTOMER_DEFAULT", {"resourceType": "EC2"}),
+    ("CHECK_ALARM_LIVENESS", {"incidentId": "i"}), ("CHECK_ALARM_LIVENESS", {"incidentId": "i", "alarmNames": "a"}),
+    ("CHECK_ALARM_LIVENESS", {"incidentId": "i", "alarmNames": [1]}),
+    ("CHECK_ALARM_LIVENESS", {"incidentId": "i", "alarmNames": [f"a{i}" for i in range(101)]}),
+])
+def test_parse_rejects_bad_payload(type_, payload):
+    with pytest.raises(InvalidCommand):
+        parse(msg(type_, payload)["body"])
+
+
+def test_parse_requires_account_for_account_commands():
+    body = json.loads(msg("CHECK_CONNECTION")["body"])
+    del body["cloudAccountId"]
+    with pytest.raises(InvalidCommand, match="cloudAccountId"):
+        parse(json.dumps(body))
+
+
+def test_liveness_region_must_be_enabled(world):
+    from alarm_engine.handler import dispatch
+    repo, sessions, disc, eng, acc = world
+    p = {"incidentId": "i", "alarmNames": ["a"]}
+    with pytest.raises(InvalidCommand, match="region"):
+        dispatch(eng, parse(msg("CHECK_ALARM_LIVENESS", {**p, "region": "eu-west-1"})["body"]))
+    assert dispatch(eng, parse(msg("CHECK_ALARM_LIVENESS", {**p, "region": "us-east-1"})["body"]))["status"] == "OK"
+    assert dispatch(eng, parse(msg("CHECK_ALARM_LIVENESS", p)["body"]))["status"] == "OK"
+
+
+def test_handler_logs_include_customer(world, caplog):
+    repo, sessions, disc, eng, acc = world
+    caplog.set_level("INFO")
+    handle_batch(eng, {"Records": [msg("CHECK_CONNECTION")]})
+    assert "customer=cus_1" in caplog.text
 
 
 def test_capability_disabled_is_a_result_not_a_retry(world):
@@ -88,8 +140,8 @@ def test_liveness_classification(world):
 
 def _setup_remediation(repo, acc, *, enabled=True, mode="APPROVAL_REQUIRED", remediator=True):
     repo.accounts[acc.id] = make_account(remediator_role_arn="arn:aws:iam::1:role/Rem", remediator_enabled=remediator)
-    repo.resources["r1"] = ResourceRow("r1", "cus_1", acc.id, "ap-northeast-2", "EC2", "arn:ec2", "i-1",
-                                       monitoring_state="MONITORED")
+    repo.resources["r1"] = ResourceRow("r1", "cus_1", acc.id, "ap-northeast-2", "EC2",
+                                       f"arn:aws:ec2:ap-northeast-2:{ACCOUNT_ID}:instance/i-1", "i-1", monitoring_state="MONITORED")
     repo.policies["cus_1"] = RemediationPolicyRow("cus_1", enabled, mode, ("EC2_STOP",))
 
 
@@ -247,3 +299,55 @@ def test_migration_dry_run_report():
     assert items[0].metric_key == "CPUUtilization"
     text = report(items)
     assert "DRY RUN" in text and "RENAME=2" in text
+
+
+# ── security review fixes
+
+def _approved(repo, acc, **kw):
+    repo.remediations["rq"] = RemediationRequestRow("rq", "cus_1", acc.id, "r1", kw.get("action", "EC2_STOP"),
+                                                    "APPROVED", {}, decided_by="contact_1", decided_at=now())
+
+
+@pytest.mark.parametrize("mutate,reason", [
+    (lambda r: setattr(r, "cloud_account_id", "acc_other"), "request account"),
+    (lambda r: setattr(r, "resource_arn", "arn:aws:ec2:ap-northeast-2:999999999999:instance/i-1"), "customer account"),
+    (lambda r: setattr(r, "resource_arn", f"arn:aws:ec2:us-west-2:{ACCOUNT_ID}:instance/i-1"), "region"),
+    (lambda r: setattr(r, "monitoring_state", "NEEDS_REVIEW"), "not monitored"),
+])
+def test_remediation_refuses_mismatched_resource(world, monkeypatch, mutate, reason):
+    repo, sessions, disc, eng, acc = world
+    _setup_remediation(repo, acc)
+    monkeypatch.setenv("ALARMOPS_REMEDIATION_EXECUTION", "true")
+    _approved(repo, acc)
+    mutate(repo.resources["r1"])
+    out = remediation.execute(repo, sessions, "rq")
+    assert out.status == "REFUSED" and reason in out.reason
+    assert repo.remediations["rq"].status == "APPROVED"
+    assert not DESTRUCTIVE & set(sessions.all_calls())
+
+
+def test_remediation_wrong_customer_is_refused(world, monkeypatch):
+    repo, sessions, disc, eng, acc = world
+    _setup_remediation(repo, acc)
+    monkeypatch.setenv("ALARMOPS_REMEDIATION_EXECUTION", "true")
+    _approved(repo, acc)
+    assert remediation.execute(repo, sessions, "rq", customer_id="cus_evil").status == "REFUSED"
+    assert repo.transition_remediation("cus_evil", "rq", "APPROVED", "EXECUTING") is False
+    assert repo.remediations["rq"].status == "APPROVED"
+
+
+def test_empty_external_id_is_capability_disabled():
+    sts = boto3.client("sts", region_name="us-east-1", aws_access_key_id="x", aws_secret_access_key="x")
+    with Stubber(sts):    # no responses queued: any call would fail the test
+        f = StsSessionFactory(sts, client_ctor=lambda *a, **k: None)
+        with pytest.raises(CapabilityDisabled):
+            f.credentials(make_account(external_id=""), "reader")
+
+
+def test_sync_run_updates_are_tenant_scoped(world):
+    repo, sessions, disc, eng, acc = world
+    rid = repo.start_sync_run("cus_1", acc.id, "DAILY")
+    repo.finish_sync_run("cus_evil", rid, "FAILED", {})
+    assert repo.runs[rid].status == "RUNNING"
+    repo.finish_sync_run("cus_1", rid, "SUCCEEDED", {})
+    assert repo.runs[rid].status == "SUCCEEDED"

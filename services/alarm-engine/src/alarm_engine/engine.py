@@ -12,6 +12,7 @@ deleted (kept from legacy). Tags that cannot be read → nothing changes (alarm-
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any, Protocol
@@ -23,6 +24,7 @@ from alarm_engine.aws import (
     CapabilityDisabled,
     CloudAccount,
     SessionFactory,
+    assert_arn_in_account,
     console_tags,
     list_owned_alarms,
     read_console_tags,
@@ -238,7 +240,7 @@ class Engine:
             for region in account.regions:
                 discovered += self.discovery.list_monitored(account, region)
         except Exception as e:  # noqa: BLE001 — failure ≠ zero resources (4-9)
-            self.repo.finish_sync_run(run, "FAILED", counts, f"discovery failed: {e}")
+            self.repo.finish_sync_run(account.customer_id, run, "FAILED", counts, f"discovery failed: {e}")
             return counts
 
         known = {(r.region, r.resource_type, r.resource_key): r for r in self.repo.list_resources(account.id)}
@@ -310,10 +312,10 @@ class Engine:
                 counts[ck] = counts.get(ck, 0) + cv
             counts["errors"] += len(r.errors)
             counts["readOnly"] = counts["readOnly"] or r.read_only
-            self.repo.heartbeat_sync_run(run)
+            self.repo.heartbeat_sync_run(account.customer_id, run)
         counts["needsReview"] = sum(1 for rr in self.repo.list_resources(account.id)
                                     if rr.monitoring_state == "NEEDS_REVIEW")
-        self.repo.finish_sync_run(run, "PARTIAL" if counts["errors"] else "SUCCEEDED", counts)
+        self.repo.finish_sync_run(account.customer_id, run, "PARTIAL" if counts["errors"] else "SUCCEEDED", counts)
         return counts
 
     def _apply_tags(self, row: ResourceRow, tags: dict[str, str] | None, run_id: str | None) -> ResourceRow:
@@ -393,6 +395,10 @@ class Engine:
         if (wants_thr and tag_thr) or (wants_eval and tag_eval and not wants_thr):
             self.repo.finish_threshold_change(customer_id, change_id, "SKIPPED_TAG_WINS")
             return "SKIPPED_TAG_WINS"
+        bad = threshold_payload_error(payload)
+        if bad:
+            self.repo.finish_threshold_change(customer_id, change_id, "FAILED", bad)
+            return "FAILED"
         account = self.repo.get_account(row.cloud_account_id)
         try:
             account.role_arn("alarmWriter")
@@ -461,6 +467,10 @@ class Engine:
         if row.resource_type in ("S3", "Route53"):
             raise CapabilityDisabled("tagWriter")
         account = self.repo.get_account(row.cloud_account_id)
+        if account.customer_id != customer_id:
+            raise PermissionError("tenant mismatch")
+        account.role_arn("tagWriter")             # CapabilityDisabled first, before inspecting the ARN
+        assert_arn_in_account(row.resource_arn, account, row.region)
         tagging = self.sessions.client(account, "tagWriter", "resourcegroupstaggingapi", row.region)
         resp = tagging.tag_resources(ResourceARNList=[row.resource_arn], Tags={"Monitoring": "on"})
         if resp.get("FailedResourcesMap"):
@@ -481,6 +491,37 @@ class Engine:
                 out[role] = "DENIED"
         self.repo.update_account_status(account_id, out)
         return out
+
+
+ALLOWED_STATISTICS = frozenset({"SampleCount", "Average", "Sum", "Minimum", "Maximum"})
+
+
+def _allowed_period(p: int) -> bool:
+    """CloudWatch PutMetricAlarm periods: 10, 30, or a multiple of 60 up to one day."""
+    return p in (10, 30) or (60 <= p <= 86400 and p % 60 == 0)
+
+
+def threshold_payload_error(p: dict) -> str | None:
+    def num(v: Any) -> bool:
+        return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
+    def pos_int(v: Any) -> bool:
+        return isinstance(v, int) and not isinstance(v, bool) and v >= 1
+
+    if "threshold" in p and p["threshold"] is not None and not num(p["threshold"]):
+        return "threshold must be a finite number"
+    m, n = p.get("evalM"), p.get("evalN")
+    if (m is not None and not pos_int(m)) or (n is not None and not pos_int(n)):
+        return "evalM/evalN must be positive integers"
+    if m is not None and n is not None and m > n:
+        return "evalM must be <= evalN"
+    per = p.get("periodSec")
+    if per is not None and not (pos_int(per) and _allowed_period(per)):
+        return "periodSec not allowed"
+    st = p.get("statistic")
+    if st is not None and st not in ALLOWED_STATISTICS:
+        return "statistic not allowed"
+    return None
 
 
 def classify_liveness(cw: Any, alarm_names: list[str]) -> dict[str, str]:

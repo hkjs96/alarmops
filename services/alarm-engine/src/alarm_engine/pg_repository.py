@@ -227,12 +227,14 @@ class PgRepository:
                       VALUES (%s,%s,%s,%s::"SyncMode",now(),now())''', rid, customer_id, cloud_account_id, mode)
         return rid
 
-    def heartbeat_sync_run(self, run_id: str) -> None:
-        self._exec('UPDATE "AlarmSyncRun" SET "heartbeatAt" = now() WHERE id = %s', run_id)
+    def heartbeat_sync_run(self, customer_id: str, run_id: str) -> None:
+        self._exec('UPDATE "AlarmSyncRun" SET "heartbeatAt" = now() WHERE id = %s AND "customerId" = %s',
+                   run_id, customer_id)
 
-    def finish_sync_run(self, run_id: str, status: str, counts: dict, error: str | None = None) -> None:
+    def finish_sync_run(self, customer_id: str, run_id: str, status: str, counts: dict,
+                        error: str | None = None) -> None:
         self._exec('''UPDATE "AlarmSyncRun" SET status = %s::"SyncStatus", counts = %s, error = %s, "finishedAt" = now()
-                      WHERE id = %s''', status, Jsonb(counts), error, run_id)
+                      WHERE id = %s AND "customerId" = %s''', status, Jsonb(counts), error, run_id, customer_id)
 
     def fail_stale_sync_runs(self, older_than: timedelta) -> int:
         return self._exec('''UPDATE "AlarmSyncRun" SET status = 'FAILED', error = 'stale: no heartbeat (timeout)',
@@ -272,11 +274,11 @@ class PgRepository:
                           request_id, customer_id)
         return self._rr(r) if r else None
 
-    def transition_remediation(self, request_id: str, from_status: str, to_status: str,
+    def transition_remediation(self, customer_id: str, request_id: str, from_status: str, to_status: str,
                                result: dict | None = None) -> bool:
         return self._exec('''UPDATE "RemediationRequest" SET status = %s::"RemediationStatus",
                                result = COALESCE(%s, result), version = version + 1,
                                "executedAt" = CASE WHEN %s IN ('SUCCEEDED','FAILED') THEN now() ELSE "executedAt" END
-                             WHERE id = %s AND status = %s::"RemediationStatus"''',
+                             WHERE id = %s AND "customerId" = %s AND status = %s::"RemediationStatus"''',
                           to_status, Jsonb(result) if result is not None else None, to_status, request_id,
-                          from_status) == 1
+                          customer_id, from_status) == 1

@@ -623,10 +623,36 @@ def test_set_monitoring_tag_only_monitoring_key_and_not_s3(world):
     from alarm_engine.aws import CapabilityDisabled
     repo, sessions, disc, eng, acc = world
     repo.accounts[acc.id] = make_account(tag_writer_role_arn="arn:aws:iam::1:role/TW", tag_writer_enabled=True)
-    repo.resources["r1"] = ResourceRow("r1", "cus_1", acc.id, SEOUL, "EC2", "arn:ec2", "i-1")
+    arn = f"arn:aws:ec2:{SEOUL}:{ACCOUNT_ID}:instance/i-1"
+    repo.resources["r1"] = ResourceRow("r1", "cus_1", acc.id, SEOUL, "EC2", arn, "i-1")
     repo.resources["r2"] = ResourceRow("r2", "cus_1", acc.id, SEOUL, "S3", "arn:s3", "b")
     eng.set_monitoring_tag("cus_1", "r1")
     calls = sessions.others[("tagWriter", "resourcegroupstaggingapi", SEOUL)].calls
-    assert calls == [("tag_resources", {"ResourceARNList": ["arn:ec2"], "Tags": {"Monitoring": "on"}})]
+    assert calls == [("tag_resources", {"ResourceARNList": [arn], "Tags": {"Monitoring": "on"}})]
     with pytest.raises(CapabilityDisabled):
         eng.set_monitoring_tag("cus_1", "r2")
+
+
+@pytest.mark.parametrize("arn", ["arn:aws:ec2:ap-northeast-2:999999999999:instance/i-1",
+                                 "arn:aws:ec2:us-west-2:{acct}:instance/i-1", "garbage"])
+def test_set_monitoring_tag_refuses_foreign_arn(world, arn):
+    repo, sessions, disc, eng, acc = world
+    repo.accounts[acc.id] = make_account(tag_writer_role_arn="arn:aws:iam::1:role/TW", tag_writer_enabled=True)
+    repo.resources["r1"] = ResourceRow("r1", "cus_1", acc.id, SEOUL, "EC2", arn.format(acct=ACCOUNT_ID), "i-1")
+    with pytest.raises(PermissionError):
+        eng.set_monitoring_tag("cus_1", "r1")
+    assert "tag_resources" not in sessions.all_calls()
+
+
+@pytest.mark.parametrize("bad", [{"threshold": "90"}, {"threshold": float("nan")}, {"evalM": 3, "evalN": 2},
+                                 {"evalM": 0}, {"periodSec": 45}, {"periodSec": 90}, {"statistic": "p99x"}])
+def test_apply_threshold_rejects_bad_values(world, bad):
+    repo, sessions, disc, eng, acc = world
+    disc.resources = [ec2()]
+    eng.sync_account(acc.id, "DAILY")
+    ma = repo.list_managed_alarms("cus_1", row_of(repo).id)["CPUUtilization"]
+    c = _change(repo, ma)
+    before = sessions.cw(SEOUL).writes()
+    out = eng.apply_threshold("cus_1", {"managedAlarmId": ma.id, "thresholdChangeId": c.id, **bad}, "c")
+    assert out == "FAILED"
+    assert sessions.cw(SEOUL).writes() == before

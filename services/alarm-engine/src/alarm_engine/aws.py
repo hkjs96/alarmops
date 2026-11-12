@@ -64,6 +64,18 @@ class CloudAccount:
         return arn
 
 
+def assert_arn_in_account(arn: str | None, account: CloudAccount, region: str | None) -> None:
+    """Before any write on a resource ARN: ARN account must be the customer account and region must match
+    (empty ARN region is accepted only for global resources handled in us-east-1)."""
+    parts = (arn or "").split(":")
+    if len(parts) < 6 or parts[0] != "arn":
+        raise PermissionError(f"malformed ARN {arn!r}")
+    if parts[4] != account.aws_account_id:
+        raise PermissionError(f"ARN {arn!r} is not in customer account {account.aws_account_id}")
+    if region is not None and parts[3] != region and not (parts[3] == "" and region == "us-east-1"):
+        raise PermissionError(f"ARN {arn!r} region does not match {region}")
+
+
 class SessionFactory(Protocol):
     def client(self, account: CloudAccount, role: Role, service: str, region: str) -> Any: ...
 
@@ -77,7 +89,10 @@ class StsSessionFactory:
         self._name = session_name
 
     def credentials(self, account: CloudAccount, role: Role) -> dict[str, str]:
-        resp = self._sts.assume_role(RoleArn=account.role_arn(role), RoleSessionName=self._name,
+        arn = account.role_arn(role)
+        if not account.external_id:          # D-07: never AssumeRole without ExternalId
+            raise CapabilityDisabled(role)
+        resp = self._sts.assume_role(RoleArn=arn, RoleSessionName=self._name,
                                      ExternalId=account.external_id, DurationSeconds=900)
         c = resp["Credentials"]
         return {"aws_access_key_id": c["AccessKeyId"], "aws_secret_access_key": c["SecretAccessKey"],

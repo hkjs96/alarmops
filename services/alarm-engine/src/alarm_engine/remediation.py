@@ -19,7 +19,7 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
-from alarm_engine.aws import CapabilityDisabled, CloudAccount, SessionFactory
+from alarm_engine.aws import CapabilityDisabled, CloudAccount, SessionFactory, assert_arn_in_account
 from alarm_engine.repository import RemediationRequestRow, Repository, ResourceRow, new_id, now
 
 ACTION_BY_TYPE = {"EC2": "EC2_STOP", "RDS": "RDS_STOP", "AuroraRDS": "RDS_STOP", "DocDB": "RDS_STOP",
@@ -52,11 +52,12 @@ class ExecuteResult:
     reason: str = ""
 
 
-def execute(repo: Repository, sessions: SessionFactory, request_id: str) -> ExecuteResult:
+def execute(repo: Repository, sessions: SessionFactory, request_id: str, *,
+            customer_id: str | None = None) -> ExecuteResult:
     if not execution_enabled():
         return ExecuteResult("REFUSED", "execution disabled (ALARMOPS_REMEDIATION_EXECUTION)")
-    req = repo.get_remediation_request(None, request_id)
-    if req is None:
+    req = repo.get_remediation_request(customer_id, request_id)
+    if req is None or (customer_id is not None and req.customer_id != customer_id):
         return ExecuteResult("REFUSED", "not found")
     if req.status != "APPROVED" or not req.decided_by or req.decided_at is None:
         return ExecuteResult("REFUSED", f"not approved ({req.status})")
@@ -68,21 +69,32 @@ def execute(repo: Repository, sessions: SessionFactory, request_id: str) -> Exec
     resource = repo.get_resource(req.customer_id, req.resource_id)
     if resource is None:
         return ExecuteResult("REFUSED", "resource not found")
-    account = repo.get_account(req.cloud_account_id)
+    if resource.cloud_account_id != req.cloud_account_id:
+        return ExecuteResult("REFUSED", "resource not in request account")
+    if resource.monitoring_state != "MONITORED":
+        return ExecuteResult("REFUSED", f"resource not monitored ({resource.monitoring_state})")
+    try:
+        account = repo.get_account(req.cloud_account_id)
+    except LookupError:
+        return ExecuteResult("REFUSED", "account not found")
     if account.customer_id != req.customer_id:
         return ExecuteResult("REFUSED", "tenant mismatch")
+    try:
+        assert_arn_in_account(resource.resource_arn, account, resource.region)
+    except PermissionError as e:
+        return ExecuteResult("REFUSED", str(e))
     try:
         account.role_arn("remediator")
     except CapabilityDisabled:
         return ExecuteResult("REFUSED", "CAPABILITY_DISABLED")
-    if not repo.transition_remediation(req.id, "APPROVED", "EXECUTING"):
+    if not repo.transition_remediation(req.customer_id, req.id, "APPROVED", "EXECUTING"):
         return ExecuteResult("REFUSED", "lost claim")
     try:
         result = _run(sessions, account, resource, req.action)
     except Exception as e:  # noqa: BLE001
-        repo.transition_remediation(req.id, "EXECUTING", "FAILED", {"error": str(e)[:500]})
+        repo.transition_remediation(req.customer_id, req.id, "EXECUTING", "FAILED", {"error": str(e)[:500]})
         return ExecuteResult("FAILED", str(e))
-    repo.transition_remediation(req.id, "EXECUTING", "SUCCEEDED", result)
+    repo.transition_remediation(req.customer_id, req.id, "EXECUTING", "SUCCEEDED", result)
     return ExecuteResult("SUCCEEDED")
 
 
@@ -96,6 +108,7 @@ def _run(sessions: SessionFactory, account: CloudAccount, r: ResourceRow, action
         else:
             rds.stop_db_instance(DBInstanceIdentifier=r.resource_key)
     elif action == "ELB_DELETE":
+        assert_arn_in_account(r.resource_arn, account, r.region)   # re-check right before the destructive call
         sessions.client(account, "remediator", "elbv2", r.region).delete_load_balancer(LoadBalancerArn=r.resource_arn)
     else:
         raise ValueError(action)

@@ -147,13 +147,14 @@ class Repository(Protocol):
     def claim_threshold_change(self, customer_id: str, change_id: str, command_id: str) -> ThresholdChangeRow | None: ...
     def finish_threshold_change(self, customer_id: str, change_id: str, status: str, error: str | None = None) -> None: ...
     def start_sync_run(self, customer_id: str, cloud_account_id: str, mode: str) -> str: ...
-    def heartbeat_sync_run(self, run_id: str) -> None: ...
-    def finish_sync_run(self, run_id: str, status: str, counts: dict, error: str | None = None) -> None: ...
+    def heartbeat_sync_run(self, customer_id: str, run_id: str) -> None: ...
+    def finish_sync_run(self, customer_id: str, run_id: str, status: str, counts: dict,
+                        error: str | None = None) -> None: ...
     def fail_stale_sync_runs(self, older_than: timedelta) -> int: ...
     def get_remediation_policy(self, customer_id: str) -> RemediationPolicyRow: ...
     def create_remediation_request(self, row: RemediationRequestRow) -> RemediationRequestRow | None: ...
     def get_remediation_request(self, customer_id: str | None, request_id: str) -> RemediationRequestRow | None: ...
-    def transition_remediation(self, request_id: str, from_status: str, to_status: str,
+    def transition_remediation(self, customer_id: str, request_id: str, from_status: str, to_status: str,
                                result: dict | None = None) -> bool: ...
 
 
@@ -269,11 +270,16 @@ class InMemoryRepository:
         self.runs[rid] = SyncRunRow(rid, customer_id, cloud_account_id, mode, heartbeat_at=now())
         return rid
 
-    def heartbeat_sync_run(self, run_id: str) -> None:
-        self.runs[run_id].heartbeat_at = now()
+    def heartbeat_sync_run(self, customer_id: str, run_id: str) -> None:
+        r = self.runs.get(run_id)
+        if r is not None and r.customer_id == customer_id:
+            r.heartbeat_at = now()
 
-    def finish_sync_run(self, run_id: str, status: str, counts: dict, error: str | None = None) -> None:
-        r = self.runs[run_id]
+    def finish_sync_run(self, customer_id: str, run_id: str, status: str, counts: dict,
+                        error: str | None = None) -> None:
+        r = self.runs.get(run_id)
+        if r is None or r.customer_id != customer_id:
+            return
         r.status, r.counts, r.error, r.finished_at = status, counts, error, now()
 
     def fail_stale_sync_runs(self, older_than: timedelta) -> int:
@@ -302,10 +308,10 @@ class InMemoryRepository:
             return None
         return replace(r)
 
-    def transition_remediation(self, request_id: str, from_status: str, to_status: str,
+    def transition_remediation(self, customer_id: str, request_id: str, from_status: str, to_status: str,
                                result: dict | None = None) -> bool:
         r = self.remediations.get(request_id)
-        if r is None or r.status != from_status:
+        if r is None or r.customer_id != customer_id or r.status != from_status:
             return False
         r.status, r.version = to_status, r.version + 1
         if result is not None:
