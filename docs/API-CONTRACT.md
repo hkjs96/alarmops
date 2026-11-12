@@ -273,8 +273,18 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 
 역할 표기: V = VIEWER 이상, O = OPERATOR 이상, A = ADMIN, P(grant) = 고객사 담당자 + portalGrant. 역할 체계 자체는 미결(Q-DM-02)이라 이 열은 임시. **I** = MSP 직원(INTERNAL) 전용: 포털 사용자에게는 그 경로가 없다(파라미터를 보기 전에 같은 404, `/oncall/paging-path`와 같음).
 
+**호출 경로 화면의 역할 (D-41, 확정).** Responders(`/customers/{id}/responders`), `/customers/{id}/paging-health`, `/rotations`, `/staff`, `/oncall/now`:
+| 호출자 | 읽기(GET) | 쓰기(POST·PATCH·DELETE) |
+|---|---|---|
+| MSP VIEWER | 200 | 403 `ROLE_REQUIRED`(`details.role: "ADMIN"`), 바뀌는 것 없음 |
+| MSP OPERATOR | 200 | 403 `ROLE_REQUIRED`, 바뀌는 것 없음 |
+| MSP ADMIN | 200 | 규칙대로 실행 |
+| 포털 사용자(저장된 역할과 무관, ADMIN이어도) | 같은 404 | 같은 404 |
+
+지금 쓰기가 있는 것은 Responders뿐이다. `/rotations`·`/staff`에 쓰기 경로가 생기면 같은 규칙(ADMIN)이다. 계약 테스트 `packages/api/test/contract/peopleContract.ts`의 "roles on Responders…(D-41)"가 메모리·SQL 저장소 둘 다에서 역할마다 고정한다.
+
 **배포 (D-09).** 콘솔 REST는 콘솔 앱 안에 있다: `apps/console/src/app/api/v1/[...path]/route.ts`(Node 런타임)가 `packages/api`의 `createApi`를 `packages/store-sql`(node-postgres, `DATABASE_URL`, 트랜잭션 풀러면 `DATABASE_POOLER=transaction` — db/README.md "Connecting")에 붙여 그대로 돌린다. 다른 서비스로 나가는 호출은 없다.
-- **AuthContext는 서버가 세션에서 만든다.** 세션 쿠키(서명 검증) → `User.id` → `ACTIVE`인 사용자만 → `customerId`가 있으면 포털(그 고객 하나, PORTAL_USER 범위가 프로젝트·서비스면 그 하위로 좁힘), 없으면 MSP 직원(전 고객, D-34), 역할은 `User.role`. 요청 본문·헤더의 사용자·역할·고객 값은 읽지 않는다. 모르는·비활성 사용자는 401.
+- **AuthContext는 서버가 세션에서 만든다.** 세션 쿠키(서명 검증) → `User.id` → `ACTIVE`인 사용자만 → `customerId`가 있으면 포털(그 고객 하나, PORTAL_USER 범위가 프로젝트·서비스면 그 하위로 좁힘), 없으면 MSP 직원(전 고객, D-34), 역할은 `User.role`. 요청 본문·헤더의 사용자·역할·고객 값은 읽지 않는다. 모르는·비활성 사용자는 401. **포털 사용자는 그 고객의 `Customer.status`가 `ACTIVE`일 때만 세션이 있다(D-42)**: `SUSPENDED`·`TERMINATED` 고객의 포털 사용자는 `sessionPrincipal` → null → 401(요청마다 확인하므로 상태를 바꾸면 다음 요청부터). MSP 직원은 고객 상태와 무관하고, 그런 고객의 데이터도 계속 본다. 고객 상태를 바꾸는 API·콘솔 화면은 아직 없다(DB에서만, D-42).
 - 쓰기(POST/PUT/PATCH/DELETE)는 콘솔과 같은 Origin에서만(`sameOriginPost`, 아니면 403 `FORBIDDEN`). API로 넘기는 헤더는 `If-Match`·`If-None-Match`·`Idempotency-Key`뿐(쿠키는 넘기지 않음).
 - 콘솔의 서버 컴포넌트·서버 액션은 같은 핸들러를 프로세스 안에서 부른다(같은 요청·응답 모양, 네트워크 없음).
 - `DATABASE_URL`이 없으면 503 `NOT_CONFIGURED`(localhost 대체 없음). 목 모드(`MOCK_API=1`, 운영 금지)에서는 `/api/v1`이 404다.
@@ -379,10 +389,10 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 | PUT/DELETE `/customers/{id}/paging-overrides/{scopeType}/{scopeId}` | PROJECT·SERVICE 덮어쓰기. 해석 service › project › customer | A |
 | GET `/customers/{id}/paging-health` | D-32. `{ level: OK\|AT_RISK\|UNREACHABLE, problems[{ code: NO_PAGEABLE_RESPONDER\|NO_VERIFIED_PHONE\|STEP_UNVERIFIED_ONLY\|ROTATION_GAP\|SEND_CAP_EXCEEDED, stepIndex?, contactIds[], rotationId?, from?, to?, message, skipped? }] }`. 서버가 Responders·단계·채널 검증·교대표(앞으로 14일)로 계산(core `pagingHealth`, 트리의 `callHealth`와 같은 함수). 저장하지 않음. Call order 화면이 모든 직원에게 보여 주므로 읽기는 V(11/12, 이전 A). 고객 전체 범위의 직원만(좁혀진 직원은 404) | V, I |
 | GET `/customers?pagingHealth=UNREACHABLE,AT_RISK` | 고객사 목록 필터. 목록 항목마다 `pagingHealth.level`과 `problems` 개수 포함. 정렬 기본: UNREACHABLE → AT_RISK → OK | A |
-| GET `/oncall/now?onlyProblems=true` | Call order 목록. ~~고객사 10곳 초과 시 콘솔이 기본으로 켬~~ → 트리의 `Only with problems`(`/scope-tree`)가 대신하고 기본은 꺼짐 | A |
+| GET `/oncall/now?onlyProblems=true` | Call order 목록. ~~고객사 10곳 초과 시 콘솔이 기본으로 켬~~ → 트리의 `Only with problems`(`/scope-tree`)가 대신하고 기본은 꺼짐 | V, I (D-41, 이전 A) |
 | GET `/customers/{id}/responders` | 아래 "Responders" 참조 | V, I |
 | POST `/customers/{id}/responders`, PATCH/DELETE `/customers/{id}/responders/{contactId}` | 아래 "Responders" 참조. `If-Match: <목록 version>` 필수 | A, I |
-| GET/POST `/rotations?scope=&customerId=`, PATCH/DELETE `/rotations/{id}`, GET `/rotations/{id}/shifts?from=&to=`, GET `/rotations/{id}/usage` | Rotation(scope MSP\|CUSTOMER). usage = 참조 고객·단계 | A |
+| GET/POST `/rotations?scope=&customerId=`, PATCH/DELETE `/rotations/{id}`, GET `/rotations/{id}/shifts?from=&to=`, GET `/rotations/{id}/usage` | Rotation(scope MSP\|CUSTOMER). usage = 참조 고객·단계 | 읽기 V, I · 쓰기 A, I (D-41) |
 | POST `/rotations/{id}/overrides`, POST `/overrides/{id}/accept\|decline` | COVER/SWAP, 상대 수락 후 반영(D-28) | O |
 | GET/POST `/responder-templates`, PATCH `/responder-templates/{id}`, POST `/responder-templates/{id}/preview` | 템플릿 변경 시 영향 고객 미리보기, PATCH는 `previewHash` 필수 | A |
 | GET `/rotations?scope=MSP\|CUSTOMER&customerId=` (구현된 읽기) | `RotationSummary[]`: `{ id, scope, customerId?, name, onShift: { contactId, name, until, channels } \| null, next: 다음 당번 이름 \| null }`. MSP 로테이션 + 범위 안 고객의 로테이션. `customerId`가 있으면 MSP 것 + 그 고객 것(범위 밖·없는 고객은 404). `channels`는 아래 채널 상태 | V, I |
@@ -410,7 +420,7 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 - **연락처 값은 나가지 않는다**(D-35): `emailMasked`(첫 글자 + `•••@도메인`), `phoneMasked`(앞 3자리 + `-••••-` + 끝 4자리). 전체 값은 `/contacts/{id}/reveal`만.
 - **`version`**: 목록의 낙관적 잠금 버전. Responders 쓰기(아래)마다 1씩 오르고 되돌아가지 않는다. 저장: 그 고객의 `AuditLog`(`targetType = 'Responders'`) 행 수 — 쓰기와 같은 트랜잭션에서 고객 행을 `FOR UPDATE`로 잠그고 다시 센다(스키마 변경 없음). 이 API 밖의 변경(템플릿 동기화, 시드)은 버전을 올리지 않는다. 응답 `ETag: "<version>"`.
 
-쓰기 — 모두 ADMIN, `If-Match: <version>` 필수(없으면 400, 다르면 409 `VERSION_CONFLICT` + `details.currentVersion`), 응답 `{ contactId, version }`(POST 201, 그 밖 200). 검사 순서: 범위(고객 전체 범위가 아니면·없으면 404) → 대상이 이 목록에 있는가(PATCH/DELETE, 없으면 404) → 역할(403) → If-Match → 아래 규칙.
+쓰기 — 모두 ADMIN(D-41: VIEWER·OPERATOR 직원은 403 `ROLE_REQUIRED`, 포털 사용자는 404), `If-Match: <version>` 필수(없으면 400, 다르면 409 `VERSION_CONFLICT` + `details.currentVersion`), 응답 `{ contactId, version }`(POST 201, 그 밖 200). 검사 순서: 범위(고객 전체 범위가 아니면·없으면 404) → 대상이 이 목록에 있는가(PATCH/DELETE, 없으면 404) → 역할(403) → If-Match → 아래 규칙.
 
 | 요청 | 본문 | 규칙 |
 |---|---|---|

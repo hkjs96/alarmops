@@ -16,7 +16,7 @@ interface PWorld {
   call: (auth: AuthContext | null, method: ApiRequest['method'], path: string, opts?: { query?: Record<string, string | undefined>; body?: unknown; headers?: Record<string, string> }) => Promise<ApiResponse>;
 }
 
-async function pworld(make: MakeFixture<Repo>): Promise<PWorld> {
+async function pworld(make: MakeFixture<Repo>, customize?: (seed: MemoryApiStore) => void): Promise<PWorld> {
   const seed = seedWorld(new MemoryApiStore()) as MemoryApiStore;
   seed.users.set('usr_haeun', { id: 'usr_haeun', name: 'Haeun Kim', contactId: 'ct_haeun', email: 'usr_haeun@example.test', role: 'OPERATOR', customerId: null });
   seed.users.set('usr_minjae', { id: 'usr_minjae', name: 'Minjae Lee', contactId: 'ct_minjae', email: 'usr_minjae@example.test', role: 'ADMIN', customerId: null });
@@ -26,6 +26,7 @@ async function pworld(make: MakeFixture<Repo>): Promise<PWorld> {
   seed.configs.push(PATTERNS.templateStandard(), config('cus_hanbit', [step(0, 0, 'ROTATION', 'rot_hanbit', ['SMS', 'VOICE'])], { style: 'CUSTOMER_ROTATION' }));
   seed.contactScopes.push({ contactId: 'ct_seojun', customerId: 'cus_mirae', scopeType: 'SERVICE', scopeId: 'svc_pay', role: 'NOTIFY' });
   seed.verifiedSlack.add('cus_mirae');
+  customize?.(seed);
   const fx = await make(seed);
   fx.setClock(() => T0);
   const api = createApi({ repo: fx.repo, now: () => T0 });
@@ -52,6 +53,82 @@ export function peopleContract(make: MakeFixture<Repo>): void {
       expect(await w.fx.repo.sessionPrincipal('usr_nobody')).toBeNull();
       expect(body(await w.call(ADMIN, 'GET', '/me'))).toEqual({ id: 'usr_minjae', name: 'Minjae Lee', email: 'usr_minjae@example.test', role: 'ADMIN', kind: 'INTERNAL' });
       expect((await w.call(null, 'GET', '/me')).status).toBe(401);
+    });
+  });
+
+  describe('customer status (D-42)', () => {
+    const withStatus = (status: 'SUSPENDED' | 'TERMINATED') => (seed: MemoryApiStore) => {
+      seed.customers.set('cus_mirae', { ...seed.customers.get('cus_mirae')!, status });
+      seed.users.set('usr_dohyun', { id: 'usr_dohyun', name: 'Dohyun Han', contactId: 'ct_dohyun', email: 'usr_dohyun@example.test', role: 'VIEWER', customerId: 'cus_hanbit' });
+    };
+    for (const status of ['SUSPENDED', 'TERMINATED'] as const) {
+      it(`${status}: its portal users get no session (null → 401); other customers' portal users and MSP staff are unaffected`, async () => {
+        w = await pworld(make, withStatus(status));
+        const p = await w.fx.repo.sessionPrincipal('usr_yuna');
+        expect(p).toBeNull();
+        // what the console adapter does with it (authForSession): no principal → no AuthContext → 401
+        expect((await w.call(p ? authFromPrincipal(p) : null, 'GET', '/me')).status).toBe(401);
+        expect(await w.fx.repo.sessionPrincipal('usr_dohyun')).toMatchObject({ userId: 'usr_dohyun', customerId: 'cus_hanbit' });
+        // staff, including a responder of the suspended customer, keep their session and still see that customer
+        expect(await w.fx.repo.sessionPrincipal('usr_haeun')).toMatchObject({ userId: 'usr_haeun', customerId: null, role: 'OPERATOR' });
+        expect(await w.fx.repo.sessionPrincipal('usr_minjae')).toMatchObject({ userId: 'usr_minjae', customerId: null, role: 'ADMIN' });
+        expect((await w.call(USERS.haeun, 'GET', '/customers/cus_mirae/responders')).status).toBe(200);
+      });
+    }
+    it('ACTIVE (the default) keeps the portal session', async () => {
+      w = await pworld(make);
+      expect(await w.fx.repo.sessionPrincipal('usr_yuna')).toMatchObject({ userId: 'usr_yuna', customerId: 'cus_mirae' });
+    });
+  });
+
+  describe('roles on Responders, paging-health, /oncall/now, /rotations, /staff (D-41)', () => {
+    const PORTAL_ADMIN: AuthContext = { userId: 'usr_yuna', name: 'Yuna Seo', kind: 'CUSTOMER', customerIds: ['cus_mirae'], role: 'ADMIN' };
+    const READS = ['/customers/cus_mirae/responders', '/customers/cus_mirae/paging-health', '/oncall/now', '/rotations', '/staff'];
+    const writes = (v: number) => [
+      ['POST', '/customers/cus_mirae/responders', { contactId: 'ct_minjae' }, v],
+      ['PATCH', '/customers/cus_mirae/responders/ct_yuna', { role: 'NOTIFY_ONLY' }, v],
+      ['DELETE', '/customers/cus_mirae/responders/ct_seojun', undefined, v],
+    ] as const;
+
+    it('READ: VIEWER, OPERATOR and ADMIN staff get 200', async () => {
+      w = await pworld(make);
+      for (const auth of [USERS.viewer, USERS.haeun, ADMIN]) {
+        for (const path of READS) expect([auth.role, path, (await w.call(auth, 'GET', path)).status]).toEqual([auth.role, path, 200]);
+      }
+    });
+
+    it('READ: portal users get the one 404, whatever their stored role', async () => {
+      w = await pworld(make);
+      const ref = body(await w.call(ADMIN, 'GET', '/customers/cus_nope/responders')).error;
+      for (const auth of [USERS.yuna, PORTAL_ADMIN]) {
+        for (const path of READS) {
+          const r = await w.call(auth, 'GET', path);
+          expect([path, r.status]).toEqual([path, 404]);
+          expect({ ...body(r).error, requestId: '' }).toEqual({ ...ref, requestId: '' });
+        }
+      }
+    });
+
+    it('WRITE: VIEWER and OPERATOR staff get 403 ROLE_REQUIRED and nothing changes; portal users 404; ADMIN succeeds', async () => {
+      w = await pworld(make);
+      for (const auth of [USERS.viewer, USERS.haeun]) {
+        for (const [method, path, b, v] of writes(0)) {
+          const r = await w.call(auth, method, path, { body: b, headers: im(v) });
+          expect([auth.role, method, r.status, body(r).error.code, body(r).error.details.role]).toEqual([auth.role, method, 403, 'ROLE_REQUIRED', 'ADMIN']);
+        }
+      }
+      for (const auth of [USERS.yuna, PORTAL_ADMIN]) {
+        for (const [method, path, b, v] of writes(0)) expect([method, (await w.call(auth, method, path, { body: b, headers: im(v) })).status]).toEqual([method, 404]);
+      }
+      expect(body(await w.call(ADMIN, 'GET', '/customers/cus_mirae/responders')).version).toBe(0);
+      expect((await w.fx.audits()).filter((a) => a.targetType === 'Responders')).toHaveLength(0);
+      let v = 0;
+      for (const [method, path, b] of writes(0)) {
+        const r = await w.call(ADMIN, method, path, { body: b, headers: im(v), query: { confirmUnreachable: 'true' } });
+        expect([method, r.status]).toEqual([method, method === 'POST' ? 201 : 200]);
+        v = body(r).version;
+      }
+      expect(v).toBe(3);
     });
   });
 
