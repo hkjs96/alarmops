@@ -1,0 +1,8 @@
+# Versions this was tested with (2026-11-12). CI installs these; the Lambda bundle needs only boto3 + psycopg.
+boto3==1.44.1
+psycopg[binary]==3.3.8
+pytest==9.2.0
+hypothesis==6.170.15
+moto[cloudwatch,sts]==5.2.5
+ruff==0.17.4
+mypy==2.4.1

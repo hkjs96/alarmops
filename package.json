@@ -9,7 +9,9 @@
   ],
   "scripts": {
     "test": "npm run test --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test:engine": "cd services/alarm-engine && python -m pytest",
+    "lint:engine": "cd services/alarm-engine && python -m ruff check . && python -m mypy"
   },
   "engines": {
     "node": ">=20"

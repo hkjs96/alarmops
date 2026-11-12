@@ -1,0 +1,71 @@
+"""DocDB — 리소스 타입 스펙 (docs/specs/resource-type-registry)
+
+알람 정의·태그 조건부 변형·생명주기·나열 힌트가 전부 이 파일에 있다. 타입을 고칠 때 여기만 고친다 —
+`SUPPORTED_RESOURCE_TYPES`·`_HARDCODED_METRIC_KEYS`·`_NAMESPACE_MAP`·`MONITORED_API_EVENTS`·수집기 맵은 파생된다.
+"""
+
+from __future__ import annotations
+
+from alarm_engine.resource_types.base import ResourceTypeSpec, register
+
+
+_DOCDB_ALARMS = [
+    {
+        "metric": "CPUUtilization",
+        "namespace": "AWS/DocDB",
+        "metric_name": "CPUUtilization",
+        "dimension_key": "DBInstanceIdentifier",
+        "stat": "Average",
+        "comparison": "GreaterThanThreshold",
+        "period": 300,
+        "evaluation_periods": 1,
+        "treat_missing_data": "breaching",
+    },
+    {
+        "metric": "FreeableMemory",
+        "namespace": "AWS/DocDB",
+        "metric_name": "FreeableMemory",
+        "dimension_key": "DBInstanceIdentifier",
+        "stat": "Average",
+        "comparison": "LessThanThreshold",
+        "period": 300,
+        "evaluation_periods": 1,
+        "transform_threshold": lambda gb: gb * 1073741824,
+        "transform_value": lambda b: b / 1073741824,
+        "treat_missing_data": "breaching",
+    },
+    {
+        "metric": "DatabaseConnections",
+        "namespace": "AWS/DocDB",
+        "metric_name": "DatabaseConnections",
+        "dimension_key": "DBInstanceIdentifier",
+        "stat": "Average",
+        "comparison": "GreaterThanThreshold",
+        "period": 300,
+        "evaluation_periods": 1,
+        "treat_missing_data": "breaching",
+    },
+]
+
+
+SPEC = register(ResourceTypeSpec(
+    type="DocDB", label="DocumentDB", collector="docdb",
+    rgt_filters=("rds:db",), rgt_prime=True,
+    notes=("생명주기 이벤트는 RDS 스펙의 것을 공유한다 — CloudTrail이 rds.amazonaws.com의 ModifyDBInstance/DeleteDBInstance로 내고, "
+           "remediation이 엔진(docdb)으로 판별한다. identity 없음: 나열도 엔진 판별에 describe가 필요하다. 메트릭은 정의에서(범용) — "
+           "표준 3개만. 2026-09-16까지의 오버라이드는 표준에서 뺀 FreeLocalStorage·ReadLatency·WriteLatency까지 개명 전 키로 냈다"
+           "(알람은 없는데 데일리 런만 보던 지표) — 이제 알람과 같은 셋만 본다. FreeableMemory는 transform_value가 bytes→GB."),
+    alarm_defs=_DOCDB_ALARMS,
+    # 표시명(알람 이름에 쓰는 지표명·방향·단위)과 기본 임계치 — 옛 alarm_registry._METRIC_DISPLAY / common.HARDCODED_DEFAULTS.
+    # 여러 타입이 같은 키(CPUUtilization 등)를 선언하면 값이 같아야 한다 — 뷰가 강제한다.
+    display={
+        "CPUUtilization": ("CPUUtilization", ">", "%"),
+        "FreeableMemory": ("FreeableMemory", "<", "GB"),
+        "DatabaseConnections": ("DatabaseConnections", ">", ""),
+    },
+    defaults={
+        "CPUUtilization": 80.0,
+        "FreeableMemory": 2.0,
+        "DatabaseConnections": 100.0,
+    },
+))
