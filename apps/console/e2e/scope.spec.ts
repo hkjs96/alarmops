@@ -1,12 +1,17 @@
 import { test, expect, type Page } from "@playwright/test";
+import { appReady } from "./helpers/ready";
 
 const PAY_ID = "inc-7f3a0c91b2d4-20261108181204";
 const PAY = `/c/mirae/core/payments-api/incident/${PAY_ID}`;
-const signIn = (page: Page, next = "/incidents") => page.goto(`/auth/dev-login?next=${encodeURIComponent(next)}`);
+/** signs in and waits until the app has taken the page over (helpers/ready.ts) */
+const signIn = async (page: Page, next = "/incidents") => {
+  await page.goto(`/auth/dev-login?next=${encodeURIComponent(next)}`);
+  await appReady(page);
+};
 
 function watchErrors(page: Page) {
   const errors: string[] = [];
-  page.on("console", (m) => { if (m.type() === "error" && !/fonts\.(googleapis|gstatic)\.com/.test(m.location().url)) errors.push(m.text()); });
+  page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
   page.on("pageerror", (e) => errors.push(String(e)));
   return errors;
 }
@@ -489,7 +494,9 @@ test.describe("phone 390", () => {
         return e.offsetParent !== null && r.width > 0 && cs.visibility !== "hidden" && !e.classList.contains("skip") && !(e as HTMLButtonElement).disabled
           && !e.closest("p, .note, .t2, .kv, .xs, .card-h, .org"); // links inside running text
       })
-      .map((e) => { const r = (e.closest(".sel") ?? e).getBoundingClientRect(); return { t: (e.getAttribute("aria-label") ?? e.textContent ?? e.tagName).trim().slice(0, 40), w: Math.round(r.width), h: Math.round(r.height) }; })
+      // a select is pressed anywhere on its box; so is the link that ends the unmapped-account notice (its ::after
+      // covers the notice: y-phone-press.spec.ts checks that a press on the notice reaches the link)
+      .map((e) => { const r = (e.closest(".sel, .inc-unmapped .banner") ?? e).getBoundingClientRect(); return { t: (e.getAttribute("aria-label") ?? e.textContent ?? e.tagName).trim().slice(0, 40), w: Math.round(r.width), h: Math.round(r.height) }; })
       .filter((x) => x.w < 44 || x.h < 44));
     for (const p of pages) {
       await page.goto(p);

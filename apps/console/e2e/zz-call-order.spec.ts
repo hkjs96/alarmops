@@ -1,17 +1,22 @@
 import { test, expect, type Browser, type Page } from "@playwright/test";
+import { appReady } from "./helpers/ready";
 
 /**
  * Call order (D-30, D-33): list, read-first panel, edit, save rules, widening, own steps, the unsaved-edit guard on
  * every exit, drafts, 409, keyboard-only editing of three customers in a row, 390px.
  * The mock store is shared by the whole run, so this file is last (zz-) and each test edits its own customer.
  */
-const signIn = (page: Page, next = "/call-order") => page.goto(`/auth/dev-login?next=${encodeURIComponent(next)}`);
+/** signs in and waits until the app has taken the page over (helpers/ready.ts) */
+const signIn = async (page: Page, next = "/call-order") => {
+  await page.goto(`/auth/dev-login?next=${encodeURIComponent(next)}`);
+  await appReady(page);
+};
 const ORDERS = "/c/hanbit/fulfilment/orders-api/call-order";
 const ORDERS_PATH = "Hanbit Logistics › Fulfilment › Orders API";
 
 function watchErrors(page: Page) {
   const errors: string[] = [];
-  page.on("console", (m) => { if (m.type() === "error" && !/fonts\.(googleapis|gstatic)\.com/.test(m.location().url)) errors.push(m.text()); });
+  page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
   page.on("pageerror", (e) => errors.push(String(e)));
   return errors;
 }
@@ -280,7 +285,7 @@ test.describe("edit and save", () => {
     expect(actions.saves()[0]!.path).toBe(ORDERS);
     expect(actions.saves()[0]!.body).toContain('{"customer":"hanbit","project":"fulfilment","service":"orders-api"}');
     // no row or box moved, and the focus is on the row that was edited
-    expect(await rowBoxes(page)).toEqual(before);
+    await expect.poll(() => rowBoxes(page)).toEqual(before); // once the panel has closed: the address changes a moment before the columns do
     await expect(row(page, "hanbit/fulfilment/orders-api").getByTestId("co-path")).toBeFocused();
     await expect(row(page, "hanbit/fulfilment/orders-api").locator(".c-then")).toContainText("4 min call Junho");
     await expect(row(page, "hanbit").locator(".c-then")).toContainText("2 min SMS Junho"); // the customer's own steps are untouched
@@ -289,7 +294,7 @@ test.describe("edit and save", () => {
     await undo(page);
     await expect(toast(page)).toContainText(`Undone · ${ORDERS_PATH} is back to how it was`);
     await expect(row(page, "hanbit/fulfilment/orders-api").locator(".c-then")).toContainText("5 min call Junho");
-    expect(await rowBoxes(page)).toEqual(before);
+    await expect.poll(() => rowBoxes(page)).toEqual(before); // once the panel has closed: the address changes a moment before the columns do
     expect(errors).toEqual([]);
   });
 
@@ -329,7 +334,7 @@ test.describe("edit and save", () => {
     await expect(toast(page).getByRole("button", { name: "Undo" })).toHaveCount(0);
     expect(actions.saves().map((s) => s.path)).toEqual(["/c/ara/call-order"]);
     await expect(page).toHaveURL(/\/call-order$/);
-    expect(await rowBoxes(page)).toEqual(before);
+    await expect.poll(() => rowBoxes(page)).toEqual(before); // once the panel has closed: the address changes a moment before the columns do
     await expect(row(page, "ara").locator(".c-then")).toContainText("3 min SMS Haeun");
   });
 

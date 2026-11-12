@@ -155,7 +155,7 @@ export function IncidentDetailBody({ inc, timeline, notifs, now }: { inc: Incide
     <div className="inc-detail">
       <div className="crumb">{inc.key}</div>
 
-      <section className={cx("card", ds === "TRIGGERED" ? "lb-red" : ds === "ESCALATED" ? "lb-orange" : ds === "RESOLVED" ? "lb-green" : undefined)} style={{ marginBottom: 20 }} aria-labelledby="inc-title">
+      <section className={cx("card inc-main", ds === "TRIGGERED" ? "lb-red" : ds === "ESCALATED" ? "lb-orange" : ds === "RESOLVED" ? "lb-green" : undefined)} style={{ marginBottom: 20 }} aria-labelledby="inc-title">
         <div className="card-b">
           <div className="row" style={{ gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
             <SevBadge severity={inc.severity} hot />

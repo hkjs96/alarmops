@@ -10,15 +10,15 @@ import type { NextConfig } from "next";
  *   (theme, tree rail) are inline. No remote script origin is allowed. A nonce-based policy is the next step
  *   (it has to be set per request in middleware).
  * - 'unsafe-eval' only outside production (React Refresh in `next dev`).
- * - style-src: the app sets inline style attributes; fonts.googleapis.com serves the Space Mono stylesheet,
- *   fonts.gstatic.com the font files. Nothing else is fetched from another origin.
+ * - style-src: the app sets inline style attributes. Fonts are the console's own files (src/app/fonts.ts):
+ *   nothing — no stylesheet, font, script or image — is fetched from another origin.
  */
 export function securityHeaders(production: boolean): { key: string; value: string }[] {
   const csp = [
     "default-src 'self'",
     `script-src 'self' 'unsafe-inline'${production ? "" : " 'unsafe-eval'"}`,
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-    "font-src 'self' https://fonts.gstatic.com",
+    "style-src 'self' 'unsafe-inline'",
+    "font-src 'self'",
     "img-src 'self' data:",
     `connect-src 'self'${production ? "" : " ws: wss:"}`,
     "object-src 'none'",

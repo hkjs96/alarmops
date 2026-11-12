@@ -23,6 +23,6 @@ export { Panel, type PanelProps } from "./scope/Panel";
 export { DirtyGuard, type DirtyGuardProps } from "./scope/DirtyGuard";
 export { ConfirmDialog, type ConfirmDialogProps } from "./scope/ConfirmDialog";
 export * from "./list/stable-list";
-export { SAME_SPOT_MS, SAME_SPOT_PX, markSpot, isSameSpot, clearSpot, installSameSpotGuard } from "./list/same-spot";
+export { SAME_SPOT_MS, SAME_SPOT_PX, PRESS_FOLLOW_MS, BOTTOM_BAND_PX, markSpot, isSameSpot, clearSpot, installSameSpotGuard, lastActionPress, pressBox, placeClearOfPress, followsPressAttr, type ActionPress, type PressBox } from "./list/same-spot";
 export { useStableRows, type StableRows } from "./list/useStableRows";
 export { Tombstone, type TombstoneProps } from "./list/Tombstone";
