@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "@alarmops/design-system/styles.css";
 import "./globals.css";
+import { fontVariables } from "./fonts";
 import { ScopeShell } from "@/components/ScopeShell";
 import { shellInitScript } from "@/lib/shell-prefs";
 import { themeInitScript } from "@/components/ThemeToggle";
@@ -20,14 +21,18 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     shell = { user: { id: me.id, name: me.name, role: me.role }, open: list.counts.open, customers: tree.customers };
   }
   return (
-    <html lang="en" suppressHydrationWarning>
-      <head>
+    <html lang="en" className={fontVariables} suppressHydrationWarning>
+      {/*
+        No <head> element here, and the two pre-paint scripts are the first thing in <body> (they still run before
+        anything is painted). With children rendered inside <head>, React's hydration sometimes looked for the body's
+        first element among the head's (error #418) and threw the whole page away to render it again in the browser —
+        when the layout's and the page's own scripts arrived a moment after the framework's (4 loads in 10 that way).
+        A press during that re-render is lost. e2e/y-fonts.spec.ts loads the page that way. Titles and meta come from
+        `metadata`; fonts from ./fonts.ts.
+      */}
+      <body>
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
         {shell ? <script dangerouslySetInnerHTML={{ __html: shellInitScript }} /> : null}
-        {/* eslint-disable-next-line @next/next/no-page-custom-font */}
-        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap" />
-      </head>
-      <body>
         <a href="#main" className="skip">Skip to content</a>
         {shell ? (
           <ScopeShell customers={shell.customers} user={shell.user} openCount={shell.open}>{children}</ScopeShell>

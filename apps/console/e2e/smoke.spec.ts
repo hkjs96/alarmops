@@ -21,7 +21,7 @@ test("dev sign-in issues an httpOnly session cookie", async ({ page, context }) 
 
 function watchErrors(page: Page) {
   const errors: string[] = [];
-  page.on("console", (m) => { if (m.type() === "error" && !/fonts\.(googleapis|gstatic)\.com/.test(m.location().url)) errors.push(m.text()); });
+  page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
   page.on("pageerror", (e) => errors.push(String(e)));
   return errors;
 }

@@ -3,7 +3,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  OutsideLine, ScopeLine, ScopeSearch, ScopeSheet, ScopeTree, clampTreeWidth, cx, installSameSpotGuard, normalizeSel, readSession, resolveSel, sameSel, selKey, selLabel, writeSession,
+  OutsideLine, ScopeLine, ScopeSearch, ScopeSheet, ScopeTree, clampTreeWidth, cx, followsPressAttr, installSameSpotGuard, lastActionPress, normalizeSel, placeClearOfPress, readSession, resolveSel, sameSel, selKey, selLabel, writeSession,
   TREE_DEFAULT_WIDTH, type ScopeCustomerNode, type ScopeLevel, type ScopeSel,
 } from "@alarmops/design-system";
 import type { OutsideCounts } from "@/lib/api/types";
@@ -17,7 +17,13 @@ import { panelListPath, sectionFor } from "@/lib/nav";
 import { AUTO_RAIL_BELOW, DEFAULT_RAIL_MAX, PREFS_KEY } from "@/lib/shell-prefs";
 
 interface Prefs { col: boolean | null; w: number }
-interface Toast { id: number; text: string; action?: ToastAction; at: number }
+interface Toast {
+  id: number; text: string; action?: ToastAction; at: number;
+  /** "top" when the control that was pressed is where the toast usually stands (design-system list/same-spot) */
+  place: "bottom" | "top";
+  /** the pressed control's box: a pointer press inside it does nothing on this toast */
+  follows?: string;
+}
 /** A toast's button does nothing this soon after the toast appeared: it may have come up under a second tap. */
 const TOAST_ARM_MS = 600;
 
@@ -98,7 +104,13 @@ export function ScopeShell({ customers, user, openCount, children }: { customers
     }
   };
 
-  const toast = useCallback((text: string, action?: ToastAction) => setToast({ id: Date.now(), text, action, at: performance.now() }), []);
+  // A toast never comes up over the control that was just pressed (QA P2-N): its Undo would be under the second,
+  // "did it take?" tap. The guard knows the last pressed action; the toast stands at the top when that control is
+  // in the part of the viewport the toast would take at the bottom, and is deaf to presses inside the control's box.
+  const toast = useCallback((text: string, action?: ToastAction) => {
+    const press = lastActionPress();
+    setToast({ id: Date.now(), text, action, at: performance.now(), place: placeClearOfPress(window.innerHeight, press), follows: followsPressAttr(press) });
+  }, []);
   useEffect(() => {
     if (!toastState) return;
     const t = setTimeout(() => setToast(null), 9000);
@@ -127,7 +139,12 @@ export function ScopeShell({ customers, user, openCount, children }: { customers
   useEffect(() => {
     const line = shellRef.current?.querySelector<HTMLElement>(".sline");
     if (!line || typeof ResizeObserver === "undefined") return;
-    const set = () => shellRef.current?.style.setProperty("--sline-h", `${Math.round(line.getBoundingClientRect().height)}px`);
+    // also on the root: scroll-padding-top (globals.css) keeps a row scrolled into view clear of the line
+    const set = () => {
+      const h = `${Math.round(line.getBoundingClientRect().height)}px`;
+      shellRef.current?.style.setProperty("--sline-h", h);
+      document.documentElement.style.setProperty("--sline-h", h);
+    };
     const ro = new ResizeObserver(set);
     ro.observe(line);
     set();
@@ -242,7 +259,7 @@ export function ScopeShell({ customers, user, openCount, children }: { customers
           />
         )}
         {toastState && !sheet && !finder ? (
-          <div className="toast" role="status" key={toastState.id} data-testid="toast">
+          <div className={cx("toast", toastState.place === "top" && "top")} role="status" key={toastState.id} data-testid="toast" data-place={toastState.place} data-follows-press={toastState.follows}>
             <span className="toast-t" title={toastState.text}>{toastState.text}</span>
             {toastState.action?.href ? <Link className="btn sm" href={toastState.action.href} onClick={() => setToast(null)}>{toastState.action.label}</Link> : null}
             {toastState.action?.onAction ? <button type="button" className="btn sm" onClick={(e) => { if (e.detail > 0 && performance.now() - toastState.at < TOAST_ARM_MS) return; const a = toastState.action!.onAction!; setToast(null); a(); }}>{toastState.action.label}</button> : null}

@@ -5,8 +5,8 @@
 import fs from 'node:fs';
 import { SchemaEngine } from '@prisma/schema-engine-wasm';
 import { bindMigrationAwareSqlAdapterFactory } from '@prisma/driver-adapter-utils';
-// Prisma 7 engine rejects datasource `url`; it is irrelevant to the DDL, so strip it.
-const content = fs.readFileSync(process.argv[2], 'utf8').replace(/^\s*url\s*=.*$/m, '');
+// Prisma 7 engine rejects datasource `url` / `directUrl`; they are irrelevant to the DDL, so strip them.
+const content = fs.readFileSync(process.argv[2], 'utf8').replace(/^\s*(url|directUrl)\s*=.*$/gm, '');
 const log = () => {};
 const conn = {
   provider: 'postgres', adapterName: '@prisma/adapter-pg',

@@ -36,6 +36,7 @@ export function HeroActions({ id, title, pathText, status, version, canEscalate,
   const spotRef = useRef<HTMLSpanElement>(null);
   const resolveRef = useRef<HTMLButtonElement>(null);
   const ackRef = useRef<HTMLButtonElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
   /** the primary spot is about to change what it holds: keep the keyboard focus on it */
   const refocus = useRef(false);
   const token = shell.acks[id];
@@ -47,7 +48,11 @@ export function HeroActions({ id, title, pathText, status, version, canEscalate,
   }, [fresh]);
   useEffect(() => { if (confirm) keepRef.current?.focus(); }, [confirm]);
   // another incident in the same panel slot starts clean
-  useEffect(() => { setFresh(false); setConfirm(false); setErr(null); }, [id]);
+  useEffect(() => {
+    setFresh(false); setConfirm(false); setErr(null);
+    const above = wrapRef.current?.previousElementSibling;
+    if (above instanceof HTMLElement) above.style.minHeight = "";
+  }, [id]);
   useEffect(() => {
     if (!refocus.current) return;
     const el = spotRef.current ?? resolveRef.current ?? (pending ? null : ackRef.current); // while it is being sent, wait for what replaces the button
@@ -57,7 +62,18 @@ export function HeroActions({ id, title, pathText, status, version, canEscalate,
   const may = hasRole(shell.user, "OPERATOR");
   const noRole = may ? undefined : roleReason(shell.user, "OPERATOR", "Acknowledging, escalating and resolving");
   const fail = (r: { code: string; message: string; details?: Record<string, unknown> }) => setErr({ conflict: r.code === "VERSION_CONFLICT", msg: errorText(r, { what: "This action", where: pathText }) });
+  /**
+   * What stands above the actions (title, account, the Paged line) gets shorter when the incident is acknowledged: the
+   * calls that will not happen any more leave the Paged line, by one line here and by two where the text is wider. The
+   * actions would move up by that much under the finger, and the second tap would land on something else. Before an
+   * action is sent that block is held at the height it has; it can grow, never shrink, until another incident is shown.
+   */
+  const holdAbove = () => {
+    const above = wrapRef.current?.previousElementSibling;
+    if (above instanceof HTMLElement) above.style.minHeight = `${above.getBoundingClientRect().height}px`;
+  };
   const run = async (fn: () => Promise<void>) => {
+    holdAbove();
     setPending(true);
     try { await fn(); } finally { setPending(false); }
     // a tab without a session has nothing to reload: the shell says "Your session ended" and offers Sign in
@@ -101,7 +117,7 @@ export function HeroActions({ id, title, pathText, status, version, canEscalate,
   if (status === "RESOLVED") return null;
   const acked = fresh || status === "ACKNOWLEDGED";
   return (
-    <div className="hero-actions-wrap">
+    <div className="hero-actions-wrap" ref={wrapRef}>
       {confirm ? (
         <div className="resolve-ask" role="alertdialog" aria-labelledby="resolve-ask-t" aria-describedby="resolve-ask-d"
           onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setConfirm(false); } }}>

@@ -1,3 +1,13 @@
+/* Fallback faces with the web fonts' metrics: when a web font is not there for the first paint the page stays on these
+   (font-display: optional, never a swap), and lines wrap and stand almost as they would in the web font.
+   Pretendard against Arial (and its metric twins): the values next/font computes for PretendardStdVariable.
+   Space Mono (advance 612, ascent 1120, descent 361 per 1000) against the usual monospace fonts, by advance width:
+   A = 602 (Menlo, DejaVu Sans Mono), B = 550 (Consolas), C = 600 (Liberation Mono, Courier New). */
+@font-face { font-family: "Pretendard Fallback"; src: local("Arial"), local("Liberation Sans"), local("Arimo"); size-adjust: 101.55%; ascent-override: 93.76%; descent-override: 23.75%; line-gap-override: 0%; }
+@font-face { font-family: "Space Mono Fallback A"; src: local("Menlo"), local("Menlo Regular"), local("DejaVu Sans Mono"); size-adjust: 101.66%; ascent-override: 110.17%; descent-override: 35.51%; line-gap-override: 0%; }
+@font-face { font-family: "Space Mono Fallback B"; src: local("Consolas"); size-adjust: 111.27%; ascent-override: 100.65%; descent-override: 32.44%; line-gap-override: 0%; }
+@font-face { font-family: "Space Mono Fallback C"; src: local("Liberation Mono"), local("Courier New"); size-adjust: 102%; ascent-override: 109.8%; descent-override: 35.39%; line-gap-override: 0%; }
+
 /* AlarmOps design tokens — from alert-hub v2 "warm paper console" (docs/design/tokens.md)
    with the docs/ui persona adjustments (dark mode, faint >= 4.5:1, single accent). */
 :root {
@@ -30,8 +40,10 @@
   --amber-t: #fcf7e8;
   --grid: #efebe3;
   --pop: 0 18px 44px rgba(27, 26, 23, 0.18);
-  --mono: "Space Mono", "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, "DejaVu Sans Mono", monospace;
-  --sans: "Pretendard", "Inter", -apple-system, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  /* The app supplies the web fonts as --font-* (console: src/app/fonts.ts, self-hosted, font-display: optional).
+     Without them the named families and then the metric-adjusted fallbacks below are used. */
+  --mono: var(--font-mono, "Space Mono"), "Space Mono Fallback A", "Space Mono Fallback B", "Space Mono Fallback C", "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+  --sans: var(--font-sans-latin, "Pretendard"), var(--font-sans-signs, "Pretendard"), var(--font-sans-korean, "Pretendard"), "Pretendard Fallback", "Inter", -apple-system, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
   color-scheme: light;
 }
 

@@ -1,7 +1,7 @@
 import { act, fireEvent, render, renderHook, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConfirmDialog } from "../scope/ConfirmDialog";
-import { SAME_SPOT_MS, clearSpot, installSameSpotGuard, isSameSpot, markSpot } from "./same-spot";
+import { BOTTOM_BAND_PX, PRESS_FOLLOW_MS, SAME_SPOT_MS, SAME_SPOT_PX, clearSpot, followsPressAttr, installSameSpotGuard, isSameSpot, lastActionPress, markSpot, placeClearOfPress } from "./same-spot";
 import { Tombstone } from "./Tombstone";
 import { useStableRows } from "./useStableRows";
 
@@ -37,6 +37,77 @@ describe("same-spot guard: one rule for every list", () => {
     now.mockReturnValue(10_000 + SAME_SPOT_MS + 1);
     fireEvent.click(screen.getByRole("button"), at(300, 200));
     expect(next).toHaveBeenCalledTimes(2);
+    off();
+  });
+});
+
+describe("same-spot guard: what a press raises keeps clear of where it was pressed (QA P2-N)", () => {
+  const box = (el: Element, left: number, top: number, width: number, height: number) => {
+    el.getBoundingClientRect = () => ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) });
+  };
+  it("the guard remembers every pressed [data-list-action] with its box; a keyboard activation forgets it; it ages out", () => {
+    const off = installSameSpotGuard();
+    render(<><button data-list-action="incident.ack">Acknowledge</button><button>Plain</button><button data-list-action="x" disabled>Off</button></>);
+    const ack = screen.getByRole("button", { name: "Acknowledge" });
+    box(ack, 220, 620, 126, 44);
+    expect(lastActionPress()).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Plain" }), at(10, 10));
+    expect(lastActionPress()).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Off" }), at(10, 10));
+    expect(lastActionPress()).toBeNull();
+    fireEvent.click(ack, at(274, 641));
+    expect(lastActionPress()).toMatchObject({ x: 274, y: 641, box: { left: 220, top: 620, right: 346, bottom: 664 } });
+    expect(isSameSpot(at(274, 641))).toBe(false); // remembering is not marking: the handler decides that
+    now.mockReturnValue(10_000 + PRESS_FOLLOW_MS - 1);
+    expect(lastActionPress()).not.toBeNull();
+    now.mockReturnValue(10_000 + PRESS_FOLLOW_MS);
+    expect(lastActionPress()).toBeNull();
+    now.mockReturnValue(10_000);
+    fireEvent.click(ack, at(274, 641, 0)); // Enter
+    expect(lastActionPress()).toBeNull();
+    off();
+  });
+  it("markSpot remembers the control it was given; without one, the point", () => {
+    render(<button>Remove</button>);
+    const b = screen.getByRole("button");
+    box(b, 100, 300, 80, 28);
+    markSpot({ ...at(120, 310), currentTarget: b });
+    expect(lastActionPress()!.box).toEqual({ left: 100, top: 300, right: 180, bottom: 328 });
+    markSpot(at(50, 60));
+    expect(lastActionPress()!.box).toEqual({ left: 50, top: 60, right: 50, bottom: 60 });
+    markSpot(at(50, 60, 0));
+    expect(lastActionPress()).toBeNull();
+  });
+  it("placement: bottom unless the pressed control, slop included, reaches into the bottom band; then top", () => {
+    expect(placeClearOfPress(740, null)).toBe("bottom");
+    const press = (bottom: number) => ({ t: 0, x: 0, y: bottom - 22, box: { left: 200, top: bottom - 44, right: 340, bottom } });
+    const edge = 740 - BOTTOM_BAND_PX - SAME_SPOT_PX;
+    expect(placeClearOfPress(740, press(edge))).toBe("bottom");
+    expect(placeClearOfPress(740, press(edge + 1))).toBe("top");
+    expect(placeClearOfPress(740, press(664))).toBe("top"); // the panel's Acknowledge on a 360×740 phone
+    expect(placeClearOfPress(915, press(664))).toBe("bottom");
+  });
+  it("an element that follows a press takes no pointer press inside the pressed control's box, for as long as it is there", () => {
+    const off = installSameSpotGuard();
+    const undo = vi.fn();
+    render(<button data-list-action="incident.ack">Acknowledge</button>);
+    const ack = screen.getByRole("button", { name: "Acknowledge" });
+    box(ack, 220, 620, 126, 44);
+    fireEvent.click(ack, at(274, 641));
+    const follows = followsPressAttr();
+    expect(follows).toBe("196,596,370,688");
+    render(<div data-follows-press={follows}><button onClick={undo}>Undo</button></div>);
+    const b = screen.getByRole("button", { name: "Undo" });
+    for (const ms of [150, 400, 1000, 2000, 3000, 8000]) {
+      now.mockReturnValue(10_000 + ms);
+      fireEvent.click(b, at(274, 641));
+      fireEvent.click(b, at(300, 660));
+    }
+    expect(undo).not.toHaveBeenCalled();
+    fireEvent.click(b, at(274, 641, 0)); // keyboard
+    fireEvent.click(b, at(274, 560)); // outside the box
+    expect(undo).toHaveBeenCalledTimes(2);
+    expect(followsPressAttr(null)).toBeUndefined();
     off();
   });
 });

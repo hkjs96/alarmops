@@ -132,12 +132,12 @@ describe("R-4 security response headers", () => {
     expect(p["Referrer-Policy"]).toBe("strict-origin-when-cross-origin");
     expect(p["Content-Security-Policy"]).toContain("frame-ancestors 'none'");
   });
-  it("CSP: own origin plus Google Fonts only; no eval and no remote scripts in production", () => {
+  it("CSP: own origin only (fonts are self-hosted); no eval and no remote scripts in production", () => {
     const d = Object.fromEntries(h(true)["Content-Security-Policy"]!.split("; ").map((x) => [x.split(" ")[0]!, x.split(" ").slice(1)]));
     expect(d["default-src"]).toEqual(["'self'"]);
     expect(d["script-src"]).toEqual(["'self'", "'unsafe-inline'"]);
-    expect(d["style-src"]).toEqual(["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"]);
-    expect(d["font-src"]).toEqual(["'self'", "https://fonts.gstatic.com"]);
+    expect(d["style-src"]).toEqual(["'self'", "'unsafe-inline'"]);
+    expect(d["font-src"]).toEqual(["'self'"]);
     expect(d["connect-src"]).toEqual(["'self'"]);
     expect(d["object-src"]).toEqual(["'none'"]);
     expect(d["base-uri"]).toEqual(["'self'"]);
