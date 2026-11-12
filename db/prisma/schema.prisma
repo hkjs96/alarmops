@@ -392,6 +392,36 @@ enum AuditActorType {
 }
 
 /// DEGRADED (notify only): the phase ran without an error but due SEV-1 pages were not attempted (security review 2, N-12).
+/// The reason code every audience may see for a failed delivery (API `reason`, core DeliveryReason).
+enum DeliveryReason {
+  TIMEOUT
+  INVALID_DESTINATION
+  RATE_LIMITED
+  PROVIDER_REJECTED
+  PROVIDER_ERROR
+  NOT_CONFIGURED
+  GAVE_UP
+}
+
+/// Who a NotificationLog row is about (D-36: portal users see staff as "MSP on-call").
+enum DeliveryTargetKind {
+  STAFF
+  CUSTOMER_PERSON
+  CUSTOMER_CHANNEL
+  MSP_CHANNEL
+}
+
+enum RevealChannel {
+  PHONE
+  EMAIL
+  SLACK
+}
+
+enum RevealMode {
+  NORMAL
+  EMERGENCY
+}
+
 enum TickStatus {
   OK
   ERROR
@@ -422,6 +452,7 @@ model User {
   updatedAt   DateTime    @updatedAt @db.Timestamptz(3)
   contact     Contact?
   bulkChanges BulkChange[]
+  contactReveals ContactRevealLog[]
 
   @@index([customerId])
 }
@@ -456,6 +487,8 @@ model Contact {
   leaveCovers     Leave[]                   @relation("LeaveReplacement")
   verifications   ChannelVerification[]
   remediationDecisions RemediationRequest[]
+  notificationJobs NotificationJob[]
+  notificationLogs NotificationLog[]
 
   @@index([customerId])
   @@index([kind])
@@ -482,6 +515,8 @@ model Responder {
   contactId  String
   contact    Contact            @relation(fields: [contactId], references: [id], onDelete: Cascade)
   role       ResponderRole      @default(PAGEABLE)
+  /// Position in the customer's Responders list, 0 = first (security R-19). Read `ORDER BY "order", "contactId"`.
+  order      Int                @default(0)
   source     ResponderSource    @default(DIRECT)
   templateId String?
   template   ResponderTemplate? @relation(fields: [templateId], references: [id])
@@ -515,6 +550,8 @@ model ResponderTemplateMember {
 model Customer {
   id                  String             @id @default(cuid())
   name                String             @unique
+  /// D-33 slug: `^[a-z0-9][a-z0-9-]{0,63}$` (CHECK in raw SQL), unique across the MSP. Reserved words are checked in the service layer.
+  slug                String             @unique
   isInternal          Boolean            @default(false)
   loginDomains        String[]           @default([])
   portalGrants        String[]           @default([])
@@ -552,9 +589,12 @@ model Project {
   customerId String
   customer   Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
   name       String
+  slug       String
   services   Service[]
+  incidents  Incident[]
 
   @@unique([customerId, name])
+  @@unique([customerId, slug])
 }
 
 model Service {
@@ -564,9 +604,12 @@ model Service {
   projectId     String
   project       Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
   name          String
+  slug          String
   cloudAccounts CloudAccount[]
+  incidents     Incident[]
 
   @@unique([projectId, name])
+  @@unique([projectId, slug])
   @@index([customerId])
 }
 
@@ -762,9 +805,12 @@ model AlertGroup {
   deliveredAt  DateTime?   @db.Timestamptz(3)
   sweptReason  String?
   version      Int         @default(0)
+  /// When the group was actually closed (closeAt is the plan). Collect waits GROUP_GRACE_SEC after it (G-5).
+  closedAt     DateTime?   @db.Timestamptz(3)
   rawEvents    RawEvent[]
 
   @@index([status, closeAt])
+  @@index([status, closedAt])
 }
 
 model Incident {
@@ -798,6 +844,19 @@ model Incident {
   rcaPlaceholder     Json?
   version            Int              @default(0)
   isMergeTarget      Boolean          @default(true)
+  /// When the tick must look at this incident next (next step, repeat, re-notify, maintenance re-check). Partial index in raw SQL.
+  nextEscalationAt       DateTime?    @db.Timestamptz(3)
+  /// Last time a firing group was opened/merged into it; auto-resolve only looks strictly after it (I-5).
+  lastMergedAt           DateTime?    @db.Timestamptz(3)
+  renotifyCount          Int          @default(0)
+  /// Org position fixed at open (account → service → project).
+  projectId              String?
+  project                Project?     @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  serviceId              String?
+  service                Service?     @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+  source                 SourceKind?
+  /// Manual "Escalate now": at most one per 60 s per incident (R-7).
+  lastManualEscalationAt DateTime?    @db.Timestamptz(3)
 
   alerts           IncidentAlert[]
   events           IncidentEvent[]
@@ -809,6 +868,7 @@ model Incident {
   @@unique([number])
   @@index([customerId, status, triggeredAt(sort: Desc)])
   @@index([status, escalationBaseAt])
+  @@index([triggeredAt(sort: Desc), id(sort: Desc)])
 }
 
 model IncidentAlert {
@@ -835,8 +895,10 @@ model IncidentEvent {
   actorId    String?
   message    String
   data       Json?
+  /// Insertion order: tie-break of the timeline for events with the same `at`.
+  seq        Int               @default(autoincrement())
 
-  @@index([incidentId, at])
+  @@index([incidentId, at, seq])
 }
 
 model Resolution {
@@ -1234,9 +1296,25 @@ model NotificationJob {
   nextAttemptAt  DateTime                @db.Timestamptz(3)
   lastError      String?
   payload        Json
+  /// Which step of the call order this page belongs to (0-based) and which repeat cycle (RENOTIFY: reminder number).
+  stepIndex      Int                     @default(0)
+  repeat         Int                     @default(0)
+  /// Recipient of a person page (null for channel pages). Checked again right before the send (R-9).
+  contactId      String?
+  contact        Contact?                @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  contactName    String?
+  /// Claim token: +1 on every claim; beginSend/release/complete write only `WHERE status='SENDING' AND "claimSeq"=?` (R-2).
+  claimSeq       Int                     @default(0)
+  /// Original due time — the ORDER column (R-11). nextAttemptAt is the lease only.
+  dueAt          DateTime                @db.Timestamptz(3)
+  providerMessageId String?
+  createdAt      DateTime                @default(now()) @db.Timestamptz(3)
+  /// Insertion order: the last tie-break of the claim order (same `dueAt` and `createdAt`).
+  seq            Int                     @default(autoincrement())
   logs           NotificationLog[]
 
   @@index([status, nextAttemptAt])
+  @@index([incidentId, stepIndex, repeat])
 }
 
 model NotificationLog {
@@ -1253,8 +1331,20 @@ model NotificationLog {
   escalationStep    Int?
   providerMessageId String?
   error             String?
+  /// Which attempt of the job this row reports.
+  attempt           Int                     @default(0)
+  /// e.g. UNVERIFIED_ADDRESS. Internal only.
+  warnings          String[]                @default([])
+  errorCode         DeliveryReason?
+  targetKind        DeliveryTargetKind
+  /// Person rows only. Never leaves in a portal response.
+  contactId         String?
+  contact           Contact?                @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  /// Insertion order (list order and cursor of GET /incidents/{id}/notifications).
+  seq               Int                     @default(autoincrement())
 
   @@index([incidentId, at])
+  @@index([incidentId, seq])
 }
 
 model SlackMessage {
@@ -1306,4 +1396,79 @@ model TickHeartbeat {
   lastStats           Json?
   consecutiveFailures Int         @default(0)
   lastScheduledAt     DateTime?   @db.Timestamptz(3) // per-minute claim (API-CONTRACT §5)
+}
+
+/// One row per minute a tick call claimed (API-CONTRACT §5 "같은 분은 한 번"). Rows older than a day are removed by the claim itself.
+model TickClaim {
+  minute    DateTime @id @db.Timestamptz(3)
+  claimedAt DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([claimedAt])
+}
+
+/// API idempotency store (API-CONTRACT §2 "멱등"): 24 h, at most 200 live entries per user (N-19).
+model IdempotencyKey {
+  /// Storage key built from user + scope/role + header value — never the bare header.
+  key         String   @id
+  ownerUserId String
+  fingerprint String
+  /// `json`, not `jsonb`: a replay must return the first response as it was written (key order included).
+  response    Json     @db.Json
+  expiresAt   DateTime @db.Timestamptz(3)
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  /// Insertion order inside one owner ("oldest first" when the cap is reached).
+  seq         Int      @default(autoincrement())
+
+  @@index([ownerUserId, expiresAt])
+  @@index([ownerUserId, seq])
+  @@index([expiresAt])
+}
+
+/// Undo token of an ack / bulk action (API-CONTRACT §8.1): 5 minutes, the acting user only, single use (taken = deleted).
+model UndoRecord {
+  token     String   @id
+  userId    String
+  action    String
+  expiresAt DateTime @db.Timestamptz(3)
+  items     Json
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([expiresAt])
+}
+
+/// Last version of a deleted PagingConfig, so a row created again for the same scope continues the sequence (N-3).
+model PagingConfigTombstone {
+  scopeType   ScopeType
+  scopeId     String
+  customerId  String
+  lastVersion Int
+  deletedAt   DateTime  @default(now()) @db.Timestamptz(3)
+
+  @@id([scopeType, scopeId])
+}
+
+/// Contact reveal record (D-35), append-only. Never stores the contact value, masked or not.
+model ContactRevealLog {
+  id                 String        @id @default(cuid())
+  at                 DateTime      @default(now()) @db.Timestamptz(3)
+  actorUserId        String
+  actor              User          @relation(fields: [actorUserId], references: [id])
+  actorRole          String
+  /// No FK: the record outlives the contact.
+  contactId          String
+  contactName        String
+  customerId         String?
+  channel            RevealChannel
+  mode               RevealMode
+  /// Required for EMERGENCY (CHECK in raw SQL), at most 500 characters.
+  reason             String?       @db.VarChar(500)
+  notifiedContactIds String[]      @default([])
+  requestId          String?
+  ip                 String?
+  userAgent          String?
+
+  @@index([customerId, at(sort: Desc)])
+  @@index([mode, at(sort: Desc)])
+  @@index([actorUserId, at(sort: Desc)])
+  @@index([contactId, at(sort: Desc)])
 }

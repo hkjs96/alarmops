@@ -97,7 +97,7 @@
 
 - "Everyone in Responders" = 이 고객의 role=PAGEABLE 전원(활성 Leave 대체 적용 후). Auto-fix approver·Portal은 ContactScope.role.
 - **Responder 순서(보안 3차 R-19).** 발송 한도로 사람을 줄일 때 누가 남는지는 이 순서로 정한다: ① 지금 근무 중인 사람(이 고객이 쓸 수 있는 로테이션 — MSP 공용 + 자기 고객 — 의 현재 당번, 대체·휴가 적용 후)이 먼저다. **20명(`ALL_RESPONDERS` 한도)까지** 먼저 남기며, 근무자가 20명을 넘으면 근무자도 ②③ 순서의 끝부터 빠지고 타임라인에 `(on shift)`로 남는다(보안 4차 R-19 잔여), ② `order` 오름차순(`order`가 유한한 숫자가 아니면 "없음"으로 보고 맨 뒤 — N-37), ③ 같으면 `contactId`. 메모리 저장소는 `order`를 채우지 않으므로 테스트에서 따로 주지 않으면 contactId 순이다. 저장소 포트(`pagingContext`)는 Responder에 `order`를 채워 `ORDER BY "order", "contactId"`로 돌려주고, 엔진도 같은 키로 다시 정렬하므로 행이 온 순서에는 좌우되지 않는다. 줄일 때는 사람보다 채널을 먼저 뺀다(이메일 → Slack DM. SMS·음성·Slack 채널 글은 빼지 않는다). 사람도 더 줄일 수 없으면 단계를 통째로 빼는데, `ALL_RESPONDERS` 단계부터 빼고 `PERSON`·`ROTATION` 단계는 마지막까지 남긴다. 통째로 빠진 단계의 사람과, 어느 단계에서도 호출되지 않게 된 사람은 타임라인에 이름으로 남는다(API-CONTRACT §2 한도).
-- **PROPOSED — needs migration:** `order int` 열(목록에서의 위치, 0부터). 열이 생기기 전 SQL 어댑터는 `row_number() over (partition by customerId order by createdAt, contactId) − 1`을 `order`로 넘긴다(추가된 순서).
+- `order int default 0` 열(목록에서의 위치, 0부터). 스키마·`0001_init`에 반영됨. SQL 저장소는 `ORDER BY "order", "contactId"`로 읽는다.
 - IX(contactId) — People 화면 "customers covered".
 
 ### ResponderTemplate / ResponderTemplateMember
@@ -144,9 +144,9 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 
 **slug 규칙 (Customer · Project · Service, D-33).**
 - 형식 `^[a-z0-9][a-z0-9-]{0,63}$`. **부모 안에서 유일**: Customer는 MSP 전체, Project는 고객 안, Service는 프로젝트 안.
-- **예약어는 쓸 수 없다**(세 단계 모두 같은 목록): `incidents` `incident` `monitoring` `call-order` `people` `maintenance` `thresholds` `alarms` `resources` `settings` `new` `-`. 주소에서 slug 자리와 화면 이름 자리가 겹치기 때문이다(`/c/<customer>/<project>/<service>/incident/<id>`, 포털 `/<project>/<service>/<screen>`). `-`는 미매핑 계정 인시던트의 고객 자리(`/c/-/incident/<id>`)다.
+- **예약어는 쓸 수 없다**(세 단계 모두 같은 목록): `incidents` `incident` `monitoring` `call-order` `people` `maintenance` `thresholds` `alarms` `resources` `settings` `new` `-`, 그리고 API·콘솔 셸이 쓰는 `api` `admin` `all` `unmapped` `auth` `c` `customers` `login`(SQL 보안 검토 N-7에서 추가). 주소에서 slug 자리와 화면 이름 자리가 겹치기 때문이다(`/c/<customer>/<project>/<service>/incident/<id>`, 포털 `/<project>/<service>/<screen>`). `-`는 미매핑 계정 인시던트의 고객 자리(`/c/-/incident/<id>`)다.
 - 만들 때 이름에서 만든다(소문자, 영숫자 밖은 `-`, 한글 등으로 비면 `customer`·`project`·`service` + 짧은 접미사). 예약어이거나 부모 안에서 겹치면 `-2`, `-3`… 접미사를 붙인다. 직접 넣은 slug가 예약어·중복이면 400 `VALIDATION_FAILED` / 409 `ALREADY_EXISTS`.
-- DB는 UQ와 형식 CHECK, 예약어는 서비스 계층에서 검증한다(목록이 화면 추가로 늘 수 있다).
+- DB는 UQ, 형식 CHECK(`*_slug_chk`), **예약어 CHECK(`*_slug_reserved_chk`)**를 둔다. 앱은 같은 규칙을 `packages/api/src/slug.ts`(`slugProblem`, `RESERVED_SLUGS`)로 먼저 검사해 400을 낸다. 두 목록이 같은지는 테스트가 비교한다(`packages/store-sql/test/review-sql.test.ts`). 화면이 늘어 예약어가 늘면 목록과 CHECK를 새 마이그레이션에서 함께 바꾼다.
 - 만든 뒤에는 바꾸지 않는다(이름만 바뀐다). 이름 변경 때 slug도 바꿀지와 옛 주소 처리는 미결(API-CONTRACT Q-API-09).
 - 마이그레이션: 기존 행은 이름에서 채운 뒤 NOT NULL.
 
@@ -299,9 +299,9 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 | deliveredAt | timestamptz? | 발송 선점(claim)(notification R2-3) |
 | sweptReason | text? | |
 | version | int | |
-| closedAt | timestamptz? | **PROPOSED — needs migration.** 실제로 닫힌 시각. grace·auto-pause 계산의 기준(`closeAt`은 예정 시각) |
+| closedAt | timestamptz? | 실제로 닫힌 시각. grace·auto-pause 계산의 기준(`closeAt`은 예정 시각) |
 
-- 부분 UQ(groupKey) where status = 'OPEN' — 축당 열린 그룹 하나(G-3). IX(status, closeAt) — 틱이 처리할 그룹 선택.
+- 부분 UQ(groupKey) where status = 'OPEN' — 축당 열린 그룹 하나(G-3). IX(status, closeAt), IX(status, closedAt) — 틱이 닫을 그룹·수집할 그룹 선택.
 - Step Functions 대신 1분 틱 + SQS 지연 메시지(grouping 새 구현 2). 틱 1분 단위라 group_wait 30초 정밀도 처리 방식은 API-CONTRACT 참조.
 
 ### Incident
@@ -330,15 +330,16 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 | rcaPlaceholder | jsonb? | D-14 자리만 |
 | version | int | |
 | isMergeTarget | bool | AAM 포인터 `inc#{axis}` 대체. 새 구성원을 합칠 대상 |
-| nextEscalationAt | timestamptz? | **PROPOSED — needs migration.** 틱이 이 인시던트를 다시 볼 시각(다음 단계·재알림·점검 창 재확인). null = 볼 일 없음. IX(nextEscalationAt) where status ≠ RESOLVED |
-| lastMergedAt | timestamptz? | **PROPOSED — needs migration.** 마지막으로 알림이 합쳐진 시각. 같은 틱에서 합친 뒤 자동 해결하지 않기 위한 기준(I-5) |
-| renotifyCount | int default 0 | **PROPOSED — needs migration.** Ack 뒤 재알림 횟수(상한 12) |
-| projectId, serviceId | text? FK | **PROPOSED — needs migration.** 열릴 때의 조직 위치(계정 → 서비스 → 프로젝트). 범위 필터·점검 창·호출 순서 해석에 사용 |
-| source | enum `CLOUDWATCH, PROMETHEUS, GRAFANA`? | **PROPOSED — needs migration.** 대표 알림의 출처(목록 필터) |
-| lastManualEscalationAt | timestamptz? | **PROPOSED — needs migration.** 수동 Escalate 60초 제한의 기준 |
+| nextEscalationAt | timestamptz? | 틱이 이 인시던트를 다시 볼 시각(다음 단계·재알림·점검 창 재확인). null = 볼 일 없음. IX(nextEscalationAt) where status ≠ RESOLVED |
+| lastMergedAt | timestamptz? | 마지막으로 알림이 합쳐진 시각. 같은 틱에서 합친 뒤 자동 해결하지 않기 위한 기준(I-5) |
+| renotifyCount | int default 0 | Ack 뒤 재알림 횟수(상한 12) |
+| projectId, serviceId | text? FK | 열릴 때의 조직 위치(계정 → 서비스 → 프로젝트). 범위 필터·점검 창·호출 순서 해석에 사용 |
+| source | enum `CLOUDWATCH, PROMETHEUS, GRAFANA`? | 대표 알림의 출처(목록 필터) |
+| lastManualEscalationAt | timestamptz? | 수동 Escalate 60초 제한의 기준 |
 
 - 부분 UQ(axis) where isMergeTarget — 축당 병합 대상 하나. 6시간 지난 인시던트는 열린 채 두되 isMergeTarget=false로 내리고 새 인시던트를 연다(I-3).
-- IX(customerId, status, triggeredAt desc), IX(status, escalationBaseAt) — 에스컬레이션 틱.
+- IX(customerId, status, triggeredAt desc), IX(triggeredAt desc, id desc) — 목록 커서. 부분 IX(nextEscalationAt, id) where status ≠ RESOLVED and nextEscalationAt is not null — 에스컬레이션 틱(`Incident_nextEscalationAt_due_idx`). 부분 IX(triggeredAt) where status ≠ RESOLVED — 자동 해소 대상(`Incident_active_idx`). IX(status, escalationBaseAt)는 남아 있으나 틱은 쓰지 않는다.
+- `pagingConfigId`·`projectId`·`serviceId`·`source`는 열릴 때 한 번 쓰고 이후 갱신하지 않는다(SQL 저장소의 UPDATE 대상에서 빠져 있다). FK는 모두 `ON DELETE SET NULL`.
 - **Ack 단위(인시던트/알림)는 미결**(Q-DM-05). 위 구조는 둘 다 담는다: 인시던트 상태와 Alert.status를 따로 둔다. 제안은 인시던트 단위 ack + 알림 ack 고착(grouping 새 구현 1).
 
 ### IncidentAlert
@@ -360,8 +361,9 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 | actorId | text? | |
 | message | text | 에스컬레이션은 기준 시각 포함 문구(oncall R4-3, 8b98366) |
 | data | jsonb? | |
+| seq | serial | 넣은 순서. `at`이 같은 이벤트의 순서와 타임라인 커서 기준 |
 
-- IX(incidentId, at). 타임라인 화면 상한은 API에서 자른다(첫 TRIGGERED 항목 고정, I-4/517b3d3).
+- IX(incidentId, at, seq). 타임라인 화면 상한은 API에서 자른다(첫 TRIGGERED 항목 고정, I-4/517b3d3).
 
 ### Resolution (해결 기록)
 | 필드 | 타입 | 비고 |
@@ -690,14 +692,18 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 | nextAttemptAt | timestamptz | 선점 시 미리 기록 |
 | lastError | text? | |
 | payload | jsonb | |
-| stepIndex | int | **PROPOSED — needs migration.** 어느 단계의 호출인지(0부터). 단계 전체 실패 판정, Undo 복원 범위 |
-| repeat | int | **PROPOSED — needs migration.** 몇 번째 반복인지(RENOTIFY는 재알림 번호) |
-| contactId | text? FK Contact | **PROPOSED — needs migration.** 사람에게 가는 잡의 수신자(채널 잡은 null). 발송 직전 고객 일치·확인 여부 재확인 |
-| contactName | text? | **PROPOSED — needs migration.** 열릴 때의 이름(기록 표시용) |
-| claimSeq | int default 0 | **PROPOSED — needs migration.** 선점 토큰. 선점마다 +1, `beginSend`·`release`·`complete`는 `WHERE status='SENDING' AND claimSeq=?`로만 쓴다(겹친 틱의 중복 발송 방지) |
-| dueAt | timestamptz | **PROPOSED — needs migration.** 원래 만기(정렬 기준). 선점·반환은 건드리지 않고, 실제 재시도·Undo·점검 창 미룸만 옮긴다. `nextAttemptAt`은 임대 시각으로만 쓴다 |
+| stepIndex | int | 어느 단계의 호출인지(0부터). 단계 전체 실패 판정, Undo 복원 범위 |
+| repeat | int | 몇 번째 반복인지(RENOTIFY는 재알림 번호) |
+| contactId | text? FK Contact | 사람에게 가는 잡의 수신자(채널 잡은 null). 발송 직전 고객 일치·확인 여부 재확인 |
+| contactName | text? | 열릴 때의 이름(기록 표시용) |
+| claimSeq | int default 0 | 선점 토큰. 선점마다 +1, `beginSend`·`release`·`complete`는 `WHERE status='SENDING' AND claimSeq=?`로만 쓴다(겹친 틱의 중복 발송 방지) |
+| dueAt | timestamptz | 원래 만기(정렬 기준). 선점·반환은 건드리지 않고, 실제 재시도·Undo·점검 창 미룸만 옮긴다. `nextAttemptAt`은 임대 시각으로만 쓴다 |
+| providerMessageId | text? | 성공한 발송의 업체 ID(여러 Slack 채널이면 쉼표로 이음). 내부만 |
+| createdAt | timestamptz | 잡이 큐에 들어간 시각(선점 순서의 세 번째 기준) |
+| seq | serial | 넣은 순서. `dueAt`·`createdAt`이 같은 잡의 마지막 정렬 기준(메모리 저장소의 삽입 순서와 같다) |
 
-- IX(status, nextAttemptAt). 선점·만기·재시도 시각은 DB 시각(`now()`)으로 계산한다(실행기 시계 금지).
+- IX(status, nextAttemptAt), IX(incidentId, stepIndex, repeat) — 단계 전체 실패 판정·Undo 복원. 부분 IX(channel, nextAttemptAt) where status in (`QUEUED`, `SENDING`) — 레인별 선점(`NotificationJob_due_idx`). CHECK(attempts ≥ 0, claimSeq ≥ 0). 선점·만기·재시도 시각은 DB 시각(`now()`)으로 계산한다(실행기 시계 금지).
+- 선점 SQL(`packages/store-sql` `claimDueJobs`): 만기 잡에 `ROW_NUMBER() OVER (PARTITION BY customerId ORDER BY sev1 DESC, 시도 여부, dueAt, createdAt, seq)`로 고객별 순번을 매기고 `ORDER BY 순번, sev1 DESC, 시도 여부, dueAt, createdAt`으로 줄을 세운 뒤(선점 수의 20%는 SEV-1이 아닌 가장 오래된 잡 몫), 고른 행을 `FOR UPDATE SKIP LOCKED`로 잠그고 만기 조건을 다시 확인해 `SENDING`, `claimSeq + 1`, `nextAttemptAt = now() + 60초`로 바꾼다. 동시에 도는 두 실행기는 같은 잡을 잡지 못한다(한쪽은 그 틱에 적게 잡을 수 있다).
 - 업체별 차단기 표(`ProviderBreaker`)는 **두지 않는다**(보안 3차 R-17에서 차단기를 없앰. 업체 상태는 저장하지 않는다 — API-CONTRACT §5 "업체 무응답").
 
 ### NotificationLog (추가만)
@@ -709,13 +715,14 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 | escalationStep | |
 | providerMessageId | 문자·음성 업체 ID, Slack ts |
 | error | 가린 업체 문구. 기본(`STORE_PROVIDER_TEXT=false`, D-39 임시): **발췌 120자**, 내부 ADMIN만 봄. `true`: 300자, 내부 OPERATOR·ADMIN. 원문은 저장하지 않는다. `NotificationJob.lastError`도 같다 |
-| attempt | **PROPOSED — needs migration.** int. 몇 번째 시도의 결과인지 |
-| warnings | **PROPOSED — needs migration.** text[]. 예: `UNVERIFIED_ADDRESS`. 내부만 |
-| errorCode | **PROPOSED — needs migration.** enum `TIMEOUT, INVALID_DESTINATION, RATE_LIMITED, PROVIDER_REJECTED, PROVIDER_ERROR, NOT_CONFIGURED, GAVE_UP`?. API의 `reason` — 모든 사용자가 보는 값 |
-| targetKind | **PROPOSED — needs migration.** enum `STAFF, CUSTOMER_PERSON, CUSTOMER_CHANNEL, MSP_CHANNEL`. 포털에서 직원을 `MSP on-call`로, 채널을 `Slack channel`로 바꾸는 근거(D-36) |
-| contactId | **PROPOSED — needs migration.** text? FK Contact. 사람 대상일 때만. 포털 응답에는 나가지 않음 |
+| attempt | int. 몇 번째 시도의 결과인지 |
+| warnings | text[]. 예: `UNVERIFIED_ADDRESS`. 내부만 |
+| errorCode | enum `TIMEOUT, INVALID_DESTINATION, RATE_LIMITED, PROVIDER_REJECTED, PROVIDER_ERROR, NOT_CONFIGURED, GAVE_UP`?. API의 `reason` — 모든 사용자가 보는 값 |
+| targetKind | enum `STAFF, CUSTOMER_PERSON, CUSTOMER_CHANNEL, MSP_CHANNEL`. 포털에서 직원을 `MSP on-call`로, 채널을 `Slack channel`로 바꾸는 근거(D-36) |
+| contactId | text? FK Contact. 사람 대상일 때만. 포털 응답에는 나가지 않음 |
+| seq | serial. 넣은 순서 — `GET /incidents/{id}/notifications`의 목록 순서와 커서 기준 |
 
-- IX(incidentId, at). 고객 포털 "통지가 실제로 나갔는지"(P3-2)의 원천.
+- IX(incidentId, at), IX(incidentId, seq). 고객 포털 "통지가 실제로 나갔는지"(P3-2)의 원천.
 
 ### SlackMessage (스레드 매핑)
 | 필드 | 비고 |
@@ -734,16 +741,39 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 ## 7. 감사 · 운영
 
 ### IdempotencyKey (API 멱등 저장소, API-CONTRACT §2 "멱등")
-**PROPOSED — needs migration.** 지금은 메모리 구현(`MemoryApiStore.idempotent`)만 있다.
+스키마·`0001_init`에 반영됨. SQL 구현은 `packages/store-sql`(`SqlApiStore.putIdempotent`), 메모리 구현은 `MemoryApiStore.idempotent`.
 | 필드 | 타입 | 비고 |
 |---|---|---|
 | key | text PK | 요청 헤더 값이 아니라 **사용자 + 범위·역할 + 헤더 값**으로 만든 저장 키 |
 | ownerUserId | text | **소유자 = 요청한 로그인 사용자(`AuthContext.userId`)**. 사용자당 살아 있는 항목 200개 상한의 기준이며, 넘으면 그 사용자의 가장 오래된 것부터 지운다(다른 사용자 것은 건드리지 않는다). preview 요청은 저장하지 않는다 |
 | fingerprint | text | 메서드 + 경로 + `If-Match` + 본문 해시. 다르면 422 `IDEMPOTENCY_KEY_REUSED` |
-| response | jsonb | 첫 응답(상태·헤더·본문), 최대 약 24KB |
-| expiresAt | timestamptz | 24시간. IX(ownerUserId, expiresAt) |
+| response | **json**(jsonb 아님) | 첫 응답(상태·헤더·본문), 최대 약 24KB. jsonb는 키 순서를 바꾸므로 재생 응답이 첫 응답과 바이트가 달라진다 — `json`으로 쓴 그대로 둔다. **`undoToken`은 저장하지 않는다**(SQL 보안 검토 R-7: 본문에서 빼고 저장 — `UndoRecord`가 해시만 두는 것과 같은 이유). **연락처 값(전화·이메일·Slack id)이 든 응답은 이 표에 들어오면 안 된다**: 그런 라우트는 `replayable: false`로 등록한다(API-CONTRACT §2 "멱등") |
+| expiresAt | timestamptz | 24시간. IX(ownerUserId, expiresAt), IX(expiresAt) — 뒤의 것은 틱의 전역 만료 청소용 |
+| createdAt | timestamptz | |
+| seq | serial | 넣은 순서. 상한을 넘으면 `seq`가 작은 것부터 지운다. IX(ownerUserId, seq) |
 
-- 상한 처리(만료 삭제 → 초과분 삭제 → 삽입)는 한 문장 또는 한 트랜잭션으로 한다.
+- 상한 처리(만료 삭제 → 초과분 삭제 → 삽입)는 한 트랜잭션으로 한다. 같은 사용자의 동시 요청은 `pg_advisory_xact_lock(hashtext('idem:' || ownerUserId))`로 줄 세운다. 만료 판정은 DB 시각.
+- **만료 행 청소는 틱이 한다**(R-7): `purgeExpired`가 매 틱 끝에 모든 사용자의 만료된 `IdempotencyKey`, 만료 후 하루 지난 `UndoRecord`, 이틀 지난 `TickClaim`을 지운다(표마다 한 번에 최대 5,000행, DB 시각 기준). 다시 쓰지 않는 사용자의 행도 24시간 + 1분 안에 사라진다. 사용자가 다음에 쓸 때 자기 만료 행을 지우는 것은 그대로 둔다.
+
+### UndoRecord (Ack·일괄 처리의 Undo 토큰, API-CONTRACT §8.1)
+| 필드 | 타입 | 비고 |
+|---|---|---|
+| token | text PK | 토큰 자체가 아니라 **SHA-256**. 토큰은 응답으로만 나간다 |
+| userId | text | 누른 사람. 다른 사람이 쓰면 404이고 행은 남는다 |
+| action | text | `ack` / `resolve` |
+| expiresAt | timestamptz | 5분. IX(expiresAt). 하루 지난 행은 다음 저장 때 지운다 |
+| items | jsonb | `[{ id, versionAfter, prev{status, acknowledgedAt, acknowledgedBy, mttaSec} }]` |
+| createdAt | timestamptz | |
+
+- 1회용: `DELETE … RETURNING`으로 꺼낸다(두 요청이 같이 가져갈 수 없다).
+
+### PagingConfigTombstone (지운 호출 순서의 마지막 버전, 보안 N-3)
+| 필드 | 타입 | 비고 |
+|---|---|---|
+| scopeType, scopeId | PK | 지워진 `PagingConfig`의 범위 |
+| customerId | text | |
+| lastVersion | int | 다시 만든 행은 `lastVersion + 1`부터 시작한다 — 지우기 전의 `If-Match`가 새 행에 맞을 수 없다 |
+| deletedAt | timestamptz | |
 
 ### AuditLog (추가만)
 | 필드 | 비고 |
@@ -779,6 +809,14 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 - AuditLog에도 한 줄(`action: contact.reveal`, targetType `Contact`, `after: { revealLogId, mode }`) — 전체 감사 기록에서 보이게.
 - IX(customerId, at desc), IX(mode, at desc) — 검토 보기 `Emergency reveals`, IX(actorUserId, at desc), IX(contactId, at desc).
 - "주 Responder"의 정의는 미결(API-CONTRACT Q-API-14). 현재: 고객 단계 PagingConfig 1단계의 첫 대상(로테이션이면 지금 당번).
+
+### TickClaim (분 단위 틱 선점, API-CONTRACT §5)
+| 필드 | 비고 |
+|---|---|
+| minute | timestamptz PK. 틱이 맡은 분(`scheduledAt`을 분으로 자른 값). `INSERT … ON CONFLICT DO NOTHING`이 성공한 호출만 그 분을 실행한다 |
+| claimedAt | DB 시각 |
+
+- `claimTick(minute, at)`은 호출자 시계 `at`이 DB `now()`와 30초 넘게 다르면 행을 넣지 않고 `CLOCK_SKEW`를 돌려준다(SQL 보안 검토 R-2). 이틀 지난 행은 틱 끝의 `purgeExpired`가 지운다 — 기준은 **`claimedAt`(DB 시각)과 `minute` 둘 다** 이틀 전이어서, 시계가 틀린 호출자가 현재 분의 행을 지우게 만들 수 없다. IX(claimedAt). `TickHeartbeat.lastScheduledAt`은 쓰지 않는다(늦게 온 이전 분도 한 번은 돌아야 하므로 "마지막 분" 하나로는 부족하다).
 
 ### TickHeartbeat (D-10)
 | 필드 | 비고 |
@@ -845,7 +883,7 @@ erDiagram
     Customer ||--o{ NotificationChannel : routes_to
 ```
 
-전역 테이블(관계 없음): `MspOrg`, `SeverityMapping`, `SuppressionPolicy`, `TickHeartbeat`, `AuditLog`, `ContactRevealLog`(FK는 actorUserId만), `IngestRejection`.
+전역 테이블(관계 없음): `MspOrg`, `SeverityMapping`, `SuppressionPolicy`, `TickHeartbeat`, `TickClaim`, `AuditLog`, `ContactRevealLog`(FK는 actorUserId만), `IngestRejection`, `IdempotencyKey`, `UndoRecord`, `PagingConfigTombstone`.
 
 ## 9. 미결 목록
 

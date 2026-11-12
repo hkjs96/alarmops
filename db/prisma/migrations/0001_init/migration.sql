@@ -170,6 +170,18 @@ CREATE TYPE "SlackMessageKind" AS ENUM ('INCIDENT', 'DIGEST', 'DM', 'REMEDIATION
 CREATE TYPE "AuditActorType" AS ENUM ('USER', 'CONTACT', 'SYSTEM', 'SLACK');
 
 -- CreateEnum
+CREATE TYPE "DeliveryReason" AS ENUM ('TIMEOUT', 'INVALID_DESTINATION', 'RATE_LIMITED', 'PROVIDER_REJECTED', 'PROVIDER_ERROR', 'NOT_CONFIGURED', 'GAVE_UP');
+
+-- CreateEnum
+CREATE TYPE "DeliveryTargetKind" AS ENUM ('STAFF', 'CUSTOMER_PERSON', 'CUSTOMER_CHANNEL', 'MSP_CHANNEL');
+
+-- CreateEnum
+CREATE TYPE "RevealChannel" AS ENUM ('PHONE', 'EMAIL', 'SLACK');
+
+-- CreateEnum
+CREATE TYPE "RevealMode" AS ENUM ('NORMAL', 'EMERGENCY');
+
+-- CreateEnum
 CREATE TYPE "TickStatus" AS ENUM ('OK', 'ERROR', 'DEGRADED');
 
 -- CreateTable
@@ -240,6 +252,7 @@ CREATE TABLE "Responder" (
     "customerId" TEXT NOT NULL,
     "contactId" TEXT NOT NULL,
     "role" "ResponderRole" NOT NULL DEFAULT 'PAGEABLE',
+    "order" INTEGER NOT NULL DEFAULT 0,
     "source" "ResponderSource" NOT NULL DEFAULT 'DIRECT',
     "templateId" TEXT,
     "createdBy" TEXT,
@@ -271,6 +284,7 @@ CREATE TABLE "ResponderTemplateMember" (
 CREATE TABLE "Customer" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
+    "slug" TEXT NOT NULL,
     "isInternal" BOOLEAN NOT NULL DEFAULT false,
     "loginDomains" TEXT[] DEFAULT ARRAY[]::TEXT[],
     "portalGrants" TEXT[] DEFAULT ARRAY[]::TEXT[],
@@ -287,6 +301,7 @@ CREATE TABLE "Project" (
     "id" TEXT NOT NULL,
     "customerId" TEXT NOT NULL,
     "name" TEXT NOT NULL,
+    "slug" TEXT NOT NULL,
 
     CONSTRAINT "Project_pkey" PRIMARY KEY ("id")
 );
@@ -297,6 +312,7 @@ CREATE TABLE "Service" (
     "customerId" TEXT NOT NULL,
     "projectId" TEXT NOT NULL,
     "name" TEXT NOT NULL,
+    "slug" TEXT NOT NULL,
 
     CONSTRAINT "Service_pkey" PRIMARY KEY ("id")
 );
@@ -474,6 +490,7 @@ CREATE TABLE "AlertGroup" (
     "deliveredAt" TIMESTAMPTZ(3),
     "sweptReason" TEXT,
     "version" INTEGER NOT NULL DEFAULT 0,
+    "closedAt" TIMESTAMPTZ(3),
 
     CONSTRAINT "AlertGroup_pkey" PRIMARY KEY ("id")
 );
@@ -509,6 +526,13 @@ CREATE TABLE "Incident" (
     "rcaPlaceholder" JSONB,
     "version" INTEGER NOT NULL DEFAULT 0,
     "isMergeTarget" BOOLEAN NOT NULL DEFAULT true,
+    "nextEscalationAt" TIMESTAMPTZ(3),
+    "lastMergedAt" TIMESTAMPTZ(3),
+    "renotifyCount" INTEGER NOT NULL DEFAULT 0,
+    "projectId" TEXT,
+    "serviceId" TEXT,
+    "source" "SourceKind",
+    "lastManualEscalationAt" TIMESTAMPTZ(3),
 
     CONSTRAINT "Incident_pkey" PRIMARY KEY ("id")
 );
@@ -535,6 +559,7 @@ CREATE TABLE "IncidentEvent" (
     "actorId" TEXT,
     "message" TEXT NOT NULL,
     "data" JSONB,
+    "seq" SERIAL NOT NULL,
 
     CONSTRAINT "IncidentEvent_pkey" PRIMARY KEY ("id")
 );
@@ -905,6 +930,15 @@ CREATE TABLE "NotificationJob" (
     "nextAttemptAt" TIMESTAMPTZ(3) NOT NULL,
     "lastError" TEXT,
     "payload" JSONB NOT NULL,
+    "stepIndex" INTEGER NOT NULL DEFAULT 0,
+    "repeat" INTEGER NOT NULL DEFAULT 0,
+    "contactId" TEXT,
+    "contactName" TEXT,
+    "claimSeq" INTEGER NOT NULL DEFAULT 0,
+    "dueAt" TIMESTAMPTZ(3) NOT NULL,
+    "providerMessageId" TEXT,
+    "createdAt" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "seq" SERIAL NOT NULL,
 
     CONSTRAINT "NotificationJob_pkey" PRIMARY KEY ("id")
 );
@@ -922,6 +956,12 @@ CREATE TABLE "NotificationLog" (
     "escalationStep" INTEGER,
     "providerMessageId" TEXT,
     "error" TEXT,
+    "attempt" INTEGER NOT NULL DEFAULT 0,
+    "warnings" TEXT[] DEFAULT ARRAY[]::TEXT[],
+    "errorCode" "DeliveryReason",
+    "targetKind" "DeliveryTargetKind" NOT NULL,
+    "contactId" TEXT,
+    "seq" SERIAL NOT NULL,
 
     CONSTRAINT "NotificationLog_pkey" PRIMARY KEY ("id")
 );
@@ -977,6 +1017,70 @@ CREATE TABLE "TickHeartbeat" (
     CONSTRAINT "TickHeartbeat_pkey" PRIMARY KEY ("name")
 );
 
+-- CreateTable
+CREATE TABLE "TickClaim" (
+    "minute" TIMESTAMPTZ(3) NOT NULL,
+    "claimedAt" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "TickClaim_pkey" PRIMARY KEY ("minute")
+);
+
+-- CreateTable
+CREATE TABLE "IdempotencyKey" (
+    "key" TEXT NOT NULL,
+    "ownerUserId" TEXT NOT NULL,
+    "fingerprint" TEXT NOT NULL,
+    "response" JSON NOT NULL,
+    "expiresAt" TIMESTAMPTZ(3) NOT NULL,
+    "createdAt" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "seq" SERIAL NOT NULL,
+
+    CONSTRAINT "IdempotencyKey_pkey" PRIMARY KEY ("key")
+);
+
+-- CreateTable
+CREATE TABLE "UndoRecord" (
+    "token" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "action" TEXT NOT NULL,
+    "expiresAt" TIMESTAMPTZ(3) NOT NULL,
+    "items" JSONB NOT NULL,
+    "createdAt" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "UndoRecord_pkey" PRIMARY KEY ("token")
+);
+
+-- CreateTable
+CREATE TABLE "PagingConfigTombstone" (
+    "scopeType" "ScopeType" NOT NULL,
+    "scopeId" TEXT NOT NULL,
+    "customerId" TEXT NOT NULL,
+    "lastVersion" INTEGER NOT NULL,
+    "deletedAt" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "PagingConfigTombstone_pkey" PRIMARY KEY ("scopeType","scopeId")
+);
+
+-- CreateTable
+CREATE TABLE "ContactRevealLog" (
+    "id" TEXT NOT NULL,
+    "at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "actorUserId" TEXT NOT NULL,
+    "actorRole" TEXT NOT NULL,
+    "contactId" TEXT NOT NULL,
+    "contactName" TEXT NOT NULL,
+    "customerId" TEXT,
+    "channel" "RevealChannel" NOT NULL,
+    "mode" "RevealMode" NOT NULL,
+    "reason" VARCHAR(500),
+    "notifiedContactIds" TEXT[] DEFAULT ARRAY[]::TEXT[],
+    "requestId" TEXT,
+    "ip" TEXT,
+    "userAgent" TEXT,
+
+    CONSTRAINT "ContactRevealLog_pkey" PRIMARY KEY ("id")
+);
+
 -- CreateIndex
 CREATE UNIQUE INDEX "User_email_key" ON "User"("email");
 
@@ -1008,13 +1112,22 @@ CREATE UNIQUE INDEX "ResponderTemplate_name_key" ON "ResponderTemplate"("name");
 CREATE UNIQUE INDEX "Customer_name_key" ON "Customer"("name");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "Customer_slug_key" ON "Customer"("slug");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "Project_customerId_name_key" ON "Project"("customerId", "name");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Project_customerId_slug_key" ON "Project"("customerId", "slug");
 
 -- CreateIndex
 CREATE INDEX "Service_customerId_idx" ON "Service"("customerId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Service_projectId_name_key" ON "Service"("projectId", "name");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Service_projectId_slug_key" ON "Service"("projectId", "slug");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "CloudAccount_awsAccountId_key" ON "CloudAccount"("awsAccountId");
@@ -1071,10 +1184,16 @@ CREATE INDEX "Alert_fingerprint_idx" ON "Alert"("fingerprint");
 CREATE INDEX "AlertGroup_status_closeAt_idx" ON "AlertGroup"("status", "closeAt");
 
 -- CreateIndex
+CREATE INDEX "AlertGroup_status_closedAt_idx" ON "AlertGroup"("status", "closedAt");
+
+-- CreateIndex
 CREATE INDEX "Incident_customerId_status_triggeredAt_idx" ON "Incident"("customerId", "status", "triggeredAt" DESC);
 
 -- CreateIndex
 CREATE INDEX "Incident_status_escalationBaseAt_idx" ON "Incident"("status", "escalationBaseAt");
+
+-- CreateIndex
+CREATE INDEX "Incident_triggeredAt_id_idx" ON "Incident"("triggeredAt" DESC, "id" DESC);
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Incident_number_key" ON "Incident"("number");
@@ -1083,7 +1202,7 @@ CREATE UNIQUE INDEX "Incident_number_key" ON "Incident"("number");
 CREATE INDEX "IncidentAlert_alertId_idx" ON "IncidentAlert"("alertId");
 
 -- CreateIndex
-CREATE INDEX "IncidentEvent_incidentId_at_idx" ON "IncidentEvent"("incidentId", "at");
+CREATE INDEX "IncidentEvent_incidentId_at_seq_idx" ON "IncidentEvent"("incidentId", "at", "seq");
 
 -- CreateIndex
 CREATE INDEX "Resolution_customerId_serviceId_metricKey_resolvedAt_idx" ON "Resolution"("customerId", "serviceId", "metricKey", "resolvedAt" DESC);
@@ -1158,7 +1277,13 @@ CREATE UNIQUE INDEX "NotificationJob_idempotencyKey_key" ON "NotificationJob"("i
 CREATE INDEX "NotificationJob_status_nextAttemptAt_idx" ON "NotificationJob"("status", "nextAttemptAt");
 
 -- CreateIndex
+CREATE INDEX "NotificationJob_incidentId_stepIndex_repeat_idx" ON "NotificationJob"("incidentId", "stepIndex", "repeat");
+
+-- CreateIndex
 CREATE INDEX "NotificationLog_incidentId_at_idx" ON "NotificationLog"("incidentId", "at");
+
+-- CreateIndex
+CREATE INDEX "NotificationLog_incidentId_seq_idx" ON "NotificationLog"("incidentId", "seq");
 
 -- CreateIndex
 CREATE INDEX "SlackMessage_incidentId_createdAt_idx" ON "SlackMessage"("incidentId", "createdAt");
@@ -1171,6 +1296,33 @@ CREATE INDEX "AuditLog_customerId_at_idx" ON "AuditLog"("customerId", "at" DESC)
 
 -- CreateIndex
 CREATE INDEX "AuditLog_targetType_targetId_idx" ON "AuditLog"("targetType", "targetId");
+
+-- CreateIndex
+CREATE INDEX "TickClaim_claimedAt_idx" ON "TickClaim"("claimedAt");
+
+-- CreateIndex
+CREATE INDEX "IdempotencyKey_ownerUserId_expiresAt_idx" ON "IdempotencyKey"("ownerUserId", "expiresAt");
+
+-- CreateIndex
+CREATE INDEX "IdempotencyKey_ownerUserId_seq_idx" ON "IdempotencyKey"("ownerUserId", "seq");
+
+-- CreateIndex
+CREATE INDEX "IdempotencyKey_expiresAt_idx" ON "IdempotencyKey"("expiresAt");
+
+-- CreateIndex
+CREATE INDEX "UndoRecord_expiresAt_idx" ON "UndoRecord"("expiresAt");
+
+-- CreateIndex
+CREATE INDEX "ContactRevealLog_customerId_at_idx" ON "ContactRevealLog"("customerId", "at" DESC);
+
+-- CreateIndex
+CREATE INDEX "ContactRevealLog_mode_at_idx" ON "ContactRevealLog"("mode", "at" DESC);
+
+-- CreateIndex
+CREATE INDEX "ContactRevealLog_actorUserId_at_idx" ON "ContactRevealLog"("actorUserId", "at" DESC);
+
+-- CreateIndex
+CREATE INDEX "ContactRevealLog_contactId_at_idx" ON "ContactRevealLog"("contactId", "at" DESC);
 
 -- AddForeignKey
 ALTER TABLE "User" ADD CONSTRAINT "User_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -1246,6 +1398,12 @@ ALTER TABLE "Alert" ADD CONSTRAINT "Alert_resourceId_fkey" FOREIGN KEY ("resourc
 
 -- AddForeignKey
 ALTER TABLE "Incident" ADD CONSTRAINT "Incident_pagingConfigId_fkey" FOREIGN KEY ("pagingConfigId") REFERENCES "PagingConfig"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Incident" ADD CONSTRAINT "Incident_projectId_fkey" FOREIGN KEY ("projectId") REFERENCES "Project"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Incident" ADD CONSTRAINT "Incident_serviceId_fkey" FOREIGN KEY ("serviceId") REFERENCES "Service"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "IncidentAlert" ADD CONSTRAINT "IncidentAlert_incidentId_fkey" FOREIGN KEY ("incidentId") REFERENCES "Incident"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -1347,13 +1505,22 @@ ALTER TABLE "ChannelVerification" ADD CONSTRAINT "ChannelVerification_contactId_
 ALTER TABLE "NotificationJob" ADD CONSTRAINT "NotificationJob_incidentId_fkey" FOREIGN KEY ("incidentId") REFERENCES "Incident"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "NotificationJob" ADD CONSTRAINT "NotificationJob_contactId_fkey" FOREIGN KEY ("contactId") REFERENCES "Contact"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "NotificationLog" ADD CONSTRAINT "NotificationLog_incidentId_fkey" FOREIGN KEY ("incidentId") REFERENCES "Incident"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "NotificationLog" ADD CONSTRAINT "NotificationLog_jobId_fkey" FOREIGN KEY ("jobId") REFERENCES "NotificationJob"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "NotificationLog" ADD CONSTRAINT "NotificationLog_contactId_fkey" FOREIGN KEY ("contactId") REFERENCES "Contact"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "SlackMessage" ADD CONSTRAINT "SlackMessage_incidentId_fkey" FOREIGN KEY ("incidentId") REFERENCES "Incident"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ContactRevealLog" ADD CONSTRAINT "ContactRevealLog_actorUserId_fkey" FOREIGN KEY ("actorUserId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Constraints Prisma schema language cannot express (DATA-MODEL.md). Hand-written,
@@ -1408,3 +1575,59 @@ CREATE UNIQUE INDEX "Alert_customerId_fingerprint_key" ON "Alert"("customerId", 
 -- Customer = resource customer is enforced by the composite FK RemediationRequest_resourceId_customerId_fkey.
 ALTER TABLE "RemediationRequest" ADD CONSTRAINT "RemediationRequest_decided_chk"
   CHECK ("status" NOT IN ('APPROVED', 'EXECUTING', 'SUCCEEDED', 'FAILED') OR ("decidedBy" IS NOT NULL AND "decidedAt" IS NOT NULL));
+
+-- slug format (D-33). Uniqueness is in the generated part.
+ALTER TABLE "Customer" ADD CONSTRAINT "Customer_slug_chk" CHECK ("slug" ~ '^[a-z0-9][a-z0-9-]{0,63}$');
+ALTER TABLE "Project" ADD CONSTRAINT "Project_slug_chk" CHECK ("slug" ~ '^[a-z0-9][a-z0-9-]{0,63}$');
+ALTER TABLE "Service" ADD CONSTRAINT "Service_slug_chk" CHECK ("slug" ~ '^[a-z0-9][a-z0-9-]{0,63}$');
+-- slug reserved words (security review SQL, N-7): a slug is a path segment of the console, so it must not be a word
+-- the router or the API owns: the screen names of DATA-MODEL "slug 규칙" (D-33) plus the words the API and the
+-- console shell use (api, admin, all, unmapped, auth, c, customers, login). Same list as RESERVED_SLUGS in
+-- packages/api/src/slug.ts (a test compares the two). A new screen name = a new migration that replaces these CHECKs.
+ALTER TABLE "Customer" ADD CONSTRAINT "Customer_slug_reserved_chk" CHECK ("slug" NOT IN ('incidents', 'incident', 'monitoring', 'call-order', 'people', 'maintenance', 'thresholds', 'alarms', 'resources', 'settings', 'new', '-', 'api', 'admin', 'all', 'unmapped', 'auth', 'c', 'customers', 'login'));
+ALTER TABLE "Project" ADD CONSTRAINT "Project_slug_reserved_chk" CHECK ("slug" NOT IN ('incidents', 'incident', 'monitoring', 'call-order', 'people', 'maintenance', 'thresholds', 'alarms', 'resources', 'settings', 'new', '-', 'api', 'admin', 'all', 'unmapped', 'auth', 'c', 'customers', 'login'));
+ALTER TABLE "Service" ADD CONSTRAINT "Service_slug_reserved_chk" CHECK ("slug" NOT IN ('incidents', 'incident', 'monitoring', 'call-order', 'people', 'maintenance', 'thresholds', 'alarms', 'resources', 'settings', 'new', '-', 'api', 'admin', 'all', 'unmapped', 'auth', 'c', 'customers', 'login'));
+
+-- Tick ③: incidents the escalation phase must look at (listEscalationDue) — only rows with something scheduled.
+CREATE INDEX "Incident_nextEscalationAt_due_idx" ON "Incident"("nextEscalationAt", "id")
+  WHERE "status" <> 'RESOLVED' AND "nextEscalationAt" IS NOT NULL;
+-- Tick ②: active incidents (listAutoResolvable) oldest first.
+CREATE INDEX "Incident_active_idx" ON "Incident"("triggeredAt") WHERE "status" <> 'RESOLVED';
+
+-- Tick ④: the outbox claim reads only live jobs of one lane that are due (claimDueJobs, outboxBacklog).
+CREATE INDEX "NotificationJob_due_idx" ON "NotificationJob"("channel", "nextAttemptAt")
+  WHERE "status" IN ('QUEUED', 'SENDING');
+ALTER TABLE "NotificationJob" ADD CONSTRAINT "NotificationJob_counters_chk" CHECK ("attempts" >= 0 AND "claimSeq" >= 0);
+
+-- ContactRevealLog: an EMERGENCY reveal must say why (D-35)
+ALTER TABLE "ContactRevealLog" ADD CONSTRAINT "ContactRevealLog_emergency_reason_chk"
+  CHECK ("mode" <> 'EMERGENCY' OR length(btrim("reason")) > 0);
+
+-- Housekeeping (security review SQL, R-7): the tick deletes expired rows of every owner (purgeExpired).
+-- (UndoRecord already has its expiresAt index in the generated part.)
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Supabase Data API (security review SQL, R-4). On Supabase the roles `anon` and `authenticated` are what the
+-- REST / GraphQL endpoints (PostgREST) run as, and by default they may read and write every table of `public`
+-- that has no row-level security. This application never uses the Data API: it connects with its own database
+-- role through `packages/store-sql`, and authorisation is done in the API layer (DATA-MODEL: no RLS policies).
+-- So those roles get nothing here — on the objects this migration created and, through the default privileges
+-- of the role running the migration, on objects later migrations create. Guarded by role existence: on a plain
+-- Postgres (local, CI) the roles do not exist and this block does nothing.
+-- This is the second barrier. The first one is a project setting a person must check before the first deploy:
+-- Data API off, or `public` removed from its exposed schemas (db/README.md "Before the first deploy").
+-- ─────────────────────────────────────────────────────────────────────────────
+DO $$
+DECLARE r text;
+BEGIN
+  FOREACH r IN ARRAY ARRAY['anon', 'authenticated'] LOOP
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) THEN
+      EXECUTE format('REVOKE ALL ON ALL TABLES IN SCHEMA %I FROM %I', current_schema(), r);
+      EXECUTE format('REVOKE ALL ON ALL SEQUENCES IN SCHEMA %I FROM %I', current_schema(), r);
+      EXECUTE format('REVOKE ALL ON ALL FUNCTIONS IN SCHEMA %I FROM %I', current_schema(), r);
+      EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA %I REVOKE ALL ON TABLES FROM %I', current_schema(), r);
+      EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA %I REVOKE ALL ON SEQUENCES FROM %I', current_schema(), r);
+      EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA %I REVOKE ALL ON FUNCTIONS FROM %I', current_schema(), r);
+    END IF;
+  END LOOP;
+END $$;

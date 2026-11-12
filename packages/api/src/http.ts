@@ -104,3 +104,41 @@ export function limitOf(req: ApiRequest, dflt = 50, max = 200): number {
 }
 
 export const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+// ───────────────────────────── input hygiene (security review SQL, R-5) ─────────────────────────────
+
+const CONTROL = /[\u0000-\u001f\u007f]/;
+export const ID_MAX_CHARS = 200;
+/** An id or slug as it may appear in a path, a cursor or a filter: no control characters (NUL included), at most 200 characters. */
+export const isCleanId = (v: unknown): v is string => typeof v === 'string' && v.length > 0 && v.length <= ID_MAX_CHARS && !CONTROL.test(v);
+/** `2026-11-09T03:00:00.000Z` — exactly what `Date.prototype.toISOString` writes, and a real instant. */
+export const isIsoInstant = (v: unknown): v is string =>
+  typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(v) && !Number.isNaN(Date.parse(v)) && new Date(v).toISOString() === v;
+
+function hasNul(v: unknown, depth = 0): boolean {
+  if (typeof v === 'string') return v.includes('\u0000');
+  if (v === null || typeof v !== 'object') return false;
+  if (depth > 32) return true; // deeper than any body of this API: refused like a NUL
+  if (Array.isArray(v)) return v.some((x) => hasNul(x, depth + 1));
+  return Object.entries(v as Record<string, unknown>).some(([k, x]) => k.includes('\u0000') || hasNul(x, depth + 1));
+}
+
+/**
+ * Refuse, BEFORE any handler or store call, input that a database cannot store or compare: a NUL byte anywhere
+ * (path, query, headers, body — Postgres text cannot hold one and answers with an error, which used to surface as
+ * a 500), and path segments that are not plain ids (control characters, longer than 200 characters).
+ * 400 VALIDATION_FAILED. The answer depends on the request text only, never on what exists, so it tells nothing
+ * about other tenants (the 404 rule of §2 is about ids that are well-formed).
+ */
+export function assertCleanInput(req: ApiRequest): void {
+  let segs: string[];
+  try {
+    segs = req.path.split('?')[0]!.split('/').filter(Boolean).map(decodeURIComponent);
+  } catch {
+    throw invalid('path', 'Invalid path.');
+  }
+  if (segs.some((s) => !isCleanId(s))) throw invalid('path', 'Invalid identifier in the path.');
+  for (const [k, v] of Object.entries(req.query ?? {})) if (k.includes('\u0000') || (v !== undefined && String(v).includes('\u0000'))) throw invalid(k.replace(/\u0000/g, ''), 'Invalid character in the query.');
+  for (const [k, v] of Object.entries(req.headers ?? {})) if (v !== undefined && String(v).includes('\u0000')) throw invalid(k, 'Invalid character in a header.');
+  if (hasNul(req.body)) throw invalid('body', 'Invalid character in the request body.');
+}

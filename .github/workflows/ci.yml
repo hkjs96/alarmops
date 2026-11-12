@@ -161,3 +161,7 @@ jobs:
         run: |
           npm run test:db -w @alarmops/db --if-present
           npm run test:sql --workspaces --if-present
+        env:
+          # store-sql's real-Postgres suite. It creates one schema per test file, so it
+          # runs against the service's default database, separate from the migrated one.
+          TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres

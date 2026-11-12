@@ -259,7 +259,7 @@ describe('R-3: a tick without budget does not burn attempts', () => {
     closedGroup(sim.store, { customerId: 'cus_hanbit', at: at(1), alerts: [{ id: 'a2' }] });
     let n = 0;
     // 40 s into a 45 s budget: past the soft deadline (35 s) of the group/escalation phases, inside the hard one
-    const r = (await runTick({ scheduledAt: at(1) }, on({ repo: sim.store, senders: sim.senders, now: () => (n++ === 0 ? at(1) : at(1, 40)) }))) as TickSummary;
+    const r = (await runTick({ scheduledAt: at(1) }, on({ repo: sim.store, senders: sim.senders, now: () => (n++ < 6 ? at(1) : at(1, 40)) }))) as TickSummary; // the reads before the phases (start, store clock, claim) are at 01:00
     expect(r.group.delivered).toBe(0);
     expect(r.truncated).toBe(true);
     expect(r.notify.sent).toBe(3);

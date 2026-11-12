@@ -134,15 +134,11 @@ describe('R-22: what a dead provider costs', () => {
   });
 });
 
-describe('R-22: the limit that is left (documented in API-CONTRACT §5)', () => {
-  it('25 hanging customers × 20 pages: the healthy page is NOT reached in the first tick — it slips until their backlog is used up', async () => {
-    // 5 probes × 5 rounds = 25 customers a tick. The 26th customer in fair order waits; the order is the same in
-    // every tick while the 25 still have never-attempted pages. If this test starts failing because the page got
-    // faster, the limit moved: update the contract text.
+describe('R-22: the limit that was left (25 customers) — moved by R-24, see security-review-5.lanes.test.ts', () => {
+  it('25 hanging customers × 20 pages: the healthy page slips at most ONE tick (it was 20 ticks before the rotating start of review 5)', async () => {
     const r = await S4(NOW, 'VOICE', 25, 20, 0, 'SEV_1', 30);
-    expect(r.delayMs).toBeGreaterThan(MIN);
-    expect(r.delayMs).toBeLessThanOrEqual(20 * MIN + SAME_TICK);
-    expect(r.degradedTicks).toBeGreaterThanOrEqual(19); // visible: the notify heartbeat is DEGRADED in every one of those ticks
+    expect(r.delayMs).toBeLessThanOrEqual(MIN + SAME_TICK);
+    expect(r.degradedTicks).toBeLessThanOrEqual(2); // still visible while it lasts: the notify heartbeat is DEGRADED
     expect(r.dups).toBe(0);
   });
 });

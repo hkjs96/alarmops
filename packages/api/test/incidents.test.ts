@@ -161,7 +161,10 @@ describe('resolve, escalate, roles', () => {
     const a = await w.call(USERS.haeun, 'POST', `/incidents/${w.ids.mirae}/ack`, opts);
     const b = await w.call(USERS.haeun, 'POST', `/incidents/${w.ids.mirae}/ack`, opts);
     expect(a.status).toBe(200);
-    expect(b).toEqual(a);
+    // security review SQL, R-7: the replay is the first response without the undo token (it is never stored)
+    const { undoToken, ...rest } = body(a);
+    expect(undoToken).toMatch(/^undo_/);
+    expect(b).toEqual({ ...a, body: rest });
     expect(w.store.audits.filter((x) => x.action === 'incident.ack')).toHaveLength(1);
     // another user's same key is a different request
     expect((await w.call(USERS.minjae, 'POST', `/incidents/${w.ids.mirae}/ack`, opts)).status).toBe(409);

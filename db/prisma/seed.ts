@@ -20,7 +20,7 @@ async function main() {
   }
 
   const customer = await prisma.customer.upsert({
-    where: { name: 'Acme Demo' }, update: {}, create: { name: 'Acme Demo' },
+    where: { name: 'Acme Demo' }, update: {}, create: { name: 'Acme Demo', slug: 'acme-demo' },
   });
   const staff = await prisma.contact.create({
     data: { kind: 'INTERNAL', name: 'Demo Engineer', email: 'oncall@example.com', emailVerifiedAt: new Date(), emailVerifiedVia: 'admin:seed' },

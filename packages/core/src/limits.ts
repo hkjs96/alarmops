@@ -42,10 +42,21 @@ export const CLAIM_LEASE_SEC = 60;
  */
 export const TICK_RESPONSE_LIMIT_MS = 60_000;
 /**
- * N-33: a store call outside the phases (claimTick, loadPolicy, outboxBacklog, writeHeartbeat) is given up after
+ * N-33: a store call outside the phases (now, claimTick, loadPolicy, outboxBacklog, writeHeartbeat, purgeExpired) is given up after
  * this long (less near the end of the tick). The SQL adapter should set a `statement_timeout` below it.
  */
 export const STORE_CALL_TIMEOUT_MS = 5_000;
+/**
+ * Security review SQL, R-2: a runner whose clock is further than this from the STORE's clock does not tick at all
+ * (`{ skipped: 'clock-skew' }`, heartbeat ERROR with no finish time → stale). Below it, the tick's due decisions
+ * run on the store's time (runner clock + measured offset).
+ */
+export const CLOCK_SKEW_LIMIT_MS = 30_000;
+/**
+ * R-2: `releaseJob(notBefore)` never parks a job further ahead than this (the longest retry delay). A maintenance
+ * hold asks for at most MAINTENANCE_RECHECK_SEC, so only a wrong clock ever hits it.
+ */
+export const RELEASE_HOLD_MAX_SEC = 600;
 /** Part of the tick budget the earlier phases may not use, so the outbox is always drained (capped at budget / 4). */
 export const NOTIFY_RESERVE_MS = 10_000;
 

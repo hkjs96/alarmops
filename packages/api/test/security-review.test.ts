@@ -112,7 +112,8 @@ describe('R-5: Idempotency-Key replays only the same request for the same, curre
     const opts = { headers: { 'If-Match': '1', 'Idempotency-Key': 'k1' } };
     const first = await w.call(USERS.haeun, 'POST', `/incidents/${w.ids.mirae}/ack`, opts);
     expect(first.status).toBe(200);
-    expect(await w.call(USERS.haeun, 'POST', `/incidents/${w.ids.mirae}/ack`, opts)).toEqual(first);
+    const withoutToken = (r: typeof first) => { const { undoToken: _t, ...rest } = body(r); return { ...r, body: rest }; }; // R-7 (review SQL): never stored, so not replayed
+    expect(await w.call(USERS.haeun, 'POST', `/incidents/${w.ids.mirae}/ack`, opts)).toEqual(withoutToken(first));
     // same user id, now a portal viewer of another customer
     const moved: AuthContext = { ...USERS.haeun, kind: 'CUSTOMER', customerIds: ['cus_hanbit'], role: 'VIEWER' };
     const r = await w.call(moved, 'POST', `/incidents/${w.ids.mirae}/ack`, opts);
@@ -137,7 +138,7 @@ describe('R-5: Idempotency-Key replays only the same request for the same, curre
     expect(w.store.incidents.get(w.ids.hanbit)!.status).toBe('TRIGGERED');
     // same body, keys in another order, and the /api/v1 prefix: the same request
     const again = await w.call(USERS.haeun, 'POST', '/api/v1/incidents/bulk', { headers: k, body: { items: [{ version: 1, id: w.ids.mirae }], preview: false, action: 'resolve' } });
-    expect(again).toEqual(preview);
+    { const { undoToken: _t, ...rest } = body(preview); expect(again).toEqual({ ...preview, body: rest }); } // R-7 (review SQL)
     // another If-Match is another request
     const a = await w.call(USERS.haeun, 'POST', `/incidents/${w.ids.hanbit}/ack`, { headers: { 'If-Match': '1', 'Idempotency-Key': 'ka' } });
     expect(a.status).toBe(200);

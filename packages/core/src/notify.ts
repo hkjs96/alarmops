@@ -409,9 +409,17 @@ type Orderable = Pick<NotificationJob, 'customerId' | 'createdAt' | 'payload'> &
 const dueOf = (j: Orderable): number => (j.dueAt ?? j.nextAttemptAt ?? j.createdAt).getTime();
 const isSev1 = (j: Orderable): boolean => j.payload.severity === 'SEV_1';
 
-export function fairOrder<T extends Orderable>(due: T[]): T[] {
+/** Customer key of the probe rotation (R-24): the customer id, '' for jobs without a customer. Compared by code unit (SQL: COLLATE "C"). */
+export const rotationKey = (j: Pick<NotificationJob, 'customerId'>): string => j.customerId ?? '';
+
+export function fairOrder<T extends Orderable>(due: T[], rotateAfter?: string | null): T[] {
   const cmp = (a: T, b: T): number => (isSev1(a) ? 0 : 1) - (isSev1(b) ? 0 : 1) || ((a.attempts ?? 0) > 0 ? 1 : 0) - ((b.attempts ?? 0) > 0 ? 1 : 0)
     || dueOf(a) - dueOf(b) || a.createdAt.getTime() - b.createdAt.getTime();
+  // Rotated rounds (R-24): customers after the cursor first, in key order, then the rest in key order.
+  const rot = (a: T, b: T): number => {
+    const ka = rotationKey(a); const kb = rotationKey(b);
+    return (ka <= rotateAfter! ? 1 : 0) - (kb <= rotateAfter! ? 1 : 0) || (ka < kb ? -1 : ka > kb ? 1 : 0);
+  };
   const queues = new Map<string, T[]>();
   for (const j of due) {
     const k = j.customerId ?? '\u0000msp';
@@ -421,7 +429,7 @@ export function fairOrder<T extends Orderable>(due: T[]): T[] {
   for (const q of queues.values()) q.sort(cmp);
   const out: T[] = [];
   for (let round = 0; out.length < due.length; round++) {
-    const heads = [...queues.values()].filter((q) => q.length > round).map((q) => q[round]!).sort(cmp);
+    const heads = [...queues.values()].filter((q) => q.length > round).map((q) => q[round]!).sort(rotateAfter == null ? cmp : rot);
     out.push(...heads);
   }
   return out;
@@ -432,16 +440,24 @@ export function fairOrder<T extends Orderable>(due: T[]): T[] {
  * (NON_SEV1_RESERVE_PCT of the limit, at least 1 once the limit is 5 or more) for the OLDEST non-SEV-1 jobs that
  * the fair order did not reach. Unused reserve goes back to the fair order. So even when more customers hold SEV-1
  * pages than the batch is wide, a lower-severity page still moves every tick, oldest first.
+ *
+ * `rotateAfter` (R-24, only while a lane got no answer in the previous tick): WHICH jobs are taken is decided on
+ * rotated rounds — inside every round the customers whose key comes after `rotateAfter` go first, in key order —
+ * so with more due customers than the claim holds the window moves on with the probe cursor instead of showing the
+ * same first customers every tick. The jobs that are taken are still RETURNED in fair order, and inside a customer
+ * the order is unchanged.
  */
-export function selectForClaim<T extends Orderable>(due: T[], limit: number): T[] {
-  const ordered = fairOrder(due);
-  if (ordered.length <= limit) return ordered;
-  const reserve = limit >= 5 ? Math.max(1, Math.floor((limit * NON_SEV1_RESERVE_PCT) / 100)) : 0;
+export const claimReserve = (limit: number): number => (limit >= 5 ? Math.max(1, Math.floor((limit * NON_SEV1_RESERVE_PCT) / 100)) : 0);
+export function selectForClaim<T extends Orderable>(due: T[], limit: number, rotateAfter?: string | null): T[] {
+  const fair = fairOrder(due);
+  if (fair.length <= limit) return fair;
+  const ordered = rotateAfter == null ? fair : fairOrder(due, rotateAfter);
+  const reserve = claimReserve(limit);
   const chosen = new Set<T>(ordered.slice(0, limit - reserve));
   const low = ordered.filter((j) => !chosen.has(j) && !isSev1(j)).sort((a, b) => dueOf(a) - dueOf(b) || a.createdAt.getTime() - b.createdAt.getTime());
   for (const j of low.slice(0, reserve)) chosen.add(j);
   for (const j of ordered) { if (chosen.size >= limit) break; chosen.add(j); }
-  return ordered.filter((j) => chosen.has(j));
+  return fair.filter((j) => chosen.has(j));
 }
 
 // ───────────────────────────── lanes (R-11) ─────────────────────────────
