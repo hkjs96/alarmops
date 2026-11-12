@@ -1,0 +1,81 @@
+"""S3 — 리소스 타입 스펙 (docs/specs/resource-type-registry)
+
+알람 정의·태그 조건부 변형·생명주기·나열 힌트가 전부 이 파일에 있다. 타입을 고칠 때 여기만 고친다 —
+`SUPPORTED_RESOURCE_TYPES`·`_HARDCODED_METRIC_KEYS`·`_NAMESPACE_MAP`·`MONITORED_API_EVENTS`·수집기 맵은 파생된다.
+"""
+
+from __future__ import annotations
+
+from alarm_engine.resource_types.base import CREATE, DELETE, Lifecycle, ResourceTypeSpec, register
+
+
+_S3_ALARMS = [
+    {
+        "metric": "S34xxErrors",
+        "namespace": "AWS/S3",
+        "metric_name": "4xxErrors",
+        "dimension_key": "BucketName",
+        "stat": "Sum",
+        "comparison": "GreaterThanThreshold",
+        "period": 300,
+        "evaluation_periods": 1,
+    },
+    {
+        "metric": "S35xxErrors",
+        "namespace": "AWS/S3",
+        "metric_name": "5xxErrors",
+        "dimension_key": "BucketName",
+        "stat": "Sum",
+        "comparison": "GreaterThanThreshold",
+        "period": 300,
+        "evaluation_periods": 1,
+    },
+    {
+        "metric": "S3BucketSizeBytes",
+        "namespace": "AWS/S3",
+        "metric_name": "BucketSizeBytes",
+        "dimension_key": "BucketName",
+        "stat": "Average",
+        "comparison": "GreaterThanThreshold",
+        "period": 86400,
+        "evaluation_periods": 1,
+        "needs_storage_type": True,
+        "treat_missing_data": "missing",  # 일간 메트릭, 중간 기간 missing은 정상 → 상태 유지
+    },
+    {
+        "metric": "S3NumberOfObjects",
+        "namespace": "AWS/S3",
+        "metric_name": "NumberOfObjects",
+        "dimension_key": "BucketName",
+        "stat": "Average",
+        "comparison": "GreaterThanThreshold",
+        "period": 86400,
+        "evaluation_periods": 1,
+        "needs_storage_type": True,
+        "treat_missing_data": "missing",  # 일간 메트릭, 중간 기간 missing은 정상 → 상태 유지
+    },
+]
+
+
+SPEC = register(ResourceTypeSpec(
+    type="S3", label="S3 버킷", collector="s3",
+    rgt_filters=("s3",), rgt_prime=True,
+    lifecycle=(Lifecycle("CreateBucket", CREATE), Lifecycle("DeleteBucket", DELETE)),
+    notes=("버킷 메트릭은 버킷 리전에서 — 나열 뒤 리전 조회가 필요하다. identity 없음: 버킷은 버킷 리전의 RGT에만 나오므로 "
+           "실행 리전 캐시로 나열하면 다른 리전 버킷을 놓친다 — 글로벌 list_buckets로 나열하고 태그는 캐시 히트만 믿는다."),
+    alarm_defs=_S3_ALARMS,
+    # 표시명(알람 이름에 쓰는 지표명·방향·단위)과 기본 임계치 — 옛 alarm_registry._METRIC_DISPLAY / common.HARDCODED_DEFAULTS.
+    # 여러 타입이 같은 키(CPUUtilization 등)를 선언하면 값이 같아야 한다 — 뷰가 강제한다.
+    display={
+        "S34xxErrors": ("4xxErrors", ">", ""),
+        "S35xxErrors": ("5xxErrors", ">", ""),
+        "S3BucketSizeBytes": ("BucketSizeBytes", ">", "B"),
+        "S3NumberOfObjects": ("NumberOfObjects", ">", ""),
+    },
+    defaults={
+        "S34xxErrors": 100.0,
+        "S35xxErrors": 10.0,
+        "S3BucketSizeBytes": 1000000000000.0,
+        "S3NumberOfObjects": 10000000.0,
+    },
+))
