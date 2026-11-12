@@ -1,4 +1,6 @@
+import { redirect } from "next/navigation";
 import { isMock } from "@/lib/api";
+import { getSession } from "@/lib/auth";
 import { liveDevLogin } from "@/lib/mode";
 import { safeNextPath } from "@/lib/safe-next";
 
@@ -8,6 +10,8 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   const mock = isMock();
   const live = !mock && liveDevLogin();
   const safe = safeNextPath(next, ""); // anything that is not a path on this origin is dropped (security S-3)
+  // QA P3-M: signed in again in another tab, then "Sign in" here — go straight back instead of showing this page once more
+  if (await getSession().catch(() => null)) redirect(safe || "/incidents");
   const devHref = "/auth/dev-login" + (safe ? `?next=${encodeURIComponent(safe)}` : "");
   return (
     <div className="page" style={{ maxWidth: 420, paddingTop: 72 }}>

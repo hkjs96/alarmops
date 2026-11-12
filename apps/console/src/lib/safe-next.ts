@@ -3,18 +3,24 @@
  * origin. Security S-3: `/%09/evil.example` passed a `startsWith("//")` check, and the URL parser then dropped the tab
  * and read `//evil.example` as another host.
  *
- * Refused, raw or percent-encoded (decoded up to 3 times): control characters, backslashes, `//` anywhere.
+ * Refused, raw or percent-encoded (decoded up to 3 times): control characters, backslashes anywhere, `//` in the path.
  * Then the value is parsed against a placeholder origin and must stay on it. Returns the normalised
  * path + query + hash, or `fallback`.
  */
 const PLACEHOLDER = "http://console.invalid";
-const FORBIDDEN = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\\]|\/\//;
+const FORBIDDEN = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\\]/;
+/**
+ * `//` is refused in the PATH only (QA P3-L): in the query or the hash it is just text (`?q=http://x`, `#a//b`) and
+ * cannot change the host — the URL parser reads the authority from the start of the path alone. A `?` or `#` that
+ * only appears after decoding is not a separator, so the decoded path is cut at the RAW separator's position.
+ */
+const pathPart = (s: string): string => s.split(/[?#]/, 1)[0]!;
 
 export function safeNextPath(raw: unknown, fallback = "/incidents"): string {
   if (typeof raw !== "string" || raw.length === 0 || raw.length > 2048 || raw[0] !== "/") return fallback;
   let s = raw;
   for (let round = 0; ; round++) {
-    if (FORBIDDEN.test(s)) return fallback;
+    if (FORBIDDEN.test(s) || pathPart(s).includes("//")) return fallback;
     let d: string;
     try { d = decodeURIComponent(s); } catch { return fallback; }
     if (d === s) break;
