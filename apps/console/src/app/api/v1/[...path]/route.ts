@@ -4,6 +4,7 @@ import { sameOriginPost } from "@/lib/auth/origin";
 import { SESSION_COOKIE, sessionSecret, verifySession } from "@/lib/auth/session";
 import { apiMethod, authForSession, handleApi, queryOf, toResponse } from "@/lib/server/backend";
 import { NotConfiguredError } from "@/lib/mode";
+import { errorTag } from "@/lib/server/error-tag";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,9 +41,10 @@ async function serve(req: NextRequest): Promise<Response> {
     return toResponse(await handleApi({ method, path: req.nextUrl.pathname, query: queryOf(req.nextUrl), headers, body }, auth));
   } catch (e) {
     if (e instanceof NotConfiguredError) return json(503, "NOT_CONFIGURED", e.message);
-    console.error("[api] adapter error", e instanceof Error ? e.message : String(e));
+    console.error("[api] adapter error", errorTag(e));
     return json(500, "INTERNAL", "Something went wrong.");
   }
 }
 
 export { serve as GET, serve as POST, serve as PUT, serve as PATCH, serve as DELETE };
+

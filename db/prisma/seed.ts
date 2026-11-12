@@ -45,12 +45,15 @@ async function main(): Promise<void> {
       await q(
         `INSERT INTO "Contact"("id", "kind", "name", "email", "phone", "slackUserId", "userId", "emailVerifiedAt", "phoneVerifiedAt", "slackVerifiedAt", "emailVerifiedVia", "phoneVerifiedVia", "slackVerifiedVia", "updatedAt")
          VALUES ($1, 'INTERNAL', $2, $3, $4, $5, $6, ${V}, ${V}, ${V}, 'admin:seed', 'admin:seed', 'admin:seed', now()) ON CONFLICT DO NOTHING`,
-        [cid, name, email, `+8210${String(1000_0000 + cid.length * 1111).slice(0, 8)}`, `U_${cid.toUpperCase()}`, uid]);
+        [cid, name, email, `+8210000000${10 + (cid.length % 90)}`, `U_${cid.toUpperCase()}`, uid]);
     }
+    // SEED PHONES: every seed phone is +82 10-0000-00NN. The 010-0000 exchange is never issued in KR, so these cannot reach a real
+    // person. db/scripts/check.mjs fails if a seed phone leaves that pattern. Tick senders (SMS/voice, when added) MUST refuse
+    // any number matching /^\+82100000/ and any contact whose phoneVerifiedVia is 'admin:seed'.
     // customer people of Acme: one pageable (verified phone), one notify only
     await q(
       `INSERT INTO "Contact"("id", "kind", "customerId", "name", "email", "phone", "emailVerifiedAt", "phoneVerifiedAt", "updatedAt") VALUES
-         ('ct_acme_jisu', 'CUSTOMER', 'cus_acme', 'Jisu Kim', 'jisu@acme.example', '+821055501234', ${V}, ${V}, now()),
+         ('ct_acme_jisu', 'CUSTOMER', 'cus_acme', 'Jisu Kim', 'jisu@acme.example', '+821000000099', ${V}, ${V}, now()),
          ('ct_acme_minho', 'CUSTOMER', 'cus_acme', 'Minho Lee', 'minho@acme.example', NULL, ${V}, NULL, now())
        ON CONFLICT DO NOTHING`);
     await q(

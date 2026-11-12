@@ -3,6 +3,7 @@ import { TICK_JOBS, runTick, type TickJob } from "@alarmops/core";
 import { backend } from "@/lib/server/backend";
 import { tickAuth } from "@/lib/server/tick-auth";
 import { NotConfiguredError } from "@/lib/mode";
+import { errorTag } from "@/lib/server/error-tag";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,7 +35,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(result, { headers: { "cache-control": "no-store" } });
   } catch (e) {
     if (e instanceof NotConfiguredError) return err(503, "NOT_CONFIGURED", e.message);
-    console.error("[tick] failed", e instanceof Error ? e.message : String(e));
+    console.error("[tick] failed", errorTag(e));
     return err(500, "INTERNAL", "Tick failed.");
   }
 }
+

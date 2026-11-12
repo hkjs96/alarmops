@@ -290,7 +290,7 @@ export function RespondersCard({ customer, customerName, services, responders, s
       </div>
       <div className="co-resp-b" ref={listRef}>
         {why ? <p className="sm mut co-resp-n" id="co-resp-why" data-testid="co-resp-why">{why}</p> : null}
-        <p className="sm mut co-resp-n">“Everyone in Responders” is these {pageable}: all MSP staff here plus the Pageable people of {customerName}. Responders belong to the whole customer, whatever level this panel shows.</p>
+        <p className="sm mut co-resp-n">“Everyone in Responders” is {pageable === 1 ? "this 1 person" : `these ${pageable} people`}: all MSP staff here plus the Pageable people of {customerName}. Responders belong to the whole customer, whatever level this panel shows.</p>
         {on ? <p className="sm co-resp-n" data-testid="co-resp-rule">Each change applies at once to all of {customerName}. Rows keep their place: a removed person stays as “Removed · Undo” until you press Done. The summary at the top of this panel is marked “Before your changes” and shows how things are now on one line.</p> : null}
         {/* one line, one height, there for as long as Responders are edited: what it says changes, nothing below it moves */}
         {on ? (

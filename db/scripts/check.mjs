@@ -62,3 +62,10 @@ const missing = required.filter(([, re]) => !re.test(migration)).map(([name]) =>
 if (/CREATE UNIQUE INDEX "Alert_fingerprint_key"/.test(migration)) missing.push('Alert.fingerprint must not be globally unique (B-4)');
 if (missing.length) { console.error('missing required constraints:\n- ' + missing.join('\n- ')); process.exit(1); }
 console.log(`hand-written constraints present (${required.length})`);
+
+// 4. Seed phones must be non-dialable (+82 10-0000-00NN, an exchange never issued in KR) so no sender can ever page a real person.
+const seed = fs.readFileSync(new URL('../prisma/seed.ts', import.meta.url), 'utf8');
+const phones = [...seed.matchAll(/[`']\+\d[^`']*[`']/g)].map((m) => m[0]);
+const bad = phones.filter((p) => !/^[`']\+8210000000(\d{2}|\$\{[^}]+\})[`']$/.test(p));
+if (!phones.length || bad.length) { console.error('seed phones must match +8210000000NN (non-dialable):\n- ' + (bad.join('\n- ') || 'none found')); process.exit(1); }
+console.log(`seed phones non-dialable (${phones.length})`);

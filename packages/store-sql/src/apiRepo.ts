@@ -335,6 +335,7 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
 
   // ───────────────────────────── people ─────────────────────────────
 
+  // Customer has no active/deleted column (schema.prisma); only User.status gates the session. If one is added, require it here.
   async sessionPrincipal(userId: string): Promise<Principal | null> {
     const [u] = await this.sql.query(
       `SELECT u."id", u."email"::text AS "email", u."name", u."customerId", u."role", c."id" AS "contactId" FROM "User" u LEFT JOIN "Contact" c ON c."userId" = u."id"
