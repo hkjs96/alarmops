@@ -41,6 +41,23 @@ jobs:
       - name: Build (console)
         run: npm run build -w @alarmops/console
 
+  engine:
+    # services/alarm-engine is Python (D-05 port, Lambda); not an npm workspace (no package.json there).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: services/alarm-engine/requirements-dev.txt
+      - run: pip install -r services/alarm-engine/requirements-dev.txt
+      - name: Lint and type check (alarm engine)
+        run: npm run lint:engine
+      - name: Tests (alarm engine, all AWS calls mocked)
+        run: npm run test:engine
+
   e2e:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
