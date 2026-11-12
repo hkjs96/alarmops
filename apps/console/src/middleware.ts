@@ -4,7 +4,9 @@ import { SESSION_COOKIE, sessionSecret, verifySession } from "@/lib/auth/session
 import { SESSION_ENDED } from "@/lib/session-ended";
 
 /** Default deny (security review C-2): everything except /login and static assets needs a valid session. */
-const PUBLIC = [/^\/login(\/|$)/, /^\/auth\/dev-login$/, /^\/auth\/sign-out$/, /^\/auth\/session$/];
+const PUBLIC = [/^\/login(\/|$)/, /^\/auth\/dev-login$/, /^\/auth\/sign-out$/, /^\/auth\/session$/,
+  // the 1-minute tick: no session, its own shared secret (app/api/internal/tick, fail closed without TICK_SECRET)
+  /^\/api\/internal\/tick$/];
 
 export async function middleware(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
@@ -19,6 +21,11 @@ export async function middleware(req: NextRequest) {
   const secret = sessionSecret(process.env, mock);
   const session = await verifySession(req.cookies.get(SESSION_COOKIE)?.value, secret);
   if (session) return NextResponse.next();
+
+  // The REST API answers in its own format (401 UNAUTHENTICATED), not with a redirect to a page.
+  if (pathname.startsWith("/api/")) {
+    return NextResponse.json({ error: { code: "UNAUTHENTICATED", message: "Sign in to continue.", details: {}, requestId: "" } }, { status: 401, headers: { "Cache-Control": "no-store" } });
+  }
 
   // A server action (ack, save, remove…) sent from a tab whose session is gone. A redirect to /login is something the
   // page cannot read — it used to leave "Saving…" on the screen for ever (QA 최종 점검 P2-D). 401 with this body is

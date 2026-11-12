@@ -9,14 +9,19 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "e2e:live": "playwright test -c playwright.live.config.ts"
   },
   "dependencies": {
     "@alarmops/design-system": "0.1.0",
     "next": "15.5.29",
     "react": "19.1.0",
     "react-dom": "19.1.0",
-    "server-only": "0.0.1"
+    "server-only": "0.0.1",
+    "@alarmops/api": "0.0.0",
+    "@alarmops/core": "0.0.0",
+    "@alarmops/store-sql": "0.0.0",
+    "pg": "^8.13.1"
   },
   "devDependencies": {
     "@eslint/eslintrc": "3.3.1",

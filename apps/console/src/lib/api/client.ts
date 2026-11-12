@@ -1,6 +1,6 @@
 import type {
   AckResult, BulkItem, BulkPreview, BulkResult, IncidentDetail, IncidentEvent, IncidentListQuery, IncidentListResponse, Me,
-  NotificationLogEntry, OncallNowEntry, Paginated, ResolveKind, ApiErrorBody, ScopeTreeResponse,
+  NotificationLogEntry, Paginated, ResolveKind, ApiErrorBody, ScopeTreeResponse,
   AddResponderInput, CallOrderListQuery, CallOrderListResponse, CustomerPersonRole, PagingConfig, PagingConfigInput, PagingHealth, PagingPath, PagingPathQuery,
   RespondersResponse, RotationSummary, StaffSummary, ResponderWriteOptions, RespondersWriteResult, UndoResult,
 } from "./types";
@@ -30,7 +30,7 @@ export const isHidden = (e: unknown): boolean => e instanceof ApiError && (e.sta
  */
 export const isNotFoundLike = (e: unknown): boolean => e instanceof ApiError && (e.status === 404 || e.code === "CROSS_CUSTOMER");
 
-/** Typed surface of API-CONTRACT §8.1 the console uses (plus /me and /oncall/now for the list side panel). */
+/** Typed surface of API-CONTRACT §8 the console uses. */
 export interface ConsoleApi {
   me(): Promise<Me>;
   listIncidents(q?: IncidentListQuery): Promise<IncidentListResponse>;
@@ -45,14 +45,13 @@ export interface ConsoleApi {
   bulkExecute(action: "ack" | "resolve", items: BulkItem[]): Promise<BulkResult>;
   /** POST /incidents/bulk/undo. An unknown, used, expired or foreign token is the one 404. */
   bulkUndo(undoToken: string): Promise<UndoResult>;
-  oncallNow(customerId?: string): Promise<OncallNowEntry[]>;
   /** GET /scope-tree (API-CONTRACT §8.0) */
   scopeTree(): Promise<ScopeTreeResponse>;
 
   /* ---- Call order (API-CONTRACT §8.3) ---- */
   /** GET /oncall/now with the scope filter: one row per customer, per project/service with own steps, and for the asked node */
   callOrderList(q?: CallOrderListQuery): Promise<CallOrderListResponse>;
-  /** GET /oncall/paging-path for a scope (PROPOSED slug query) */
+  /** GET /oncall/paging-path for a scope (scope slugs) */
   pagingPath(q: PagingPathQuery): Promise<PagingPath>;
   getPaging(customerId: string): Promise<PagingConfig>;
   /** PUT /customers/{id}/paging, If-Match */
@@ -65,7 +64,7 @@ export interface ConsoleApi {
   deletePagingOverride(customerId: string, scopeType: "PROJECT" | "SERVICE", scopeId: string, version: number): Promise<void>;
   pagingHealth(customerId: string): Promise<PagingHealth>;
   getResponders(customerId: string): Promise<RespondersResponse>;
-  /** If-Match = the version of the Responders list the user saw (PROPOSED, see RespondersResponse) */
+  /** If-Match = the version of the Responders list the user saw (see RespondersResponse) */
   addResponder(customerId: string, input: AddResponderInput, opts: ResponderWriteOptions): Promise<RespondersWriteResult>;
   patchResponder(customerId: string, contactId: string, body: { role: CustomerPersonRole }, opts: ResponderWriteOptions): Promise<RespondersWriteResult>;
   removeResponder(customerId: string, contactId: string, opts: ResponderWriteOptions): Promise<RespondersWriteResult>;
@@ -124,7 +123,6 @@ export function createHttpApi(opts: { baseUrl: string; fetch?: typeof fetch; hea
     bulkPreview: (action, items) => call("POST", "/incidents/bulk", { action, items, preview: true }),
     bulkExecute: (action, items) => call("POST", "/incidents/bulk", { action, items, preview: false }),
     bulkUndo: (undoToken) => call("POST", "/incidents/bulk/undo", { undoToken }),
-    oncallNow: (customerId) => call("GET", "/oncall/now" + toQuery({ customerId })),
     scopeTree: () => call("GET", "/scope-tree"),
     callOrderList: (q = {}) => call("GET", "/oncall/now" + toQuery({ customer: q.customer, project: q.project, service: q.service, mine: q.mine ? 1 : undefined, onlyProblems: q.onlyProblems ? true : undefined })),
     pagingPath: (q) => call("GET", "/oncall/paging-path" + toQuery({ ...q })),

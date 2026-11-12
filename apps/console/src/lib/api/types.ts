@@ -1,8 +1,8 @@
 /**
  * Console REST types for docs/API-CONTRACT.md §8.1 (Incidents & alerts).
  * Field names follow DATA-MODEL.md (Incident, IncidentEvent, NotificationLog, Alert).
- * Where the contract does not pin the response shape yet, fields are the minimum the
- * screens in docs/ui/screens/incidents-list.md / incident-detail.md need — flagged "PROPOSED".
+ * Every field here is in the contract (§8.0–§8.4, "콘솔 응답 모양"); fields the API does not send yet are optional and
+ * say so (the console shows "—" or leaves the line out).
  */
 import type { ScopeCustomerNode, Severity, ThresholdSource } from "@alarmops/design-system";
 
@@ -70,16 +70,12 @@ export interface AssignmentSnapshot {
   pagingConfigId?: string | null;
   /** the server's wording, e.g. "Custom steps · Urgent (edited)". The console words it itself (lib/call-order/plan-label.ts) so both screens say the same. */
   planLabel?: string;
-  /** PROPOSED: the structured form of planLabel. When absent the console reads planLabel. */
-  style?: PagingStyle;
-  plan?: PagingPlan;
-  edited?: boolean;
   level: "SERVICE" | "PROJECT" | "CUSTOMER" | "MSP";
   steps: SnapshotStep[];
   repeatCount: number;
 }
 
-/** PROPOSED by the backend (packages/api incidents.ts): why paging is or is not going on */
+/** Why paging is or is not going on (API-CONTRACT §8.1 `escalation.state`) */
 export type EscalationState = "PAGING" | "MUTED" | "STOPPED_ACKED" | "STOPPED_RESOLVED" | "STOPPED_EXHAUSTED" | "NEVER_ESCALATING" | "UNREACHABLE";
 /** `escalation` of an incident. Always an object: an incident nobody is paged for has `state: "NEVER_ESCALATING"`. */
 export interface EscalationProgress {
@@ -106,12 +102,12 @@ export interface EscalationProgress {
 export interface IncidentListItem {
   id: string;
   number: number;
-  /** display key e.g. INC-20261109-0312-7F3A — PROPOSED */
+  /** display key e.g. INC-20261109-0312-7F3A (§8.1) */
   key: string;
   title: string;
   severity: Severity;
   status: IncidentStatus;
-  /** PROPOSED: TRIGGERED and at least one escalation step fired without ack → shown as "Escalated" */
+  /** TRIGGERED and at least one escalation step fired without ack → shown as "Escalated" (§8.1) */
   escalated: boolean;
   org: OrgChain;
   unmapped: boolean;
@@ -145,7 +141,7 @@ export interface IncidentCounts {
    * the menu badge, the tree, the tiles, the "Outside this view" line. API-CONTRACT §8.0: counts.open + outside.open = the badge.
    */
   open: number;
-  /** PROPOSED tile sub-lines */
+  /** Tile sub-lines (§8.1 `counts.meta`): optional, the API does not send them yet — the tiles show "—" / 0 */
   meta?: {
     triggeredSev1: number;
     oldestTriggeredAt: string | null;
@@ -268,7 +264,7 @@ export interface IncidentDetail extends IncidentListItem {
   /** D-14: placeholder only */
   rcaPlaceholder: { availableAfterPoc: true };
   details: { source: string; resource: string; alarm: string; runbookUrl?: string; runbookLabel?: string; lastTime?: string };
-  /** "Paged" line in hero — PROPOSED */
+  /** "Paged" line in hero (§8.1) */
   paged: { label: string; at: string; done: boolean }[];
   notificationCount: number;
 }
@@ -303,15 +299,6 @@ export interface NotificationLogEntry {
   warnings?: string[];
 }
 export type NotificationFailReason = "TIMEOUT" | "INVALID_DESTINATION" | "RATE_LIMITED" | "PROVIDER_REJECTED" | "PROVIDER_ERROR" | "NOT_CONFIGURED" | "GAVE_UP";
-
-export interface OncallNowEntry {
-  contactId: string | null;
-  name: string;
-  initials: string;
-  rotation: string;
-  detail: string;
-  openCount: number;
-}
 
 export type ResolveKind = "RESTART" | "CONFIG" | "AUTO" | "OTHER";
 
@@ -368,8 +355,7 @@ export interface ScopeTreeResponse {
 }
 
 /* ------------------------------------------------------------------------------------------------------------------
- * Call order (API-CONTRACT §8.3, D-30 · D-32). Fields marked PROPOSED are not pinned by the contract yet; the list
- * is in docs of the PR that introduced them (feat/console-call-order) and at the top of lib/call-order/model.ts.
+ * Call order (API-CONTRACT §8.3, D-30 · D-32).
  * ---------------------------------------------------------------------------------------------------------------- */
 export type PagingStyle = "ALL_AT_ONCE" | "CUSTOMER_ROTATION" | "SHARED_ROTATION" | "CUSTOM";
 export type PagingPlan = "STANDARD" | "URGENT" | "QUIET";
@@ -415,7 +401,7 @@ export interface PagingConfig extends PagingConfigInput {
   scopeId: string;
   edited: boolean;
   version: number;
-  /** PROPOSED: DATA-MODEL PagingConfig.updatedBy resolved to a name, for "edited by Junho Park, Oct 29" */
+  /** DATA-MODEL PagingConfig.updatedBy as a name, for "edited by Junho Park, Oct 29". Optional: not sent yet (§8.3) */
   updatedByName?: string | null;
   updatedAt?: string | null;
   sentence: string;
@@ -429,9 +415,9 @@ export interface PagingPathStep extends PagingStep {
   /** contacts this step reaches now (Leave and Override applied) */
   nowIds: string[];
   names: string[];
-  /** PROPOSED: name of the rotation (ROTATION) or the person (PERSON) the step names — the contract has only targetId */
+  /** name of the rotation (ROTATION) or the person (PERSON) the step names (§8.3) */
   targetName?: string;
-  /** PROPOSED: the named person is a customer person, shown as "Yuna Seo (Mirae Pay)" */
+  /** the named person is a customer person, shown as "Yuna Seo (Mirae Pay)" */
   targetIsCustomerPerson?: boolean;
 }
 
@@ -441,7 +427,7 @@ export interface PagingPath {
   customer: { id: string; name: string };
   /** the level whose steps apply. Equal to the asked level when it has its own steps. null: nothing is configured anywhere up the chain (`warning: "NO_CALL_ORDER"`) */
   inheritedFrom: LevelRef | null;
-  /** PROPOSED: true when the asked level itself holds the steps (saves comparing ids) */
+  /** true when the asked level itself holds the steps */
   own: boolean;
   style: PagingStyle | null;
   plan: PagingPlan | null;
@@ -451,19 +437,19 @@ export interface PagingPath {
   version: number;
   /** NO_CALL_ORDER: no steps anywhere up the chain. NOBODY_REACHABLE: steps exist and reach nobody right now */
   warning?: "NO_CALL_ORDER" | "NOBODY_REACHABLE";
-  /** PROPOSED: needed to send the config back unchanged in a PUT */
+  /** SHARED_ROTATION: the rotation, needed to send the config back unchanged in a PUT */
   sharedRotationId?: string;
   steps: PagingPathStep[];
   repeatCount: number;
   stopAtMin: number;
   sentence: string;
   customerNotified: { contactId: string; name: string; scope: LevelRef }[];
-  /** PROPOSED: who last changed the steps that apply */
+  /** who last changed the steps that apply. Optional: not sent yet (§8.3) */
   updatedByName?: string | null;
   updatedAt?: string | null;
 }
 
-/** PROPOSED query of GET /oncall/paging-path: the contract has ?q= / ?resourceId= / ?serviceId= only; the panel asks by scope slugs */
+/** GET /oncall/paging-path by scope slugs (§8.3) */
 export interface PagingPathQuery { customer: string; project?: string; service?: string }
 
 export type PagingProblemCode = "NO_PAGEABLE_RESPONDER" | "NO_VERIFIED_PHONE" | "STEP_UNVERIFIED_ONLY" | "ROTATION_GAP" | "SEND_CAP_EXCEEDED";
@@ -481,13 +467,12 @@ export interface PagingProblem {
 /** GET /customers/{id}/paging-health (D-32) */
 export interface PagingHealth { level: "OK" | "AT_RISK" | "UNREACHABLE"; problems: PagingProblem[] }
 
-/** PROPOSED: verification state per channel. Never the address itself. */
+/** Verification state per channel (§8.3 Responders). Never the address itself. The API sends VERIFIED / UNVERIFIED / NOT_SET. */
 export type ChannelState = "VERIFIED" | "UNVERIFIED" | "EXPIRED" | "LINK_SENT" | "NOT_SET";
 export type ContactChannelKey = "SLACK" | "EMAIL" | "SMS" | "VOICE";
 /**
- * PROPOSED display fields on responders. The contract lists ids only (`staff[{contactId, source, templateId}]`,
- * `people[{contactId, role, extras[], scope}]`); the panel needs a name, the channel states for the D-32 checks and the
- * masked contact (D-35 — full values only through POST /contacts/{id}/reveal, which this screen does not call yet).
+ * Display fields on responders (§8.3): a name, the channel states for the D-32 checks and the masked contact
+ * (D-35 — full values only through POST /contacts/{id}/reveal, which this screen does not call yet).
  */
 export interface ResponderDisplay {
   name: string;
@@ -506,16 +491,16 @@ export interface CustomerPersonResponder extends ResponderDisplay {
 }
 /**
  * GET /customers/{id}/responders.
- * PROPOSED `version` (security review 권고 2): the list has a version like the steps have. POST / PATCH / DELETE send it
+ * `version` (§8.3, security review 권고 2): the list has a version like the steps have. POST / PATCH / DELETE send it
  * as If-Match and answer 409 VERSION_CONFLICT when someone else changed the Responders meanwhile; each write returns
- * the new version. PROPOSED `slackChannel`: whether the customer's Slack channel is connected, which is what a
- * SLACK_CHANNEL step needs (the D-32 checks in the editor).
+ * the new version. `slackChannel`: whether the customer's Slack channel is connected (VERIFIED) or not (NOT_SET),
+ * which is what a SLACK_CHANNEL step needs.
  */
 export interface RespondersResponse { staff: StaffResponder[]; people: CustomerPersonResponder[]; templateId: string | null; version: number; slackChannel?: ChannelState }
-/** PROPOSED answer of the Responders writes: the new version of the list */
+/** Answer of the Responders writes: the new version of the list (§8.3) */
 export interface RespondersWriteResult { contactId: string; version: number }
 /**
- * PROPOSED (security review 권고 6): a change that would leave the customer UNREACHABLE is refused with 409
+ * §8.3 (security review 권고 6): a change that would leave the customer UNREACHABLE is refused with 409
  * `WOULD_BE_UNREACHABLE` unless the request says the user was told (`confirmUnreachable: true`).
  */
 export interface ResponderWriteOptions { version: number; confirmUnreachable?: boolean }
@@ -530,18 +515,17 @@ export interface RotationSummary {
   scope: "MSP" | "CUSTOMER";
   customerId?: string;
   name: string;
-  /** `channels` is PROPOSED: the D-32 checks in the editor need to know whether the person on shift can be reached */
+  /** `channels`: the D-32 checks in the editor need to know whether the person on shift can be reached */
   onShift: { contactId: string; name: string; until: string; channels?: Partial<Record<ContactChannelKey, ChannelState>> } | null;
   next?: string | null;
 }
 
 /** GET /staff?q= (People) — the minimum the "add staff" picker needs */
-export interface StaffSummary { contactId: string; name: string; title?: string; /** PROPOSED, as on responders */ channels?: Partial<Record<ContactChannelKey, ChannelState>> }
+export interface StaffSummary { contactId: string; name: string; title?: string; /** as on responders */ channels?: Partial<Record<ContactChannelKey, ChannelState>> }
 
 /**
- * One row of the Call order list. PROPOSED shape: the contract gives `customers[{id, name, style, plan, edited,
- * firstStep, steps[], responderCount}]` and says (§8.0) that the list also has a row per project/service with own
- * steps and a row for the asked node. `rows[]` is that list, already resolved.
+ * One row of the Call order list (§8.3 GET /oncall/now): a row per customer, per project/service with own steps,
+ * and a row for the asked node (§8.0), already resolved.
  */
 export interface CallOrderRow {
   /** "<customer>/<project>/<service>" slugs of the row's scope */

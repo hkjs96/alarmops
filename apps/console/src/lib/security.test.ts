@@ -1,4 +1,5 @@
-import { apiBaseUrl, mockMode, NotConfiguredError } from "./mode";
+import { mockMode } from "./mode";
+import { databaseConfig } from "./server/db-config";
 import { safeExternalUrl } from "./safe-url";
 import { safeNextPath } from "./safe-next";
 import { assertBulkItems, assertVersion, assertId, assertBulkAction, isId, isSlug, MAX_BULK_IDS } from "./validate";
@@ -50,11 +51,12 @@ describe("C-2 session + token forwarding", () => {
   });
 });
 
-describe("C-3 API_BASE_URL", () => {
-  it("fails closed when missing", () => {
-    expect(() => apiBaseUrl({})).toThrow(NotConfiguredError);
-    expect(() => apiBaseUrl({ API_BASE_URL: " " })).toThrow(NotConfiguredError);
-    expect(apiBaseUrl({ API_BASE_URL: "https://api.x" })).toBe("https://api.x");
+describe("C-3 DATABASE_URL (the API runs inside the console, D-09)", () => {
+  it("is required: no localhost fallback", () => {
+    expect(databaseConfig({})).toBeNull();
+    expect(databaseConfig({ DATABASE_URL: " " })).toBeNull();
+    expect(databaseConfig({ DATABASE_URL: "postgres://x/db" })).toEqual({ url: "postgres://x/db", pooler: "direct", max: 3 });
+    expect(databaseConfig({ DATABASE_URL: "postgres://x/db", DATABASE_POOLER: "transaction", DATABASE_POOL_MAX: "5" })).toEqual({ url: "postgres://x/db", pooler: "transaction", max: 5 });
   });
 });
 

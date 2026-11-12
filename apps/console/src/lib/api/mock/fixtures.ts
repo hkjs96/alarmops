@@ -4,7 +4,7 @@
  * Clock is frozen at Mon Nov 9 2026 03:16:16 KST so ages match the mockup.
  */
 import type {
-  EscalationProgress, IncidentDetail, IncidentEvent, IncidentListItem, NotificationLogEntry, OncallNowEntry, Severity,
+  EscalationProgress, IncidentDetail, IncidentEvent, IncidentListItem, NotificationLogEntry, Severity,
 } from "../types";
 import { orgOf } from "./scope-fixtures";
 
@@ -144,14 +144,6 @@ export const mutedAlerts: { customerId: string; severity: Severity; windowId: st
 
 export const unmappedAccounts = [{ awsAccountId: "481220935017", alertCount: 3 }];
 
-export const oncallNow: OncallNowEntry[] = [
-  { contactId: "ct_haeun", name: "Haeun Kim", initials: "HK", rotation: "MSP night desk", detail: "6 customers · until Mon 9 09:00", openCount: 2 },
-  { contactId: "ct_taemin", name: "Taemin Jung", initials: "TJ", rotation: "Data desk", detail: "Mirae Pay · until Mon 9 09:00", openCount: 0 },
-  { contactId: "ct_junho", name: "Junho Park", initials: "JP", rotation: "Hanbit on-call", detail: "Hanbit Logistics · until Mon 9 10:00", openCount: 1 },
-  { contactId: "ct_kyungmin", name: "Kyungmin Oh", initials: "KO", rotation: "Lumen on-call", detail: "Lumen Bank · until Mon 9 10:00", openCount: 0 },
-  { contactId: null, name: "All at once", initials: "All", rotation: "", detail: "Daon Retail · Cheong Media · Eden Mobility · Jeil Insure · Kumho Clinic", openCount: 2 },
-  { contactId: null, name: "No owner", initials: "–", rotation: "", detail: "Unmapped account 481220935017", openCount: 1 },
-];
 
 /* ---------------- Incident detail: payments-db-1 ---------------- */
 

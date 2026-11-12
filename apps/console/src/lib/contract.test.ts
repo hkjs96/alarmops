@@ -32,7 +32,6 @@ describe("P2-A one wording for ordering + plan, on both screens", () => {
     expect(parsePlanLabel("Shared MSP rotation · Quiet")).toEqual({ style: "SHARED_ROTATION", plan: "QUIET", edited: false });
     expect(parsePlanLabel("something else")).toBeNull();
     expect(snapshotPlanLabel({ planLabel: "All at once · Standard" })).toBe("All at once, started from Standard");
-    expect(snapshotPlanLabel({ planLabel: "x", style: "CUSTOM", plan: "QUIET", edited: true })).toBe("Custom, started from Quiet (edited)");
     expect(snapshotPlanLabel({ planLabel: "Some future wording" })).toBe("Some future wording");
     expect(snapshotPlanLabel(null)).toBeNull();
   });
