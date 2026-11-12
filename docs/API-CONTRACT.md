@@ -47,7 +47,7 @@ Slack ──▶ POST /api/slack/interactive        문자·음성 업체 ──�
 | 범위 | 모든 조회에 서버가 구한 customerId 집합(프로젝트·서비스 범위 사용자는 그 하위) 적용. 목록·수치(`counts`, `outside`, 트리의 `openIncidents`·`callHealth`)도 같은 범위로 계산한다. 범위 밖은 **404**(존재를 드러내지 않음, org-tenant R3-3, 위 "조회 경로의 404"). 범위 안 대상에 대한 쓰기가 역할 부족이면 403. MSP 직원의 범위는 전 고객이다(기본 보기 All customers, D-34) — `mine`은 권한이 아니라 필터다 |
 | 낙관적 잠금 | 수정 요청은 `If-Match: <version>` 필수인 리소스: Incident, ManagedAlarm, PagingConfig, ResponderTemplate, ThresholdDefault. 불일치 409 `VERSION_CONFLICT` |
 | 멱등 | 생성·상태 변경 POST·PUT·DELETE는 `Idempotency-Key` 헤더 허용(24시간 보관). 같은 키 재요청은 첫 응답 재생. 키는 **사용자 + 현재 범위·역할 + 메서드 + 경로 + `If-Match` + 본문 해시**에 묶인다: 같은 키를 다른 요청에 쓰면 422 `IDEMPOTENCY_KEY_REUSED`(실행하지 않음), 역할·범위가 바뀐 뒤에는 재생하지 않고 새로 판정한다. 성공(2xx) 응답만 저장한다. `preview: true` 요청(읽기 전용)은 저장하지 않는다. 사용자당 살아 있는 키는 최대 200개이고 넘으면 가장 오래된 것부터 버린다(버려진 키의 재요청은 새 요청으로 실행되며 `If-Match`·버전이 중복 적용을 막는다). **재생 응답에는 `undoToken`이 없다**(SQL 보안 검토 R-7): 토큰은 첫 응답으로만 나가고 멱등 저장소에는 본문에서 뺀 채 저장한다. 첫 응답을 잃은 클라이언트는 재생으로 Undo할 수 없다(첫 토큰은 5분 동안 그대로 유효). **연락처 값이 든 응답을 내는 라우트(연락처 공개 D-35, 연락처 목록·내보내기)는 `replayable: false`로 등록한다** — 재요청은 재생되지 않고 다시 실행·감사된다. 만료된 키는 틱이 전 사용자 대상으로 지운다 |
-| 입력 문자 | 경로·질의·헤더·본문 어디든 NUL(`\u0000`)이 있으면 400 `VALIDATION_FAILED`. 경로의 id 자리는 제어 문자가 없고 200자 이하여야 한다(아니면 400). 커서는 `{ t: ISO 시각(toISOString 형식), id: 위 규칙의 id }`만 받는다(아니면 400 `cursor`). 이 판정은 요청 문자만 보고 저장소를 부르기 전에 끝나므로 500이 되지 않고, 대상이 있는지와 무관하게 같은 응답이다(SQL 보안 검토 R-5). 형식이 맞는 id의 "없음/남의 것"은 지금처럼 404 |
+| 입력 문자 | 경로·질의·헤더·본문 어디든 NUL(`\u0000`)이 있으면 400 `VALIDATION_FAILED`. 경로의 id 자리는 제어 문자가 없고 200자 이하여야 한다(아니면 400). 커서는 `{ t: ISO 시각(toISOString 형식, 0000년 제외 — Postgres에 0년이 없다, issue #10 P-2), id: 위 규칙의 id }`만 받는다(아니면 400 `cursor`). 이 판정은 요청 문자만 보고 저장소를 부르기 전에 끝나므로 500이 되지 않고, 대상이 있는지와 무관하게 같은 응답이다(SQL 보안 검토 R-5). 형식이 맞는 id의 "없음/남의 것"은 지금처럼 404 |
 | 감사 | 쓰기 요청은 모두 AuditLog 1행 |
 
 ### 오류 형식
@@ -64,11 +64,12 @@ Slack ──▶ POST /api/slack/interactive        문자·음성 업체 ──�
 | 403 | `NOT_A_RESPONDER` | 연락처 열람: 그 고객의 Responder가 아니고 ADMIN도 아님(D-35) |
 | 422 | `EMERGENCY_REASON_REQUIRED` | 연락처 비상 열람: Responder가 아닌 ADMIN이 `reason` 없이(또는 공백만) 호출(D-35) |
 | 409 | `VERSION_CONFLICT`, `ALREADY_EXISTS`, `INVALID_TRANSITION`, `TAG_WINS` | 경합, 중복 생성(4b5b079), 상태 전이 불가, 리소스 태그가 값 결정(D-08) |
+| 409 | `WOULD_BE_UNREACHABLE`, `IN_USE`, `FROM_TEMPLATE` | Responders 쓰기: 고객이 UNREACHABLE이 됨(`?confirmUnreachable=true`로 확인 후 실행) / 단계가 그 사람을 지정함 / 템플릿에서 온 직원(§8.3 Responders) |
 | 413 | `PAYLOAD_TOO_LARGE` | 수집 본문 1MB 초과 |
 | 422 | `ROLE_UPDATE_REQUIRED` | 고객 스택이 옛 버전 |
 | 409 | `MUTED_BY_MAINTENANCE` | 수동 Escalate: 점검 창이 덮고 SEV-1이 아님. `details.mutedUntil`(D-17) |
 | 422 | `SEND_CAP_EXCEEDED` | 호출 순서 저장: 인시던트 1건이 한 바퀴 60건 또는 1시간 120건을 넘김. `details { perCycle, perHour, limits }`(D-38) |
-| 422 | `RESPONDER_LIMIT_EXCEEDED` | 호출 순서 저장: `ALL_RESPONDERS` 단계인데 Pageable Responder가 20명 초과. `details { field, responders, limit }`. **예정(아직 없음):** Responder를 늘리는 쓰기 API가 생기면 같은 규칙(`sendCapViolations`)으로 거부한다 — 지금은 그런 쓰기 경로가 없고, 저장 뒤 늘어난 사람은 엔진이 열릴 때 줄인다(아래 한도표, D-38) |
+| 422 | `RESPONDER_LIMIT_EXCEEDED` | 호출 순서 저장: `ALL_RESPONDERS` 단계인데 Pageable Responder가 20명 초과. `details { field, responders, limit }`. Responder를 늘리는 쓰기(§8.3 Responders POST·PATCH)도 같은 규칙(`sendCapViolation`)으로 거부한다(11/12). 이 API 밖에서 늘어난 사람은 엔진이 열릴 때 줄인다(아래 한도표, D-38) |
 | 422 | `IDEMPOTENCY_KEY_REUSED` | 같은 `Idempotency-Key`를 다른 요청(메서드·경로·`If-Match`·본문)에 사용 |
 | 422 | `CROSS_CUSTOMER`, `NOT_PAGEABLE` | 단계 대상이 다른 고객의 사람·로테이션 / Notify-only 사람 |
 | 429 | `RATE_LIMITED` | **응답 헤더 `Retry-After: <초>`**와 같은 값의 `details.retryAfterSec`. 현재 쓰임: 수동 Escalate(인시던트당 60초에 1회) |
@@ -162,11 +163,24 @@ Grafana legacy, PagerDuty, generic은 PoC 범위 밖(fingerprint 제안 4).
 
 ## 5. 1분 틱 (B4)
 
-`POST /api/internal/tick` — pg_cron이 매분 호출. HTTP 호출 수단(pg_net 등 Supabase 확장 사용 여부)은 Q-API-02.
+`POST /api/internal/tick` — 콘솔 앱 안의 라우트(`apps/console/src/app/api/internal/tick/route.ts`, Node 런타임, 세션 없음). D-23: pg_cron + pg_net이 매분 호출한다. 실행기는 실제 시계를 쓰고(N-40) 저장소는 `packages/store-sql`(DB `now()` 기준, R-2). 업체 발송기는 아직 없어 잡은 `NOT_CONFIGURED`로 아웃박스에 남는다.
+
+```sql
+-- Supabase (D-23). 비밀은 Vault에 두고 SQL에 평문으로 쓰지 않는다. 호출 타임아웃은 60초 이상(§5 "예산").
+select cron.schedule('alarmops-tick', '* * * * *', $$
+  select net.http_post(
+    url     := 'https://<console-host>/api/internal/tick',
+    headers := jsonb_build_object('content-type', 'application/json',
+                 'authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'tick_secret')),
+    body    := jsonb_build_object('scheduledAt', to_char(date_trunc('minute', now()) at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:00"Z"')),
+    timeout_milliseconds := 60000);
+$$);
+```
+AWS 이전 때는 이 호출 1곳을 EventBridge Scheduler로 바꾼다(D-23).
 
 | 항목 | 내용 |
 |---|---|
-| 인증 | `Authorization: Bearer <TICK_SECRET>`, constant-time. 비밀 미설정 503 |
+| 인증 | `Authorization: Bearer <TICK_SECRET>`, constant-time(양쪽 SHA-256 비교라 길이도 드러나지 않음). 비밀 미설정·32자 미만 503 `NOT_CONFIGURED`(fail-closed), 틀림·없음 401. 미들웨어의 세션 검사 대상이 아니다(공개 경로, 이 비밀이 유일한 자격) |
 | 본문 | `{ "scheduledAt": "2026-11-09T03:13:00Z", "jobs": ["group","escalation","notify","reconcile"] }` (생략 시 전부) |
 | 멱등 | `scheduledAt`(분 단위)별로 `TickClaim` 선점. 같은 분 중복 호출은 `200 {"skipped":"duplicate"}`. 겹친 실행은 행 단위 낙관적 잠금으로 안전(oncall R4-5) |
 | 시계 (SQL 보안 검토 R-2) | 틱은 먼저 저장소 시각(DB `now()`)을 묻는다. 실행기 시계가 **30초 넘게** 다르면 아무것도 하지 않고 `200 {"skipped":"clock-skew","clockSkewMs":n}`(실행기 − 저장소)을 돌려주며, 요청된 작업의 하트비트를 `ERROR` + `lastFinishedAt = null`(→ `/health`에서 stale)로 남긴다. 저장소도 `claimTick`에서 같은 판정을 한 번 더 한다. 30초 안이면 그룹 닫기·수집, 에스컬레이션 만기, 점검 창 판정, 타임라인·로그 시각은 모두 **저장소 시각**(실행기 시계 + 측정한 차이)으로 한다. 저장소는 호출자가 준 시각을 그대로 믿지 않는다: 새 페이지·Undo로 되살린 페이지의 만기는 `LEAST(받은 시각, now())`, 점검 보류(`releaseJob`)는 `now() + 10분`까지, 만기 목록은 `now()`를 넘겨 보지 않고, 하트비트 시각도 `now()`를 넘지 않는다. 그래서 시계가 빠른 실행기·API 서버는 페이지를 이르게 보내지도, 미래로 미뤄 두지도 못한다 |
@@ -257,7 +271,13 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 
 ## 8. 콘솔 REST (B5)
 
-역할 표기: V = VIEWER 이상, O = OPERATOR 이상, A = ADMIN, P(grant) = 고객사 담당자 + portalGrant. 역할 체계 자체는 미결(Q-DM-02)이라 이 열은 임시.
+역할 표기: V = VIEWER 이상, O = OPERATOR 이상, A = ADMIN, P(grant) = 고객사 담당자 + portalGrant. 역할 체계 자체는 미결(Q-DM-02)이라 이 열은 임시. **I** = MSP 직원(INTERNAL) 전용: 포털 사용자에게는 그 경로가 없다(파라미터를 보기 전에 같은 404, `/oncall/paging-path`와 같음).
+
+**배포 (D-09).** 콘솔 REST는 콘솔 앱 안에 있다: `apps/console/src/app/api/v1/[...path]/route.ts`(Node 런타임)가 `packages/api`의 `createApi`를 `packages/store-sql`(node-postgres, `DATABASE_URL`, 트랜잭션 풀러면 `DATABASE_POOLER=transaction` — db/README.md "Connecting")에 붙여 그대로 돌린다. 다른 서비스로 나가는 호출은 없다.
+- **AuthContext는 서버가 세션에서 만든다.** 세션 쿠키(서명 검증) → `User.id` → `ACTIVE`인 사용자만 → `customerId`가 있으면 포털(그 고객 하나, PORTAL_USER 범위가 프로젝트·서비스면 그 하위로 좁힘), 없으면 MSP 직원(전 고객, D-34), 역할은 `User.role`. 요청 본문·헤더의 사용자·역할·고객 값은 읽지 않는다. 모르는·비활성 사용자는 401.
+- 쓰기(POST/PUT/PATCH/DELETE)는 콘솔과 같은 Origin에서만(`sameOriginPost`, 아니면 403 `FORBIDDEN`). API로 넘기는 헤더는 `If-Match`·`If-None-Match`·`Idempotency-Key`뿐(쿠키는 넘기지 않음).
+- 콘솔의 서버 컴포넌트·서버 액션은 같은 핸들러를 프로세스 안에서 부른다(같은 요청·응답 모양, 네트워크 없음).
+- `DATABASE_URL`이 없으면 503 `NOT_CONFIGURED`(localhost 대체 없음). 목 모드(`MOCK_API=1`, 운영 금지)에서는 `/api/v1`이 404다.
 
 ### 8.0 범위: 트리, 목록 필터, 필터 밖 수치 (D-33, D-34)
 
@@ -330,6 +350,8 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 | POST `/incidents/bulk/undo` | `{ undoToken }` (5분) → `{ restored[], skipped[{id, code}] }`. 단건 Ack의 `undoToken`도 받는다. **Undo 규칙:** 누른 사람만, 1회, 그 뒤로 아무도 건드리지 않은 항목만(버전이 같아야 함, 아니면 `skipped`에 `VERSION_CONFLICT`). 모르는·쓴·만료된·남의 토큰은 같은 404. Ack를 되돌리면 호출은 멈췄던 단계에서 이어지고, Ack 때문에 취소됐던 **현재 단계의** 대기 중 호출만 되살아난다(이미 나간 호출은 다시 보내지 않고, 이전 단계·다른 사유의 건너뜀은 그대로, 다음 단계 시각은 옮기지 않음). Resolve를 되돌린 인시던트는 병합 대상으로 돌아가지 않는다 | O |
 | GET `/alerts/{id}` | 알림(지문) 상세, RawEvent 이력, 억제 판정 이력 | V |
 
+**목록·상세 항목의 확정 필드 (11/12, 콘솔 `types.ts`의 PROPOSED 정리).** `key`(표시 키 `INC-yyyymmdd-HHMM-XXXX`, UTC), `escalated`(TRIGGERED이고 한 단계 이상 나감), `escalation { state: PAGING\|MUTED\|STOPPED_ACKED\|STOPPED_RESOLVED\|STOPPED_EXHAUSTED\|NEVER_ESCALATING\|UNREACHABLE, step, firedSteps, totalSteps, repeat, repeatCount, nextAt, nextLabel, doneAt, baseAt, stoppedAt, renotifyAt, mutedByMaintenance }`, 상세의 `paged[{label, at, done}]`. `assignmentSnapshot.planLabel`은 문장으로만 준다(구조화된 style·plan·edited는 없다 — 콘솔이 문장을 해석). `counts.meta`(타일 보조 줄)는 **선택이고 아직 보내지 않는다**(콘솔은 "—"/0).
+
 **포털(고객) 사용자 응답 모양 (D-36).** 인시던트 목록·상세·타임라인·통지 기록은 같은 경로를 쓰되 내부 식별자가 없다. `assignee` / `acknowledgedBy` / `resolvedBy`: `{ name }`만(`contactId`·`via` 없음). `assignmentSnapshot`: `{ capturedAt, planLabel, level, repeatCount, steps[{ index, atMin, targetType, resolved[{ name }], channels, label? }] }`(`pagingConfigId`·`targetId` 없음). 타임라인 항목: `actorId: null`, `message`는 구조화 데이터로 다시 만든 문장. 통지 기록: `providerMessageId`·`error`·`warnings` 없음, 채널은 `Slack channel`. **MSP 직원 이름은 `MSP on-call`**로 나가고(플래그 `PORTAL_SHOWS_STAFF_NAMES=true`일 때만 실명), 그 고객 자신의 사람은 실명이다. `awsAccountIds`는 빈 배열.
 
 | POST `/alerts/{id}/ack` | 알림 단위 ack — **Ack 단위 미결(Q-DM-05)**, 결정 전까지 404 비활성 | O |
@@ -351,23 +373,55 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 | POST `/schedules/{id}/overrides/{oid}/accept` | 대상자만. PENDING→ACCEPTED, 반영. 이미 처리됨 409 `OVERRIDE_NOT_PENDING` | O(대상자) |
 | POST `/schedules/{id}/overrides/{oid}/decline` | 대상자만. 본문 `{ note? }`. PENDING→DECLINED, 요청자에게 알림. 48시간 또는 시작 시각 경과 시 EXPIRED | O(대상자) |
 | POST `/schedules/{id}/overrides/{oid}/remind` | 요청자만. Slack 재전송(10분 1회 제한) | O |
-| GET `/oncall/now?customerId=&customer=&project=&service=&mine=&contactId=&style=` | 로테이션별 지금 당번 + 고객별 첫 호출 대상·단계 요약 — 알림 해석과 같은 함수(Leave·Override 적용) | V |
-| GET `/oncall/paging-path?q=` 또는 `?resourceId=` / `?serviceId=` | **INTERNAL 전용**: 포털 사용자에게는 이 경로가 없다(파라미터를 보기 전에 404). "Who gets paged for…". 응답 `{ path: [{level:"RESOURCE"\|"SERVICE"\|"PROJECT"\|"CUSTOMER", id, name}], customer: {id,name}, inheritedFrom: {level, id, name}, style, plan, edited, pagingConfigId, version, steps: [{atMin, targetType:"PERSON"\|"ROTATION"\|"ALL_RESPONDERS", targetId?, nowIds[], names[], channels}], repeatCount, stopAtMin, sentence, customerNotified: [{contactId, name, scope:{level,id,name}}] }`(Notify only 고객 사람). `q`는 이름 접두 검색, 여러 건이면 `candidates[]` 반환. `/oncall/now`와 같은 해석 함수 | V |
+| GET `/oncall/now?customerId=&customer=&project=&service=&mine=&onlyProblems=` | Call order 목록(구현됨). 응답 `{ rotations: RotationSummary[], rows: CallOrderRow[] }`. `rows[]`: 고객 행(항상 `own: true`) + 범위 안에서 자기 단계를 가진 프로젝트·서비스 행 + 요청한 노드 자신의 행(물려받았으면 `own: false`, `inheritedFrom {level,id,name}`). 행 `{ key: "<customer>/<project>/<service>" slug, org: OrgChain, level, own, inheritedFrom, style, plan, edited, steps: PagingPathStep[](아래 paging-path와 같은 모양), repeatCount, responderCount(Pageable), health: {level, problems: n, first?} \| null(고객 행만) }`. 정렬: UNREACHABLE → AT_RISK → OK, 같으면 이름. `onlyProblems=true`: health가 OK가 아니거나 열린 인시던트가 있는 고객만. 범위가 프로젝트·서비스로 좁혀진 직원은 그 하위 행만. `rotations[]`는 아래 `/rotations` 항목 모양. 알림 해석과 같은 함수(Leave·Override 적용). `contactId`·`style` 파라미터는 아직 없다 | V, I |
+| GET `/oncall/paging-path?q=` 또는 `?resourceId=` / `?serviceId=` / `?projectId=` / `?customerId=` / slug `?customer=[&project=[&service=]]`(콘솔 패널) | **INTERNAL 전용**: 포털 사용자에게는 이 경로가 없다(파라미터를 보기 전에 404). "Who gets paged for…". 응답 `{ path: [{level:"RESOURCE"\|"SERVICE"\|"PROJECT"\|"CUSTOMER", id, name}], customer: {id,name}, inheritedFrom: {level, id, name}, style, plan, edited, pagingConfigId, version, steps: [{atMin, targetType:"PERSON"\|"ROTATION"\|"ALL_RESPONDERS", targetId?, nowIds[], names[], channels}], repeatCount, stopAtMin, sentence, customerNotified: [{contactId, name, scope:{level,id,name}}] }`(Notify only 고객 사람). 추가 필드: `own`(요청한 단계 자신이 단계를 가짐), `sharedRotationId`(SHARED_ROTATION), 단계마다 `targetName`(로테이션·사람 이름)·`targetIsCustomerPerson`, 아무에게도 닿지 않으면 `warning: "NOBODY_REACHABLE"`, 설정이 없으면 `warning: "NO_CALL_ORDER"`·`inheritedFrom: null`. `updatedByName`·`updatedAt`은 선택(아직 보내지 않음). `q`는 이름 접두 검색, 여러 건이면 `candidates[]` 반환. `/oncall/now`와 같은 해석 함수 | V |
 | GET/PUT `/customers/{id}/paging` | D-30 개정. `{ style: ALL_AT_ONCE\|CUSTOMER_ROTATION\|SHARED_ROTATION\|CUSTOM, plan: STANDARD\|URGENT\|QUIET, sharedRotationId?, steps[{atMin, targetType: PERSON\|ROTATION\|ALL_RESPONDERS, targetId?, channels[]}], repeatCount }` (If-Match). `plan`만 바꾸면 서버가 템플릿으로 단계 재생성(`edited=false`). 응답에 `sentence`(실명 미리보기)와 `sendCap { perCycle, perHour, limits, exceeded }`(지금 Responder 기준으로 매번 다시 계산, `exceeded`는 `null` 또는 지금 저장하면 받을 오류 코드). **아직 저장한 단계가 없으면 GET은 `version: 0`, `steps: []`, ETag `"0"`을 주고, 첫 PUT은 `If-Match: 0`으로 보내 201을 받는다**(이후 PUT은 200). 삭제 후 다시 만들어도 버전은 이어진다. 한도는 §2 "한도" | A |
 | PUT/DELETE `/customers/{id}/paging-overrides/{scopeType}/{scopeId}` | PROJECT·SERVICE 덮어쓰기. 해석 service › project › customer | A |
-| GET `/customers/{id}/paging-health` | D-32. `{ level: OK\|AT_RISK\|UNREACHABLE, problems[{ code: NO_PAGEABLE_RESPONDER\|NO_VERIFIED_PHONE\|STEP_UNVERIFIED_ONLY\|ROTATION_GAP\|SEND_CAP_EXCEEDED, stepIndex?, contactIds[], rotationId?, from?, to?, message }] }`. 서버가 Responders·단계·채널 검증·교대표(앞으로 14일)로 계산. 저장하지 않음 | A |
+| GET `/customers/{id}/paging-health` | D-32. `{ level: OK\|AT_RISK\|UNREACHABLE, problems[{ code: NO_PAGEABLE_RESPONDER\|NO_VERIFIED_PHONE\|STEP_UNVERIFIED_ONLY\|ROTATION_GAP\|SEND_CAP_EXCEEDED, stepIndex?, contactIds[], rotationId?, from?, to?, message, skipped? }] }`. 서버가 Responders·단계·채널 검증·교대표(앞으로 14일)로 계산(core `pagingHealth`, 트리의 `callHealth`와 같은 함수). 저장하지 않음. Call order 화면이 모든 직원에게 보여 주므로 읽기는 V(11/12, 이전 A). 고객 전체 범위의 직원만(좁혀진 직원은 404) | V, I |
 | GET `/customers?pagingHealth=UNREACHABLE,AT_RISK` | 고객사 목록 필터. 목록 항목마다 `pagingHealth.level`과 `problems` 개수 포함. 정렬 기본: UNREACHABLE → AT_RISK → OK | A |
 | GET `/oncall/now?onlyProblems=true` | Call order 목록. ~~고객사 10곳 초과 시 콘솔이 기본으로 켬~~ → 트리의 `Only with problems`(`/scope-tree`)가 대신하고 기본은 꺼짐 | A |
-| GET/POST `/customers/{id}/responders`, PATCH/DELETE `/customers/{id}/responders/{contactId}` | `{contactId, role: PAGEABLE\|NOTIFY_ONLY}` 또는 새 고객 사람 `{name,email,phone,role,extras:[APPROVER,PORTAL_USER],scope, insertStep?:{afterIndex, atMin, channels}}`. 다른 고객 Contact는 422 `CROSS_CUSTOMER` | A |
+| GET `/customers/{id}/responders` | 아래 "Responders" 참조 | V, I |
+| POST `/customers/{id}/responders`, PATCH/DELETE `/customers/{id}/responders/{contactId}` | 아래 "Responders" 참조. `If-Match: <목록 version>` 필수 | A, I |
 | GET/POST `/rotations?scope=&customerId=`, PATCH/DELETE `/rotations/{id}`, GET `/rotations/{id}/shifts?from=&to=`, GET `/rotations/{id}/usage` | Rotation(scope MSP\|CUSTOMER). usage = 참조 고객·단계 | A |
 | POST `/rotations/{id}/overrides`, POST `/overrides/{id}/accept\|decline` | COVER/SWAP, 상대 수락 후 반영(D-28) | O |
 | GET/POST `/responder-templates`, PATCH `/responder-templates/{id}`, POST `/responder-templates/{id}/preview` | 템플릿 변경 시 영향 고객 미리보기, PATCH는 `previewHash` 필수 | A |
-| GET `/staff?q=`, GET `/staff/{id}/coverage` | People: `{customerCount, onShift[], nextShift, customers[{id, via[]}]}` | V |
+| GET `/rotations?scope=MSP\|CUSTOMER&customerId=` (구현된 읽기) | `RotationSummary[]`: `{ id, scope, customerId?, name, onShift: { contactId, name, until, channels } \| null, next: 다음 당번 이름 \| null }`. MSP 로테이션 + 범위 안 고객의 로테이션. `customerId`가 있으면 MSP 것 + 그 고객 것(범위 밖·없는 고객은 404). `channels`는 아래 채널 상태 | V, I |
+| GET `/staff?q=` (구현됨) | 활성 MSP 직원 Contact `[{ contactId, name, channels }]`, 이름 순, `q`는 이름 부분 일치. 연락처 값은 없다 | V, I |
+| GET `/staff/{id}/coverage` | People: `{customerCount, onShift[], nextShift, customers[{id, via[]}]}` | V |
 | POST `/staff/{id}/leave/preview`, POST `/staff/{id}/leave`, DELETE `/leaves/{id}` | `{from, to, replacementId}` → `{customers[{id,effects[]}], rotations[{id,shifts[]}], totals, previewHash}`. 적용은 같은 본문 + previewHash, 다르면 409 `PREVIEW_STALE`. BulkChange + AuditLog 기록 | A |
 | POST `/staff/{id}/customers/preview`, POST `/staff/{id}/customers` | 직원을 여러 고객 Responders에 추가 `{customerIds[]}` | A |
 | GET `/bulk-changes?contactId=&kind=` | 일괄 변경 감사 | V |
 | GET `/contacts/needs-action?kind=&customerId=&channel=&q=` | 직원·고객 통합 Needs action 목록(한 정의: 확인 안 된 채널이 하나라도 있는 사람). 응답 `{ people[], counts:{people, staff, customer, linkable, notSet} }` | A |
 | GET/POST `/routing-rules`, PATCH/DELETE `/{id}` | | A |
+
+#### Responders (D-32, D-35, security review 권고 2·3·6, 11/12 구현)
+
+`GET /customers/{id}/responders` →
+```json
+{ "staff":  [{ "contactId": "ct_…", "source": "DIRECT|TEMPLATE", "templateId": "…", "templateName": "…", "name": "Haeun Kim",
+               "channels": { "SLACK": "VERIFIED", "EMAIL": "VERIFIED", "SMS": "UNVERIFIED", "VOICE": "UNVERIFIED" },
+               "emailMasked": "h•••@msp.example", "phoneMasked": "010-••••-1234" }],
+  "people": [{ "contactId": "ct_…", "role": "PAGEABLE|NOTIFY_ONLY", "extras": ["APPROVER","PORTAL_USER"], "scope": { "level": "CUSTOMER|PROJECT|SERVICE", "id": "…", "name": "…" },
+               "name": "Yuna Seo", "channels": { … }, "emailMasked": "…", "phoneMasked": "…" }],
+  "templateId": null, "version": 3, "slackChannel": "VERIFIED|NOT_SET" }
+```
+- 순서는 `Responder.order`, 같으면 contactId. `staff` = INTERNAL Contact, `people` = 그 고객의 Contact. `scope`는 그 사람의 NOTIFY ContactScope(없으면 첫 ContactScope, 그것도 없으면 고객). `extras`는 APPROVER·PORTAL_USER ContactScope.
+- **채널 상태**(`channels`): `SLACK`·`EMAIL`·`SMS`·`VOICE`마다 `VERIFIED`(값 + 유효한 확인 시각) / `UNVERIFIED`(값만) / `NOT_SET`. SMS·VOICE는 전화 하나를 본다. 콘솔 타입에는 `EXPIRED`·`LINK_SENT`도 있으나 API는 아직 보내지 않는다.
+- **연락처 값은 나가지 않는다**(D-35): `emailMasked`(첫 글자 + `•••@도메인`), `phoneMasked`(앞 3자리 + `-••••-` + 끝 4자리). 전체 값은 `/contacts/{id}/reveal`만.
+- **`version`**: 목록의 낙관적 잠금 버전. Responders 쓰기(아래)마다 1씩 오르고 되돌아가지 않는다. 저장: 그 고객의 `AuditLog`(`targetType = 'Responders'`) 행 수 — 쓰기와 같은 트랜잭션에서 고객 행을 `FOR UPDATE`로 잠그고 다시 센다(스키마 변경 없음). 이 API 밖의 변경(템플릿 동기화, 시드)은 버전을 올리지 않는다. 응답 `ETag: "<version>"`.
+
+쓰기 — 모두 ADMIN, `If-Match: <version>` 필수(없으면 400, 다르면 409 `VERSION_CONFLICT` + `details.currentVersion`), 응답 `{ contactId, version }`(POST 201, 그 밖 200). 검사 순서: 범위(고객 전체 범위가 아니면·없으면 404) → 대상이 이 목록에 있는가(PATCH/DELETE, 없으면 404) → 역할(403) → If-Match → 아래 규칙.
+
+| 요청 | 본문 | 규칙 |
+|---|---|---|
+| POST | `{ contactId, role? }` | 활성 MSP 직원(항상 PAGEABLE) 또는 **이 고객의** 사람(기본 NOTIFY_ONLY). 다른 고객의 사람·없는 id·비활성은 **같은 404**(이전 계약의 422 `CROSS_CUSTOMER` 대신 — 다른 테넌트 id가 실재함을 알리지 않는다, 권고 3). 이미 있으면 409 `ALREADY_EXISTS` |
+| POST | `{ name, email?, phone?, role, extras?: ["APPROVER"\|"PORTAL_USER"] }` | 새 고객 사람(Contact CUSTOMER + Responder + extras는 고객 단계 ContactScope). 이름 1~80자, 이메일·전화 중 하나 필수, 형식 400. 새 값은 미확인 상태(확인 링크는 아직 보내지 않음). `insertStep`은 아직 없다 |
+| PATCH `/{contactId}` | `{ role }` | 고객 사람만(직원은 404). NOTIFY_ONLY로 바꾸려는데 어떤 단계가 그 사람을 PERSON으로 지정하면 409 `IN_USE` |
+| DELETE `/{contactId}` | — | 템플릿에서 온 직원은 409 `FROM_TEMPLATE`(템플릿에서 바꾼다). 단계가 지정한 사람은 409 `IN_USE` |
+
+- **409 `WOULD_BE_UNREACHABLE`** (권고 6): PATCH·DELETE 결과 고객의 paging-health가 UNREACHABLE이 되면(전에는 아니었는데) 실행하지 않는다. `?confirmUnreachable=true`(사용자가 경고를 본 뒤)이면 실행한다. `details.level`.
+- **D-38**: 목록을 늘리는 쓰기(POST, PATCH→PAGEABLE)가 이 고객의 어느 호출 순서를 한도 밖으로 밀면 422 `RESPONDER_LIMIT_EXCEEDED`(`details {field, responders, limit}`) / `SEND_CAP_EXCEEDED` — 호출 순서 저장과 같은 `sendCapViolation`. 이미 넘어 있던 것은 막지 않는다(paging-health가 보여 준다).
+- 감사: 쓰기마다 AuditLog 1행 `responders.add|create|role|remove`, `before/after`는 버전·역할만(이메일·전화 없음).
 
 ### 8.4 조직·계정·연동
 | 메서드 경로 | 설명 | 권한 |
@@ -391,7 +445,7 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 | POST `/integrations/{id}/rotate-token` | 이전 토큰 즉시 무효(R5-1) | A |
 | GET/POST `/notification-channels`, PATCH/DELETE `/{id}`, POST `/{id}/test` | 중복 409 | A, P(channels) |
 | GET/PATCH `/users`, `/users/{id}` | 가입 승인, 역할 | A |
-| GET `/me` | 세션 사용자, 역할, 범위 고객사 | 세션 |
+| GET `/me` | 세션 사용자 `{ id, name, email, role, kind: INTERNAL\|CUSTOMER }`. `role`은 실제로 적용되는 역할(포털 사용자는 VIEWER, 유효한 역할이 없는 직원도 VIEWER로 표시하되 쓰기는 거부). 범위 고객 목록은 `/scope-tree`가 준다 | 세션 |
 
 ### 8.5 리소스·임계치 (D-08, D-16, D-19)
 | 메서드 경로 | 설명 | 권한 |
@@ -476,7 +530,7 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 | ID | 질문 | 현재 처리 |
 |---|---|---|
 | Q-API-01 | "큐는 SQS 하나"가 큐 1개인가, SQS 기술 하나인가 | 큐 2개 + DLQ |
-| Q-API-02 | pg_cron이 HTTP를 부르는 수단(pg_net은 Supabase 확장 → 이전 시 대체 필요) | 미정 |
+| Q-API-02 | pg_cron이 HTTP를 부르는 수단(pg_net은 Supabase 확장 → 이전 시 대체 필요) | D-23: pg_net(§5 SQL). 이전 때 EventBridge Scheduler |
 | Q-API-03 | Vercel 콘솔이 SQS에 보낼 AWS 자격증명(Vercel OIDC → IAM 역할 vs 접근 키) | 미정, security 검토 |
 | Q-API-04 | group_wait 30초를 SQS 지연 메시지로 지킬지, 1분 단위로 올릴지 | 지연 메시지 제안 |
 | Q-API-05 | 알람 엔진 언어(Python 이식)와 DB 접근 방식(Prisma 외 드라이버 허용 범위) | 표 밖 쓰기 금지 |
