@@ -878,3 +878,15 @@
 | actionlint | — | 미실행 | 이 환경에 없음 |
 
 판정: P1·P2·[차단] 없음. P3 1건(apt 대체 경로). **MERGE-READY.**
+
+## feat/console-live-api 화면 변경 persona-check — 2026-11-12
+
+| 날짜 | 시나리오 | 버전 | 페르소나 | 측정값 | 판정 | 캡처 |
+|---|---|---|---|---|---|---|
+| 2026-11-12 | Responders 동시 수정 충돌 (P3-J), live | b60f372 | 준호 (1440 라이트, 390 다크) | 탭 B 편집 중 탭 A가 사람 제거 → B 제거 시 상단 "Changed — reload. Someone else changed the Responders; who is paged now shows after Reload", 카드 안 "The last change was not applied" + Reload, 하단 동일 안내. 390 가로 넘침 0. 제거 확인 대화상자 문구 명확 | 통과 | `shots/2026-11-12-live-api/live/resp-conflict-*.png` |
+| 2026-11-12 | "Before your changes: if something broke" 흐린 제목 | b60f372 | 준호 | 편집 중 제목이 흐리게 바뀌고 "updates when you press Done" 안내가 위에 붙음. 읽기 순서 자연스러움 | 통과 | `shots/2026-11-12-live-api/live/resp-edit-*.png` |
+| 2026-11-12 | 인시던트에서 세션 만료 뒤 Acknowledge, mock·live | b60f372 | 하은 (390 라이트) | "Your session ended — sign in again. Nothing was changed." + "Paging goes on as before: an incident you acknowledged here was not acknowledged, so its people are still being called." 초안 보존 안내, Sign in 버튼 | 통과 | `shots/2026-11-12-live-api/{mock,live}/session-ended-390.png` |
+| 2026-11-12 | 로그인 상태에서 /login, next= 처리, mock·live | b60f372 | 하은 (390 다크) | /login → /incidents, ?next=/people → /people, //evil.com·https://evil.com → /incidents(외부 이동 없음), 인코딩된 ?a=//b#x 보존. 로그아웃 상태 /incidents?customer=x#y → next에 쿼리 보존(주소창 해시는 브라우저가 서버에 보내지 않아 빠짐) | 통과 | `shots/2026-11-12-live-api/{mock,live}/login-*.png` |
+| 2026-11-12 | 사소한 문구 | b60f372 | 준호 | Responders 1명일 때 "is these 1" 단수 처리 없음 | P3 | — |
+
+live 모드: 로컬 Postgres(/opt/pglocal, nobody, 데이터 /tmp/pgqa) + `npm run e2e:live` 4/4 통과. 검증자 분리 서브에이전트는 이 환경에서 쓸 수 없어 QA가 직접 화면만 보고 판정. 판정: P0·P1·P2 없음.
