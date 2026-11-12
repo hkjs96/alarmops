@@ -6,7 +6,9 @@
     "validate": "node scripts/check.mjs",
     "test": "node scripts/check.mjs",
     "migrate:diff": "node scripts/migrate-diff-offline.mjs prisma/schema.prisma",
-    "seed": "tsx prisma/seed.ts"
+    "seed": "tsx prisma/seed.ts",
+    "check:rls": "node scripts/check-rls.mjs",
+    "test:db": "node scripts/check-rls.mjs && node --test scripts/test-rls.mjs"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

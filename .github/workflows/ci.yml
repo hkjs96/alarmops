@@ -168,9 +168,13 @@ jobs:
       - name: Prisma generate
         run: npx prisma generate
         working-directory: db
+      - name: Create Supabase-like roles anon / authenticated (so the migrations' guarded REVOKE runs)
+        run: docker exec "${{ job.services.postgres.id }}" psql -U postgres -d alarmops -v ON_ERROR_STOP=1 -c "CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN; GRANT ALL ON SCHEMA public TO anon, authenticated; ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon, authenticated;"
       - name: Apply migrations (prisma migrate deploy)
         run: npx prisma migrate deploy
         working-directory: db
+      - name: Every public table has RLS on, not forced, no policies (D-40)
+        run: npm run check:rls -w @alarmops/db
       - name: Create shadow database
         run: docker exec "${{ job.services.postgres.id }}" createdb -U postgres alarmops_shadow
       - name: Migrations match schema.prisma (prisma migrate diff)
