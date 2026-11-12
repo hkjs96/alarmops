@@ -14,7 +14,9 @@ import type {
   AuditInput, GroupDeliveryCommit, GroupMember, HeartbeatRow, HeartbeatWrite, IncidentCommit, IncidentEventInput, ResolutionInput, TickRepository,
 } from './tick.js';
 
-export interface OrgCustomer { id: string; name: string; slug: string }
+/** `status` (D-42): absent = ACTIVE. Only the session lookup reads it; ingest and the tick do not. */
+export type CustomerStatus = 'ACTIVE' | 'SUSPENDED' | 'TERMINATED';
+export interface OrgCustomer { id: string; name: string; slug: string; status?: CustomerStatus }
 export interface OrgProject { id: string; customerId: string; name: string; slug: string }
 export interface OrgService { id: string; customerId: string; projectId: string; name: string; slug: string }
 export interface OrgAccount { awsAccountId: string; customerId: string; serviceId: string | null }

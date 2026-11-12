@@ -29,6 +29,14 @@ enum UserStatus {
   DISABLED
 }
 
+/// D-42: a customer that is not ACTIVE keeps its data, but its portal users cannot sign in (sessionPrincipal → 401).
+/// SUSPENDED = paused (e.g. billing), may come back. TERMINATED = contract ended. MSP staff are unaffected.
+enum CustomerStatus {
+  ACTIVE
+  SUSPENDED
+  TERMINATED
+}
+
 enum ContactKind {
   INTERNAL
   CUSTOMER
@@ -553,6 +561,8 @@ model Customer {
   /// D-33 slug: `^[a-z0-9][a-z0-9-]{0,63}$` (CHECK in raw SQL), unique across the MSP. Reserved words are checked in the service layer.
   slug                String             @unique
   isInternal          Boolean            @default(false)
+  /// D-42: only ACTIVE customers' portal users get a session. Ingest does not look at it (open question).
+  status              CustomerStatus     @default(ACTIVE)
   loginDomains        String[]           @default([])
   portalGrants        String[]           @default([])
   defaultGroupWaitSec Int?

@@ -29,7 +29,7 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
   async orgTree(scope: ScopeFilter) {
     const svcProject = (id: string) => this.services.get(id)?.projectId;
     return {
-      customers: [...this.customers.values()].filter((c) => seesCustomer(scope, c.id)).map((c) => ({ ...c })),
+      customers: [...this.customers.values()].filter((c) => seesCustomer(scope, c.id)).map((c) => ({ id: c.id, name: c.name, slug: c.slug })),
       projects: [...this.projects.values()].filter((p) => nodeVisible(scope, { customerId: p.customerId, projectId: p.id }, svcProject)).map((p) => ({ ...p })),
       services: [...this.services.values()].filter((s) => nodeVisible(scope, { customerId: s.customerId, projectId: s.projectId, serviceId: s.id }, svcProject)).map((s) => ({ ...s })),
     };
@@ -215,6 +215,11 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     if (!u || (u.status ?? 'ACTIVE') !== 'ACTIVE') return null;
     const contact = u.contactId ? this.contacts.get(u.contactId) : undefined;
     const customerId = u.customerId !== undefined ? u.customerId : contact?.kind === 'CUSTOMER' ? contact.customerId : null;
+    // D-42: a portal user of a customer that is not ACTIVE (or that does not exist) has no session. Staff are unaffected.
+    if (customerId) {
+      const cust = this.customers.get(customerId);
+      if (!cust || (cust.status ?? 'ACTIVE') !== 'ACTIVE') return null;
+    }
     const subScopes = customerId && u.contactId ? this.contactScopes.filter((s) => s.contactId === u.contactId && s.role === 'PORTAL_USER' && s.scopeType !== 'CUSTOMER')
       .map((s) => (s.scopeType === 'PROJECT' ? { customerId, projectId: s.scopeId } : { customerId, projectId: this.services.get(s.scopeId)?.projectId, serviceId: s.scopeId }))
       .map((x) => (x.projectId === undefined ? { customerId: x.customerId, serviceId: (x as { serviceId: string }).serviceId } : x)) : [];

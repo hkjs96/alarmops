@@ -80,7 +80,7 @@ export async function sqlFixture(db: TestDb, seed: MemoryTickStore): Promise<Sql
      VALUES ('global', $1, $2, $3, $4, $5, $6::jsonb, $7, $8, now())`,
     [p.repeatIntervalSec, p.flappingPerDay, p.flappingWindowDays, p.flappingQuarantineSec, p.groupWaitSec, js(p.autoPauseSec), p.renotifyAfterSec, p.incidentMergeMaxSec]);
   let order = 0;
-  for (const c of seed.customers.values()) await q(`INSERT INTO "Customer"("id", "name", "slug", "createdAt", "updatedAt") VALUES ($1, $2, $3, now() + make_interval(secs => $4), now())`, [c.id, c.name, c.slug, order++]);
+  for (const c of seed.customers.values()) await q(`INSERT INTO "Customer"("id", "name", "slug", "status", "createdAt", "updatedAt") VALUES ($1, $2, $3, $4::"CustomerStatus", now() + make_interval(secs => $5), now())`, [c.id, c.name, c.slug, c.status ?? 'ACTIVE', order++]);
   for (const x of seed.projects.values()) await q(`INSERT INTO "Project"("id", "customerId", "name", "slug") VALUES ($1, $2, $3, $4)`, [x.id, x.customerId, x.name, x.slug]);
   for (const x of seed.services.values()) await q(`INSERT INTO "Service"("id", "customerId", "projectId", "name", "slug") VALUES ($1, $2, $3, $4, $5)`, [x.id, x.customerId, x.projectId, x.name, x.slug]);
   const accountRow = async (id: string, customerId: string, serviceId: string | null, awsAccountId: string): Promise<void> => {

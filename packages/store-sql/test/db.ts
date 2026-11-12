@@ -3,14 +3,19 @@
  * - default: PGlite (Postgres as WASM, in-process, nothing to install);
  * - TEST_DATABASE_URL set: that server (CI: a postgres:16 service; later a Supabase branch). Every test file works in
  *   its own schema, created from the real migration and dropped at the end.
- * Either way the schema is `db/prisma/migrations/0001_init/migration.sql` — the file `prisma migrate deploy` applies.
+ * Either way the schema is every `db/prisma/migrations/<name>/migration.sql` in name order — what `prisma migrate deploy` applies.
  */
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import pg from 'pg';
 import { pgClient, pgliteClient, type SqlClient } from '../src/index.js';
 
+/** `0001_init` alone: the hand-written constraints that tests look for in the text live there. */
 export const MIGRATION = readFileSync(new URL('../../../db/prisma/migrations/0001_init/migration.sql', import.meta.url), 'utf8');
+const MIGRATIONS_DIR = new URL('../../../db/prisma/migrations/', import.meta.url);
+/** Every migration in name order (0001_init, 0002_rls, 0003_customer_status, …): what the test schemas are built from. */
+export const ALL_MIGRATIONS: string[] = readdirSync(MIGRATIONS_DIR, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name).sort()
+  .map((m) => readFileSync(new URL(`${m}/migration.sql`, MIGRATIONS_DIR), 'utf8'));
 export const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL || '';
 export const TEST_PG_POOLER: 'direct' | 'transaction' = process.env.TEST_PG_POOLER === 'transaction' ? 'transaction' : 'direct';
 
@@ -41,7 +46,7 @@ export async function openTestDb(): Promise<TestDb> {
       }
       await admin.query(`CREATE SCHEMA "${schema}"`);
       await admin.query(`SET search_path = "${schema}", public`);
-      await admin.query(MIGRATION);
+      for (const m of ALL_MIGRATIONS) await admin.query(m);
     } finally {
       await admin.end();
     }
@@ -63,7 +68,7 @@ export async function openTestDb(): Promise<TestDb> {
   const { PGlite } = await import('@electric-sql/pglite');
   const { citext } = await import('@electric-sql/pglite/contrib/citext');
   const db = new PGlite({ extensions: { citext } });
-  await db.exec(MIGRATION);
+  for (const m of ALL_MIGRATIONS) await db.exec(m);
   const client = pgliteClient(db as never);
   const tables = await tablesOf(client, 'public');
   return {
