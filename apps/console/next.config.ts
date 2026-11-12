@@ -39,6 +39,8 @@ export function securityHeaders(production: boolean): { key: string; value: stri
 }
 
 const config: NextConfig = {
+  // the live e2e runs `next dev` next to a production build: it gets its own output folder
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   // The API, its store and the core run inside this app (D-09). They are TypeScript sources with `.js` import
   // specifiers (NodeNext style); webpack is told to try `.ts` for them.
   transpilePackages: ["@alarmops/design-system", "@alarmops/api", "@alarmops/core", "@alarmops/store-sql"],

@@ -96,6 +96,43 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # The real stack: console (MOCK_API unset) + packages/api + store-sql on a postgres:16 service, seeded by the db seed.
+  # apps/console/playwright.live.config.ts creates a fresh database from the migrations and starts `next dev`
+  # (the live dev sign-in exists only outside production).
+  e2e-live:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      # Throwaway server inside this job only. Not a secret.
+      LIVE_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Install Chromium
+        working-directory: apps/console
+        run: npx playwright install --with-deps chromium
+      - name: End-to-end tests (live API + Postgres)
+        working-directory: apps/console
+        run: npx playwright test -c playwright.live.config.ts --reporter=list
+
   db:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
