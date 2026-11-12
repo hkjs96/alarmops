@@ -11,6 +11,8 @@ export interface AuthContext {
   userId: string;
   /** Display name for timeline/audit wording. */
   name?: string;
+  /** Sign-in email, when the adapter resolved the session from the store (authFromPrincipal). Shown by GET /me only. */
+  email?: string;
   /** INTERNAL = MSP staff, CUSTOMER = portal user of a customer. */
   kind: 'INTERNAL' | 'CUSTOMER';
   /**
@@ -170,12 +172,14 @@ export function normalizeAuth(a: unknown): AuthContext | null {
   const userId = own(a, 'userId');
   const kind = own(a, 'kind');
   const name = own(a, 'name');
+  const email = own(a, 'email');
   const rawIds = own(a, 'customerIds');
   const rawSubs = own(a, 'subScopes');
   const role = own(a, 'role');
   if (!isStr(userId)) return null;
   if (kind !== 'INTERNAL' && kind !== 'CUSTOMER') return null;
   if (name !== undefined && typeof name !== 'string') return null;
+  if (email !== undefined && typeof email !== 'string') return null;
   let customerIds: readonly string[] | '*';
   if (rawIds === '*') customerIds = '*';
   else {
@@ -201,6 +205,7 @@ export function normalizeAuth(a: unknown): AuthContext | null {
   return nullProto({
     userId, kind, customerIds,
     ...(typeof name === 'string' ? { name } : {}),
+    ...(typeof email === 'string' ? { email } : {}),
     ...(typeof role === 'string' && (ROLES as readonly string[]).includes(role) ? { role: role as Role } : {}),
     ...(subScopes ? { subScopes } : {}),
   }) as AuthContext;

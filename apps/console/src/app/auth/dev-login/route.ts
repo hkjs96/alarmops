@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { liveDevLogin, mockMode } from "@/lib/mode";
 import { authForSession } from "@/lib/server/backend";
 import { safeNextPath } from "@/lib/safe-next";
+import { LOGIN_ENDED } from "@/lib/auth/ended-flags";
 import { DEV_USER, DEV_USERS, LIVE_DEV_USERS, SESSION_COOKIE, SESSION_TTL_S, sessionSecret, signSession } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
@@ -25,7 +26,9 @@ export async function GET(req: NextRequest) {
     // the seeded users of db/prisma/seed.ts; the user must exist and be ACTIVE in the database
     const id = (Object.hasOwn(LIVE_DEV_USERS, as) ? LIVE_DEV_USERS[as] : undefined) ?? LIVE_DEV_USERS.admin!;
     const auth = await authForSession(id);
-    if (!auth) return new NextResponse("Not found", { status: 404 });
+    // dev login is on but the store refuses this user (suspended customer, disabled user): back to /login with the
+    // calm "you were signed out" notice, not a bare 404. Dev login off stays 404 above.
+    if (!auth) return new NextResponse(null, { status: 303, headers: { Location: LOGIN_ENDED, "Cache-Control": "no-store" } });
     user = { sub: id, email: "", name: auth.name ?? id };
   }
   const token = await signSession({ ...user, exp: Math.floor(Date.now() / 1000) + SESSION_TTL_S }, secret);

@@ -213,17 +213,24 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
   async sessionPrincipal(userId: string): Promise<Principal | null> {
     const u = this.users.get(userId);
     if (!u || (u.status ?? 'ACTIVE') !== 'ACTIVE') return null;
+    // Mirror the SQL store (LEFT JOIN "Contact" c ON c."userId" = u."id"): the contact is the one linked to THIS user
+    // and must exist — a dangling User.contactId is no contact (contactId null, no sub-scopes), not a half link.
+    // (Memory contacts carry no userId: User.contactId is the link here, the same one-to-one link.)
     const contact = u.contactId ? this.contacts.get(u.contactId) : undefined;
-    const customerId = u.customerId !== undefined ? u.customerId : contact?.kind === 'CUSTOMER' ? contact.customerId : null;
+    const contactId = contact?.id ?? null;
+    const customerId = u.customerId ?? null;
+    // Fail closed (same as the SQL store): a CUSTOMER contact's user must be bound to that very customer. The
+    // customer is never filled in from the contact — a missing or different User.customerId is no session at all.
+    if (contact?.kind === 'CUSTOMER' && contact.customerId !== customerId) return null;
     // D-42: a portal user of a customer that is not ACTIVE (or that does not exist) has no session. Staff are unaffected.
     if (customerId) {
       const cust = this.customers.get(customerId);
       if (!cust || (cust.status ?? 'ACTIVE') !== 'ACTIVE') return null;
     }
-    const subScopes = customerId && u.contactId ? this.contactScopes.filter((s) => s.contactId === u.contactId && s.role === 'PORTAL_USER' && s.scopeType !== 'CUSTOMER')
+    const subScopes = customerId && contactId ? this.contactScopes.filter((s) => s.contactId === contactId && s.role === 'PORTAL_USER' && s.scopeType !== 'CUSTOMER')
       .map((s) => (s.scopeType === 'PROJECT' ? { customerId, projectId: s.scopeId } : { customerId, projectId: this.services.get(s.scopeId)?.projectId, serviceId: s.scopeId }))
       .map((x) => (x.projectId === undefined ? { customerId: x.customerId, serviceId: (x as { serviceId: string }).serviceId } : x)) : [];
-    return { userId: u.id, email: u.email ?? `${u.id}@example.test`, name: u.name, customerId: customerId ?? null, role: u.role ?? (customerId ? 'VIEWER' : 'OPERATOR'), contactId: u.contactId, subScopes };
+    return { userId: u.id, email: u.email ?? `${u.id}@example.test`, name: u.name, customerId: customerId ?? null, role: u.role ?? (customerId ? 'VIEWER' : 'OPERATOR'), contactId, subScopes };
   }
   async respondersState(customerId: string): Promise<RespondersState> {
     const name = (t: string, id: string) => (t === 'CUSTOMER' ? this.customers.get(id)?.name : t === 'PROJECT' ? this.projects.get(id)?.name : this.services.get(id)?.name) ?? id;

@@ -890,3 +890,25 @@
 | 2026-11-12 | 사소한 문구 | b60f372 | 준호 | Responders 1명일 때 "is these 1" 단수 처리 없음 | P3 | — |
 
 live 모드: 로컬 Postgres(/opt/pglocal, nobody, 데이터 /tmp/pgqa) + `npm run e2e:live` 4/4 통과. 검증자 분리 서브에이전트는 이 환경에서 쓸 수 없어 QA가 직접 화면만 보고 판정. 판정: P0·P1·P2 없음.
+
+### 2026-11-12 fix/principal-logs — 고객 SUSPENDED 시 포털 세션 종료 (live, 범위: 로그인·세션)
+
+| 날짜 | 시나리오 | 버전(커밋) | 페르소나 | 측정값 | 판정 | 캡처 |
+|---|---|---|---|---|---|---|
+| 2026-11-12 | 포털 사용자 로그인 뒤 고객 SUSPENDED, 새로고침 | 43ebeb9 | 고객 포털 사용자 (1440 라이트, 390 다크) | 두 폭 모두 307 /incidents → 303 /auth/ended → 200 /login, 오류 화면·반복 없음, ao_session 쿠키 삭제됨, 390 가로 스크롤 없음 | 통과 | `docs/qa/shots/2026-11-12-portal-suspend/portal-active-*.png`, `docs/qa/shots/2026-11-12-portal-suspend/portal-suspended-reload-*.png` |
+| 2026-11-12 | 다시 ACTIVE로 바꾼 뒤 로그인 | 43ebeb9 | 고객 포털 사용자 (1440, 390) | /login → a viewer 링크 → /incidents, 쿠키 다시 발급, 자기 고객(Acme Demo)만 보임 | 통과 | `docs/qa/shots/2026-11-12-portal-suspend/portal-reactivated-*.png` |
+| 2026-11-12 | 고객 SUSPENDED 동안 직원(Admin) | 43ebeb9 | 준호 (1440, 390) | 로그인·새로고침·/c/acme-demo/call-order 모두 200, 정지된 고객 데이터도 그대로 보임 | 통과 | `docs/qa/shots/2026-11-12-portal-suspend/staff-suspended-*.png` |
+| 2026-11-12 | 유효한 세션으로 /auth/ended 방문 | 43ebeb9 | 준호 (1440, 390) | 303 → /incidents, 쿠키 유지, 새로고침해도 로그인 유지. 로그아웃 상태 /auth/ended → /login | 통과 | `docs/qa/shots/2026-11-12-portal-suspend/staff-auth-ended-*.png` |
+| 2026-11-12 | 정지된 고객의 포털 사용자가 다시 로그인 시도 (dev 로그인) | 43ebeb9 | 고객 포털 사용자 (1440, 390) | /auth/dev-login?as=viewer → 404, 스타일 없는 평문 "Not found"만 보이고 다시 로그인으로 갈 길이 없음. dev 전용 경로라 실제 운영 SSO 경로에서 어떻게 보일지는 확인 못 함(SSO 미연결) | P2 | `docs/qa/shots/2026-11-12-portal-suspend/portal-suspended-signin-*.png` |
+| 2026-11-12 | 세션 종료 이유 안내 | 43ebeb9 | 고객 포털 사용자 | 정지 뒤 /login이 아무 안내 없이 일반 로그인 화면이라, 사용자는 왜 로그아웃됐는지 모르고 다시 로그인을 시도하게 됨("Your account's access is paused — contact your MSP" 같은 문구 없음) | P2 | `docs/qa/shots/2026-11-12-portal-suspend/portal-suspended-reload-390-dark.png` |
+
+live 모드: 로컬 Postgres(/opt/pglocal, nobody, 데이터 /tmp/pgqa3) + `e2e-live/prepare.mjs` 시드 + `next dev`(LIVE_DEV_LOGIN=1). 시드에 포털 사용자가 없어 SQL로 usr_dev_viewer를 CUSTOMER Contact ct_acme_jisu(cus_acme)에 연결하고 User.customerId=cus_acme로 바꿈. 스크립트 `docs/qa/shoot-portal-suspend.mjs`. 검증자 분리 서브에이전트는 이 환경에서 쓸 수 없어 QA가 화면과 이동 기록만 보고 판정. 판정: P0·P1 없음, P2 2건.
+
+### 2026-11-12 세션 종료 안내 두 화면 (fix/principal-logs @ 93ab48f, mock)
+
+| 날짜 | 시나리오 | 버전(커밋) | 페르소나 | 측정값 | 판정 | 캡처 |
+|---|---|---|---|---|---|---|
+| 2026-11-12 | 로그아웃 상태 /login?ended=1 안내 문구 | 93ab48f | 고객 포털 사용자 (1440 라이트, 390 다크) | 상자 하나에 "You were signed out. If you can't sign back in, contact your administrator." 한 줄 안내. 그냥 /login에는 안내 없음. 가로 스크롤 없음. 본문 대비 충분(라이트 #1b1a17/#fbfaf7, 다크 #eeeae1/#12110f). 앞서 기록한 P2(세션 종료 이유 안내 없음) 해소 | 통과 | `docs/qa/shots/2026-11-12-session-ended-notice/login-{ended,plain}-*.png` |
+| 2026-11-12 | 유효한 세션으로 /auth/ended?from=layout 방문 | 93ab48f | 준호 (1440 라이트, 390 다크) | 200 한 번(리다이렉트 반복 없음), 꾸밈 없는 화면 "Something went wrong — try again / The console could not load your account just now.", Try again 링크 98×44, Sign out 버튼 92×44, 가로 스크롤 없음, 다크에서도 읽힘(Sign out 흰 글자/#6b6b6b 약 5.3:1). Try again → /incidents 200, 세션 유지. Sign out → 303 /auth/sign-out → /login?signedOut=1, 쿠키 삭제, 이후 /incidents → /login?next=%2Fincidents | 통과 | `docs/qa/shots/2026-11-12-session-ended-notice/ended-layout{,-tryagain,-signout}-*.png` |
+
+mock 모드(`MOCK_API=1 next dev -p 3107`), 스크립트 `docs/qa/shoot-ended-notice.mjs`. live 모드(정지 고객 포털 사용자 → /login?ended=1, dev-login 재시도)는 이번에 하지 않음. 검증자 분리 서브에이전트는 이 환경에서 쓸 수 없어 QA가 화면과 이동 기록만 보고 판정. 범위 밖 참고: /login의 mock 전용 dev 로그인 링크는 높이 14px(dev 전용이라 판정에서 뺌). 판정: P0·P1·P2 없음.

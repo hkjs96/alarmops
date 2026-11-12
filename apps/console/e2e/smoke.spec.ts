@@ -53,6 +53,36 @@ test("no horizontal scroll at 390px", async ({ page }) => {
   }
 });
 
+test("/login?ended=1: the signed-out notice, no horizontal scroll at 390px, light and dark", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  for (const scheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await page.goto("/login?ended=1");
+    await expect(page.getByTestId("login-ended")).toHaveText("You were signed out. If you can't sign back in, contact your administrator.");
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(overflow, scheme).toBeLessThanOrEqual(0);
+  }
+  await page.goto("/login");
+  await expect(page.getByTestId("login-ended")).toHaveCount(0);
+});
+
+test("/auth/ended?from=layout with a live session: a plain page, no redirect loop, 44px controls at 390px", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await signIn(page);
+  const res = await page.goto("/auth/ended?from=layout");
+  expect(res?.status()).toBe(200);
+  await expect(page).toHaveURL(/\/auth\/ended\?from=layout$/);
+  await expect(page.locator("h1")).toHaveText("Something went wrong — try again");
+  for (const el of [page.getByRole("link", { name: "Try again" }), page.getByRole("button", { name: "Sign out" })]) {
+    const box = await el.boundingBox();
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+  }
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await expect(page).toHaveURL(/\/login/);
+});
+
 test("unknown incident shows Not found", async ({ page }) => {
   await signIn(page, "/incidents/does-not-exist");
   await expect(page.getByRole("heading", { name: "Not found" })).toBeVisible();

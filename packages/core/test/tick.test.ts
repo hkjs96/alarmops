@@ -74,7 +74,7 @@ describe('tick: groups → incidents', () => {
     const gid = closedGroup(sim.store, { customerId: 'cus_mirae', at: T0, alerts: [{ id: 'al_1' }] });
     sim.store.failGroups.add(gid);
     const r1 = await sim.tick();
-    expect(r1.errors).toEqual([{ phase: 'group', id: gid, message: expect.stringContaining('simulated failure') }]);
+    expect(r1.errors).toEqual([{ phase: 'group', id: gid, message: 'Error' }]); // the error's tag, never its raw message
     expect(sim.store.incidents.size).toBe(0);
     sim.store.failGroups.clear();
     sim.now = at(1);
@@ -265,7 +265,7 @@ describe('tick: idempotency, skipped minutes, bounds, isolation', () => {
     sim.store.failIncidents.add(mirae!.id);
     sim.now = at(5);
     const r = await sim.tick();
-    expect(r.errors).toEqual([{ phase: 'escalation', id: mirae!.id, message: expect.stringContaining('simulated failure') }]);
+    expect(r.errors).toEqual([{ phase: 'escalation', id: mirae!.id, message: 'Error' }]); // the error's tag, never its raw message
     expect(r.escalation).toMatchObject({ checked: 2, escalated: 1 });
     expect(sim.voice.sent.filter((m) => m.incidentId === hanbit!.id)).toHaveLength(4);
     const hb = await sim.store.readHeartbeats();

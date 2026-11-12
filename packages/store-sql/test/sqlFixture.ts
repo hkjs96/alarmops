@@ -129,8 +129,8 @@ export async function sqlFixture(db: TestDb, seed: MemoryTickStore): Promise<Sql
   for (const [gid, g] of seed.groups) await addGroup(g, seed.members.get(gid) ?? []);
   // API-side seed (MemoryApiStore)
   for (const u of api.users?.values() ?? []) {
-    const contact = u.contactId ? seed.contacts.get(u.contactId) : undefined;
-    const customerId = u.customerId !== undefined ? u.customerId : contact?.kind === 'CUSTOMER' ? contact.customerId : null;
+    // as stored: never derived from the contact (sessionPrincipal fails closed on a mismatch, memory and SQL alike)
+    const customerId = u.customerId ?? null;
     await q(`INSERT INTO "User"("id", "email", "name", "status", "customerId", "role", "updatedAt") VALUES ($1, $2, $3, $4::"UserStatus", $5, $6::"ConsoleRole", now())`,
       [u.id, u.email ?? `${u.id}@example.test`, u.name, u.status ?? 'ACTIVE', customerId, u.role ?? (customerId ? 'VIEWER' : 'OPERATOR')]);
     if (u.contactId) await q(`UPDATE "Contact" SET "userId" = $1 WHERE "id" = $2`, [u.id, u.contactId]);
