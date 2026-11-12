@@ -133,7 +133,7 @@ async function buildConfig(body: unknown, base: Pick<PagingConfig, 'id' | 'custo
   return { ...base, style: st, plan: pl, edited, repeatCount: repeat as number, version: 0, steps: built };
 }
 
-async function visibleCustomer(deps: Deps, auth: AuthContext, customerId: string, level: 'CUSTOMER' | 'BELOW' = 'BELOW') {
+export async function visibleCustomer(deps: Deps, auth: AuthContext, customerId: string, level: 'CUSTOMER' | 'BELOW' = 'BELOW') {
   const scope = scopeOf(auth);
   const tree = await deps.repo.orgTree(scope);
   const customer = tree.customers.find((c) => c.id === customerId);
@@ -223,6 +223,14 @@ export async function deletePagingOverride(req: ApiRequest, deps: Deps, customer
   return ok({ deleted: true });
 }
 
+/** One resolved step as GET /oncall/paging-path and GET /oncall/now write it: who it names and who it reaches now. */
+export function pathStepOut(s: NonNullable<ReturnType<typeof pagingPath>>['steps'][number], world: PagingWorld) {
+  const person = s.targetType === 'PERSON' && s.targetId ? world.contacts.get(s.targetId) : undefined;
+  const targetName = s.targetType === 'ROTATION' ? world.rotations.get(s.targetId ?? '')?.name : person?.name;
+  return { atMin: s.atMin, targetType: s.targetType, ...(s.targetId ? { targetId: s.targetId } : {}), nowIds: s.nowIds, names: s.names, channels: s.channels,
+    ...(targetName ? { targetName } : {}), ...(person ? { targetIsCustomerPerson: person.kind === 'CUSTOMER' } : {}) };
+}
+
 /**
  * GET /oncall/paging-path — "Who gets paged for…". Asked by `serviceId` / `resourceId` / `q` (contract) or by
  * `projectId` / `customerId` / slugs `customer[&project[&service]]` (PROPOSED: the console panel asks by scope).
@@ -299,12 +307,7 @@ export async function getPagingPath(req: ApiRequest, deps: Deps): Promise<ApiRes
   return ok({
     ...base, inheritedFrom: from, own: hit.inheritedFrom === asked, style: p.style, plan: p.plan, edited: p.edited, pagingConfigId: p.pagingConfigId, version: p.version,
     ...(p.style === 'SHARED_ROTATION' && first?.targetType === 'ROTATION' && first.targetId ? { sharedRotationId: first.targetId } : {}),
-    steps: p.steps.map((s) => {
-      const person = s.targetType === 'PERSON' && s.targetId ? world.contacts.get(s.targetId) : undefined;
-      const targetName = s.targetType === 'ROTATION' ? world.rotations.get(s.targetId ?? '')?.name : person?.name;
-      return { atMin: s.atMin, targetType: s.targetType, ...(s.targetId ? { targetId: s.targetId } : {}), nowIds: s.nowIds, names: s.names, channels: s.channels,
-        ...(targetName ? { targetName } : {}), ...(person ? { targetIsCustomerPerson: person.kind === 'CUSTOMER' } : {}) };
-    }),
+    steps: p.steps.map((s) => pathStepOut(s, world)),
     repeatCount: p.repeatCount, stopAtMin: p.stopAtMin, sentence: p.sentence,
     ...(p.steps.every((s) => s.nowIds.length === 0 && !s.channels.includes('SLACK_CHANNEL')) ? { warning: 'NOBODY_REACHABLE' } : {}),
   });

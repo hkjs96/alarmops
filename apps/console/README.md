@@ -35,3 +35,14 @@
 - **Sign-out reaches the other tabs**: `signOutNow` posts on `BroadcastChannel("ao-auth")` and stamps `localStorage["ao-signed-out"]` (a time, nothing else); other tabs remove their `ao-…` sessionStorage keys and show the same state.
 - **Save and sign out**: the confirmation of a wide save says sign-out follows; cancelling it says "Not signed out"; pressed while a save is on its way, it follows that save (one request) and says so.
 - **Sign-out origin check** compares scheme + host + port. The scheme is the one Next reports (`X-Forwarded-Proto` when a load balancer sets it, the connection otherwise). **`CONSOLE_ORIGIN`** (e.g. `https://console.example.com`), when set, is the only origin accepted — the strict setting for production.
+
+## Live mode: the API inside the console (11/12, D-09)
+
+- `MOCK_API` unset → `/api/v1/*` is `packages/api` on `packages/store-sql` (`DATABASE_URL`, `DATABASE_POOLER=transaction` behind Supavisor/PgBouncer). The pages call the same handler in-process (`lib/server/backend.ts`); the AuthContext is built on the server from the session's user (`User.status = ACTIVE`, role and customer from the row).
+- `POST /api/internal/tick` — `Authorization: Bearer $TICK_SECRET` (≥ 32 chars, constant time, 503 when unset). pg_cron + pg_net call it every minute (SQL in docs/API-CONTRACT.md §5).
+- Dev sign-in against the real API: `LIVE_DEV_LOGIN=1` + `SESSION_SECRET` with `next dev` only (never under NODE_ENV=production): `/auth/dev-login?as=admin|operator|viewer` signs in as the users of `db/prisma/seed.ts`.
+
+### Live e2e (`npm run e2e:live -w @alarmops/console`)
+
+`LIVE_DATABASE_URL` = admin URL of a LOCAL Postgres (≥ 15). `e2e-live/prepare.mjs` drops and creates `alarmops_live`, applies every migration and runs the db seed, then `next dev` starts on 3117 (`.next-live/`). Without `LIVE_DATABASE_URL` the tests are skipped with that reason. CI: job `e2e-live` on a `postgres:16` service. Locally without Docker, e.g. the Postgres binaries in `/opt/pglocal` (run as a non-root user):
+`initdb -D /tmp/pg/data -U postgres --auth=trust && pg_ctl -D /tmp/pg/data -o "-p 55432 -k /tmp/pg" start`, then `LIVE_DATABASE_URL=postgresql://postgres@localhost:55432/postgres`.

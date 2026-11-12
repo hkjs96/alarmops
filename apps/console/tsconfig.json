@@ -17,6 +17,6 @@
     "paths": { "@/*": ["./src/*"] },
     "types": ["vitest/globals", "@testing-library/jest-dom"]
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules", "e2e", "playwright.config.ts"]
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts", ".next-live/types/**/*.ts"],
+  "exclude": ["node_modules", "e2e", "e2e-live", "playwright.config.ts", "playwright.live.config.ts"]
 }

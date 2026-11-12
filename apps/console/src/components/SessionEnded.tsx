@@ -49,7 +49,7 @@ export function SessionEnded() {
         <div id="sess-b" className="dguard-b">
           {why === "signed-out"
             ? "This tab is signed out with it. The drafts kept in this tab were removed, as signing out does."
-            : "What you just pressed was not applied, and nothing else was changed. A draft you were writing is kept in this tab: sign in as the same person and it is offered again."}
+            : `What you just pressed was not applied, and nothing else was changed.${/\/incidents?(\/|$)|\/incident\//.test(window.location.pathname) ? " Paging goes on as before: an incident you acknowledged here was not acknowledged, so its people are still being called." : ""} A draft you were writing is kept in this tab: sign in as the same person and it is offered again.`}
         </div>
         <div className="dguard-acts">
           <a ref={link} className="btn pri" data-guard-pass="" data-testid="session-sign-in" href={signInHref(window.location)}>Sign in</a>

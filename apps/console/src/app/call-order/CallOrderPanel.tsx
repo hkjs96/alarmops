@@ -68,6 +68,8 @@ export function CallOrderPanel({ data, listHref, listQuery }: { data: PanelData;
    * the list and a panel opened again are read from the server as it is.
    */
   const [respEditing, setRespEditing] = useState(false);
+  /** P3-J: Responders got 409 / 404 — what the live line knows is from before someone else's change */
+  const [respConflict, setRespConflict] = useState(false);
   const latest = useRef(data);
   latest.current = data;
   const held = useRef<PanelData | null>(null);
@@ -392,8 +394,8 @@ export function CallOrderPanel({ data, listHref, listQuery }: { data: PanelData;
             {isHeld ? (
               <div className="co-held-h">
                 <div className="co-held-l" data-testid="co-held-label"><Mark shape="tri" />Before your changes — updates when you press Done</div>
-                <div className={cx("co-resp-live co-held-now", nowTone)} data-testid="co-held-now">
-                  <span className="co-resp-live-t" role="status">{nowLine}</span>
+                <div className={cx("co-resp-live co-held-now", respConflict ? "warn" : nowTone)} data-testid="co-held-now">
+                  <span className="co-resp-live-t" role="status">{respConflict ? <><b>Changed — reload.</b> Someone else changed the Responders; who is paged now shows after Reload</> : nowLine}</span>
                 </div>
               </div>
             ) : null}
@@ -477,7 +479,7 @@ export function CallOrderPanel({ data, listHref, listQuery }: { data: PanelData;
               ) : null}
 
               <section aria-labelledby="co-now">
-                <div className="ov co-h" id="co-now">If something breaks now{editing ? <span className="co-live"> · updates as you type</span> : null}</div>
+                <div className="ov co-h" id="co-now">{isHeld ? "Before your changes: if something broke" : "If something breaks now"}{editing ? <span className="co-live"> · updates as you type</span> : null}</div>
                 <Sentence parts={sentence} live={editing} />
                 {editing ? (
                   <div className="co-issues" role="alert" data-testid="co-issues">
@@ -552,7 +554,7 @@ export function CallOrderPanel({ data, listHref, listQuery }: { data: PanelData;
 
           <RespondersCard customer={scope.customer} customerName={names.customer} services={node ? node.projects.reduce((n, p) => n + p.services.length, 0) : 0}
             responders={data.responders} staff={data.staff} steps={data.path.steps} customerSteps={data.customerSteps} customerRepeat={data.customerRepeat} rotations={data.rotations}
-            health={data.health} blocked={editing ? "Save or cancel the step edit above before changing Responders." : null} onEditingChange={onRespEditing} />
+            health={data.health} blocked={editing ? "Save or cancel the step edit above before changing Responders." : null} onEditingChange={onRespEditing} onConflictChange={setRespConflict} />
 
           {editing && path.own && scope.project && !meta.creating ? (
             <div className="row co-rm">

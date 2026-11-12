@@ -39,7 +39,17 @@ export function securityHeaders(production: boolean): { key: string; value: stri
 }
 
 const config: NextConfig = {
-  transpilePackages: ["@alarmops/design-system"],
+  // the live e2e runs `next dev` next to a production build: it gets its own output folder
+  distDir: process.env.NEXT_DIST_DIR || ".next",
+  // The API, its store and the core run inside this app (D-09). They are TypeScript sources with `.js` import
+  // specifiers (NodeNext style); webpack is told to try `.ts` for them.
+  transpilePackages: ["@alarmops/design-system", "@alarmops/api", "@alarmops/core", "@alarmops/store-sql"],
+  serverExternalPackages: ["pg", "@electric-sql/pglite"],
+  webpack(cfg) {
+    cfg.resolve ??= {};
+    cfg.resolve.extensionAlias = { ...(cfg.resolve.extensionAlias ?? {}), ".js": [".ts", ".tsx", ".js"] };
+    return cfg;
+  },
   reactStrictMode: true,
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders(process.env.NODE_ENV === "production") }];

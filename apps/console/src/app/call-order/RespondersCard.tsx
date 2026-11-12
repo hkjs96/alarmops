@@ -57,7 +57,7 @@ interface Outlook { unreachable: boolean; worse: string[] }
  * problems, "Changed — reload", an error — is below the last row (`co-resp-status`). The panel around this card holds
  * its own text still until Done (CallOrderPanel).
  */
-export function RespondersCard({ customer, customerName, services, responders, staff, steps, customerSteps, customerRepeat, rotations, health: now, blocked, onEditingChange }: {
+export function RespondersCard({ customer, customerName, services, responders, staff, steps, customerSteps, customerRepeat, rotations, health: now, blocked, onEditingChange, onConflictChange }: {
   customer: string; customerName: string;
   /** how reachable the customer is now, as the server worked it out (D-32) */
   health: PagingHealth;
@@ -72,6 +72,8 @@ export function RespondersCard({ customer, customerName, services, responders, s
   /** why Responders cannot be edited right now (the steps are being edited); null when they can */
   blocked: string | null;
   onEditingChange?: (editing: boolean) => void;
+  /** P3-J: the list changed under the user (409 / 404). The panel's live "Now:" line must not keep the old reach. */
+  onConflictChange?: (conflict: boolean) => void;
 }) {
   const shell = useShell();
   const router = useRouter();
@@ -240,6 +242,7 @@ export function RespondersCard({ customer, customerName, services, responders, s
     staffRows.resort(); peopleRows.resort();
   };
   useEffect(() => { onEditingChange?.(on); }, [on, onEditingChange]);
+  useEffect(() => { onConflictChange?.(conflict); }, [conflict, onConflictChange]);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- only when the steps editor takes over
   useEffect(() => { if (blocked && editing) finish(); }, [blocked]);
   // the pressed button is gone (Remove… became a tombstone, Undo became the row): the focus goes to its row, not to the top of the page
@@ -287,7 +290,7 @@ export function RespondersCard({ customer, customerName, services, responders, s
       </div>
       <div className="co-resp-b" ref={listRef}>
         {why ? <p className="sm mut co-resp-n" id="co-resp-why" data-testid="co-resp-why">{why}</p> : null}
-        <p className="sm mut co-resp-n">“Everyone in Responders” is these {pageable}: all MSP staff here plus the Pageable people of {customerName}. Responders belong to the whole customer, whatever level this panel shows.</p>
+        <p className="sm mut co-resp-n">“Everyone in Responders” is {pageable === 1 ? "this 1 person" : `these ${pageable} people`}: all MSP staff here plus the Pageable people of {customerName}. Responders belong to the whole customer, whatever level this panel shows.</p>
         {on ? <p className="sm co-resp-n" data-testid="co-resp-rule">Each change applies at once to all of {customerName}. Rows keep their place: a removed person stays as “Removed · Undo” until you press Done. The summary at the top of this panel is marked “Before your changes” and shows how things are now on one line.</p> : null}
         {/* one line, one height, there for as long as Responders are edited: what it says changes, nothing below it moves */}
         {on ? (

@@ -26,7 +26,7 @@ export interface FxCustomerPaging {
   config: FxStoredConfig | null;
   /** the version the next customer-level config continues from when the steps were deleted and made again */
   configVersion: number;
-  /** version of the Responders list (PROPOSED If-Match on the Responders writes) */
+  /** version of the Responders list (If-Match on the Responders writes) */
   respondersVersion: number;
   /** customer people taken out of Responders, so that putting one back (Undo) restores scope and extras */
   removedPeople: Record<string, FxPerson>;

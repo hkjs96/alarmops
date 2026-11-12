@@ -1,11 +1,17 @@
+import { redirect } from "next/navigation";
 import { isMock } from "@/lib/api";
+import { getSession } from "@/lib/auth";
+import { liveDevLogin } from "@/lib/mode";
 import { safeNextPath } from "@/lib/safe-next";
 
 /** Google SSO placeholder (DECISIONS 이전 원칙 1: app-level Google SSO, no Supabase Auth). Not wired yet. */
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ next?: string }> }) {
   const { next } = await searchParams;
   const mock = isMock();
+  const live = !mock && liveDevLogin();
   const safe = safeNextPath(next, ""); // anything that is not a path on this origin is dropped (security S-3)
+  // QA P3-M: signed in again in another tab, then "Sign in" here — go straight back instead of showing this page once more
+  if (await getSession().catch(() => null)) redirect(safe || "/incidents");
   const devHref = "/auth/dev-login" + (safe ? `?next=${encodeURIComponent(safe)}` : "");
   return (
     <div className="page" style={{ maxWidth: 420, paddingTop: 72 }}>
@@ -23,6 +29,9 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
               <>Mock mode: <a href={devHref}>sign in as Haeun Kim (dev) →</a>{" "}
                 <span className="mut">or as{" "}
                   <a href={devHref + (safe ? "&" : "?") + "as=operator"}>an operator</a> / <a href={devHref + (safe ? "&" : "?") + "as=viewer"}>a viewer</a></span></>
+            ) : live ? (
+              <>Live dev mode: <a href={devHref}>sign in as Demo Admin (dev) →</a>{" "}
+                <span className="mut">or as <a href={devHref + (safe ? "&" : "?") + "as=operator"}>an operator</a> / <a href={devHref + (safe ? "&" : "?") + "as=viewer"}>a viewer</a></span></>
             ) : "Sign-in is unavailable until SSO is configured."}
           </p>
         </div>

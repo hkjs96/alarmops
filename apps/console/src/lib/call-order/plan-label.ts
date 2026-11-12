@@ -29,9 +29,8 @@ export function parsePlanLabel(text: string): PlanRef | null {
 }
 
 /** The label of an incident's frozen call order, in the console's one wording. Unknown wording is shown as the server sent it. */
-export function snapshotPlanLabel(snap: Pick<AssignmentSnapshot, "planLabel" | "style" | "plan" | "edited"> | null | undefined): string | null {
+export function snapshotPlanLabel(snap: Pick<AssignmentSnapshot, "planLabel"> | null | undefined): string | null {
   if (!snap) return null;
-  if (snap.style && snap.plan) return planLabel({ style: snap.style, plan: snap.plan, edited: Boolean(snap.edited) });
   if (!snap.planLabel) return null;
   const p = parsePlanLabel(snap.planLabel);
   return p ? planLabel(p) : snap.planLabel;

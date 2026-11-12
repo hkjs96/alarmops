@@ -2,8 +2,10 @@
 import { describe } from 'vitest';
 import { memoryFixture } from '../../core/test/contract/fixture.js';
 import type { MemoryApiStore } from '../src/index.js';
+import { peopleContract } from './contract/peopleContract.js';
 import { apiContract } from './contract/apiContract.js';
 
 describe('api store contract: memory', () => {
   apiContract(async (seed) => memoryFixture(seed as MemoryApiStore));
+  peopleContract(async (seed) => memoryFixture(seed as MemoryApiStore));
 });

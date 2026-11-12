@@ -80,7 +80,7 @@ export async function sqlFixture(db: TestDb, seed: MemoryTickStore): Promise<Sql
      VALUES ('global', $1, $2, $3, $4, $5, $6::jsonb, $7, $8, now())`,
     [p.repeatIntervalSec, p.flappingPerDay, p.flappingWindowDays, p.flappingQuarantineSec, p.groupWaitSec, js(p.autoPauseSec), p.renotifyAfterSec, p.incidentMergeMaxSec]);
   let order = 0;
-  for (const c of seed.customers.values()) await q(`INSERT INTO "Customer"("id", "name", "slug", "createdAt", "updatedAt") VALUES ($1, $2, $3, now() + make_interval(secs => $4), now())`, [c.id, c.name, c.slug, order++]);
+  for (const c of seed.customers.values()) await q(`INSERT INTO "Customer"("id", "name", "slug", "status", "createdAt", "updatedAt") VALUES ($1, $2, $3, $4::"CustomerStatus", now() + make_interval(secs => $5), now())`, [c.id, c.name, c.slug, c.status ?? 'ACTIVE', order++]);
   for (const x of seed.projects.values()) await q(`INSERT INTO "Project"("id", "customerId", "name", "slug") VALUES ($1, $2, $3, $4)`, [x.id, x.customerId, x.name, x.slug]);
   for (const x of seed.services.values()) await q(`INSERT INTO "Service"("id", "customerId", "projectId", "name", "slug") VALUES ($1, $2, $3, $4, $5)`, [x.id, x.customerId, x.projectId, x.name, x.slug]);
   const accountRow = async (id: string, customerId: string, serviceId: string | null, awsAccountId: string): Promise<void> => {
@@ -129,7 +129,10 @@ export async function sqlFixture(db: TestDb, seed: MemoryTickStore): Promise<Sql
   for (const [gid, g] of seed.groups) await addGroup(g, seed.members.get(gid) ?? []);
   // API-side seed (MemoryApiStore)
   for (const u of api.users?.values() ?? []) {
-    await q(`INSERT INTO "User"("id", "email", "name", "status", "updatedAt") VALUES ($1, $2, $3, 'ACTIVE', now())`, [u.id, `${u.id}@example.test`, u.name]);
+    const contact = u.contactId ? seed.contacts.get(u.contactId) : undefined;
+    const customerId = u.customerId !== undefined ? u.customerId : contact?.kind === 'CUSTOMER' ? contact.customerId : null;
+    await q(`INSERT INTO "User"("id", "email", "name", "status", "customerId", "role", "updatedAt") VALUES ($1, $2, $3, $4::"UserStatus", $5, $6::"ConsoleRole", now())`,
+      [u.id, u.email ?? `${u.id}@example.test`, u.name, u.status ?? 'ACTIVE', customerId, u.role ?? (customerId ? 'VIEWER' : 'OPERATOR')]);
     if (u.contactId) await q(`UPDATE "Contact" SET "userId" = $1 WHERE "id" = $2`, [u.id, u.contactId]);
   }
   for (const [i, s] of (api.contactScopes ?? []).entries()) {

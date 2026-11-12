@@ -1,4 +1,5 @@
-import { apiBaseUrl, mockMode, NotConfiguredError } from "./mode";
+import { mockMode } from "./mode";
+import { databaseConfig } from "./server/db-config";
 import { safeExternalUrl } from "./safe-url";
 import { safeNextPath } from "./safe-next";
 import { assertBulkItems, assertVersion, assertId, assertBulkAction, isId, isSlug, MAX_BULK_IDS } from "./validate";
@@ -50,11 +51,12 @@ describe("C-2 session + token forwarding", () => {
   });
 });
 
-describe("C-3 API_BASE_URL", () => {
-  it("fails closed when missing", () => {
-    expect(() => apiBaseUrl({})).toThrow(NotConfiguredError);
-    expect(() => apiBaseUrl({ API_BASE_URL: " " })).toThrow(NotConfiguredError);
-    expect(apiBaseUrl({ API_BASE_URL: "https://api.x" })).toBe("https://api.x");
+describe("C-3 DATABASE_URL (the API runs inside the console, D-09)", () => {
+  it("is required: no localhost fallback", () => {
+    expect(databaseConfig({})).toBeNull();
+    expect(databaseConfig({ DATABASE_URL: " " })).toBeNull();
+    expect(databaseConfig({ DATABASE_URL: "postgres://x/db" })).toEqual({ url: "postgres://x/db", pooler: "direct", max: 3 });
+    expect(databaseConfig({ DATABASE_URL: "postgres://x/db", DATABASE_POOLER: "transaction", DATABASE_POOL_MAX: "5" })).toEqual({ url: "postgres://x/db", pooler: "transaction", max: 5 });
   });
 });
 
@@ -152,6 +154,8 @@ describe("S-3 next= is a path on this origin, or it is dropped", () => {
     for (const ok of [
       "/incidents", "/incidents?customer=mirae&project=core&status=ACKNOWLEDGED", "/c/mirae/core/payments-api/incident/inc-7f3a0c91b2d4-20261108181204?mine=1",
       "/people?customer=hanbit", "/incidents?q=db%201", "/incidents?q=a%2Fb", "/settings/msp-defaults#x", "/",
+      // QA P3-L: `//` in the query or the hash is text, not a host
+      "/incidents?q=http://x.example/a", "/incidents?next=//evil.example", "/c/mirae/call-order#a//b",
     ]) expect(safeNextPath(ok), ok).toBe(ok);
   });
   it("refuses other hosts, however they are spelled", () => {
@@ -159,7 +163,7 @@ describe("S-3 next= is a path on this origin, or it is dropped", () => {
       "//evil.example", "/\\evil.example", "/\\/evil.example", "\\\\evil.example", "https://evil.example", "http:evil.example", "javascript:alert(1)", "evil.example", "",
       "/%09/evil.example", "/\t/evil.example", "/%0A/evil.example", "/\n/evil.example", "/%0d/evil.example", "/\r/evil.example", "/ /evil.example".replace(" ", "\u0000"),
       "/%2F%2Fevil.example", "/%2f/evil.example", "/%5Cevil.example", "/%5c%5cevil.example", "/%252F%252Fevil.example", "/%25252F%25252Fevil.example", "/%2509/evil.example",
-      "/incidents//evil.example", "/incidents?next=//evil.example", "/x%", "/%E0%A4%A", "/" + "a".repeat(2100), "/%25252525252Fx",
+      "/incidents//evil.example", "/x%", "/%E0%A4%A", "/" + "a".repeat(2100), "/%25252525252Fx",
       5, null, undefined, ["/incidents"],
     ]) expect(safeNextPath(bad), String(bad)).toBe("/incidents");
     expect(safeNextPath("//evil.example", "")).toBe("");

@@ -240,7 +240,6 @@ export function createMockApi(store: Store = createStore(), clock: () => number 
       }
       return { restored, skipped };
     },
-    async oncallNow() { return structuredClone(fx.oncallNow); },
     async scopeTree(): Promise<ScopeTreeResponse> {
       const open = store.incidents.filter(isOpen);
       const n = (f: (i: IncidentListItem) => boolean) => open.filter(f).length;

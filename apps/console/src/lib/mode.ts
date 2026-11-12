@@ -23,9 +23,10 @@ export function mockMode(env: Env = process.env): boolean {
   return true;
 }
 
-/** API base URL; missing → fail closed (no localhost fallback). */
-export function apiBaseUrl(env: Env = process.env): string {
-  const v = env.API_BASE_URL?.trim();
-  if (!v) throw new NotConfiguredError("API_BASE_URL");
-  return v;
+/**
+ * Dev sign-in against the REAL API (live e2e, local runs): only with LIVE_DEV_LOGIN=1, never when
+ * NODE_ENV=production (`next start`, every deployment) and never on Vercel. Fail closed: any other value is off.
+ */
+export function liveDevLogin(env: Env = process.env): boolean {
+  return env.LIVE_DEV_LOGIN === "1" && env.NODE_ENV !== "production" && !env.VERCEL && env.MOCK_API !== "1";
 }

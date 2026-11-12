@@ -11,6 +11,7 @@ import { actOnIncident, bulkIncidents, getIncident, getNotifications, getTimelin
 import { deletePagingOverride, getCustomerPaging, getPagingPath, putCustomerPaging, putPagingOverride } from './pagingApi.js';
 import type { ApiRepository } from './repo.js';
 import { getScopeTree } from './scope.js';
+import { deleteResponder, getMe, getOncallNow, getPagingHealth, getResponders, listRotations, listStaff, patchResponder, postResponder } from './peopleApi.js';
 
 export interface ApiDeps {
   repo: ApiRepository;
@@ -57,6 +58,15 @@ export const ROUTES: Route[] = [
   route('PUT', '/customers/:id/paging-overrides/:scopeType/:scopeId', (r, d, p) => putPagingOverride(r, d, p[0]!, p[1]!, p[2]!)),
   route('DELETE', '/customers/:id/paging-overrides/:scopeType/:scopeId', (r, d, p) => deletePagingOverride(r, d, p[0]!, p[1]!, p[2]!)),
   route('GET', '/oncall/paging-path', (r, d) => getPagingPath(r, d)),
+  route('GET', '/me', (r, d) => getMe(r, d)),
+  route('GET', '/oncall/now', (r, d) => getOncallNow(r, d)),
+  route('GET', '/customers/:id/paging-health', (r, d, p) => getPagingHealth(r, d, p[0]!)),
+  route('GET', '/customers/:id/responders', (r, d, p) => getResponders(r, d, p[0]!)),
+  route('POST', '/customers/:id/responders', (r, d, p) => postResponder(r, d, p[0]!)),
+  route('PATCH', '/customers/:id/responders/:contactId', (r, d, p) => patchResponder(r, d, p[0]!, p[1]!)),
+  route('DELETE', '/customers/:id/responders/:contactId', (r, d, p) => deleteResponder(r, d, p[0]!, p[1]!)),
+  route('GET', '/rotations', (r, d) => listRotations(r, d)),
+  route('GET', '/staff', (r, d) => listStaff(r, d)),
 ];
 
 function match(method: string, path: string): { route: Route; params: string[]; canonical: string } | null {

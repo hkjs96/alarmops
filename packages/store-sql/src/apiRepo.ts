@@ -4,10 +4,10 @@
  * with the same result.
  */
 import { createHash } from 'node:crypto';
-import { incidentMute, type AuditInput, type DeliveryLog, type IncidentEventInput, type IncidentRow, type MaintenanceWindow, type PagingConfig } from '@alarmops/core';
-import { nodeVisible, type ApiRepository, type AlertMemberRow, type IdempotentEntry, type IncidentFilter, type IncidentPage, type NodeFilter, type NotifiedPerson, type OpenCounts, type OrgTree, type ScopeFilter, type StatusCounts, type UndoRecord, type UserInfo } from '@alarmops/api';
+import { incidentMute, type Contact, type Leave, type Override, type Rotation, type AuditInput, type DeliveryLog, type IncidentEventInput, type IncidentRow, type MaintenanceWindow, type PagingConfig } from '@alarmops/core';
+import { nodeVisible, type ApiRepository, type AlertMemberRow, type IdempotentEntry, type IncidentFilter, type IncidentPage, type NodeFilter, type NotifiedPerson, type OpenCounts, type OrgTree, type ScopeFilter, type StatusCounts, type UndoRecord, type UserInfo, type Principal, type ResponderOp, type ResponderWriteOutcome, type RespondersState, type RotationsWorld } from '@alarmops/api';
 import { PG, pgCode, type SqlExecutor } from './client.js';
-import { Params, d, dReq, incidentCols, iso, js, newId, num, toEvent, toIncident, toLog } from './rows.js';
+import { CONTACT_COLS, toContact, Params, d, dReq, incidentCols, iso, js, newId, num, toEvent, toIncident, toLog } from './rows.js';
 import { SqlTickStore, insertAudit, toWindow } from './tickRepo.js';
 
 class Abort<T> { constructor(readonly value: T) {} }
@@ -330,6 +330,131 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
       [customerId, path.projectId ?? null, path.serviceId ?? null],
     );
     return rows.map((r) => ({ contactId: r.contactId, name: r.name, scope: { level: r.scopeType, id: r.scopeId, name: r.scopeName } }));
+  }
+
+
+  // ───────────────────────────── people ─────────────────────────────
+
+  /**
+   * The session gate: User.status must be ACTIVE, and for a portal user (customer-bound) the customer must be ACTIVE
+   * too (D-42: SUSPENDED / TERMINATED → null → 401). MSP staff (customerId null) do not depend on any customer.
+   */
+  async sessionPrincipal(userId: string): Promise<Principal | null> {
+    const [u] = await this.sql.query(
+      `SELECT u."id", u."email"::text AS "email", u."name", u."customerId", u."role", c."id" AS "contactId" FROM "User" u LEFT JOIN "Contact" c ON c."userId" = u."id"
+        WHERE u."id" = $1 AND u."status" = 'ACTIVE'
+          AND (u."customerId" IS NULL OR EXISTS (SELECT 1 FROM "Customer" cu WHERE cu."id" = u."customerId" AND cu."status" = 'ACTIVE'))`, [userId]);
+    if (!u) return null;
+    const customerId = (u.customerId ?? null) as string | null;
+    let subScopes: Principal['subScopes'] = [];
+    if (customerId && u.contactId) {
+      const rows = await this.sql.query(
+        `SELECT cs."scopeType", cs."scopeId", s."projectId" FROM "ContactScope" cs LEFT JOIN "Service" s ON cs."scopeType" = 'SERVICE' AND s."id" = cs."scopeId" AND s."customerId" = cs."customerId"
+          WHERE cs."contactId" = $1 AND cs."customerId" = $2 AND cs."role" = 'PORTAL_USER' AND cs."scopeType" <> 'CUSTOMER' ORDER BY cs."createdAt", cs."id"`, [u.contactId, customerId]);
+      subScopes = rows.map((r) => (r.scopeType === 'PROJECT' ? { customerId, projectId: r.scopeId as string }
+        : r.projectId ? { customerId, projectId: r.projectId as string, serviceId: r.scopeId as string } : { customerId, serviceId: r.scopeId as string }));
+    }
+    return { userId: u.id, email: u.email, name: u.name, customerId, role: u.role, contactId: (u.contactId ?? null) as string | null, subScopes };
+  }
+
+  /** Responders version = number of Responders audit rows of the customer (written in the same transaction as each change). */
+  private async respondersVersionOf(q: SqlExecutor, customerId: string): Promise<number> {
+    const [r] = await q.query(`SELECT count(*)::int AS "n" FROM "AuditLog" WHERE "customerId" = $1 AND "targetType" = 'Responders'`, [customerId]);
+    return (r?.n as number) ?? 0;
+  }
+
+  async respondersState(customerId: string): Promise<RespondersState> {
+    const [entries, scopes, cust, version] = await Promise.all([
+      this.sql.query(
+        `SELECT r."contactId", r."role", r."source", r."templateId", t."name" AS "templateName", r."order" FROM "Responder" r LEFT JOIN "ResponderTemplate" t ON t."id" = r."templateId"
+          WHERE r."customerId" = $1 ORDER BY r."order", r."contactId"`, [customerId]),
+      this.sql.query(
+        `SELECT cs."contactId", cs."scopeType", cs."scopeId", cs."role",
+                COALESCE(CASE cs."scopeType" WHEN 'CUSTOMER' THEN (SELECT x."name" FROM "Customer" x WHERE x."id" = cs."scopeId")
+                                              WHEN 'PROJECT' THEN (SELECT x."name" FROM "Project" x WHERE x."id" = cs."scopeId" AND x."customerId" = $1)
+                                              ELSE (SELECT x."name" FROM "Service" x WHERE x."id" = cs."scopeId" AND x."customerId" = $1) END, cs."scopeId") AS "scopeName"
+           FROM "ContactScope" cs WHERE cs."customerId" = $1 ORDER BY cs."createdAt", cs."id"`, [customerId]),
+      this.sql.query(`SELECT "responderTemplateId" FROM "Customer" WHERE "id" = $1`, [customerId]),
+      this.respondersVersionOf(this.sql, customerId),
+    ]);
+    return {
+      version, templateId: (cust[0]?.responderTemplateId ?? null) as string | null,
+      entries: entries.map((r) => ({ contactId: r.contactId, role: r.role, source: r.source, templateId: r.templateId ?? null, templateName: r.templateName ?? null, order: r.order })),
+      scopes: scopes.map((r) => ({ contactId: r.contactId, scopeType: r.scopeType, scopeId: r.scopeId, scopeName: r.scopeName, role: r.role })),
+    };
+  }
+
+  async writeResponders(customerId: string, expectedVersion: number, op: ResponderOp, audit: AuditInput): Promise<ResponderWriteOutcome> {
+    if (typeof customerId !== 'string' || !customerId || audit.customerId !== customerId) throw new Error('writeResponders: audit must be for the same customer');
+    try {
+      return await this.sql.transaction(async (tx) => {
+        // The customer row is the lock of its Responders list: writers queue here, then re-read the version.
+        const [locked] = await tx.query(`SELECT "id" FROM "Customer" WHERE "id" = $1 FOR UPDATE`, [customerId]);
+        if (!locked) return 'CONFLICT' as const;
+        if ((await this.respondersVersionOf(tx, customerId)) !== expectedVersion) return 'CONFLICT' as const;
+        const has = async (id: string) => (await tx.query(`SELECT 1 FROM "Responder" WHERE "customerId" = $1 AND "contactId" = $2`, [customerId, id])).length > 0;
+        const insert = async (id: string, role: string) => tx.query(
+          `INSERT INTO "Responder"("customerId", "contactId", "role", "order", "source", "createdBy", "createdAt")
+           VALUES ($1, $2, $3::"ResponderRole", COALESCE((SELECT max("order") + 1 FROM "Responder" WHERE "customerId" = $1), 0), 'DIRECT', $4, ${this.sql.now()})`,
+          [customerId, id, role, audit.actorId]);
+        let contactId: string;
+        if (op.kind === 'add') {
+          if (await has(op.contactId)) return 'EXISTS' as const;
+          // tenant rule in the statement: staff, or a person of THIS customer
+          const [ok] = await tx.query(`SELECT 1 FROM "Contact" WHERE "id" = $1 AND "active" AND ("kind" = 'INTERNAL' OR "customerId" = $2)`, [op.contactId, customerId]);
+          if (!ok) return 'GONE' as const;
+          await insert(op.contactId, op.role);
+          contactId = op.contactId;
+        } else if (op.kind === 'create') {
+          contactId = newId('ct');
+          await tx.query(
+            `INSERT INTO "Contact"("id", "kind", "customerId", "name", "email", "phone", "active", "createdAt", "updatedAt") VALUES ($1, 'CUSTOMER', $2, $3, $4, $5, true, ${this.sql.now()}, ${this.sql.now()})`,
+            [contactId, customerId, op.name, op.email, op.phone]);
+          await insert(contactId, op.role);
+          for (const role of op.extras) {
+            await tx.query(`INSERT INTO "ContactScope"("id", "customerId", "contactId", "scopeType", "scopeId", "role", "createdAt") VALUES ($1, $2, $3, 'CUSTOMER', $2, $4::"ContactScopeRole", ${this.sql.now()})`,
+              [newId('cs'), customerId, contactId, role]);
+          }
+        } else if (op.kind === 'role') {
+          const r = await tx.query(`UPDATE "Responder" SET "role" = $3::"ResponderRole" WHERE "customerId" = $1 AND "contactId" = $2 RETURNING 1`, [customerId, op.contactId, op.role]);
+          if (!r.length) return 'GONE' as const;
+          contactId = op.contactId;
+        } else {
+          const r = await tx.query(`DELETE FROM "Responder" WHERE "customerId" = $1 AND "contactId" = $2 RETURNING 1`, [customerId, op.contactId]);
+          if (!r.length) return 'GONE' as const;
+          contactId = op.contactId;
+        }
+        await insertAudit(tx, { ...audit, targetType: 'Responders', targetId: contactId });
+        return { contactId, version: expectedVersion + 1 };
+      });
+    } catch (err) {
+      if (pgCode(err) === PG.UNIQUE) return 'EXISTS';
+      throw err;
+    }
+  }
+
+  async rotationsWorld(scope: ScopeFilter): Promise<RotationsWorld> {
+    const all = scope.customerIds === '*';
+    const ids = all ? [] : [...scope.customerIds];
+    const rows = await this.sql.query(
+      `SELECT r."id", r."scope", r."customerId", r."name", r."cadence", r."anchorAt",
+              COALESCE((SELECT jsonb_agg(jsonb_build_object('contactId', m."contactId", 'order', m."order") ORDER BY m."order", m."contactId")
+                          FROM "RotationMember" m WHERE m."rotationId" = r."id"), '[]'::jsonb) AS "members"
+         FROM "Rotation" r WHERE r."scope" = 'MSP' OR (r."customerId" IS NOT NULL AND ($1::boolean OR r."customerId" = ANY($2::text[]))) ORDER BY r."name", r."id"`, [all, ids]);
+    const rotations: Rotation[] = rows.map((r) => ({ id: r.id, scope: r.scope, customerId: r.customerId ?? null, name: r.name, cadence: r.cadence, anchorAt: dReq(r.anchorAt), members: r.members }));
+    const rids = rotations.map((r) => r.id);
+    const ovRows = rids.length ? await this.sql.query(`SELECT "rotationId", "contactId", "startAt", "endAt", "status" FROM "Override" WHERE "rotationId" = ANY($1::text[]) ORDER BY "startAt", "id"`, [rids]) : [];
+    const overrides: Override[] = ovRows.map((r) => ({ rotationId: r.rotationId, contactId: r.contactId, startAt: dReq(r.startAt), endAt: dReq(r.endAt), status: r.status }));
+    const people = [...new Set([...rotations.flatMap((r) => r.members.map((m) => m.contactId)), ...overrides.map((o) => o.contactId)])];
+    const lvRows = people.length ? await this.sql.query(`SELECT "contactId", "replacementId", to_char("startDate", 'YYYY-MM-DD') AS "startDate", to_char("endDate", 'YYYY-MM-DD') AS "endDate", "cancelledAt" FROM "Leave" WHERE "contactId" = ANY($1::text[]) ORDER BY "startDate", "id"`, [people]) : [];
+    const leaves: Leave[] = lvRows.map((r) => ({ contactId: r.contactId, replacementId: r.replacementId, startDate: r.startDate, endDate: r.endDate, cancelledAt: d(r.cancelledAt) }));
+    const cids = [...new Set([...people, ...leaves.map((l) => l.replacementId)])];
+    const cRows = cids.length ? await this.sql.query(`SELECT ${CONTACT_COLS} FROM "Contact" WHERE "id" = ANY($1::text[])`, [cids]) : [];
+    return { rotations, overrides, leaves, contacts: new Map(cRows.map((r) => [r.id as string, toContact(r)])) };
+  }
+
+  async staffContacts(): Promise<Contact[]> {
+    return (await this.sql.query(`SELECT ${CONTACT_COLS} FROM "Contact" WHERE "kind" = 'INTERNAL' AND "active" ORDER BY "name", "id"`)).map(toContact);
   }
 
   // ───────────────────────────── idempotency ─────────────────────────────
