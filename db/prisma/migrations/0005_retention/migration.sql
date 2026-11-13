@@ -40,6 +40,7 @@ CREATE TABLE "RetentionPurgeLog" (
 CREATE TABLE "RetentionClaim" (
     "day" TEXT NOT NULL,
     "claimedAt" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "finishedAt" TIMESTAMPTZ(3),
 
     CONSTRAINT "RetentionClaim_pkey" PRIMARY KEY ("day")
 );
@@ -53,6 +54,25 @@ ALTER TABLE "RetentionPurgeLog" ADD CONSTRAINT "RetentionPurgeLog_customerId_fke
 -- Hand-written: a purged incident has a paging outcome; a hold has its reason, time and author.
 ALTER TABLE "Incident" ADD CONSTRAINT "Incident_purged_outcome_chk" CHECK (("purgedAt" IS NULL) = ("pagingOutcome" IS NULL));
 ALTER TABLE "Customer" ADD CONSTRAINT "Customer_legal_hold_chk" CHECK (NOT "legalHold" OR ("legalHoldAt" IS NOT NULL AND "legalHoldReason" IS NOT NULL AND "legalHoldByUserId" IS NOT NULL));
+
+-- Hand-written: removes the given keys at every depth of a JSON value (D-45: customer contact values inside AuditLog before/after).
+CREATE FUNCTION retention_mask_json(j jsonb, keys text[]) RETURNS jsonb LANGUAGE plpgsql IMMUTABLE AS $fn$
+DECLARE r jsonb; k text; v jsonb;
+BEGIN
+  IF j IS NULL THEN RETURN NULL; END IF;
+  IF jsonb_typeof(j) = 'object' THEN
+    r := '{}'::jsonb;
+    FOR k, v IN SELECT * FROM jsonb_each(j) LOOP
+      IF k = ANY(keys) THEN CONTINUE; END IF;
+      r := r || jsonb_build_object(k, retention_mask_json(v, keys));
+    END LOOP;
+    RETURN r;
+  ELSIF jsonb_typeof(j) = 'array' THEN
+    RETURN COALESCE((SELECT jsonb_agg(retention_mask_json(e, keys) ORDER BY o) FROM jsonb_array_elements(j) WITH ORDINALITY AS t(e, o)), '[]'::jsonb);
+  END IF;
+  RETURN j;
+END
+$fn$;
 
 -- D-40: ROW LEVEL SECURITY on the new tables, no policies, not FORCEd (the owner bypasses it).
 ALTER TABLE "RetentionPurgeLog" ENABLE ROW LEVEL SECURITY;

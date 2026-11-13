@@ -318,3 +318,19 @@ describe('list query rules (§2)', () => {
     expect(body(await w.call(USERS.viewer, 'GET', '/incidents', { query: { assignee: 'me' } })).items).toEqual([]);
   });
 });
+
+describe('D-46 digest scope (security review B-1)', () => {
+  it('GET /digests/latest: staff limited to one customer never get another customer\'s name, id or counts; portal users get 404', async () => {
+    const w = await world();
+    w.store.customers.set('cus_hanbit', { ...w.store.customers.get('cus_hanbit')!, status: 'TERMINATED', statusChangedAt: w.sim.now });
+    w.store.residuals.set('cus_hanbit', [{ sourceKey: 'aws:222222222222', lastAt: new Date('2026-11-09T05:00:00Z'), count: 3 }]);
+    w.sim.now = new Date('2026-11-10T02:00:00Z');
+    const mirae = { userId: 'usr_haeun', name: 'Haeun Kim', kind: 'INTERNAL', customerIds: ['cus_mirae'], role: 'OPERATOR' } as const;
+    const r = await w.call(mirae, 'GET', '/digests/latest');
+    expect(r.status).toBe(200);
+    expect(JSON.stringify(r.body)).not.toMatch(/Hanbit|cus_hanbit|222222222222/);
+    const all = await w.call({ ...mirae, customerIds: '*' }, 'GET', '/digests/latest');
+    expect(JSON.stringify(all.body)).toContain('cus_hanbit');
+    expect((await w.call({ userId: 'usr_yuna', name: 'Y', kind: 'CUSTOMER', customerIds: ['cus_mirae'], role: 'VIEWER' }, 'GET', '/digests/latest')).status).toBe(404);
+  });
+});

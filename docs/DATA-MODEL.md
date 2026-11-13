@@ -860,10 +860,13 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 - **CloudAccount**: `disabled`, `connectionPurgedAt`. 오프보딩 완료 시 `externalId`는 `purged-<id>`, 역할 ARN은 비움, 선택 기능 꺼짐. **행은 지우지 않는다**(잔여 이벤트가 미매핑으로 보여 MSP를 호출하는 것을 막는다, d43 보안 검토).
 - **Incident**: `purgedAt`, `pagingOutcome`(DELIVERED/FAILED/NOT_PAGED; CHECK: 둘은 함께 null 또는 함께 값). 30일 뒤 제목은 `[purged]`, `axis`는 `purged:<id>`(병합 대상 아님), `accountIds`·`resourceTypes`·`assignmentSnapshot` 비움, `acknowledgedBy`·`resolvedBy`는 "Responder N"(첫 등장 순서). 발생·확인·해결 시각, 심각도, mtta/mttr, 호출 결과는 5년 유지.
 - **RetentionPurgeLog**(고객 FK, 고객 행이 남는 한 유지): `customerId, stage(CONNECTIONS|RETURN_PERIOD|AUDIT_EXPIRY|SLA_EXPIRY|LEGAL_HOLD_SET|LEGAL_HOLD_RELEASED), counts(json 건수만), actor('system' 또는 user id), at`. 삭제·가림이 있었던 단계만 1행(건수 0인 재실행은 쓰지 않음).
-- **RetentionClaim**(`day` 'YYYY-MM-DD' KST PK): 하루 한 번 실행 선점. 중간에 멈추면(`partial`) 행을 돌려줘 다음 틱이 이어서 한다.
+- **RetentionClaim**(`day` 'YYYY-MM-DD' KST PK, `finishedAt`): 하루 한 번 실행 선점. 중간에 멈추면(`partial`) 행을 지워 다음 틱이 이어서 하고, 끝나면 `finishedAt`을 쓴다. `finishedAt`이 없고 30분 넘은 선점은 다시 잡을 수 있다(실행이 죽은 경우). 대상 고객 목록은 SLA_EXPIRY가 기록된 고객을 뺀다(SLA_EXPIRY는 지울 게 없어도 처음 한 번 기록해 "끝남" 표시).
 - 기준 시각은 모두 `Customer.statusChangedAt`(해지 시각): 30일(`returnDays`), 2년(`auditDays`=730), 5년(`slaDays`=1826). 환경변수 `RETENTION_RETURN_DAYS|AUDIT_DAYS|SLA_DAYS`(정수 ≥1, 순서 return ≤ audit ≤ sla, 아니면 전체 무시).
-- **AuditLog/ContactRevealLog**: 30일에 `before/after`의 최상위 키 `email|phone|slackUserId|name|contactName` 제거, ContactRevealLog.contactName은 지워진 연락처면 `[purged]`. 2년에 삭제하되 **`targetType` = `CustomerStatus`, `Responders` 행은 삭제하지 않는다**(버전이 그 행 수라서). 최상위 키만 가리므로 중첩 JSON의 연락처 값은 못 가린다(알려진 한계).
+- **AuditLog/ContactRevealLog**: 30일에 `before/after`의 키 `email|phone|slackUserId|name|contactName` 제거, ContactRevealLog.contactName은 지워진 연락처면 `[purged]`. 2년에 삭제하되 **`targetType` = `CustomerStatus`, `Responders` 행은 삭제하지 않는다**(버전이 그 행 수라서). 키는 **모든 깊이**에서 제거한다(SQL 함수 `retention_mask_json`, 0005). 키 이름으로 찾으므로 `phone` 같은 이름이 아닌 키에 든 값은 못 가린다.
 - 포털 사용자(User)는 삭제. 단 ContactRevealLog·BulkChange가 가리키는(FK RESTRICT) 사용자는 이메일 `purged-<id>@invalid.invalid`, 이름 "Removed user", DISABLED로 가린다.
+- **Resource·RemediationRequest(R-5)**: 오프보딩 완료 때 RemediationRequest가 없는 Resource는 삭제, 있는 Resource는 이름·ARN·키·태그만 가려 둔다(복합 FK가 cascade라 지우면 승인 이력이 같이 사라진다). RemediationRequest와 남은 Resource는 AUDIT_EXPIRY(2년)에 삭제하고 목록에 따로 센다.
+- **기한 판정은 DB 시계(R-2)**: 각 단계 SQL 안에서 `statusChangedAt + make_interval(days) <= now()`(CONNECTIONS는 오프보딩 `completedAt`)를 다시 확인한다. 러너 시계가 빨라도 일찍 지우지 못한다. 각 문장은 Customer 행에 `FOR SHARE`를 걸어 legal hold(`FOR UPDATE`)가 실행 중인 문장 뒤에 순서대로 반영된다(이미 도는 문장은 끝까지 가고 다음 문장부터 멈춤).
+- **감사 기록의 만료**: `CustomerLegalHold`·`CustomerExport` 감사 행도 보호 대상이 아니라 2년 뒤 삭제된다(hold 해제 사유는 그때까지만 남는다).
 - 삭제 순서(30일 단계): Incident 가명화 → NotificationLog → NotificationJob → SlackMessage → IncidentEvent → Resolution → RawEvent → Alert → AlertGroup → Contact(CUSTOMER) → User → 감사 가림. 모든 문장에 `customerId = ?`와 "TERMINATED이고 hold 아님" 확인이 들어 있다.
 
 ## 8. ER 다이어그램 (주요 관계)

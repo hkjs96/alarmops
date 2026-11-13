@@ -233,6 +233,22 @@ export function retentionContract(make: MakeApiFixture): void {
       expect(d.suspended).toMatchObject([{ customerId: 'cus_hanbit', customerName: 'Hanbit Retail', incidents: 1 }]);
       expect(d.terminatedResiduals).toMatchObject([{ customerId: 'cus_mirae', sources: 1, totalEvents: 7 }]);
       expect(JSON.stringify(d)).not.toContain('secret-db');
+      // B-1: narrowed MSP staff see only their own customers in the digest (no names, counts or ids of the others).
+      const onlyHanbit = { ...USERS.haeun, customerIds: ['cus_hanbit'] };
+      const h = body(await w.call(onlyHanbit, 'GET', '/digests/latest'));
+      expect(h.suspended).toHaveLength(1);
+      expect(h.terminatedResiduals).toEqual([]);
+      expect(JSON.stringify(h)).not.toMatch(/Mirae|cus_mirae/);
+      const onlyMirae = { ...USERS.haeun, customerIds: ['cus_mirae'] };
+      const m = body(await w.call(onlyMirae, 'GET', '/digests/latest'));
+      expect(m.suspended).toEqual([]);
+      expect(m.terminatedResiduals).toHaveLength(1);
+      expect(JSON.stringify(m)).not.toMatch(/Hanbit|cus_hanbit/);
+      const none = body(await w.call({ ...USERS.haeun, customerIds: [] }, 'GET', '/digests/latest'));
+      expect(none).toMatchObject({ suspended: [], terminatedResiduals: [], empty: true });
+      // sub-scoped staff do not see whole-customer residuals
+      const sub = { ...USERS.haeun, customerIds: ['cus_mirae'], subScopes: [{ customerId: 'cus_mirae', projectId: 'prj_data' }] };
+      expect(body(await w.call(sub, 'GET', '/digests/latest')).terminatedResiduals).toEqual([]);
       // The window moves on: the day after, the same events are not repeated.
       w.sim.now = new Date('2026-11-11T02:00:00Z');
       expect(body(await w.call(USERS.viewer, 'GET', '/digests/latest'))).toMatchObject({ businessDay: '2026-11-11', suspended: [], terminatedResiduals: [], empty: true });

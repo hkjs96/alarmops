@@ -9,7 +9,7 @@ import type { MaintenanceWindow } from './maintenance.js';
 import { CLAIM_LEASE_SEC, CLOCK_SKEW_LIMIT_MS, RELEASE_HOLD_MAX_SEC } from './limits.js';
 import { LANE_CHANNELS, MAX_ATTEMPTS, retryAt, sanitizeProviderError, selectForClaim, type DeliveryLog, type DeliveryReason, type NotificationJob, type SenderKind } from './notify.js';
 import type { CustomerStatus } from './types.js';
-import { AUDIT_CONTACT_VALUE_KEYS, PROTECTED_AUDIT_TARGET_TYPES, type PurgeLogEntry, type RetentionCandidate, type RetentionRepository, type RetentionStage, type StageResult } from './retention.js';
+import { PROTECTED_AUDIT_TARGET_TYPES, RETENTION_CLAIM_TTL_MIN, maskContactValues, type PurgeLogEntry, type RetentionCandidate, type RetentionRepository, type RetentionStage, type StageResult } from './retention.js';
 import type { Contact, Leave, Override, PagingConfig, PagingWorld, Responder, Rotation } from './paging.js';
 import { DEFAULT_POLICY, type SuppressionPolicy } from './policy.js';
 import type {
@@ -35,7 +35,9 @@ export class MemoryTickStore implements TickRepository, RetentionRepository {
   /** Webhook integration sources (D-45 retention empties the token). */
   sources = new Map<string, OrgSource>();
   /** D-45: KST days the retention job has claimed, and the purge log (one entry per stage that changed something). */
-  retentionDays = new Set<string>();
+  retentionDays = new Map<string, { claimedAt: Date; finished: boolean }>();
+  /** ContactRevealLog rows (D-45 masks the name of a deleted contact at 30 days and deletes the rows at 2 years). */
+  revealLogs: Array<{ id: string; customerId: string | null; contactId: string; contactName: string }> = [];
   purgeLogs: PurgeLogEntry[] = [];
   // paging
   contacts = new Map<string, Contact>();
@@ -97,7 +99,14 @@ export class MemoryTickStore implements TickRepository, RetentionRepository {
   }
 
   // ───────────── D-45 retention ─────────────
-  async claimRetentionDay(day: string) { if (this.retentionDays.has(day)) return false; this.retentionDays.add(day); return true; }
+  async claimRetentionDay(day: string) {
+    const cur = this.retentionDays.get(day);
+    const now = this.clock();
+    if (cur && (cur.finished || now.getTime() - cur.claimedAt.getTime() < RETENTION_CLAIM_TTL_MIN * 60_000)) return false;
+    this.retentionDays.set(day, { claimedAt: now, finished: false });
+    return true;
+  }
+  async finishRetentionDay(day: string) { const c = this.retentionDays.get(day); if (c) c.finished = true; }
   async releaseRetentionDay(day: string) { this.retentionDays.delete(day); }
   /** CustomerOffboarding.completedAt: the API store owns that table in memory. */
   protected offboardingCompletedAt(_customerId: string): Date | null { return null; }
@@ -105,11 +114,11 @@ export class MemoryTickStore implements TickRepository, RetentionRepository {
   protected retentionExtra(_stage: RetentionStage, _customerId: string): Record<string, number> { return {}; }
   async retentionCandidates(limit: number): Promise<RetentionCandidate[]> {
     return [...this.customers.values()]
-      .filter((c) => c.status === 'TERMINATED' && !c.legalHold && c.statusChangedAt)
+      .filter((c) => c.status === 'TERMINATED' && !c.legalHold && c.statusChangedAt && !this.purgeLogs.some((l) => l.customerId === c.id && l.stage === 'SLA_EXPIRY'))
       .sort((a, b) => a.statusChangedAt!.getTime() - b.statusChangedAt!.getTime() || a.id.localeCompare(b.id)).slice(0, limit)
       .map((c) => ({ customerId: c.id, statusChangedAt: c.statusChangedAt!, offboardingCompletedAt: this.offboardingCompletedAt(c.id) }));
   }
-  async runRetentionStage(customerId: string, stage: RetentionStage, opts: { deadlineMs: number; now: Date }): Promise<StageResult> {
+  async runRetentionStage(customerId: string, stage: RetentionStage, opts: { deadlineMs: number; now: Date; days: number | null }): Promise<StageResult> {
     const cus = this.customers.get(customerId);
     if (!cus || cus.status !== 'TERMINATED' || cus.legalHold) return { counts: {}, partial: false, skipped: true };
     const counts: Record<string, number> = {};
@@ -117,7 +126,7 @@ export class MemoryTickStore implements TickRepository, RetentionRepository {
     if (stage === 'CONNECTIONS') {
       for (const a of this.accounts.values()) {
         if (a.customerId !== customerId || a.purgedAt) continue;
-        a.externalId = null; a.roleArns = []; a.disabled = true; a.purgedAt = opts.now;
+        a.externalId = `purged-${a.awsAccountId}`; a.roleArns = []; a.disabled = true; a.purgedAt = opts.now;
         bump('CloudAccount', 1);
       }
       for (const s of this.sources.values()) if (s.customerId === customerId && (s.tokenHash || s.enabled)) { s.tokenHash = null; s.enabled = false; bump('IntegrationSource', 1); }
@@ -158,24 +167,29 @@ export class MemoryTickStore implements TickRepository, RetentionRepository {
         if (a.customerId !== customerId) continue;
         for (const side of ['before', 'after'] as const) {
           const v = a[side];
-          if (v && typeof v === 'object' && !Array.isArray(v) && AUDIT_CONTACT_VALUE_KEYS.some((k) => k in (v as object))) {
-            a[side] = Object.fromEntries(Object.entries(v as object).filter(([k]) => !AUDIT_CONTACT_VALUE_KEYS.includes(k)));
-            masked++;
-          }
+          if (v === undefined || v === null) continue;
+          const m = maskContactValues(v);
+          if (JSON.stringify(m) !== JSON.stringify(v)) { a[side] = m; masked++; }
         }
       }
+      for (const r of this.revealLogs) if (r.customerId === customerId && r.contactName !== '[purged]' && !this.contacts.has(r.contactId)) { r.contactName = '[purged]'; bump('ContactRevealLog.masked', 1); }
       bump('AuditLog.masked', masked);
     } else if (stage === 'AUDIT_EXPIRY') {
       const n = this.audits.length;
       this.audits = this.audits.filter((a) => a.customerId !== customerId || PROTECTED_AUDIT_TARGET_TYPES.includes(a.targetType));
       bump('AuditLog', n - this.audits.length);
+      const rl = this.revealLogs.length;
+      this.revealLogs = this.revealLogs.filter((r) => r.customerId !== customerId);
+      bump('ContactRevealLog', rl - this.revealLogs.length);
     } else {
       const ids = [...this.incidents.values()].filter((i) => i.customerId === customerId).map((i) => i.id);
       for (const id of ids) this.incidents.delete(id);
       bump('Incident', ids.length);
     }
     for (const [k, n] of Object.entries(this.retentionExtra(stage, customerId))) bump(k, n);
-    if (Object.keys(counts).length) this.purgeLogs.push({ id: this.nextId('purge'), customerId, stage, counts, actor: 'system', at: opts.now });
+    // SLA_EXPIRY is logged once even when nothing was left: it marks the customer as finished (no more candidate).
+    const firstSla = stage === 'SLA_EXPIRY' && !this.purgeLogs.some((l) => l.customerId === customerId && l.stage === 'SLA_EXPIRY');
+    if (Object.keys(counts).length || firstSla) this.purgeLogs.push({ id: this.nextId('purge'), customerId, stage, counts, actor: 'system', at: opts.now });
     return { counts, partial: false };
   }
   async loadPolicy() { return this.policy; }

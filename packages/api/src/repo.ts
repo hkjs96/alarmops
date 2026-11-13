@@ -248,8 +248,8 @@ export interface ApiRepository {
   exportIncidents(customerId: string, afterNumber: number, limit: number): Promise<ExportIncidentRow[]>;
   /** A write that has no store method of its own (the export is audited before it streams). */
   recordAudit(audit: AuditInput): Promise<void>;
-  /** Suspended-customer incidents (pagingSuppressed = CUSTOMER_SUSPENDED, triggeredAt in [from, to)) and TERMINATED residual sources (lastAt in [from, to)). */
-  digestData(from: Date, to: Date): Promise<DigestData>;
+  /** Suspended-customer incidents (pagingSuppressed = CUSTOMER_SUSPENDED, triggeredAt in [from, to)) and TERMINATED residual sources (lastAt in [from, to)). Only customers inside `scope` (B-1): residuals need the whole customer in scope, incidents follow the usual scope rule. */
+  digestData(scope: ScopeFilter, from: Date, to: Date): Promise<DigestData>;
 
   // ── idempotency (API-CONTRACT §2 "멱등", 24h) ──
   getIdempotent(key: string, now: Date): Promise<IdempotentEntry | null>;

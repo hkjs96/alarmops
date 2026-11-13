@@ -246,17 +246,18 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     }));
   }
   async recordAudit(audit: AuditInput): Promise<void> { this.audits.push(audit); }
-  async digestData(from: Date, to: Date): Promise<DigestData> {
+  async digestData(scope: ScopeFilter, from: Date, to: Date): Promise<DigestData> {
     const inWin = (t: Date): boolean => t.getTime() >= from.getTime() && t.getTime() < to.getTime();
     const by = new Map<string, { customerId: string; customerName: string; incidents: number; firstAt: Date; lastAt: Date }>();
     for (const i of this.incidents.values()) {
-      if (i.pagingSuppressed !== 'CUSTOMER_SUSPENDED' || !i.customerId || !inWin(i.triggeredAt)) continue;
+      if (i.pagingSuppressed !== 'CUSTOMER_SUSPENDED' || !i.customerId || !inWin(i.triggeredAt) || !inScope(scope, i)) continue;
       const cur = by.get(i.customerId);
       if (cur) { cur.incidents++; if (i.triggeredAt < cur.firstAt) cur.firstAt = i.triggeredAt; if (i.triggeredAt > cur.lastAt) cur.lastAt = i.triggeredAt; }
       else by.set(i.customerId, { customerId: i.customerId, customerName: this.customers.get(i.customerId)?.name ?? i.customerId, incidents: 1, firstAt: i.triggeredAt, lastAt: i.triggeredAt });
     }
     const terminated: DigestData['terminatedResiduals'] = [];
     for (const [cid, rs] of this.residuals) {
+      if (!inScope(scope, { customerId: cid, projectId: null, serviceId: null })) continue; // whole customer only
       const hit = rs.filter((r) => inWin(r.lastAt));
       if (!hit.length) continue;
       terminated.push({ customerId: cid, customerName: this.customers.get(cid)?.name ?? cid, sources: hit.length, lastEventAt: new Date(Math.max(...hit.map((r) => r.lastAt.getTime()))), totalEvents: rs.reduce((n, r) => n + r.count, 0) });

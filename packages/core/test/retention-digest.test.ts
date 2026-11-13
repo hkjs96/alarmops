@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_RETENTION, KOREAN_HOLIDAYS, buildDigest, digestWindowFor, dueStages, isBusinessDay, kstDay, latestDigestWindow, previousBusinessDay, retentionConfigFromEnv, retentionSchedule,
-  runRetention, TICK_JOBS, type RetentionRepository,
+  runRetention, maskContactValues, TICK_JOBS, type RetentionRepository,
 } from '../src/index.js';
 
 describe('D-46 business days', () => {
@@ -63,6 +63,14 @@ describe('D-45 retention schedule and config', () => {
     expect(retentionConfigFromEnv({ RETENTION_RETURN_DAYS: 'abc', RETENTION_SLA_DAYS: '-5' })).toEqual(DEFAULT_RETENTION);
     expect(retentionConfigFromEnv({ RETENTION_RETURN_DAYS: '900' })).toEqual(DEFAULT_RETENTION); // return > audit: refused as a whole
     expect(retentionConfigFromEnv({})).toEqual(DEFAULT_RETENTION);
+    // floors 7 / 90 / 365 (R-3): below the floor is ignored with a warning
+    const warns: string[] = [];
+    expect(retentionConfigFromEnv({ RETENTION_RETURN_DAYS: '6' }, (m) => warns.push(m))).toEqual(DEFAULT_RETENTION);
+    expect(retentionConfigFromEnv({ RETENTION_AUDIT_DAYS: '89' }, (m) => warns.push(m))).toEqual(DEFAULT_RETENTION);
+    expect(retentionConfigFromEnv({ RETENTION_SLA_DAYS: '364' }, (m) => warns.push(m))).toEqual(DEFAULT_RETENTION);
+    expect(warns).toHaveLength(3);
+    expect(retentionConfigFromEnv({ RETENTION_RETURN_DAYS: '7', RETENTION_AUDIT_DAYS: '90', RETENTION_SLA_DAYS: '365' })).toEqual({ returnDays: 7, auditDays: 90, slaDays: 365 });
+    expect(maskContactValues({ a: { email: 'x', ok: 1 }, list: [{ phone: '1', k: 2 }], name: 'n' })).toEqual({ a: { ok: 1 }, list: [{ k: 2 }] });
   });
   it('KST day boundary is 15:00 UTC', () => {
     expect(kstDay(new Date('2026-11-09T14:59:00Z'))).toBe('2026-11-09');
@@ -76,6 +84,7 @@ describe('runRetention', () => {
     const calls: string[] = [];
     const repo: Partial<RetentionRepository> = {
       claimRetentionDay: async (d) => { calls.push(`claim ${d}`); return true; },
+      finishRetentionDay: async (d) => { calls.push(`finish ${d}`); },
       releaseRetentionDay: async (d) => { calls.push(`release ${d}`); },
       retentionCandidates: async () => [{ customerId: 'a', statusChangedAt: new Date('2020-01-01T00:00:00Z'), offboardingCompletedAt: null }, { customerId: 'b', statusChangedAt: new Date('2020-01-01T00:00:00Z'), offboardingCompletedAt: null }],
       runRetentionStage: async (c, s) => { calls.push(`${c} ${s}`); return { counts: { X: 2 }, partial: false }; },
@@ -88,7 +97,7 @@ describe('runRetention', () => {
   it('claims the KST day once, runs due stages per customer in order', async () => {
     const { repo, calls } = stub();
     const r = await runRetention(repo, DEFAULT_RETENTION, now, { deadlineMs: far });
-    expect(calls).toEqual(['claim 2026-11-09', 'a RETURN_PERIOD', 'a AUDIT_EXPIRY', 'a SLA_EXPIRY', 'b RETURN_PERIOD', 'b AUDIT_EXPIRY', 'b SLA_EXPIRY']);
+    expect(calls).toEqual(['claim 2026-11-09', 'a RETURN_PERIOD', 'a AUDIT_EXPIRY', 'a SLA_EXPIRY', 'b RETURN_PERIOD', 'b AUDIT_EXPIRY', 'b SLA_EXPIRY', 'finish 2026-11-09']);
     expect(r).toMatchObject({ ran: true, customers: 2, stages: 6, rows: 12, partial: false });
   });
   it('an already claimed day does nothing; a store without retention is skipped', async () => {

@@ -3,7 +3,7 @@
  * that go, the guard inside each statement, the chunking/partial path and the RLS of the new tables.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { SqlApiStore } from '../src/index.js';
+import { SqlApiStore, withClock } from '../src/index.js';
 import { openTestDb, type TestDb } from './db.js';
 
 let db: TestDb;
@@ -32,15 +32,18 @@ async function seed(opts: { hold?: boolean } = {}): Promise<SqlApiStore> {
     await q(`INSERT INTO "NotificationLog"("id", "customerId", "incidentId", "channel", "status", "targetSummary", "targetKind") VALUES ($1, $2, $3, 'SMS', 'SENT', 'x', 'STAFF'), ($4, $2, $5, 'SMS', 'FAILED', 'x', 'STAFF')`,
       [`log_a_${id}`, id, `inc_${id}_0`, `log_b_${id}`, `inc_${id}_1`]);
   }
-  return new SqlApiStore(db.client);
+  // The store's clock is the test's NOW: stage due times are decided by the database clock inside the statements.
+  return new SqlApiStore(withClock(db.client, () => NOW));
 }
-const stage = (s: SqlApiStore, cid: string, st: 'CONNECTIONS' | 'RETURN_PERIOD' | 'AUDIT_EXPIRY' | 'SLA_EXPIRY', deadlineMs = Date.now() + 60_000) => s.runRetentionStage(cid, st, { deadlineMs, now: NOW });
+const DAYS = { CONNECTIONS: null, RETURN_PERIOD: 30, AUDIT_EXPIRY: 730, SLA_EXPIRY: 1826 } as const;
+const stage = (s: SqlApiStore, cid: string, st: keyof typeof DAYS, deadlineMs = Date.now() + 60_000, days: number | null = DAYS[st]) => s.runRetentionStage(cid, st, { deadlineMs, now: NOW, days });
 
 describe('retention on Postgres (D-45)', () => {
   let store: SqlApiStore;
   beforeEach(async () => { store = await seed(); });
 
   it('CONNECTIONS: secrets are emptied and the account is disabled, but the CloudAccount row stays so residual events still map to the customer', async () => {
+    await q(`INSERT INTO "CustomerOffboarding"("id", "customerId", "startedByUserId", "reason", "steps", "completedAt") VALUES ('off_t', 'cus_t', 'u', 'r', '{}'::jsonb, now())`);
     const r = await stage(store, 'cus_t', 'CONNECTIONS');
     expect(r.counts).toMatchObject({ CloudAccount: 1, IntegrationSource: 1, Resource: 1 });
     const [a] = await q(`SELECT * FROM "CloudAccount" WHERE "id" = 'ca_cus_t'`);
@@ -92,19 +95,19 @@ describe('retention on Postgres (D-45)', () => {
   it('a stage past its deadline stops before the next chunk and reports partial; the next call finishes it', async () => {
     // 2 chunks of 1000 rows; the deadline is already past after the first chunk.
     await q(`INSERT INTO "AuditLog"("id", "customerId", "actorType", "action", "targetType") SELECT 'aud_' || g, 'cus_t', 'USER', 'x', 'Contact' FROM generate_series(1, 1500) g`);
-    const r = await stage(store, 'cus_t', 'AUDIT_EXPIRY', Date.now() - 1);
+    const r = await stage(store, 'cus_t', 'AUDIT_EXPIRY', Date.now() - 1, 30);
     expect(r).toMatchObject({ partial: true, counts: {} });
-    const full = await stage(store, 'cus_t', 'AUDIT_EXPIRY');
+    const full = await stage(store, 'cus_t', 'AUDIT_EXPIRY', undefined, 30);
     expect(full).toMatchObject({ partial: false, counts: { AuditLog: 1500, ContactRevealLog: 1 } });
   });
 
   it('AUDIT_EXPIRY keeps CustomerStatus and Responders rows; SLA_EXPIRY removes the incidents', async () => {
     await q(`INSERT INTO "AuditLog"("id", "customerId", "actorType", "action", "targetType") VALUES ('a1', 'cus_t', 'USER', 'x', 'CustomerStatus'), ('a2', 'cus_t', 'USER', 'x', 'Responders'), ('a3', 'cus_t', 'USER', 'x', 'Contact'), ('a4', 'cus_t', 'USER', 'x', NULL), ('a5', 'cus_o', 'USER', 'x', 'Contact')`);
-    await stage(store, 'cus_t', 'AUDIT_EXPIRY');
+    await stage(store, 'cus_t', 'AUDIT_EXPIRY', undefined, 30);
     expect((await q(`SELECT "id" FROM "AuditLog" ORDER BY "id"`)).map((r) => r.id)).toEqual(['a1', 'a2', 'a5']);
     expect(await q(`SELECT 1 FROM "ContactRevealLog" WHERE "customerId" = 'cus_t'`)).toEqual([]);
     expect(await q(`SELECT 1 FROM "ContactRevealLog" WHERE "customerId" = 'cus_o'`)).toHaveLength(1);
-    await stage(store, 'cus_t', 'SLA_EXPIRY');
+    await stage(store, 'cus_t', 'SLA_EXPIRY', undefined, 30);
     expect(await q(`SELECT 1 FROM "Incident" WHERE "customerId" = 'cus_t'`)).toEqual([]);
     expect(await q(`SELECT 1 FROM "Incident" WHERE "customerId" = 'cus_o'`)).toHaveLength(3);
   });
@@ -114,5 +117,58 @@ describe('retention on Postgres (D-45)', () => {
     await expect(q(`UPDATE "Customer" SET "legalHold" = true WHERE "id" = 'cus_t'`)).rejects.toThrow(/Customer_legal_hold_chk/);
     const rls = await q(`SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity, (SELECT count(*)::int FROM pg_policy p WHERE p.polrelid = c.oid) AS policies FROM pg_class c WHERE c.relname IN ('RetentionPurgeLog', 'RetentionClaim') AND c.relkind = 'r' ORDER BY 1`);
     expect(rls).toEqual([{ relname: 'RetentionClaim', relrowsecurity: true, relforcerowsecurity: false, policies: 0 }, { relname: 'RetentionPurgeLog', relrowsecurity: true, relforcerowsecurity: false, policies: 0 }]);
+  });
+
+  it('R-2: a stage whose period has not passed on the DATABASE clock does nothing, whatever the runner says', async () => {
+    // statusChangedAt is 2026-12-01 and the store clock is 2027-01-10 (40 days): 100 000 days is not due, 30 is.
+    expect((await stage(store, 'cus_t', 'RETURN_PERIOD', Date.now() + 60_000, 100_000)).counts).toEqual({});
+    expect((await stage(store, 'cus_t', 'AUDIT_EXPIRY')).counts).toEqual({}); // 730 days: not due
+    expect((await stage(store, 'cus_t', 'SLA_EXPIRY')).counts).toEqual({});
+    expect(await q(`SELECT 1 FROM "Incident" WHERE "customerId" = 'cus_t' AND "purgedAt" IS NOT NULL`)).toEqual([]);
+    expect(await q(`SELECT 1 FROM "Incident" WHERE "customerId" = 'cus_t'`)).toHaveLength(3);
+    // CONNECTIONS needs the offboarding complete on the row itself
+    await q(`INSERT INTO "CustomerOffboarding"("id", "customerId", "startedByUserId", "reason", "steps") VALUES ('off_t', 'cus_t', 'u', 'r', '{}'::jsonb)`);
+    expect((await stage(store, 'cus_t', 'CONNECTIONS')).counts).toEqual({});
+    await q(`UPDATE "CustomerOffboarding" SET "completedAt" = now() WHERE "customerId" = 'cus_t'`);
+    expect((await stage(store, 'cus_t', 'CONNECTIONS')).counts).toMatchObject({ CloudAccount: 1 });
+  });
+
+  it('R-4: contact values nested in AuditLog before/after are removed at every depth', async () => {
+    await q(`INSERT INTO "AuditLog"("id", "customerId", "actorType", "action", "targetType", "before", "after") VALUES
+      ('n1', 'cus_t', 'USER', 'x', 'Foo', '{"a": {"contact": {"phone": "+82101", "ok": 1}}, "list": [{"email": "e@x", "keep": true}]}'::jsonb, '{"name": "Kim", "n": 2}'::jsonb),
+      ('n2', 'cus_o', 'USER', 'x', 'Foo', '{"a": {"phone": "+82102"}}'::jsonb, NULL)`);
+    const r = await stage(store, 'cus_t', 'RETURN_PERIOD');
+    expect(r.counts['AuditLog.masked']).toBe(1);
+    const [n1] = await q(`SELECT "before", "after" FROM "AuditLog" WHERE "id" = 'n1'`);
+    expect(n1).toEqual({ before: { a: { contact: { ok: 1 } }, list: [{ keep: true }] }, after: { n: 2 } });
+    expect((await q(`SELECT "before" FROM "AuditLog" WHERE "id" = 'n2'`))[0]!.before).toEqual({ a: { phone: '+82102' } });
+    expect((await stage(store, 'cus_t', 'RETURN_PERIOD')).counts).toEqual({}); // idempotent
+  });
+
+  it('R-5: a Resource with a RemediationRequest survives CONNECTIONS (scrubbed) and goes with its request at AUDIT_EXPIRY', async () => {
+    await q(`INSERT INTO "Resource"("id", "customerId", "cloudAccountId", "region", "resourceType", "resourceArn", "resourceKey", "name", "lastSeenAt", "updatedAt") VALUES ('res_keep', 'cus_t', 'ca_cus_t', 'ap-northeast-2', 'ec2', 'arn:secret', 'i-secret', 'secret-name', now(), now())`);
+    await q(`INSERT INTO "RemediationRequest"("id", "customerId", "cloudAccountId", "resourceId", "trigger", "action", "status", "requestedAt") VALUES ('rr1', 'cus_t', 'ca_cus_t', 'res_keep', '{}'::jsonb, 'EC2_STOP', 'NOTIFIED', now())`);
+    await q(`INSERT INTO "CustomerOffboarding"("id", "customerId", "startedByUserId", "reason", "steps", "completedAt") VALUES ('off_t', 'cus_t', 'u', 'r', '{}'::jsonb, now())`);
+    const r = await stage(store, 'cus_t', 'CONNECTIONS');
+    expect(r.counts).toMatchObject({ Resource: 1, 'Resource.scrubbed': 1 });
+    expect((await q(`SELECT "name", "resourceArn", "resourceKey" FROM "Resource" WHERE "id" = 'res_keep'`))[0]).toEqual({ name: null, resourceArn: 'purged:res_keep', resourceKey: 'res_keep' });
+    expect(await q(`SELECT 1 FROM "RemediationRequest" WHERE "id" = 'rr1'`)).toHaveLength(1);
+    const a = await stage(store, 'cus_t', 'AUDIT_EXPIRY', Date.now() + 60_000, 30);
+    expect(a.counts).toMatchObject({ RemediationRequest: 1, Resource: 1 });
+    expect(await q(`SELECT 1 FROM "Resource" WHERE "customerId" = 'cus_t'`)).toEqual([]);
+    expect(await q(`SELECT 1 FROM "Resource" WHERE "customerId" = 'cus_o'`)).toHaveLength(1);
+  });
+
+  it('claim: once per day; a finished claim is final; an unfinished one older than 30 minutes can be taken again; SLA_EXPIRY done = not a candidate', async () => {
+    expect(await store.claimRetentionDay('2027-01-10')).toBe(true);
+    expect(await store.claimRetentionDay('2027-01-10')).toBe(false);
+    await q(`UPDATE "RetentionClaim" SET "claimedAt" = '2027-01-09T23:00:00Z'`); // 1 h before the store clock, unfinished
+    expect(await store.claimRetentionDay('2027-01-10')).toBe(true);
+    await store.finishRetentionDay('2027-01-10');
+    await q(`UPDATE "RetentionClaim" SET "claimedAt" = '2027-01-09T23:00:00Z'`);
+    expect(await store.claimRetentionDay('2027-01-10')).toBe(false);
+    expect((await store.retentionCandidates(10)).map((c) => c.customerId).sort()).toEqual(['cus_o', 'cus_t']);
+    await stage(store, 'cus_t', 'SLA_EXPIRY', Date.now() + 60_000, 1);
+    expect((await store.retentionCandidates(10)).map((c) => c.customerId)).toEqual(['cus_o']);
   });
 });

@@ -35,19 +35,34 @@ export interface RetentionConfig {
 }
 export const DEFAULT_RETENTION: RetentionConfig = { returnDays: 30, auditDays: 730, slaDays: 1826 };
 
+/** Lowest values the environment may set (security review D-45 R-3): a typo or a hostile env must not shrink retention to nothing. */
+export const RETENTION_FLOORS: RetentionConfig = { returnDays: 7, auditDays: 90, slaDays: 365 };
+
 /**
  * `RETENTION_RETURN_DAYS`, `RETENTION_AUDIT_DAYS`, `RETENTION_SLA_DAYS` (D-45: periods are configurable). A value that is
- * not a whole number of at least 1 is ignored (the default stays): a typo must not shorten a retention period to nothing.
+ * not a whole number, or is below RETENTION_FLOORS (7 / 90 / 365 days), is ignored (the default stays) and `warn` is called.
  * The order return <= audit <= sla is enforced; otherwise the whole override is ignored.
+ * NOTE: not wired into the console app yet (console follow-up): until then the defaults apply.
  */
-export function retentionConfigFromEnv(env: Record<string, string | undefined>): RetentionConfig {
-  const num = (v: string | undefined, d: number): number => (v !== undefined && /^\d{1,5}$/.test(v.trim()) && Number(v) >= 1 ? Number(v) : d);
-  const c: RetentionConfig = {
-    returnDays: num(env.RETENTION_RETURN_DAYS, DEFAULT_RETENTION.returnDays),
-    auditDays: num(env.RETENTION_AUDIT_DAYS, DEFAULT_RETENTION.auditDays),
-    slaDays: num(env.RETENTION_SLA_DAYS, DEFAULT_RETENTION.slaDays),
+export function retentionConfigFromEnv(env: Record<string, string | undefined>, warn: (msg: string) => void = () => undefined): RetentionConfig {
+  const num = (name: string, key: keyof RetentionConfig): number => {
+    const v = env[name];
+    if (v === undefined || v === '') return DEFAULT_RETENTION[key];
+    if (/^\d{1,5}$/.test(v.trim()) && Number(v) >= RETENTION_FLOORS[key]) return Number(v);
+    warn(`${name}=${v} ignored: must be a whole number of at least ${RETENTION_FLOORS[key]}; using ${DEFAULT_RETENTION[key]}`);
+    return DEFAULT_RETENTION[key];
   };
-  return c.returnDays <= c.auditDays && c.auditDays <= c.slaDays ? c : { ...DEFAULT_RETENTION };
+  const c: RetentionConfig = { returnDays: num('RETENTION_RETURN_DAYS', 'returnDays'), auditDays: num('RETENTION_AUDIT_DAYS', 'auditDays'), slaDays: num('RETENTION_SLA_DAYS', 'slaDays') };
+  if (c.returnDays <= c.auditDays && c.auditDays <= c.slaDays) return c;
+  warn('RETENTION_* ignored: the order return <= audit <= sla does not hold; using the defaults');
+  return { ...DEFAULT_RETENTION };
+}
+
+/** Removes the contact-value keys at every depth of a JSON value (AuditLog before/after). Pure; the SQL function retention_mask_json does the same. */
+export function maskContactValues(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(maskContactValues);
+  if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v as object).filter(([k]) => !AUDIT_CONTACT_VALUE_KEYS.includes(k)).map(([k, x]) => [k, maskContactValues(x)]));
+  return v;
 }
 
 export interface RetentionCandidate {
@@ -67,18 +82,21 @@ export interface StageResult {
 
 /** Store side of the job. Optional on TickRepository: a store without it simply never retains anything. */
 export interface RetentionRepository {
-  /** INSERT the KST day; false = already claimed. */
+  /** Claim the KST day; false = already claimed. A claim that was never finished and is older than RETENTION_CLAIM_TTL_MIN minutes can be taken again. */
   claimRetentionDay(day: string): Promise<boolean>;
+  /** The run for the day ended (also with per-customer errors): the claim can no longer be taken again. */
+  finishRetentionDay(day: string): Promise<void>;
   /** Give the day back (the job stopped early and must continue on the next tick). */
   releaseRetentionDay(day: string): Promise<void>;
-  /** TERMINATED customers without legal hold and with statusChangedAt set, oldest termination first. */
+  /** TERMINATED customers without legal hold and with statusChangedAt set whose SLA_EXPIRY stage has not been logged yet (all stages done = left out, so they cannot starve the rest), oldest termination first. */
   retentionCandidates(limit: number): Promise<RetentionCandidate[]>;
   /**
    * Run ONE stage for ONE customer. Every statement is scoped by customerId and re-checks "TERMINATED and no hold".
    * Writes one RetentionPurgeLog row (actor 'system') when it removed or changed anything. Idempotent.
-   * `deadlineMs` = epoch ms after which no new chunk starts.
+   * `deadlineMs` = epoch ms after which no new chunk starts. `days` = the period of the stage (null for CONNECTIONS): the SQL store checks
+   * `statusChangedAt + days <= its own now()` inside the statements, so a runner clock that runs early cannot purge early (R-2).
    */
-  runRetentionStage(customerId: string, stage: RetentionStage, opts: { deadlineMs: number; now: Date }): Promise<StageResult>;
+  runRetentionStage(customerId: string, stage: RetentionStage, opts: { deadlineMs: number; now: Date; days: number | null }): Promise<StageResult>;
 }
 
 const DAY_MS = 86_400_000;
@@ -87,6 +105,10 @@ const KST_MS = 9 * 3_600_000;
 export const kstDay = (d: Date): string => new Date(d.getTime() + KST_MS).toISOString().slice(0, 10);
 
 /** Stages that are due for this customer at `now`, in the order they must run. */
+/** Period of a stage in days (null: CONNECTIONS is due when the offboarding is complete). */
+export const stageDays = (stage: RetentionStage, cfg: RetentionConfig): number | null =>
+  stage === 'RETURN_PERIOD' ? cfg.returnDays : stage === 'AUDIT_EXPIRY' ? cfg.auditDays : stage === 'SLA_EXPIRY' ? cfg.slaDays : null;
+
 export function dueStages(c: RetentionCandidate, cfg: RetentionConfig, now: Date): RetentionStage[] {
   const t = now.getTime();
   const base = c.statusChangedAt.getTime();
@@ -117,6 +139,8 @@ export interface RetentionSummary {
   errors: Array<{ customerId: string; stage: RetentionStage; message: string }>;
 }
 
+/** A claim that never finished is taken over after this long (the run died). */
+export const RETENTION_CLAIM_TTL_MIN = 30;
 export const RETENTION_JOB: TickJob = 'retention';
 const CANDIDATE_LIMIT = 500;
 
@@ -134,7 +158,7 @@ export async function runRetention(
       for (const stage of dueStages(c, cfg, now)) {
         if (Date.now() >= opts.deadlineMs) { sum.partial = true; break; }
         try {
-          const r = await repo.runRetentionStage(c.customerId, stage, { deadlineMs: opts.deadlineMs, now });
+          const r = await repo.runRetentionStage(c.customerId, stage, { deadlineMs: opts.deadlineMs, now, days: stageDays(stage, cfg) });
           if (r.skipped) break;
           sum.stages++;
           sum.rows += Object.values(r.counts).reduce((a, b) => a + b, 0);
@@ -149,8 +173,9 @@ export async function runRetention(
       if (sum.partial) break;
     }
   } finally {
-    // Unfinished work continues on the next tick instead of waiting a day.
-    if (sum.partial && repo.releaseRetentionDay) await repo.releaseRetentionDay(day).catch(() => undefined);
+    // Unfinished work continues on the next tick instead of waiting a day; a finished run closes the claim.
+    if (sum.partial) await repo.releaseRetentionDay?.(day).catch(() => undefined);
+    else await repo.finishRetentionDay?.(day).catch(() => undefined);
   }
   return sum;
 }

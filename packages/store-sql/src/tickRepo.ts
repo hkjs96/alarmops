@@ -38,9 +38,10 @@ export class SqlTickStore implements TickRepository, RetentionRepository {
 
   // D-45 retention (retentionSql.ts)
   claimRetentionDay(day: string): Promise<boolean> { return retention.claimDay(this.sql, day); }
+  finishRetentionDay(day: string): Promise<void> { return retention.finishDay(this.sql, day); }
   releaseRetentionDay(day: string): Promise<void> { return retention.releaseDay(this.sql, day); }
   retentionCandidates(limit: number): Promise<RetentionCandidate[]> { return retention.candidates(this.sql, limit); }
-  runRetentionStage(customerId: string, stage: RetentionStage, opts: { deadlineMs: number; now: Date }): Promise<StageResult> { return retention.runStage(this.sql, customerId, stage, opts); }
+  runRetentionStage(customerId: string, stage: RetentionStage, opts: { deadlineMs: number; now: Date; days: number | null }): Promise<StageResult> { return retention.runStage(this.sql, customerId, stage, opts); }
 
   /** Run `fn` in one transaction; an `Abort` rolls back and yields its value. */
   protected async tx<T>(fn: (tx: SqlExecutor) => Promise<T>): Promise<T> {

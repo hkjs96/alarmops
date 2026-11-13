@@ -646,8 +646,10 @@ model RetentionPurgeLog {
 
 /// D-45: the daily retention job runs once per KST day: the first tick of the day inserts the row (day = 'YYYY-MM-DD' in KST).
 model RetentionClaim {
-  day       String   @id
-  claimedAt DateTime @default(now()) @db.Timestamptz(3)
+  day        String    @id
+  claimedAt  DateTime  @default(now()) @db.Timestamptz(3)
+  /// Set when the run ended. A claim that is not finished and older than 30 minutes can be taken again (the run died).
+  finishedAt DateTime? @db.Timestamptz(3)
 }
 
 /// D-43: one per TERMINATED customer. `steps` = { PAGING_STOPPED | ALARMS_DELETED | CUSTOMER_STACK_REMOVED | ACCOUNTS_DISABLED |

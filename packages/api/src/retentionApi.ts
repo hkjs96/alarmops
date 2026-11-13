@@ -8,7 +8,7 @@
  * MSP staff only: for portal users the routes do not exist (404 before anything else).
  */
 import { DEFAULT_RETENTION, buildDigest, latestDigestWindow, retentionSchedule, type RetentionConfig } from '@alarmops/core';
-import { requireAuth } from './auth.js';
+import { requireAuth, scopeOf } from './auth.js';
 import { adminCustomer } from './customerApi.js';
 import { ApiError, invalid, isRecord, notFound, ok, type ApiRequest, type ApiResponse } from './http.js';
 import type { ApiRepository, ExportIncidentRow, LegalHoldState } from './repo.js';
@@ -129,6 +129,6 @@ export async function getLatestDigest(req: ApiRequest, deps: Deps): Promise<ApiR
   const auth = requireAuth(req);
   if (auth.kind !== 'INTERNAL') throw notFound();
   const w = latestDigestWindow(deps.now());
-  const data = await deps.repo.digestData(w.from, w.to);
+  const data = await deps.repo.digestData(scopeOf(auth), w.from, w.to);
   return ok(buildDigest(w, data));
 }

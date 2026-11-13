@@ -474,7 +474,8 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
       const [c] = await tx.query(`SELECT "legalHold" FROM "Customer" WHERE "id" = $1 FOR UPDATE`, [customerId]);
       if (!c) return 'NOT_FOUND' as const;
       if ((c.legalHold === true) === !!hold) return 'NOOP' as const;
-      // The retention job re-checks the hold inside every statement; this row lock orders a hold change against a running chunk.
+      // The retention statements take FOR SHARE on this row (retentionSql GUARD): this FOR UPDATE waits for a chunk that is running,
+      // so a hold committed here is seen by every chunk that starts afterwards. A chunk already running finishes first.
       if (hold) {
         await tx.query(`UPDATE "Customer" SET "legalHold" = true, "legalHoldAt" = $2::timestamptz, "legalHoldByUserId" = $3, "legalHoldReason" = $4, "updatedAt" = ${this.sql.now()} WHERE "id" = $1`, [customerId, iso(hold.at), hold.byUserId, hold.reason]);
       } else {
@@ -501,17 +502,24 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
     }));
   }
   async recordAudit(audit: AuditInput): Promise<void> { await insertAudit(this.sql, audit); }
-  async digestData(from: Date, to: Date): Promise<DigestData> {
+  async digestData(scope: ScopeFilter, from: Date, to: Date): Promise<DigestData> {
+    // One parameter list per statement: Postgres cannot type a parameter the statement does not use.
+    const ps = new Params();
+    const [f, t] = [ps.add(iso(from)), ps.add(iso(to))];
+    const susScope = scopeSql(ps, scope, 'i');
+    const pr = new Params();
+    const [rf, rt] = [pr.add(iso(from)), pr.add(iso(to))];
+    const resScope = scopeSql(pr, scope, 'r', { project: 'NULL', service: 'NULL' }); // residuals have no project/service: the whole customer must be in scope
     const [sus, res] = await Promise.all([
       this.sql.query(
         `SELECT i."customerId", c."name", count(*)::int AS "n", min(i."triggeredAt") AS "firstAt", max(i."triggeredAt") AS "lastAt"
            FROM "Incident" i JOIN "Customer" c ON c."id" = i."customerId"
-          WHERE i."pagingSuppressed" = 'CUSTOMER_SUSPENDED' AND i."triggeredAt" >= $1::timestamptz AND i."triggeredAt" < $2::timestamptz GROUP BY i."customerId", c."name" ORDER BY c."name"`, [iso(from), iso(to)]),
+          WHERE i."pagingSuppressed" = 'CUSTOMER_SUSPENDED' AND i."triggeredAt" >= ${f}::timestamptz AND i."triggeredAt" < ${t}::timestamptz AND ${susScope} GROUP BY i."customerId", c."name" ORDER BY c."name"`, ps.values),
       this.sql.query(
-        `SELECT r."customerId", c."name", count(*) FILTER (WHERE r."lastAt" >= $1::timestamptz AND r."lastAt" < $2::timestamptz)::int AS "sources", max(r."lastAt") FILTER (WHERE r."lastAt" >= $1::timestamptz AND r."lastAt" < $2::timestamptz) AS "lastAt",
+        `SELECT r."customerId", c."name", count(*) FILTER (WHERE r."lastAt" >= ${rf}::timestamptz AND r."lastAt" < ${rt}::timestamptz)::int AS "sources", max(r."lastAt") FILTER (WHERE r."lastAt" >= ${rf}::timestamptz AND r."lastAt" < ${rt}::timestamptz) AS "lastAt",
                 (SELECT COALESCE(sum(r2."count"), 0)::int FROM "OffboardResidual" r2 WHERE r2."customerId" = r."customerId") AS "total"
            FROM "OffboardResidual" r JOIN "Customer" c ON c."id" = r."customerId"
-          WHERE r."lastAt" >= $1::timestamptz AND r."lastAt" < $2::timestamptz GROUP BY r."customerId", c."name" ORDER BY c."name"`, [iso(from), iso(to)]),
+          WHERE r."lastAt" >= ${rf}::timestamptz AND r."lastAt" < ${rt}::timestamptz AND ${resScope} GROUP BY r."customerId", c."name" ORDER BY c."name"`, pr.values),
     ]);
     return {
       suspended: sus.map((r) => ({ customerId: r.customerId, customerName: r.name, incidents: r.n, firstAt: dReq(r.firstAt), lastAt: dReq(r.lastAt) })),
