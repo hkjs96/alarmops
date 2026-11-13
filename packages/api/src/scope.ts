@@ -79,7 +79,7 @@ export async function getScopeTree(req: ApiRequest, deps: { repo: ApiRepository;
     const { configs, world } = await deps.repo.pagingContext(c.id);
     const own = (type: 'PROJECT' | 'SERVICE', id: string) => configs.some((cfg) => cfg.scopeType === type && cfg.scopeId === id);
     const node = {
-      id: c.id, slug: c.slug, name: c.name,
+      id: c.id, slug: c.slug, name: c.name, status: c.status,
       mine: internal && mine.includes(c.id),
       openIncidents: mineCounts.reduce((n, x) => n + x.open, 0),
       // MSP-internal: portal users always get "OK" (the field is required by the console type, so it is not dropped).

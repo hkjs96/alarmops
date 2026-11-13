@@ -49,14 +49,14 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
     const all = scope.customerIds === '*';
     const ids = all ? [] : [...scope.customerIds];
     const [customers, projects, services] = await Promise.all([
-      this.sql.query(`SELECT "id", "name", "slug" FROM "Customer" WHERE $1::boolean OR "id" = ANY($2::text[]) ORDER BY "createdAt", "id"`, [all, ids]),
+      this.sql.query(`SELECT "id", "name", "slug", "status" FROM "Customer" WHERE $1::boolean OR "id" = ANY($2::text[]) ORDER BY "createdAt", "id"`, [all, ids]),
       this.sql.query(`SELECT "id", "name", "slug", "customerId" FROM "Project" WHERE $1::boolean OR "customerId" = ANY($2::text[]) ORDER BY "name", "id"`, [all, ids]),
       this.sql.query(`SELECT "id", "name", "slug", "customerId", "projectId" FROM "Service" WHERE $1::boolean OR "customerId" = ANY($2::text[]) ORDER BY "name", "id"`, [all, ids]),
     ]);
     const projectOf = new Map(services.map((s) => [s.id as string, s.projectId as string]));
     const svcProject = (id: string): string | undefined => projectOf.get(id);
     return {
-      customers: customers.map((c) => ({ id: c.id, name: c.name, slug: c.slug })),
+      customers: customers.map((c) => ({ id: c.id, name: c.name, slug: c.slug, status: c.status as CustomerStatusValue })),
       projects: projects.filter((p) => nodeVisible(scope, { customerId: p.customerId, projectId: p.id }, svcProject)).map((p) => ({ id: p.id, name: p.name, slug: p.slug, customerId: p.customerId })),
       services: services.filter((s) => nodeVisible(scope, { customerId: s.customerId, projectId: s.projectId, serviceId: s.id }, svcProject))
         .map((s) => ({ id: s.id, name: s.name, slug: s.slug, customerId: s.customerId, projectId: s.projectId })),

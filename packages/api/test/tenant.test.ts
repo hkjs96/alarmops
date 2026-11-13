@@ -12,9 +12,9 @@ describe('GET /scope-tree — the response is the isolation (security R-1)', () 
     const r = await w.call(USERS.haeun, 'GET', '/scope-tree');
     expect(r.status).toBe(200);
     expect(body(r)).toEqual({ customers: [
-      { id: 'cus_hanbit', slug: 'hanbit', name: 'Hanbit Retail', mine: false, openIncidents: 1, callHealth: 'AT_RISK', projects: [
+      { id: 'cus_hanbit', slug: 'hanbit', name: 'Hanbit Retail', status: 'ACTIVE', mine: false, openIncidents: 1, callHealth: 'AT_RISK', projects: [
         { id: 'prj_shop', slug: 'shop', name: 'Shop', openIncidents: 1, ownSteps: false, services: [{ id: 'svc_web', slug: 'web', name: 'Web', openIncidents: 1, ownSteps: false }] }] },
-      { id: 'cus_mirae', slug: 'mirae', name: 'Mirae Pay', mine: true, openIncidents: 1, callHealth: 'OK', projects: [
+      { id: 'cus_mirae', slug: 'mirae', name: 'Mirae Pay', status: 'ACTIVE', mine: true, openIncidents: 1, callHealth: 'OK', projects: [
         { id: 'prj_core', slug: 'core', name: 'Core', openIncidents: 1, ownSteps: false, services: [{ id: 'svc_pay', slug: 'payments-api', name: 'Payments API', openIncidents: 1, ownSteps: false }] },
         { id: 'prj_data', slug: 'data-platform', name: 'Data platform', openIncidents: 0, ownSteps: true, services: [] }] },
     ] });

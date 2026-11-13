@@ -32,7 +32,7 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
   async orgTree(scope: ScopeFilter) {
     const svcProject = (id: string) => this.services.get(id)?.projectId;
     return {
-      customers: [...this.customers.values()].filter((c) => seesCustomer(scope, c.id)).map((c) => ({ id: c.id, name: c.name, slug: c.slug })),
+      customers: [...this.customers.values()].filter((c) => seesCustomer(scope, c.id)).map((c) => ({ id: c.id, name: c.name, slug: c.slug, status: c.status ?? 'ACTIVE' })),
       projects: [...this.projects.values()].filter((p) => nodeVisible(scope, { customerId: p.customerId, projectId: p.id }, svcProject)).map((p) => ({ ...p })),
       services: [...this.services.values()].filter((s) => nodeVisible(scope, { customerId: s.customerId, projectId: s.projectId, serviceId: s.id }, svcProject)).map((s) => ({ ...s })),
     };

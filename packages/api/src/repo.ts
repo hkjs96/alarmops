@@ -10,10 +10,11 @@ import type { UserInfo } from './audience.js';
 import type { Role, ScopeFilter } from './auth.js';
 
 export interface OrgNode { id: string; name: string; slug: string }
+export interface CustomerNode extends OrgNode { status: CustomerStatusValue }
 export interface ProjectNode extends OrgNode { customerId: string }
 export interface ServiceNode extends OrgNode { customerId: string; projectId: string }
 /** Customers, projects and services inside the scope — nothing else (out-of-scope nodes are absent, not zeroed). */
-export interface OrgTree { customers: OrgNode[]; projects: ProjectNode[]; services: ServiceNode[] }
+export interface OrgTree { customers: CustomerNode[]; projects: ProjectNode[]; services: ServiceNode[] }
 
 export interface IncidentFilter {
   /** 'active' = TRIGGERED + ACKNOWLEDGED. */
