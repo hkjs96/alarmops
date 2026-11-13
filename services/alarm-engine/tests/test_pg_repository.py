@@ -99,7 +99,8 @@ def test_threshold_defaults_and_remediation_transitions(pg):
     assert r is not None
     assert pg.create_remediation_request(RemediationRequestRow("rq2", "cus_1", "acc_1", rid, "EC2_STOP",
                                                                "PENDING_APPROVAL", {})) is None
-    assert pg.transition_remediation("rq1", "APPROVED", "EXECUTING") is False
+    assert pg.transition_remediation("cus_1", "rq1", "APPROVED", "EXECUTING") is False   # not APPROVED yet
+    assert pg.transition_remediation("cus_2", "rq1", "PENDING_APPROVAL", "APPROVED") is False   # other customer: no row
 
 
 def test_offboarding_result_is_merged_under_a_row_lock_and_scoped_by_customer(pg):
