@@ -115,7 +115,7 @@ describe('retention on Postgres (D-45)', () => {
   it('migration constraints: a purged incident has an outcome; a hold needs reason, time and author; RLS is on for the new tables', async () => {
     await expect(q(`UPDATE "Incident" SET "purgedAt" = now() WHERE "id" = 'inc_cus_t_0'`)).rejects.toThrow(/Incident_purged_outcome_chk/);
     await expect(q(`UPDATE "Customer" SET "legalHold" = true WHERE "id" = 'cus_t'`)).rejects.toThrow(/Customer_legal_hold_chk/);
-    const rls = await q(`SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity, (SELECT count(*)::int FROM pg_policy p WHERE p.polrelid = c.oid) AS policies FROM pg_class c WHERE c.relname IN ('RetentionPurgeLog', 'RetentionClaim') AND c.relkind = 'r' ORDER BY 1`);
+    const rls = await q(`SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity, (SELECT count(*)::int FROM pg_policy p WHERE p.polrelid = c.oid) AS policies FROM pg_class c WHERE c.relname IN ('RetentionPurgeLog', 'RetentionClaim') AND c.relkind = 'r' AND c.relnamespace = current_schema()::regnamespace ORDER BY 1`);
     expect(rls).toEqual([{ relname: 'RetentionClaim', relrowsecurity: true, relforcerowsecurity: false, policies: 0 }, { relname: 'RetentionPurgeLog', relrowsecurity: true, relforcerowsecurity: false, policies: 0 }]);
   });
 
