@@ -1,7 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, sessionState } from "@/lib/server/session-check";
 
-import { clientIp, hit } from "@/lib/server/rate-limit";
+import { clientIp, hit, type Limit } from "@/lib/server/rate-limit";
+import { mockMode } from "@/lib/mode";
+import { sessionSecret, verifySession } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
 const WINDOW_MS = 60_000;
@@ -16,12 +18,18 @@ const ACCOUNT_LIMIT = 30;
  * → 401). 503 when the store did not answer — the page reads anything but 401 as "cannot say".
  */
 export async function GET(req: NextRequest) {
-  // Rate limit (hardening 2b), before anything is looked up: per address and per session cookie ("account"), fixed
-  // 60 s windows, in memory and so per instance (lib/server/rate-limit.ts). The page asks rarely (only after a server
-  // action got no readable answer), so normal use is nowhere near these numbers.
+  // Rate limit (hardening 2b), before anything is looked up: per address, and per account once the cookie VERIFIES
+  // (a forged or random cookie only ever counts against its address: rotating cookies cannot fill the table). Fixed 60 s
+  // windows, in memory and so per instance (lib/server/rate-limit.ts). The page asks rarely, so normal use is far below.
   const cookie = req.cookies.get(SESSION_COOKIE)?.value;
   const byIp = hit(`session:ip:${clientIp(req.headers)}`, IP_LIMIT, WINDOW_MS);
-  const byAcct = cookie ? hit(`session:acct:${cookie.slice(-48)}`, ACCOUNT_LIMIT, WINDOW_MS) : { ok: true, retryAfterSec: 0 };
+  let byAcct: Limit = { ok: true, retryAfterSec: 0 };
+  if (byIp.ok && cookie) {
+    let mock = false;
+    try { mock = mockMode(); } catch { mock = false; }
+    const sess = await verifySession(cookie, sessionSecret(process.env, mock));
+    if (sess) byAcct = hit(`session:acct:${sess.sub}`, ACCOUNT_LIMIT, WINDOW_MS);
+  }
   if (!byIp.ok || !byAcct.ok) {
     const retryAfterSec = Math.max(byIp.ok ? 0 : byIp.retryAfterSec, byAcct.ok ? 0 : byAcct.retryAfterSec);
     return NextResponse.json(

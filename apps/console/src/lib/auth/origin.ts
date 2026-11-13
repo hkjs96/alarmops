@@ -1,4 +1,4 @@
-import { NotConfiguredError } from "../mode";
+import { NotConfiguredError, mockMode } from "../mode";
 type Env = Record<string, string | undefined>;
 export interface PostHeaders {
   origin: string | null; host: string | null; forwardedHost: string | null; secFetchSite: string | null;
@@ -28,7 +28,9 @@ function originOf(value: string): string | null {
 export function consoleOrigin(env: Env = process.env): string | null {
   const raw = env.CONSOLE_ORIGIN?.trim();
   if (!raw) {
-    const e2eMock = env.MOCK_API === "1" && env.E2E_ALLOW_MOCK === "1" && !env.VERCEL;
+    // the same predicate as everywhere else (mockMode): never exempt on Vercel production; and this branch is only reached when CONSOLE_ORIGIN is not set
+    let e2eMock = false;
+    try { e2eMock = mockMode(env); } catch { e2eMock = false; }
     if (env.NODE_ENV === "production" && !e2eMock) throw new NotConfiguredError("CONSOLE_ORIGIN");
     return null;
   }

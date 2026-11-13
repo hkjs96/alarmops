@@ -33,6 +33,13 @@ describe("CONSOLE_ORIGIN is required in production (2a)", () => {
     expect(consoleOrigin({ NODE_ENV: "production", MOCK_API: "1", E2E_ALLOW_MOCK: "1" })).toBeNull();
     expect(() => consoleOrigin({ NODE_ENV: "production", MOCK_API: "1" })).toThrow();
   });
+  it("the mock exemption is mockMode()'s: never on Vercel production, never with a CONSOLE_ORIGIN that is invalid", () => {
+    const e = { NODE_ENV: "production", MOCK_API: "1", E2E_ALLOW_MOCK: "1" };
+    expect(() => consoleOrigin({ ...e, VERCEL_ENV: "production" })).toThrow();
+    expect(() => consoleOrigin({ ...e, VERCEL: "1" })).toThrow();
+    expect(() => consoleOrigin({ ...e, CONSOLE_ORIGIN: "junk" })).toThrow();
+    expect(consoleOrigin({ ...e, CONSOLE_ORIGIN: "https://c.example" })).toBe("https://c.example");
+  });
   it("middleware answers 503 for every request in a misconfigured production", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("CONSOLE_ORIGIN", "");
@@ -50,6 +57,22 @@ describe("rate limit (2b)", () => {
     expect(r).toEqual({ ok: false, retryAfterSec: 1 });
     expect(hit("other", 2, 1000, 400).ok).toBe(true);
     expect(hit("k", 2, 1000, 1000).ok).toBe(true);
+  });
+  it("a full table evicts the oldest keys, not everybody: a flood of new keys does not wipe a counted address", () => {
+    hit("victim", 1, 60_000, 0);
+    expect(hit("victim", 1, 60_000, 1).ok).toBe(false);
+    for (let i = 0; i < 10_050; i++) hit(`flood-${i}`, 1, 60_000, 2 + i);
+    expect(hit("flood-10049", 1, 60_000, 20_000).ok).toBe(false); // the newest are still counted
+  });
+  it("/auth/session: random cookies do not get a bucket of their own (only the address counts)", async () => {
+    vi.stubEnv("SESSION_SECRET", "x".repeat(40));
+    vi.stubEnv("MOCK_API", "");
+    for (let i = 0; i < 121; i++) {
+      const r = new NextRequest("http://localhost/auth/session");
+      r.cookies.set("ao_session", `forged-${i}`);
+      const res = await sessionGET(r);
+      if (i < 120) expect(res.status).not.toBe(429); else expect(res.status).toBe(429); // the address bucket, whatever the cookie
+    }
   });
   it("X-Forwarded-For counts only behind a trusted proxy", () => {
     const h = new Headers({ "x-forwarded-for": "6.6.6.6, 10.0.0.1" });

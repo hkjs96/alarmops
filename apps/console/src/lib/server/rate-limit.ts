@@ -16,8 +16,9 @@ export interface Limit { ok: boolean; retryAfterSec: number }
 /** Counts one request for `key`; `ok` is false once `limit` requests were seen in the current `windowMs` window. */
 export function hit(key: string, limit: number, windowMs: number, now = Date.now()): Limit {
   if (slots.size >= MAX_KEYS) {
-    for (const [k, s] of slots) if (s.resetAt <= now) slots.delete(k);
-    if (slots.size >= MAX_KEYS) slots.clear(); // under a flood of distinct keys: forget rather than grow without bound
+    for (const [k, v] of slots) if (v.resetAt <= now) slots.delete(k);
+    // still full: evict the oldest keys (Map keeps insertion order), never everything: a flood of new keys must not wipe the others' counts
+    for (const k of slots.keys()) { if (slots.size < MAX_KEYS) break; slots.delete(k); }
   }
   let s = slots.get(key);
   if (!s || s.resetAt <= now) { s = { count: 0, resetAt: now + windowMs }; slots.set(key, s); }

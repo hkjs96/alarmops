@@ -1,6 +1,6 @@
 "use client";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type MouseEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type MouseEvent } from "react";
 import { Banner, ConfirmDialog, Tombstone, cx, isSameSpot, markSpot, useStableRows } from "@alarmops/design-system";
 import type {
   ChannelState, ContactChannelKey, CustomerPersonResponder, CustomerPersonRole, PagingHealth, PagingPathStep, PagingStep, ResponderDisplay, RespondersResponse,
@@ -212,10 +212,11 @@ export function RespondersCard({ customer, customerName, services, responders, s
     const s = others.find((x) => x.contactId === pick);
     if (!s || isSameSpot(e) || busy.add) return;
     markSpot(e);
+    holdSpot(e.currentTarget as HTMLElement, () => listRef.current?.querySelector<HTMLElement>("select[aria-label='MSP staff to add']"));
     setBusyFor("add", "add"); setErr(null);
     const r = await callAction(() => addResponder(customer, { contactId: s.contactId }, ver.current));
     setBusyFor("add", null);
-    if (!r.ok) { failed(r); return; }
+    if (!r.ok) { hold.current = null; failed(r); return; }
     ver.current = Math.max(ver.current, r.data.version);
     setPick("");
     shell.toast(`${s.name} added to Responders of ${customerName}`);
@@ -226,14 +227,45 @@ export function RespondersCard({ customer, customerName, services, responders, s
     const name = form.name.trim();
     if (!name) { setFormErr("Enter the person's name."); return; }
     if (!form.email.trim() && !form.phone.trim()) { setFormErr("Enter an email or a phone number."); return; }
+    const formEl = e.currentTarget as HTMLElement; // read now: currentTarget is gone after the await
+    const submit = formEl.querySelector<HTMLElement>("button[type='submit']");
+    if (submit) holdSpot(submit, () => formEl.querySelector<HTMLElement>("input"));
     setBusyFor("add", "add"); setErr(null); setFormErr(null);
     const r = await callAction(() => addResponder(customer, { name, email: form.email, phone: form.phone, role: form.role }, ver.current));
     setBusyFor("add", null);
-    if (!r.ok) { failed(r); return; }
+    if (!r.ok) { hold.current = null; failed(r); return; }
     ver.current = Math.max(ver.current, r.data.version);
     // the typed address and number are not kept in the page once sent; the list shows them masked
     setForm({ name: "", email: "", phone: "", role: "NOTIFY_ONLY" });
     shell.toast(`${name} added to ${customerName} as ${ROLE[form.role]} · a confirmation link is sent`);
+  };
+
+  /**
+   * QA 권고 B: an added row pushes the Add controls (below the lists) down. Without scroll anchoring (Safari) the next press
+   * would miss, so after a successful add the page is scrolled by exactly that much — the Add control stays at the same
+   * place in the viewport — and the focus goes to the field next to it (the button itself is disabled until something is typed).
+   */
+  const hold = useRef<{ el: HTMLElement; top: number; focus: () => HTMLElement | null | undefined } | null>(null);
+  const holdSpot = (el: HTMLElement, focus: () => HTMLElement | null | undefined) => { hold.current = { el, top: el.getBoundingClientRect().top, focus }; };
+  useLayoutEffect(() => {
+    const h = hold.current;
+    if (!h || !h.el.isConnected) return;
+    const d = h.el.getBoundingClientRect().top - h.top;
+    if (d !== 0) {
+      let sp: HTMLElement | null = h.el.parentElement;
+      while (sp && !(/(auto|scroll)/.test(getComputedStyle(sp).overflowY) && sp.scrollHeight > sp.clientHeight)) sp = sp.parentElement;
+      if (sp) sp.scrollTop += d; else window.scrollBy(0, d);
+    }
+    hold.current = null;
+    h.focus()?.focus({ preventScroll: true });
+  }, [responders.staff.length, responders.people.length]);
+
+  /** the jump link next to Done (QA 권고 A): the Add controls are below the lists */
+  const jumpToAdd = (e: MouseEvent) => {
+    e.preventDefault();
+    const t = listRef.current?.querySelector<HTMLElement>("select[aria-label='MSP staff to add']");
+    t?.scrollIntoView({ block: "center" });
+    t?.focus({ preventScroll: true });
   };
 
   /** Done (or the steps editor taking over): the explicit refresh. Tombstones go, the list is taken as it is now. */
@@ -283,6 +315,7 @@ export function RespondersCard({ customer, customerName, services, responders, s
       <div className="card-h">
         <span className="ov" id="co-resp-h">Responders · {customerName}</span>
         <span className="sp" />
+        {on ? <a href="#co-resp-ed" className="btn sm co-jump" data-testid="co-resp-jump" onClick={jumpToAdd}>Add staff / Add person ↓</a> : null}
         <button type="button" className="btn sm" data-testid="co-resp-edit" aria-pressed={on} disabled={Boolean(why)} aria-describedby={why ? "co-resp-why" : undefined}
           onClick={() => { if (editing) finish(); else { setEditing(true); setErr(null); } }}>
           {on ? "Done" : `Edit responders for ${customerName}`}
@@ -360,7 +393,7 @@ export function RespondersCard({ customer, customerName, services, responders, s
         </ul>
         {/* P3-K: everything Edit brings in sits below the last row, so pressing Edit moves no row. Rows reserve the room their controls need (.co-resp .co-people li). */}
         {on ? (
-          <div className="co-resp-ed" data-testid="co-resp-ed">
+          <div className="co-resp-ed" id="co-resp-ed" data-testid="co-resp-ed">
         {/* one line, one height, there for as long as Responders are edited: what it says changes, nothing below it moves */}
         {on ? (
           <div className={cx("co-resp-live", conflict || err ? "warn" : now.level === "UNREACHABLE" ? "unr" : now.level === "AT_RISK" ? "ar" : null)} data-testid="co-resp-live">

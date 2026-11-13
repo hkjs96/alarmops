@@ -23,6 +23,8 @@ export async function middleware(req: NextRequest) {
   fwd.set("content-security-policy", csp);
   const res = await gate(req, () => NextResponse.next({ request: { headers: fwd } }));
   res.headers.set("Content-Security-Policy", csp);
+  // the page carries this request's nonce: no cache may keep it for another request
+  if (!res.headers.has("Cache-Control")) res.headers.set("Cache-Control", "no-store");
   return res;
 }
 
