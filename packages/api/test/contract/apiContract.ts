@@ -575,6 +575,16 @@ export function apiContract(make: MakeApiFixture): void {
       expect((await w.call(null, 'GET', '/customers/cus_mirae/status')).status).toBe(401);
     });
 
+    it('GET /scope-tree carries each customer status for every staff role (not ADMIN-only) and follows a status change', async () => {
+      await open();
+      const statuses = async (who: AuthContext) => Object.fromEntries(body(await w.call(who, 'GET', '/scope-tree')).customers.map((c: any) => [c.id, c.status]));
+      expect(await statuses(USERS.haeun)).toMatchObject({ cus_mirae: 'ACTIVE', cus_hanbit: 'ACTIVE' });
+      expect((await patch(USERS.minjae, 'SUSPENDED')).status).toBe(200);
+      expect(await statuses(USERS.haeun)).toMatchObject({ cus_mirae: 'SUSPENDED', cus_hanbit: 'ACTIVE' });
+      expect((await patch(USERS.minjae, 'TERMINATED', { confirmName: await nameOf() }, 1)).status).toBe(200);
+      expect(await statuses(USERS.minjae)).toMatchObject({ cus_mirae: 'TERMINATED', cus_hanbit: 'ACTIVE' });
+    });
+
     it('PATCH: ADMIN only; portal never; needs If-Match and a reason; unknown status is 400', async () => {
       await open();
       expect((await patch(USERS.haeun, 'SUSPENDED')).status).toBe(403);

@@ -311,7 +311,7 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 
 ```json
 { "customers": [
-    { "id": "cus_…", "slug": "mirae", "name": "Mirae Pay", "mine": true,
+    { "id": "cus_…", "slug": "mirae", "name": "Mirae Pay", "status": "ACTIVE", "mine": true,
       "openIncidents": 1, "callHealth": "OK",
       "projects": [
         { "id": "prj_…", "slug": "core", "name": "Core", "openIncidents": 1, "ownSteps": false,
@@ -321,13 +321,14 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 
 | 필드 | 뜻 |
 |---|---|
+| `status` | `ACTIVE \| SUSPENDED \| TERMINATED`. 고객 단계만. 범위 안 MSP 직원은 모두 본다(D-41, ADMIN 전용 아님; 콘솔의 정지·해지 배지). 포털 사용자는 고객이 `ACTIVE`가 아니면 세션이 없어(D-42, 401) 항상 `ACTIVE`만 받는다. `GET /customers/{id}/status`와 같은 값 |
 | `openIncidents` | 그 노드 아래 열린 인시던트 수(TRIGGERED, 아직 아무도 확인하지 않음 — 메뉴 배지와 같은 정의). 상위 = 하위 합 |
 | `callHealth` | `OK \| AT_RISK \| UNREACHABLE`. 고객 단계만. `/customers/{id}/paging-health`의 `level`과 같은 계산(D-32) |
 | `ownSteps` | 그 프로젝트·서비스에 호출 순서 덮어쓰기(PagingOverride)가 있음. 고객 노드에는 없다 |
 | `mine` | 세션 사용자가 그 고객의 Responder(직접 또는 템플릿 경유). 서버가 계산 |
 | `slug` | 부모 안에서 유일, `^[a-z0-9][a-z0-9-]{0,63}$` |
 
-트리 표식은 3종뿐이라 필드도 이 셋이다. 임계치 검토 수(Needs review)는 넣지 않는다.
+트리 표식은 `callHealth`·`ownSteps`·`mine` 3종이고, 고객 노드의 `status`는 정지·해지 배지용이다. 임계치 검토 수(Needs review)는 넣지 않는다.
 
 **테넌트 규칙 (security R-1).** 콘솔은 받은 트리를 그대로 그리고 모든 화면의 페이로드로 브라우저에 내려보낸다. 격리는 이 응답이 전부다.
 1. 서버가 구한 customerId 집합 안의 고객만 준다. 프로젝트·서비스 범위(ContactScope PROJECT/SERVICE)인 사용자는 그 하위만.
@@ -448,7 +449,7 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 ### 8.4 조직·계정·연동
 | 메서드 경로 | 설명 | 권한 |
 |---|---|---|
-| GET/POST `/customers`, GET/PATCH/DELETE `/customers/{id}` | | A (GET V) |
+| GET/POST `/customers`, GET/PATCH/DELETE `/customers/{id}` | 목록·단건 항목에 `status: ACTIVE\|SUSPENDED\|TERMINATED`를 포함한다(`/scope-tree` 고객 노드와 같은 값, 직원 V). 목록 엔드포인트는 아직 미구현 — 구현 시 이 필드를 넣는다 | A (GET V) |
 | GET `/customers/{id}/status` | **구현됨.** `{ status, statusChangedAt, version }`, `ETag: "<version>"`. ADMIN(MSP 직원)만; 포털 사용자·모르는 id는 404, 직원 비ADMIN은 403 | A |
 | PATCH `/customers/{id}/status` | **구현됨(D-43).** `{ status: ACTIVE\|SUSPENDED\|TERMINATED, reason, confirmName? }` + `If-Match: <version>`. ADMIN만(포털은 404, 다른 직원 403). `reason` 필수(공백만 불가, 500자 이하). `TERMINATED`로 갈 때 `confirmName`이 고객사 이름과 정확히 같아야 한다(아니면 400 `VALIDATION_FAILED`, field `confirmName`). `TERMINATED`에서 다른 상태로는 409 `CUSTOMER_TERMINATED`. **같은 상태로의 요청은 아무것도 쓰지 않고 200**(감사·버전 불변; 이미 해지면 기존 `offboardingId`). 버전은 `AuditLog`(`targetType='CustomerStatus'`)의 고객별 행 수로 센다(Responders와 같은 방식, 컬럼 없음) — 상태 변경과 같은 트랜잭션에서 감사 행이 써지므로 변경마다 +1. `statusChangedAt` 기록. `TERMINATED`가 되면 **같은 트랜잭션**에서 `CustomerOffboarding`(PAGING_STOPPED=DONE, ALARMS_DELETED=PENDING, 나머지 3개 MANUAL)을 만든다. **커밋 뒤** CloudAccount마다 `OFFBOARD_ACCOUNT`를 `CommandPublisher` 포트로 발행(`commandId = offboard-<offboardingId>-<cloudAccountId>`). 응답 `200 { status, statusChangedAt, version, offboardingId?, commandsSent?, commandsFailed?[] }`. **알려진 틈:** 아웃박스 테이블이 없어 커밋과 발행이 원자적이지 않다. 발행이 실패하면 상태 변경은 유지하고(호출은 이미 멈춤) `commandsFailed`로 알리며 `ALARMS_DELETED`를 `MANUAL`(`COMMAND_PUBLISH_FAILED: <계정 id>`)로 바꾼다(엔진 결과가 뒤늦게 오면 덮어쓴다). 자동 재발행은 없지만 **같은 `TERMINATED` 요청을 다시 보내면**(이미 해지 = no-op) `ALARMS_DELETED`가 `PENDING`이거나 발행 실패로 `MANUAL`인 동안 같은 `commandId`의 명령을 다시 발행한다(엔진이 `commandId`로 멱등 처리; 응답에 `commandsSent`·`commandsFailed`). 커밋 직후 프로세스가 죽은 경우의 복구 수단이며, 아웃박스 없는 PoC의 한계다. 부분 실패는 엔진이 남긴 `detail`을 지우지 않고 뒤에 덧붙인다. 쓰기 순간 이미 같은 상태면(SQL 등으로 바뀐 경우) 오류 없이 no-op 큐 포트가 설정되지 않으면 쓰기 전에 503 `COMMANDS_UNAVAILABLE`. 일반 PATCH `/customers/{id}`로는 상태를 바꿀 수 없다 | A |
 | GET `/customers/{id}/offboarding` | **구현됨.** D-43 체크리스트: `{ id, startedAt, completedAt, reason, steps[{ key: PAGING_STOPPED\|ALARMS_DELETED\|CUSTOMER_STACK_REMOVED\|ACCOUNTS_DISABLED\|BUS_ALLOWLIST_REMOVED, state: DONE\|PENDING\|MANUAL, at?, byUserId?, detail? }], residual: { lastEventAt?, count } }`(`residual`은 `OffboardResidual` 합계; 없으면 `{ count: 0 }`). ADMIN만(포털 404, 직원 비ADMIN 403). 해지한 적 없는 고객은 404. `CUSTOMER_STACK_REMOVED`는 사람이 표시(고객 계정이라 우리가 지울 수 없다) | A |
