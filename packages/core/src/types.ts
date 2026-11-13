@@ -6,6 +6,10 @@ export type EventState = 'FIRING' | 'RESOLVED' | 'INSUFFICIENT_DATA';
 export type EventType = 'STATE_CHANGE' | 'CONFIG_CHANGE';
 export type CustomerResolvedBy = 'ACCOUNT_MAP' | 'SOURCE_TOKEN' | 'UNMAPPED';
 export type Decision = 'NOTIFY' | 'SUPPRESS' | 'DEFER';
+/** Customer.status (D-42, D-43). */
+export type CustomerStatus = 'ACTIVE' | 'SUSPENDED' | 'TERMINATED';
+/** Incident.pagingSuppressed (D-43): the incident is recorded but never paged, even after the customer is ACTIVE again. */
+export type PagingSuppressedReason = 'CUSTOMER_SUSPENDED';
 
 /** SQS `alert-events` body (API-CONTRACT §3). */
 export interface NormalizedEvent {

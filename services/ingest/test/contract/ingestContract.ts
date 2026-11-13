@@ -5,7 +5,7 @@
  * consumer (processMessage) end to end on the store.
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import { normalizeCloudWatch, type CloudWatchEventBridgeEvent, type GroupRow, type MaintenanceWindow, type NormalizedEvent, type Severity } from '@alarmops/core';
+import { normalizeCloudWatch, type CloudWatchEventBridgeEvent, type CustomerStatus, type GroupRow, type MaintenanceWindow, type NormalizedEvent, type Severity } from '@alarmops/core';
 import { processMessage } from '../../src/consumer.js';
 import type { AlertRepository, AlertRow, IntegrationSourceRow, SourceRepository } from '../../src/ports.js';
 import { coreFixture, FakeQueue, sha } from '../helpers.js';
@@ -16,12 +16,16 @@ export interface IngestSeed {
   accounts: Array<[awsAccountId: string, customerId: string]>;
   severity: Record<string, Severity>;
   windows: MaintenanceWindow[];
+  /** D-43: absent = ACTIVE. */
+  statuses?: Record<string, CustomerStatus>;
 }
 export interface IngestFixture {
   repo: AlertRepository & SourceRepository;
   counts(): Promise<{ rawEvents: number; alerts: number; groups: number; rejections: number }>;
   rawEvent(id: string): Promise<{ decision: string | null; decisionReason: string | null; groupId: string | null; alertId: string } | null>;
   sourceLastReceivedAt(id: string): Promise<Date | null>;
+  /** D-43 */
+  residual(customerId: string, sourceKey: string): Promise<{ firstAt: Date; lastAt: Date; count: number } | null>;
   close(): Promise<void>;
 }
 export type MakeIngestFixture = (seed: IngestSeed) => Promise<IngestFixture>;
@@ -75,6 +79,35 @@ export function ingestContract(make: MakeIngestFixture): void {
       const t = new Date('2026-11-09T03:13:00Z');
       await fx.repo.touchSource('src_prom', t);
       expect((await fx.sourceLastReceivedAt('src_prom'))?.toISOString()).toBe(t.toISOString());
+    });
+  });
+
+  describe('customer status and residuals (D-43)', () => {
+    it('reads the status of the customer asked for (unknown = ACTIVE)', async () => {
+      fx = await make({ ...SEED, statuses: { cus_1: 'SUSPENDED', cus_2: 'TERMINATED' } });
+      expect(await fx.repo.customerStatus('cus_1')).toBe('SUSPENDED');
+      expect(await fx.repo.customerStatus('cus_2')).toBe('TERMINATED');
+      expect(await fx.repo.customerStatus('cus_nope')).toBe('ACTIVE');
+    });
+
+    it('recordResidual upserts per (customer, sourceKey): firstAt stays, lastAt moves forward only, count adds up; other keys and customers are separate', async () => {
+      fx = await make({ ...SEED, statuses: { cus_1: 'TERMINATED' } });
+      const t1 = new Date('2026-11-09T03:00:00Z'); const t2 = new Date('2026-11-09T04:00:00Z'); const t0 = new Date('2026-11-09T02:00:00Z');
+      await fx.repo.recordResidual({ customerId: 'cus_1', sourceKey: 'aws:123456789012', at: t1, count: 1 });
+      await fx.repo.recordResidual({ customerId: 'cus_1', sourceKey: 'aws:123456789012', at: t2, count: 3 });
+      await fx.repo.recordResidual({ customerId: 'cus_1', sourceKey: 'aws:123456789012', at: t0, count: 1 }); // late arrival: lastAt must not go back
+      await fx.repo.recordResidual({ customerId: 'cus_1', sourceKey: 'integration:src_prom', at: t1, count: 2 });
+      await fx.repo.recordResidual({ customerId: 'cus_2', sourceKey: 'aws:123456789012', at: t1, count: 7 });
+      expect(await fx.residual('cus_1', 'aws:123456789012')).toEqual({ firstAt: t0, lastAt: t2, count: 5 });
+      expect(await fx.residual('cus_1', 'integration:src_prom')).toEqual({ firstAt: t1, lastAt: t1, count: 2 });
+      expect(await fx.residual('cus_2', 'aws:123456789012')).toEqual({ firstAt: t1, lastAt: t1, count: 7 });
+      expect(await fx.residual('cus_2', 'integration:src_prom')).toBeNull();
+    });
+
+    it('a terminated customer makes no alert, group or incident source: the repository only counts', async () => {
+      fx = await make({ ...SEED, statuses: { cus_1: 'TERMINATED' } });
+      await fx.repo.recordResidual({ customerId: 'cus_1', sourceKey: 'aws:123456789012', at: new Date('2026-11-09T03:00:00Z'), count: 1 });
+      expect(await fx.counts()).toMatchObject({ rawEvents: 0, alerts: 0, groups: 0 });
     });
   });
 

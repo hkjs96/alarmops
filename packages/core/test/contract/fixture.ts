@@ -30,6 +30,8 @@ export interface StoreFixture<R extends TickRepository = TickRepository> {
   /** A group as ingest leaves it, with its member alerts (episode state = `member.episodeOpen`). */
   addGroup(g: GroupRow, members: GroupMember[]): Promise<void>;
   setEpisode(alertId: string, open: boolean): Promise<void>;
+  /** D-43: Customer.status changes after the incident exists (a person did it through PATCH /customers/{id}/status). */
+  setCustomerStatus(customerId: string, status: 'ACTIVE' | 'SUSPENDED' | 'TERMINATED'): Promise<void>;
   addWindow(w: MaintenanceWindow): Promise<void>;
   revokeWindow(id: string, at: Date): Promise<void>;
   putJob(j: NotificationJob): Promise<void>;
@@ -67,6 +69,7 @@ export function memoryFixture<S extends MemoryTickStore>(store: S): StoreFixture
       for (const m of members) if (!store.episodes.has(m.alertId)) store.episodes.set(m.alertId, m.episodeOpen);
     },
     async setEpisode(alertId, open) { store.episodes.set(alertId, open); },
+    async setCustomerStatus(customerId, status) { store.customers.set(customerId, { ...store.customers.get(customerId)!, status }); },
     async addWindow(w) { store.windows.push({ ...w }); },
     async revokeWindow(id, at) { store.windows.find((w) => w.id === id)!.revokedAt = at; },
     async putJob(j) { store.jobs.set(j.idempotencyKey, structuredClone(j)); },

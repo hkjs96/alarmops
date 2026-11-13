@@ -7,7 +7,7 @@
  *   that loses the race is 'EXISTS'. Updates are `WHERE id AND version AND customerId IS NOT DISTINCT FROM`.
  * - AlertGroup: one OPEN group per key (partial UQ); a losing create is 'EXISTS'.
  */
-import { DEFAULT_SEVERITY_TABLE, type GroupRow, type MaintenanceWindow, type NormalizedEvent, type Severity, type SuppressionPolicy } from '@alarmops/core';
+import { DEFAULT_SEVERITY_TABLE, type CustomerStatus, type GroupRow, type MaintenanceWindow, type NormalizedEvent, type Severity, type SuppressionPolicy } from '@alarmops/core';
 import type { AlertRepository, AlertRow, IngestRejectionInput, IntegrationSourceRow, RawEventDecision, SourceRepository } from '@alarmops/ingest';
 import { PG, pgCode, type SqlClient, type SqlRow } from './client.js';
 import { GROUP_COLS, d, dReq, iso, js, newId, num, toGroup } from './rows.js';
@@ -60,6 +60,18 @@ export class SqlIngestStore implements AlertRepository, SourceRepository {
   async severityTable(): Promise<Record<string, Severity>> {
     const rows = await this.sql.query(`SELECT "matchValue", "severity" FROM "SeverityMapping"`);
     return rows.length ? Object.fromEntries(rows.map((r) => [r.matchValue as string, r.severity as Severity])) : { ...DEFAULT_SEVERITY_TABLE };
+  }
+  async customerStatus(customerId: string): Promise<CustomerStatus> {
+    const [r] = await this.sql.query(`SELECT "status" FROM "Customer" WHERE "id" = $1`, [customerId]);
+    return (r?.status as CustomerStatus | undefined) ?? 'ACTIVE';
+  }
+  async recordResidual(r: { customerId: string; sourceKey: string; at: Date; count: number }): Promise<void> {
+    await this.sql.query(
+      `INSERT INTO "OffboardResidual"("customerId", "sourceKey", "firstAt", "lastAt", "count") VALUES ($1, $2, $3::timestamptz, $3::timestamptz, $4)
+       ON CONFLICT ("customerId", "sourceKey") DO UPDATE SET
+         "firstAt" = LEAST("OffboardResidual"."firstAt", EXCLUDED."firstAt"), "lastAt" = GREATEST("OffboardResidual"."lastAt", EXCLUDED."lastAt"),
+         "count" = "OffboardResidual"."count" + EXCLUDED."count"`,
+      [r.customerId, r.sourceKey, r.at.toISOString(), r.count]);
   }
 
   // ── AlertRepository ──

@@ -105,3 +105,37 @@ describe('webhook receiver (API-CONTRACT §4)', () => {
     await expect(h(req('prometheus', coreFixture('alertmanager-v4.json'), { authorization: `Bearer ${PROM_TOKEN}` }))).rejects.toThrow(/SQS/);
   });
 });
+
+describe('customer status (D-43)', () => {
+  const alerts = () => coreFixture('alertmanager-v4.json');
+  const auth = { Authorization: `Bearer ${PROM_TOKEN}` };
+  it('SUSPENDED: accepted and queued like any event (the tick records the incident without paging)', async () => {
+    const { h, q, s } = setup();
+    s.statuses.set('cus_1', 'SUSPENDED');
+    const r = await h(req('prometheus', alerts(), auth));
+    expect(r.statusCode).toBe(202);
+    expect(q.sent).toHaveLength(3);
+    expect(s.residuals.size).toBe(0);
+  });
+  it('TERMINATED: 202 so the provider does not retry, nothing queued, only the residual count (per integration)', async () => {
+    const { h, q, s } = setup();
+    s.statuses.set('cus_1', 'TERMINATED');
+    const r = await h(req('prometheus', alerts(), auth));
+    expect(r.statusCode).toBe(202);
+    expect(JSON.parse(r.body)).toEqual({ accepted: 3, rejected: 0 });
+    expect(q.sent).toEqual([]);
+    expect(s.alerts.size + s.rawEvents.size + s.groups.size).toBe(0);
+    expect([...s.residuals.values()]).toEqual([{ customerId: 'cus_1', sourceKey: 'integration:src_prom', firstAt: new Date('2026-11-09T03:06:00Z'), lastAt: new Date('2026-11-09T03:06:00Z'), count: 3 }]);
+    await h(req('prometheus', alerts(), auth));
+    expect([...s.residuals.values()][0]!.count).toBe(6);
+  });
+  it('the token check comes first: a TERMINATED customer\'s wrong token is still 401 and counts nothing; another customer is unaffected', async () => {
+    const { h, q, s } = setup();
+    s.statuses.set('cus_1', 'TERMINATED');
+    expect((await h(req('prometheus', alerts(), { Authorization: `Bearer in_${'f'.repeat(40)}` }))).statusCode).toBe(401);
+    expect(s.residuals.size).toBe(0);
+    expect((await h(req('grafana', coreFixture('grafana-unified.json'), {}, { token: GRAF_TOKEN }))).statusCode).toBe(202);
+    expect(q.sent.length).toBeGreaterThan(0);
+    expect(s.residuals.size).toBe(0);
+  });
+});

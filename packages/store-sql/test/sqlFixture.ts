@@ -154,6 +154,7 @@ export async function sqlFixture(db: TestDb, seed: MemoryTickStore): Promise<Sql
     setClock: (c) => { clock = c; },
     busy: () => counted.busy(),
     addContact, addGroup, addWindow, putJob,
+    async setCustomerStatus(customerId, status) { await q(`UPDATE "Customer" SET "status" = $2::"CustomerStatus" WHERE "id" = $1`, [customerId, status]); },
     async patchContact(id, patch) {
       for (const [k, v] of Object.entries(patch)) await q(`UPDATE "Contact" SET "${k}" = ${k.endsWith('At') ? '$2::timestamptz' : k === 'kind' ? '$2::"ContactKind"' : '$2'} WHERE "id" = $1`, [id, v instanceof Date ? v.toISOString() : v]);
     },

@@ -3,6 +3,7 @@
  * Default: PGlite. `TEST_DATABASE_URL=postgres://…` → that server (what CI runs with a postgres:16 service).
  */
 import { afterAll, beforeAll, describe } from 'vitest';
+import { inactiveContract } from '../../core/test/contract/inactiveContract.js';
 import { tickContract } from '../../core/test/contract/tickContract.js';
 import { openTestDb, type TestDb } from './db.js';
 import { sqlFixture } from './sqlFixture.js';
@@ -13,4 +14,5 @@ afterAll(async () => { await db?.close(); });
 
 describe(`store contract: sql (${process.env.TEST_DATABASE_URL ? 'postgres' : 'pglite'})`, () => {
   tickContract((seed) => sqlFixture(db, seed));
+  inactiveContract((seed) => sqlFixture(db, seed));
 });

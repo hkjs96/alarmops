@@ -16,7 +16,7 @@
  */
 import {
   CLAIM_LEASE_SEC, CLOCK_SKEW_LIMIT_MS, LANE_CHANNELS, LANES, MAX_ATTEMPTS, RELEASE_HOLD_MAX_SEC, RETRY_DELAYS_SEC, claimReserve, policyFromRow, sanitizeProviderError,
-  type AuditInput, type Contact, type DeliveryLog, type DeliveryReason, type GroupDeliveryCommit, type GroupMember, type GroupRow, type HeartbeatRow,
+  type AuditInput, type Contact, type CustomerStatus, type DeliveryLog, type DeliveryReason, type GroupDeliveryCommit, type GroupMember, type GroupRow, type HeartbeatRow,
   type HeartbeatWrite, type IncidentCommit, type IncidentEventInput, type IncidentRow, type Leave, type MaintenanceWindow, type NotificationIntent,
   type NotificationJob, type Override, type PagingConfig, type PagingWorld, type ResolutionInput, type Responder, type Rotation, type SenderKind,
   type SuppressionPolicy, type TickJob, type TickRepository, TICK_JOBS, MAX_MEMBERS,
@@ -135,6 +135,12 @@ export class SqlTickStore implements TickRepository {
       [customerId, awsAccountId],
     );
     return r ? { projectId: r.projectId, serviceId: r.serviceId } : null;
+  }
+
+  /** D-43. A customer that is not found is ACTIVE (when in doubt, page). */
+  async customerStatus(customerId: string): Promise<CustomerStatus> {
+    const [r] = await this.sql.query(`SELECT "status" FROM "Customer" WHERE "id" = $1`, [customerId]);
+    return (r?.status as CustomerStatus | undefined) ?? 'ACTIVE';
   }
 
   async pagingContext(customerId: string): Promise<{ configs: PagingConfig[]; world: PagingWorld }> {
@@ -299,15 +305,15 @@ export class SqlTickStore implements TickRepository {
       `INSERT INTO "Incident"("id", "axis", "customerId", "title", "severity", "status", "triggeredAt", "acknowledgedAt", "resolvedAt", "acknowledgedBy", "resolvedBy",
          "resolvedVia", "mttaSec", "mttrSec", "memberCount", "eventCount", "accountIds", "resourceTypes", "assignmentSnapshot", "pagingConfigId",
          "escalationStep", "escalationRepeat", "escalationBaseAt", "escalationDoneAt", "renotifiedAt", "version", "isMergeTarget", "nextEscalationAt",
-         "lastMergedAt", "renotifyCount", "projectId", "serviceId", "source", "lastManualEscalationAt")
+         "lastMergedAt", "renotifyCount", "projectId", "serviceId", "source", "lastManualEscalationAt", "pagingSuppressed")
        VALUES ($1, $2, $3, $4, $5::"Severity", $6::"IncidentStatus", $7::timestamptz, $8::timestamptz, $9::timestamptz, $10, $11,
          $12::"ResolvedVia", $13, $14, $15, $16, $17::text[], $18::text[], $19::jsonb, $20,
          $21, $22, $23::timestamptz, $24::timestamptz, $25::timestamptz, 0, $26, $27::timestamptz,
-         $28::timestamptz, $29, $30, $31, $32::"SourceKind", $33::timestamptz)`,
+         $28::timestamptz, $29, $30, $31, $32::"SourceKind", $33::timestamptz, $34::"PagingSuppressedReason")`,
       [r.id, r.axis, r.customerId, r.title, r.severity, r.status, iso(r.triggeredAt), iso(r.acknowledgedAt), iso(r.resolvedAt), r.acknowledgedBy, r.resolvedBy,
         r.resolvedVia, r.mttaSec, r.mttrSec, r.memberCount, r.eventCount, r.accountIds, r.resourceTypes, js(r.assignmentSnapshot), r.pagingConfigId,
         r.escalationStep, r.escalationRepeat, iso(r.escalationBaseAt), iso(r.escalationDoneAt), iso(r.renotifiedAt), r.isMergeTarget, iso(r.nextEscalationAt),
-        iso(r.lastMergedAt), r.renotifyCount, r.projectId, r.serviceId, r.source, iso(r.lastManualEscalationAt)],
+        iso(r.lastMergedAt), r.renotifyCount, r.projectId, r.serviceId, r.source, iso(r.lastManualEscalationAt), r.pagingSuppressed ?? null],
     );
   }
 
@@ -322,12 +328,13 @@ export class SqlTickStore implements TickRepository {
          "accountIds" = $15::text[], "resourceTypes" = $16::text[], "assignmentSnapshot" = $17::jsonb, "escalationStep" = $18, "escalationRepeat" = $19,
          "escalationBaseAt" = $20::timestamptz, "escalationDoneAt" = $21::timestamptz, "renotifiedAt" = $22::timestamptz, "isMergeTarget" = $23,
          "nextEscalationAt" = $24::timestamptz, "lastMergedAt" = $25::timestamptz, "renotifyCount" = $26, "lastManualEscalationAt" = $27::timestamptz,
+         "pagingSuppressed" = COALESCE("pagingSuppressed", $29::"PagingSuppressedReason"),
          "version" = "version" + $28
        WHERE "id" = $1 AND "version" = $2 RETURNING ${incidentCols()}`,
       [r.id, expectedVersion, r.title, r.severity, r.status, iso(r.acknowledgedAt), iso(r.resolvedAt), r.acknowledgedBy, r.resolvedBy, r.resolvedVia, r.mttaSec, r.mttrSec,
         r.memberCount, r.eventCount, r.accountIds, r.resourceTypes, js(r.assignmentSnapshot), r.escalationStep, r.escalationRepeat, iso(r.escalationBaseAt),
         iso(r.escalationDoneAt), iso(r.renotifiedAt), r.isMergeTarget, iso(r.nextEscalationAt), iso(r.lastMergedAt), r.renotifyCount, iso(r.lastManualEscalationAt ?? null),
-        bump ? 1 : 0],
+        bump ? 1 : 0, r.pagingSuppressed ?? null],
     );
     return row ? toIncident(row) : null;
   }

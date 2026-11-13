@@ -180,11 +180,26 @@ describe('EventBridge normalizer λ', () => {
   it('queues normalized CloudWatch events; ignores other detail types', async () => {
     const repo = store();
     const queue = new FakeQueue();
-    const h = makeEventBridgeHandler({ accounts: new AccountCustomerCache((a) => repo.customerForAccount(a)), queue });
+    const h = makeEventBridgeHandler({ accounts: new AccountCustomerCache((a) => repo.customerForAccount(a)), queue, sources: repo });
     expect(await h(coreFixture('cloudwatch-managed.json'))).toEqual({ queued: 1 });
     expect(queue.sent[0]!.attributes).toEqual({ customerId: 'cus_1', source: 'CLOUDWATCH' });
     const other = { ...coreFixture('cloudwatch-managed.json'), 'detail-type': 'EC2 Instance State-change Notification' };
     expect(await h(other)).toEqual({ queued: 0 });
+  });
+  it('D-43: a TERMINATED customer\'s account events are not queued, only counted as aws:{account}; SUSPENDED ones are queued; unmapped ones are untouched', async () => {
+    const repo = store();
+    const queue = new FakeQueue();
+    const h = makeEventBridgeHandler({ accounts: new AccountCustomerCache((a) => repo.customerForAccount(a)), queue, sources: repo, now: () => new Date('2026-11-09T03:06:00Z') });
+    repo.statuses.set('cus_1', 'SUSPENDED');
+    expect(await h(coreFixture('cloudwatch-managed.json'))).toEqual({ queued: 1 });
+    queue.take();
+    repo.statuses.set('cus_1', 'TERMINATED');
+    expect(await h(coreFixture('cloudwatch-managed.json'))).toEqual({ queued: 0 });
+    expect(queue.sent).toEqual([]);
+    expect([...repo.residuals.values()]).toEqual([expect.objectContaining({ customerId: 'cus_1', sourceKey: 'aws:123456789012', count: 1 })]);
+    expect(repo.alerts.size + repo.rawEvents.size).toBe(0);
+    const unmapped = { ...coreFixture('cloudwatch-managed.json'), account: '999999999999' };
+    expect(await h(unmapped)).toEqual({ queued: 1 });
   });
   it('account cache: TTL refresh and keep previous mapping on lookup failure (known-bugs 1-8)', async () => {
     let now = 0;

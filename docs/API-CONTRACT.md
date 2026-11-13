@@ -161,7 +161,7 @@ Grafana legacy, PagerDuty, generic은 PoC 범위 밖(fingerprint 제안 4).
 | 응답 | `202 { "accepted": n, "rejected": m }` — SQS 적재까지만 동기 |
 | 멱등 | dedupKey = hash(sourceId, fingerprint, startsAt, status) |
 
-**고객 상태별 수집 (D-43, 구현 전).** 웹훅(B2)과 EventBridge(B1) 모두 같다. 토큰·계정 검사는 상태와 무관하게 먼저 한다.
+**고객 상태별 수집 (D-43, 구현됨 — 이슈 #19).** 웹훅(B2)과 EventBridge(B1) 모두 같다. 인시던트는 수집이 아니라 틱 ①이 만든다: `SUSPENDED`는 평소처럼 큐에 넣고 틱이 `pagingSuppressed`로 열며 잡을 만들지 않는다. `TERMINATED`는 큐에 넣지 않고 `OffboardResidual`만 올린다(웹훅 `202 {accepted, rejected}`의 `accepted`는 정규화된 건수). 상태는 캐시하지 않고 매 호출 읽는다. 토큰·계정 검사는 상태와 무관하게 먼저 한다.
 
 | `Customer.status` | 수집 | 인시던트 | 호출 |
 |---|---|---|---|
@@ -193,7 +193,7 @@ AWS 이전 때는 이 호출 1곳을 EventBridge Scheduler로 바꾼다(D-23).
 | 멱등 | `scheduledAt`(분 단위)별로 `TickClaim` 선점. 같은 분 중복 호출은 `200 {"skipped":"duplicate"}`. 겹친 실행은 행 단위 낙관적 잠금으로 안전(oncall R4-5) |
 | 시계 (SQL 보안 검토 R-2) | 틱은 먼저 저장소 시각(DB `now()`)을 묻는다. 실행기 시계가 **30초 넘게** 다르면 아무것도 하지 않고 `200 {"skipped":"clock-skew","clockSkewMs":n}`(실행기 − 저장소)을 돌려주며, 요청된 작업의 하트비트를 `ERROR` + `lastFinishedAt = null`(→ `/health`에서 stale)로 남긴다. 저장소도 `claimTick`에서 같은 판정을 한 번 더 한다. 30초 안이면 그룹 닫기·수집, 에스컬레이션 만기, 점검 창 판정, 타임라인·로그 시각은 모두 **저장소 시각**(실행기 시계 + 측정한 차이)으로 한다. 저장소는 호출자가 준 시각을 그대로 믿지 않는다: 새 페이지·Undo로 되살린 페이지의 만기는 `LEAST(받은 시각, now())`, 점검 보류(`releaseJob`)는 `now() + 10분`까지, 만기 목록은 `now()`를 넘겨 보지 않고, 하트비트 시각도 `now()`를 넘지 않는다. 그래서 시계가 빠른 실행기·API 서버는 페이지를 이르게 보내지도, 미래로 미뤄 두지도 못한다 |
 | 처리 | ① group: `closeAt ≤ now`인 OPEN 그룹 Close → grace 5초 경과분 Collect/Finalize → 인시던트 병합(I-3, 6시간 상한) → INITIAL 잡 생성. stale 그룹 sweep(G-6) ② escalation: 아래 표 ③ notify: 아웃박스 드레인 — 아래 "아웃박스 드레인", Slack 다이제스트(R2) ④ reconcile: 5분마다 인시던트 정합성 점검(I-6) → alarm-commands에 `CHECK_ALARM_LIVENESS` 발행 |
-| 응답 | `200 { "group": {...}, "escalation": {"checked":n,"escalated":n,"muted":n}, "notify": {"sent":n,"failed":n,"retried":n,"skipped":n,"deferred":n,"released":n,"timeouts":n,"unanswered":["SMS"],"dueUnattempted":n,"dueSev1Unattempted":n,"probeCursor":{"SMS":"<customerId>"}}, "truncated": bool, "durationMs": n }` |
+| 응답 | `200 { "group": {...}, "escalation": {"checked":n,"escalated":n,"muted":n,"suppressed":n}, "notify": {"sent":n,"failed":n,"retried":n,"skipped":n,"deferred":n,"released":n,"timeouts":n,"unanswered":["SMS"],"dueUnattempted":n,"dueSev1Unattempted":n,"probeCursor":{"SMS":"<customerId>"}}, "truncated": bool, "durationMs": n }` |
 | heartbeat | 작업별 `TickHeartbeat` 갱신. 3분 정체 경보(Q-DM-17). 상태는 `OK` / `ERROR` / `DEGRADED`. **notify는 오류가 없어도, 만기가 된 SEV-1 호출이 한 번도 시도되지 않은 채 남아 있으면 `DEGRADED`**다(예산 소진, 업체 무응답). `notify.unanswered`는 그 틱에 타임아웃만 있고 응답이 한 번도 없던 레인이다(표시용 — 레인은 닫히지 않는다). 상태 점검은 `stale` 또는 `degraded`면 정상으로 보고하지 않는다 |
 | 예산 | **응답은 작업 예산(45초) + 호출 타임아웃(10초) + 결과 기록 1초 이내, 최대 60초.** 예산이 지나면 새 호출을 시작하지 않고, 이미 시작한 호출은 타임아웃까지만 기다린다. 예산·타임아웃을 더 크게 줘도 합이 60초를 넘지 않게 줄인다. notify가 그 시간 안에 끝나지 않으면(저장소 호출이 돌아오지 않음) 기다리지 않고 `ERROR`로 응답하며 선점된 잡은 임대(60초)가 끝나면 돌아온다. 호출자(pg_cron·Lambda) 타임아웃은 60초 이상으로 둔다. 남은 일은 다음 틱. 앞 단계(group·reconcile·escalation)는 notify 몫(10초, 예산의 1/4 이하)을 남기고 멈춘다. 앞 단계 하나가 돌아오지 않으면 그 시점에 두고 notify로 넘어가며(`ERROR` 기록), notify는 시작 시점부터 자기 몫을 항상 받는다 |
 
@@ -204,7 +204,7 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 | 조건 | 동작 | 근거 |
 |---|---|---|
 | Incident.status ≠ TRIGGERED | 건너뜀(ack가 멈춘다) | oncall R6-3 |
-| 고객 `status ≠ ACTIVE` 또는 `pagingSuppressed` 있음 | 건너뜀, 잡을 만들지 않음(`suppressed++`). 아웃박스 드레인(③)도 발송 직전 같은 조건을 다시 보고 `SKIPPED_CUSTOMER_INACTIVE`로 닫는다. `ACTIVE`로 돌아와도 정지 중 인시던트는 호출하지 않는다 | D-43 |
+| 고객 `status ≠ ACTIVE` 또는 `pagingSuppressed` 있음 | 건너뜀, 잡을 만들지 않음(`suppressed++`). 아웃박스 드레인(③)도 발송 직전 같은 조건을 다시 보고 잡을 `SKIPPED`로, `lastError = SKIPPED_CUSTOMER_INACTIVE`로 닫는다. 정지 중 고객의 열린 인시던트는 틱이 한 번 보고 `pagingSuppressed`를 달아 더 보지 않는다(`nextEscalationAt = null`). `ACTIVE`로 돌아온 뒤 같은 축에 새 발화가 오면 조용한 인시던트에 합치지 않고 새 인시던트를 열어(조용한 쪽은 병합 대상에서 내림) 평소대로 호출한다. `ACTIVE`로 돌아와도 정지 중 인시던트는 호출하지 않는다 | D-43 |
 | 점검 창이 덮고 severity ≠ SEV-1 | 건너뜀, 단계 유지, `muted++` | D-17, R4-6 |
 | `now − escalationBaseAt ≥ step.waitMin` | 선점(`WHERE version=?`) → IncidentEvent(기준 시각 포함 문구) → 채널별 NotificationJob | R4-2, R4-3, R4-5 |
 | 마지막 단계 이후 `escalationRepeat < pagingConfig.repeatCount` | step=0, repeat+1, 처음부터 | D-20 (기본 1회) |
@@ -257,7 +257,7 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 | `CHECK_ALARM_LIVENESS` | `{ incidentId, fingerprints[] }` | DescribeAlarms로 deleted/not_firing/firing/unknown 분류 후 DB 반영 | Reader | grouping I-6 |
 | `EXECUTE_REMEDIATION` | `{ remediationRequestId }` | 상태 APPROVED 재확인 후 실행 | Remediator | D-15 |
 | `CHECK_CONNECTION` | `{}` | 역할별 AssumeRole(ExternalId) 점검 | 각 역할 | D-07, P4-1 |
-| `OFFBOARD_ACCOUNT` | `{ offboardingId }` | 해지 고객 계정의 `ManagedBy=AlarmOps` 알람만 삭제(다른 알람은 건드리지 않음). 삭제 전 계정·리전·태그를 다시 확인. 결과는 계정별 `deleted`·`failed`·`CAPABILITY_DISABLED` | AlarmWriter | D-43 |
+| `OFFBOARD_ACCOUNT` | `{ offboardingId }` (+ 최상위 `cloudAccountId` 필수) | **구현됨.** 고객이 `TERMINATED`가 아니면 `REFUSED`. 계정 리전 + us-east-1에서 목록(ARN 계정·리전, `ManagedBy=AlarmOps` 태그) → 삭제 직전 배치마다 다시 읽어 확인 → `DeleteAlarms`. 결과는 `CustomerOffboarding.steps.ALARMS_DELETED`에 계정별로 합쳐 기록(전부 OK=DONE, 하나라도 `CAPABILITY_DISABLED`·`FAILED`=MANUAL, 사람이 DONE으로 표시한 것은 덮지 않음). 실패는 기록 후 재시도. 해지 고객의 계정만 건드린다. 해지 고객 계정의 `ManagedBy=AlarmOps` 알람만 삭제(다른 알람은 건드리지 않음). 삭제 전 계정·리전·태그를 다시 확인. 결과는 계정별 `deleted`·`failed`·`CAPABILITY_DISABLED` | AlarmWriter | D-43 |
 
 - 멱등: `commandId` = 메시지 중복 제거 키. 엔진은 처리 전 `ThresholdChange.applyStatus`·`RemediationRequest.status`를 조건부로 선점한다. `APPLY_THRESHOLD`가 `PENDING`이 아니면 무시.
 - 역할이 없거나 꺼져 있으면 실행하지 않고 결과를 `CAPABILITY_DISABLED`로 기록.
@@ -269,6 +269,7 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 | 테이블 | 엔진 | 콘솔 | 비고 |
 |---|---|---|---|
 | CloudAccount | 읽기, `*Status`·`lastCheckedAt` 쓰기 | CRUD | |
+| CustomerOffboarding | `steps.ALARMS_DELETED`·`completedAt`만 쓰기(행 잠금) | 생성·읽기 | D-43 |
 | Resource | 쓰기(upsert, 상태 전이) | 읽기 | 발견 실패 시 지우지 않음(4-9) |
 | ManagedAlarm | 쓰기 | 읽기 | 버전 조건 |
 | ThresholdDefault | 읽기 | 쓰기 | |
@@ -447,7 +448,7 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 | 메서드 경로 | 설명 | 권한 |
 |---|---|---|
 | GET/POST `/customers`, GET/PATCH/DELETE `/customers/{id}` | | A (GET V) |
-| PATCH `/customers/{id}/status` | **D-43, 구현 전.** `{ status: ACTIVE\|SUSPENDED\|TERMINATED, reason, confirmName? }` (If-Match). `TERMINATED`로 갈 때는 `confirmName`이 고객사 이름과 같아야 한다(아니면 400). `TERMINATED`에서 다른 상태로는 409 `CUSTOMER_TERMINATED`. `TERMINATED`가 되면 서버가 `CustomerOffboarding`을 만들고 계정마다 `OFFBOARD_ACCOUNT`를 발행 → `200 { status, offboardingId? }`. 감사 기록 남김. 일반 PATCH `/customers/{id}`로는 상태를 바꿀 수 없다 | A |
+| PATCH `/customers/{id}/status` | **D-43, 구현 전(이슈 #19의 남은 항목: 저장소 포트·핸들러 미구현).** `{ status: ACTIVE\|SUSPENDED\|TERMINATED, reason, confirmName? }` (If-Match). `TERMINATED`로 갈 때는 `confirmName`이 고객사 이름과 같아야 한다(아니면 400). `TERMINATED`에서 다른 상태로는 409 `CUSTOMER_TERMINATED`. `TERMINATED`가 되면 서버가 `CustomerOffboarding`을 만들고 계정마다 `OFFBOARD_ACCOUNT`를 발행 → `200 { status, offboardingId? }`. 감사 기록 남김. 일반 PATCH `/customers/{id}`로는 상태를 바꿀 수 없다 | A |
 | GET `/customers/{id}/offboarding` | D-43 체크리스트: `{ steps[{ key: PAGING_STOPPED\|ALARMS_DELETED\|CUSTOMER_STACK_REMOVED\|ACCOUNTS_DISABLED\|BUS_ALLOWLIST_REMOVED, state: DONE\|PENDING\|MANUAL, detail? }], residual: { lastEventAt?, count } }`. `CUSTOMER_STACK_REMOVED`는 사람이 표시(고객 계정이라 우리가 지울 수 없다). PATCH로 MANUAL·PENDING 항목 완료 표시 | A |
 | GET/POST `/customers/{id}/projects`, `/projects/{id}/services` (+PATCH/DELETE) | 이름 유일 409 | A |
 | GET/POST `/customers/{id}/accounts`, PATCH/DELETE `/accounts/{id}` | 12자리 검증, ExternalId 발급, 역할 ARN, 선택 기능 토글 | A |

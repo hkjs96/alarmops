@@ -1,6 +1,6 @@
 import { sha1, stamp14 } from './hash.js';
 import type { SuppressionPolicy } from './policy.js';
-import { severityRank, type Severity, type Source } from './types.js';
+import { severityRank, type PagingSuppressedReason, type Severity, type Source } from './types.js';
 import type { AssignmentSnapshot } from './escalation.js';
 
 export const MAX_MEMBERS = 200; // I-4
@@ -50,6 +50,8 @@ export interface IncidentRow {
   projectId: string | null;
   serviceId: string | null;
   source: Source | null;
+  /** D-43: set => the tick never pages this incident. Never cleared (a customer that is ACTIVE again is not paged late). Absent = null. */
+  pagingSuppressed?: PagingSuppressedReason | null;
   /** Display sequence (DATA-MODEL Incident.number); assigned by the repository on create. */
   number: number;
   version: number;
@@ -77,7 +79,7 @@ export function newIncident(axis: string, m: { customerId: string | null; severi
     acknowledgedAt: null, acknowledgedBy: null, resolvedAt: null, resolvedBy: null, resolvedVia: null, mttaSec: null, mttrSec: null,
     memberCount: 0, eventCount: 0, accountIds: [], resourceTypes: [], isMergeTarget: true,
     escalationStep: 0, escalationRepeat: 0, escalationBaseAt: at, escalationDoneAt: null, nextEscalationAt: null,
-    renotifiedAt: null, renotifyCount: 0, lastMergedAt: at, pagingConfigId: null, assignmentSnapshot: null,
+    renotifiedAt: null, renotifyCount: 0, pagingSuppressed: null, lastMergedAt: at, pagingConfigId: null, assignmentSnapshot: null,
     projectId: null, serviceId: null, source: null, number: 0, version: 0,
   };
 }

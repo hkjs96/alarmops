@@ -119,7 +119,7 @@ Customer.responderTemplateId text? FK — 고객이 쓰는 템플릿(하나, 선
 | name | text UQ | org-tenant R1-1 |
 | slug | text UQ | 콘솔 주소·API 범위 필터의 고객 이름(`/c/<slug>/…`, `?customer=<slug>`). 형식·예약어는 아래 "slug 규칙" |
 | isInternal | bool default false | 내부 시스템용 가짜 고객사(R1-2) |
-| status | enum `CustomerStatus` `ACTIVE \| SUSPENDED \| TERMINATED`, default `ACTIVE` | D-42(마이그레이션 `0003_customer_status`). `ACTIVE`가 아니면 그 고객의 **포털 사용자는 세션이 없다**(`sessionPrincipal` → null → 401). 데이터는 지우지 않고, MSP 직원은 계속 본다. `SUSPENDED` = 잠시 멈춤(예: 결제), `TERMINATED` = 계약 종료. 바꾸는 API는 `PATCH /customers/{id}/status`(API-CONTRACT §8.4, 구현 전). 수집·틱 동작은 D-43: `SUSPENDED`는 기록만 하고 호출 없음, `TERMINATED`는 오프보딩 후 이벤트를 "정리 필요"로만 남김 |
+| status | enum `CustomerStatus` `ACTIVE \| SUSPENDED \| TERMINATED`, default `ACTIVE` | D-42(마이그레이션 `0003_customer_status`). `ACTIVE`가 아니면 그 고객의 **포털 사용자는 세션이 없다**(`sessionPrincipal` → null → 401). 데이터는 지우지 않고, MSP 직원은 계속 본다. `SUSPENDED` = 잠시 멈춤(예: 결제), `TERMINATED` = 계약 종료. 바꾸는 API는 `PATCH /customers/{id}/status`(API-CONTRACT §8.4, 아직 미구현). 수집·틱 동작은 D-43: `SUSPENDED`는 기록만 하고 호출 없음, `TERMINATED`는 오프보딩 후 이벤트를 "정리 필요"로만 남김 |
 | statusChangedAt | timestamptz? | D-43. 마지막 상태 변경 시각(해지 보관 기간 계산의 기준) |
 | loginDomains | text[] | 비면 고객사 담당자 로그인 불가(R4-3) |
 | portalGrants | text[] | `contacts, silences, channels` 중 선택, 기본 빈 값(R4-4) |
@@ -833,7 +833,7 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 
 - 3분 넘게 `lastFinishedAt`이 묵으면 경보(oncall 새 구현 1). 경보 발송 주체는 틱 밖이어야 한다 → 미결(Q-DM-17).
 
-### CustomerOffboarding (D-43, 구현 전)
+### CustomerOffboarding (D-43, 0004_inactive_customers)
 해지(`TERMINATED`)할 때 하나 만든다. 고객당 하나(UQ customerId).
 | 필드 | 타입 | 비고 |
 |---|---|---|
@@ -844,7 +844,7 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 | steps | jsonb | `{ PAGING_STOPPED, ALARMS_DELETED, CUSTOMER_STACK_REMOVED, ACCOUNTS_DISABLED, BUS_ALLOWLIST_REMOVED }` → `{ state: DONE\|PENDING\|MANUAL, at?, byUserId?, detail? }`. `ALARMS_DELETED`는 `OFFBOARD_ACCOUNT` 결과로 채움(AlarmWriter 없으면 MANUAL) |
 | startedAt / completedAt | timestamptz | 모든 단계가 DONE이면 completedAt |
 
-### OffboardResidual (D-43, 구현 전)
+### OffboardResidual (D-43, 0004_inactive_customers)
 해지 뒤에도 들어온 이벤트. 인시던트를 만들지 않고 집계만 한다. "정리 필요" 알림의 근거.
 | 필드 | 타입 | 비고 |
 |---|---|---|

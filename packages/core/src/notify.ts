@@ -292,6 +292,11 @@ export type DeliveryOutcome =
 export interface DispatchContext {
   now: Date;
   senders: Senders;
+  /**
+   * D-43: the incident's customer is not ACTIVE, or the incident is `pagingSuppressed`. Checked right before the send
+   * (the customer may have been suspended or terminated after the job was queued): the job is closed, nothing is sent.
+   */
+  customerInactive?: boolean;
   /** Current incident status; null when the incident is gone. */
   incidentStatus: 'TRIGGERED' | 'ACKNOWLEDGED' | 'RESOLVED' | null;
   contact: Contact | null;
@@ -339,7 +344,11 @@ function sendWithTimeout(sender: NotificationSender, msg: OutboundMessage, ms: n
  * - Several Slack destinations: sent in parallel under one timeout (N-11); failed only when all fail (R4-3).
  * - Every provider call has a timeout (R-2); a timeout is a retryable failure.
  */
+/** D-43: `NotificationJob.lastError` of a job closed because its customer is SUSPENDED / TERMINATED (or the incident was opened while suspended). */
+export const CUSTOMER_INACTIVE_REASON = 'SKIPPED_CUSTOMER_INACTIVE';
+
 export async function dispatchJob(job: NotificationJob, ctx: DispatchContext): Promise<DeliveryOutcome> {
+  if (ctx.customerInactive) return { status: 'SKIPPED', reason: CUSTOMER_INACTIVE_REASON };
   if (ctx.incidentStatus == null || ctx.incidentStatus === 'RESOLVED') return { status: 'SKIPPED', reason: 'incident_closed' };
   if ((job.purpose === 'INITIAL' || job.purpose === 'ESCALATION') && ctx.incidentStatus !== 'TRIGGERED') return { status: 'SKIPPED', reason: 'acknowledged' };
   if (job.purpose === 'RENOTIFY' && ctx.incidentStatus !== 'ACKNOWLEDGED') return { status: 'SKIPPED', reason: 'not_acknowledged' };
