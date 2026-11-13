@@ -41,6 +41,7 @@ enum CustomerStatus {
 /// customer; never cleared, so a customer that comes back to ACTIVE is not paged late for what happened meanwhile.
 enum PagingSuppressedReason {
   CUSTOMER_SUSPENDED
+  CUSTOMER_TERMINATED
 }
 
 enum ContactKind {

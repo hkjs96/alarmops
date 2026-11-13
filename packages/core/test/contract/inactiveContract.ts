@@ -26,7 +26,7 @@ export function inactiveContract(make: MakeFixture): void {
         await sim.group({ customerId: 'cus_mirae', at: T0, alerts: [{ id: 'al_1' }] });
         await sim.run(180, [], true);
         const inc = await sim.incident();
-        expect(inc).toMatchObject({ customerId: 'cus_mirae', status: 'TRIGGERED', pagingSuppressed: 'CUSTOMER_SUSPENDED', nextEscalationAt: null, assignmentSnapshot: null });
+        expect(inc).toMatchObject({ customerId: 'cus_mirae', status: 'TRIGGERED', pagingSuppressed: status === 'TERMINATED' ? 'CUSTOMER_TERMINATED' : 'CUSTOMER_SUSPENDED', nextEscalationAt: null, assignmentSnapshot: null });
         expect(await fx.jobs()).toEqual([]);
         expect(sim.allSent()).toEqual([]);
         expect((await fx.events(inc.id)).map((e) => e.kind)).toEqual(['TRIGGERED', 'NOTE']);

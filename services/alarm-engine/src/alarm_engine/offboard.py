@@ -33,6 +33,10 @@ DELETE_BATCH = 100
 GLOBAL_ALARM_REGION = "us-east-1"
 
 
+class TargetNotFound(LookupError):
+    """The offboarding does not exist for this customer: poison (retry cannot help). Other lookup errors are bugs and retry."""
+
+
 class OffboardFailed(RuntimeError):
     """Some alarms could not be deleted. Raised AFTER the result was recorded, so SQS retries the (idempotent) command."""
 
@@ -52,12 +56,18 @@ def run(repo: Repository, sessions: SessionFactory, customer_id: str, cloud_acco
         offboarding_id: str) -> dict:
     ob = repo.get_offboarding(customer_id, offboarding_id)
     if ob is None:
-        raise LookupError(f"offboarding {offboarding_id} not found for customer {customer_id}")
+        raise TargetNotFound(f"offboarding {offboarding_id} not found for customer {customer_id}")
+    # The offboarding row belongs to this customer (get_offboarding is scoped), so a refusal may be written on it:
+    # the step turns MANUAL and says why, instead of staying PENDING with no trace.
     if ob.customer_status != "TERMINATED":
-        return {"status": "REFUSED", "reason": "customer is not TERMINATED"}
+        reason = "customer is not TERMINATED"
+        repo.record_offboard_result(customer_id, offboarding_id, cloud_account_id, {"status": "REFUSED", "deleted": 0, "failed": 0, "reason": reason})
+        return {"status": "REFUSED", "reason": reason}
     account = repo.get_account(cloud_account_id)
     if account.customer_id != customer_id:
-        return {"status": "REFUSED", "reason": "tenant mismatch"}
+        reason = "tenant mismatch"
+        repo.record_offboard_result(customer_id, offboarding_id, cloud_account_id, {"status": "REFUSED", "deleted": 0, "failed": 0, "reason": reason})
+        return {"status": "REFUSED", "reason": reason}
 
     deleted = failed = foreign = 0
     errors: list[str] = []

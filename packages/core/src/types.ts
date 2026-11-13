@@ -9,7 +9,7 @@ export type Decision = 'NOTIFY' | 'SUPPRESS' | 'DEFER';
 /** Customer.status (D-42, D-43). */
 export type CustomerStatus = 'ACTIVE' | 'SUSPENDED' | 'TERMINATED';
 /** Incident.pagingSuppressed (D-43): the incident is recorded but never paged, even after the customer is ACTIVE again. */
-export type PagingSuppressedReason = 'CUSTOMER_SUSPENDED';
+export type PagingSuppressedReason = 'CUSTOMER_SUSPENDED' | 'CUSTOMER_TERMINATED';
 
 /** SQS `alert-events` body (API-CONTRACT §3). */
 export interface NormalizedEvent {

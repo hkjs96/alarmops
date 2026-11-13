@@ -4,7 +4,7 @@
 -- Generated part (prisma migrate diff); the RLS block at the end is hand-written (D-40: every table, no policies, not FORCEd).
 
 -- CreateEnum
-CREATE TYPE "PagingSuppressedReason" AS ENUM ('CUSTOMER_SUSPENDED');
+CREATE TYPE "PagingSuppressedReason" AS ENUM ('CUSTOMER_SUSPENDED', 'CUSTOMER_TERMINATED');
 
 -- AlterTable
 ALTER TABLE "Customer" ADD COLUMN     "statusChangedAt" TIMESTAMPTZ(3);

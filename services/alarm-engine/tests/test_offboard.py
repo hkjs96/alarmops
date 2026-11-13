@@ -139,7 +139,18 @@ def test_refuses_when_the_customer_is_not_terminated(world):
     out = handle_batch(eng, {"Records": [cmd()]})
     assert out == {"batchItemFailures": []}
     assert sessions.assumed == [] and len(sessions.cw("ap-northeast-2").alarms) == 6
-    assert step(repo) == {"state": "PENDING"}
+    assert step(repo)["state"] == "MANUAL" and "REFUSED" in step(repo)["detail"]       # leaves a trace
+
+
+def test_internal_keyerror_is_retried_not_dropped(world, monkeypatch):
+    repo, sessions, _disc, eng, acc = world
+    terminated(repo)
+
+    def bug(*a, **k):
+        raise KeyError("internal bug")
+    monkeypatch.setattr(repo, "customer_account_ids", bug)
+    sessions.cw("ap-northeast-2").add_foreign_alarm("a1", tags=MINE)
+    assert handle_batch(eng, {"Records": [cmd()]}) == {"batchItemFailures": [{"itemIdentifier": "m_acc_1"}]}
 
 
 def test_tenant_guards_are_poison_not_retried_and_call_nothing(world):

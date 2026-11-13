@@ -163,7 +163,11 @@ def dispatch(engine: Engine, cmd: dict, liveness_sink: Callable[[str, str, dict]
             return offboard.run(engine.repo, engine.sessions, cus, _account_of(engine, cmd), p["offboardingId"])
     except CapabilityDisabled as e:
         return {"status": "CAPABILITY_DISABLED", "role": e.role}
+    except offboard.TargetNotFound as e:   # unknown offboarding for this customer: poison
+        raise InvalidCommand(f"not found: {e}") from e
     except (KeyError, LookupError) as e:   # unknown resource/alarm/account for this customer: poison
+        if t == "OFFBOARD_ACCOUNT":
+            raise   # a KeyError inside the destructive path is a bug: retry / DLQ, never silently dropped
         raise InvalidCommand(f"not found: {e}") from e
     raise InvalidCommand(t)
 

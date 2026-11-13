@@ -25,7 +25,7 @@ import {
 } from './notify.js';
 import type { Contact, PagingConfig, PagingWorld } from './paging.js';
 import type { SuppressionPolicy } from './policy.js';
-import type { CustomerStatus, Severity, Source } from './types.js';
+import type { CustomerStatus, PagingSuppressedReason, Severity, Source } from './types.js';
 
 export type TickJob = 'group' | 'reconcile' | 'escalation' | 'notify';
 export const TICK_JOBS: readonly TickJob[] = ['group', 'reconcile', 'escalation', 'notify'];
@@ -548,6 +548,7 @@ interface Ctx extends TickDeps {
   /** D-43: customer status, read once per customer in this tick (a rejected read is not cached). */
   statuses?: Map<string, Promise<CustomerStatus>>;
 }
+const suppressionReason = (s: CustomerStatus): PagingSuppressedReason => (s === 'TERMINATED' ? 'CUSTOMER_TERMINATED' : 'CUSTOMER_SUSPENDED');
 /** D-43. null customer (unmapped account) is never inactive: nobody owns it, the MSP default path handles it. */
 function statusOf(c: Ctx, customerId: string | null): Promise<CustomerStatus> {
   if (!customerId) return Promise.resolve('ACTIVE');
@@ -690,10 +691,12 @@ async function openIncident(c: Ctx, g: GroupRow, firing: GroupMember[], now: Dat
   const jobs: NotificationIntent[] = [];
   // D-43: SUSPENDED / TERMINATED customer: the incident is recorded, nobody is paged (MSP staff included), and it stays
   // silent after the customer is ACTIVE again. No paging order is frozen and no job is queued.
-  if (inc.customerId && (await statusOf(c, inc.customerId)) !== 'ACTIVE') {
+  const openStatus = inc.customerId ? await statusOf(c, inc.customerId) : 'ACTIVE';
+  if (inc.customerId && openStatus !== 'ACTIVE') {
+    const reason = suppressionReason(openStatus);
     events.push({ incidentId: inc.id, customerId: inc.customerId, at: inc.triggeredAt, kind: 'NOTE', actorType: 'SYSTEM', actorId: null,
-      message: 'Nobody is paged: the customer is not active (suspended).', data: { note: 'PAGING_SUPPRESSED', reason: 'CUSTOMER_SUSPENDED' } });
-    return { row: { ...inc, pagingSuppressed: 'CUSTOMER_SUSPENDED', nextEscalationAt: null }, events, jobs };
+      message: `Nobody is paged: the customer is ${openStatus === 'TERMINATED' ? 'terminated' : 'suspended'}.`, data: { note: 'PAGING_SUPPRESSED', reason } });
+    return { row: { ...inc, pagingSuppressed: reason, nextEscalationAt: null }, events, jobs };
   }
   if (inc.customerId) {
     const account = rep.awsAccountId ?? firing.find((m) => m.awsAccountId)?.awsAccountId ?? null;
@@ -779,14 +782,15 @@ async function escalateOne(c: Ctx, inc: IncidentRow): Promise<void> {
   // D-43: no paging for a customer that is not ACTIVE, nor for an incident opened while it was suspended. Nothing is
   // queued. The incident is parked for good (nextEscalationAt null) and marked, so that a customer that comes back
   // to ACTIVE is not paged late for it. Bookkeeping only: no version bump, no open screen gets a 409.
-  if (inc.pagingSuppressed || (await statusOf(c, inc.customerId)) !== 'ACTIVE') {
+  const status = await statusOf(c, inc.customerId);
+  if (inc.pagingSuppressed || status !== 'ACTIVE') {
     c.sum.escalation.suppressed++;
     if (inc.pagingSuppressed && inc.nextEscalationAt == null) return;
     const first = !inc.pagingSuppressed;
     await c.repo.commitIncident({
-      row: { ...inc, pagingSuppressed: 'CUSTOMER_SUSPENDED', nextEscalationAt: null }, expectedVersion: inc.version, bump: false,
+      row: { ...inc, pagingSuppressed: suppressionReason(status), nextEscalationAt: null }, expectedVersion: inc.version, bump: false,
       events: first ? [{ incidentId: inc.id, customerId: inc.customerId, at: now, kind: 'NOTE', actorType: 'SYSTEM', actorId: null,
-        message: 'Paging stopped: the customer is not active (suspended).', data: { note: 'PAGING_SUPPRESSED', reason: 'CUSTOMER_SUSPENDED' } }] : undefined,
+        message: `Paging stopped: the customer is ${status === 'TERMINATED' ? 'terminated' : 'suspended'}.`, data: { note: 'PAGING_SUPPRESSED', reason: suppressionReason(status) } }] : undefined,
     });
     return;
   }
@@ -1028,7 +1032,9 @@ async function sendOne(c: Ctx, job: NotificationJob, windows: Map<string, Promis
       mutedUntil = incidentMute({ customerId: inc.customerId, projectId: inc.projectId, serviceId: inc.serviceId, accountIds: inc.accountIds, resourceTypes: inc.resourceTypes, severity: inc.severity }, await windows.get(k)!, now)?.endsAt ?? null;
     }
     // D-43: the customer may have been suspended or terminated after this job was queued — look again right before the send.
-    const customerInactive = !!inc?.pagingSuppressed || (await statusOf(c, job.customerId ?? inc?.customerId ?? null)) !== 'ACTIVE';
+    // Read fresh, not from the per-tick cache (which may hold a value from the group step): this is the last gate before a page.
+    const owner = job.customerId ?? inc?.customerId ?? null;
+    const customerInactive = !!inc?.pagingSuppressed || (owner != null && (await c.repo.customerStatus(owner)) !== 'ACTIVE');
     const out = await dispatchJob(job, {
       now, senders: c.senders, customerInactive, incidentStatus: inc?.status ?? null, contact: person, slackChannels: slack.channels, slackOwner: slack.owner, mutedUntil,
       requireVerifiedPhone: protectUnlessFalse(c.smsVoiceRequireVerified), sendTimeoutMs: c.sendTimeoutMs, storeProviderText: c.storeProviderText === true,

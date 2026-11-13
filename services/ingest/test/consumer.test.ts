@@ -201,6 +201,26 @@ describe('EventBridge normalizer λ', () => {
     const unmapped = { ...coreFixture('cloudwatch-managed.json'), account: '999999999999' };
     expect(await h(unmapped)).toEqual({ queued: 1 });
   });
+  it('D-43: a failing status lookup does not lose the event (queued, warning logged); TERMINATED is cached briefly', async () => {
+    const repo = store();
+    const queue = new FakeQueue();
+    const logs: string[] = [];
+    let reads = 0;
+    let fail = true;
+    const sources = {
+      customerStatus: async (c: string) => { reads++; if (fail) throw new Error('db slow'); return repo.customerStatus(c); },
+      recordResidual: (r: Parameters<typeof repo.recordResidual>[0]) => repo.recordResidual(r),
+    };
+    const h = makeEventBridgeHandler({ accounts: new AccountCustomerCache((a) => repo.customerForAccount(a)), queue, sources, log: (_l, m) => logs.push(m) });
+    expect(await h(coreFixture('cloudwatch-managed.json'))).toEqual({ queued: 1 });
+    expect(logs).toEqual(['customer_status_lookup_failed']);
+    fail = false;
+    repo.statuses.set('cus_1', 'TERMINATED');
+    await h(coreFixture('cloudwatch-managed.json'));
+    await h(coreFixture('cloudwatch-managed.json'));
+    expect(reads).toBe(2); // the second TERMINATED event came from the cache
+    expect([...repo.residuals.values()][0]!.count).toBe(2);
+  });
   it('account cache: TTL refresh and keep previous mapping on lookup failure (known-bugs 1-8)', async () => {
     let now = 0;
     let mapping: string | null = 'cus_1';

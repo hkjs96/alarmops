@@ -316,7 +316,7 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 | title | text | 대표 = 가장 심각한 구성원(G-9) |
 | severity | enum SEV | |
 | status | enum `TRIGGERED, ACKNOWLEDGED, RESOLVED` | I-1 |
-| pagingSuppressed | enum `CUSTOMER_SUSPENDED`? | D-43. 정지 고객의 인시던트. 있으면 틱이 호출하지 않고, 고객이 `ACTIVE`로 돌아와도 지우지 않는다(뒤늦은 호출 방지). 구현 전 |
+| pagingSuppressed | enum `CUSTOMER_SUSPENDED \| CUSTOMER_TERMINATED`? | D-43. 정지 고객의 인시던트. 있으면 틱이 호출하지 않고, 고객이 `ACTIVE`로 돌아와도 지우지 않는다(뒤늦은 호출 방지). 구현 전 |
 | triggeredAt, acknowledgedAt, resolvedAt | timestamptz? | |
 | acknowledgedBy, resolvedBy | text? FK User/Contact | |
 | resolvedVia | enum `MANUAL, AUTO, RECONCILE`? | I-6, oncall R7-1 |
