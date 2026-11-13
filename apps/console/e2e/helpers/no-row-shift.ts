@@ -25,6 +25,8 @@ export interface NoRowShift {
   baseline?: RowBox[];
   /** rows that start below the pressed point may move down — never up — because a row was added above them */
   mayGrowBelow?: boolean;
+  /** the pressed control sits below the list it adds to (Responders, P3-K): rows may move down — never up — by the row that was added */
+  mayMoveDown?: boolean;
   /** rows of the baseline that the action is expected to take away for good (an explicit refresh): none by default */
   settleMs?: number[];
 }
@@ -107,7 +109,7 @@ export async function assertNoRowShift(page: Page, o: NoRowShift): Promise<RowBo
     // 3. nothing moved (compared only while nothing was scrolled: a page that scrolls is not a row that shifts)
     if (o.baseline || scroll === scroll0) {
       const moved = start.map((r) => ({ key: r.key, dx: pos.get(r.key)!.x - r.x, dy: pos.get(r.key)!.y - r.y, from: r.y }))
-        .filter((m) => Math.abs(m.dx) > 1 || (o.mayGrowBelow && m.from >= p.y ? m.dy < -1 : Math.abs(m.dy) > 1));
+        .filter((m) => Math.abs(m.dx) > 1 || (o.mayMoveDown || (o.mayGrowBelow && m.from >= p.y) ? m.dy < -1 : Math.abs(m.dy) > 1));
       expect(moved, `${o.name} +${ms}ms: rows that moved`).toEqual([]);
     }
     // 4. the pressed spot: no action of another row has come under it

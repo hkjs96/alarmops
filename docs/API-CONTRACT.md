@@ -72,7 +72,7 @@ Slack ──▶ POST /api/slack/interactive        문자·음성 업체 ──�
 | 422 | `RESPONDER_LIMIT_EXCEEDED` | 호출 순서 저장: `ALL_RESPONDERS` 단계인데 Pageable Responder가 20명 초과. `details { field, responders, limit }`. Responder를 늘리는 쓰기(§8.3 Responders POST·PATCH)도 같은 규칙(`sendCapViolation`)으로 거부한다(11/12). 이 API 밖에서 늘어난 사람은 엔진이 열릴 때 줄인다(아래 한도표, D-38) |
 | 422 | `IDEMPOTENCY_KEY_REUSED` | 같은 `Idempotency-Key`를 다른 요청(메서드·경로·`If-Match`·본문)에 사용 |
 | 422 | `CROSS_CUSTOMER`, `NOT_PAGEABLE` | 단계 대상이 다른 고객의 사람·로테이션 / Notify-only 사람 |
-| 429 | `RATE_LIMITED` | **응답 헤더 `Retry-After: <초>`**와 같은 값의 `details.retryAfterSec`. 현재 쓰임: 수동 Escalate(인시던트당 60초에 1회) |
+| 429 | `RATE_LIMITED` | **응답 헤더 `Retry-After: <초>`**와 같은 값의 `details.retryAfterSec`. 현재 쓰임: 수동 Escalate(인시던트당 60초에 1회), 콘솔 `GET /auth/session`(주소당 120회·세션당 30회 / 60초, 인스턴스별 메모리 카운터) |
 | 503 | `NOT_CONFIGURED` | 필수 비밀 미설정(fail-closed, org-tenant 새 구현 1, oncall R4-8) |
 
 메시지는 영어(D-01).

@@ -1,3 +1,4 @@
+import { NotConfiguredError, mockMode } from "../mode";
 type Env = Record<string, string | undefined>;
 export interface PostHeaders {
   origin: string | null; host: string | null; forwardedHost: string | null; secFetchSite: string | null;
@@ -16,6 +17,26 @@ function originOf(value: string): string | null {
     const u = new URL(value);
     return u.protocol === "http:" || u.protocol === "https:" ? u.origin : null;
   } catch { return null; }
+}
+
+/**
+ * The origin the console is served at, from `CONSOLE_ORIGIN` (hardening 2a). Required when NODE_ENV=production: unset or
+ * not an http(s) origin throws NotConfiguredError (503, fail closed) instead of falling back to the Host header.
+ * The only exception is the mock e2e run (`next start` with MOCK_API=1 and E2E_ALLOW_MOCK=1, which `mockMode` refuses
+ * everywhere else). Outside production, unset gives null (the request's own scheme + host); set but invalid still throws.
+ */
+export function consoleOrigin(env: Env = process.env): string | null {
+  const raw = env.CONSOLE_ORIGIN?.trim();
+  if (!raw) {
+    // the same predicate as everywhere else (mockMode): never exempt on Vercel production; and this branch is only reached when CONSOLE_ORIGIN is not set
+    let e2eMock = false;
+    try { e2eMock = mockMode(env); } catch { e2eMock = false; }
+    if (env.NODE_ENV === "production" && !e2eMock) throw new NotConfiguredError("CONSOLE_ORIGIN");
+    return null;
+  }
+  const o = originOf(raw);
+  if (!o) throw new NotConfiguredError("CONSOLE_ORIGIN (not an http(s) origin)");
+  return o;
 }
 
 /**
@@ -39,7 +60,9 @@ export function sameOriginPost(h: PostHeaders, env: Env = process.env): boolean 
   if (!h.origin) return true;
   const from = originOf(h.origin);
   if (!from) return false;
-  if (env.CONSOLE_ORIGIN) return originOf(env.CONSOLE_ORIGIN) === from;
+  let configured: string | null;
+  try { configured = consoleOrigin(env); } catch { return false; } // production without CONSOLE_ORIGIN: nothing counts as the own origin
+  if (configured) return configured === from;
   const trusted = env.TRUSTED_PROXY === "1";
   const host = (trusted ? first(h.forwardedHost) : null) ?? h.host;
   const proto = h.proto?.replace(/:$/, "").toLowerCase();

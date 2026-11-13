@@ -527,3 +527,11 @@ div.co-refused { margin-top: 6px; }
   .co-steps.ed .co-step { grid-template-columns: 20px minmax(0, 1fr); grid-template-areas: "n min" ". who" ". chs" ". ops" ". msg"; }
   .co-steps.ed .co-chs, .co-steps.ed .co-ops, .co-refused { grid-column: 2; }
 }
+
+/* P3-K: what Edit brings in (status line, rule, add forms) sits below the last row; the rows only reserve room for their controls */
+.co-resp-ed { margin-top: 12px; display: grid; gap: 8px; }
+.co-resp-ed > * { margin: 0; }
+.co-ctl.off { visibility: hidden; }
+.co-ghost { display: inline-block; box-sizing: border-box; pointer-events: none; }
+.co-pctl .inp.co-ghost { width: auto; min-width: 0; padding-right: 28px; white-space: nowrap; }
+.co-ctl:not(.co-pctl) { display: inline-flex; align-items: center; }

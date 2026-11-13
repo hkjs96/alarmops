@@ -912,3 +912,28 @@ live 모드: 로컬 Postgres(/opt/pglocal, nobody, 데이터 /tmp/pgqa3) + `e2e-
 | 2026-11-12 | 유효한 세션으로 /auth/ended?from=layout 방문 | 93ab48f | 준호 (1440 라이트, 390 다크) | 200 한 번(리다이렉트 반복 없음), 꾸밈 없는 화면 "Something went wrong — try again / The console could not load your account just now.", Try again 링크 98×44, Sign out 버튼 92×44, 가로 스크롤 없음, 다크에서도 읽힘(Sign out 흰 글자/#6b6b6b 약 5.3:1). Try again → /incidents 200, 세션 유지. Sign out → 303 /auth/sign-out → /login?signedOut=1, 쿠키 삭제, 이후 /incidents → /login?next=%2Fincidents | 통과 | `docs/qa/shots/2026-11-12-session-ended-notice/ended-layout{,-tryagain,-signout}-*.png` |
 
 mock 모드(`MOCK_API=1 next dev -p 3107`), 스크립트 `docs/qa/shoot-ended-notice.mjs`. live 모드(정지 고객 포털 사용자 → /login?ended=1, dev-login 재시도)는 이번에 하지 않음. 검증자 분리 서브에이전트는 이 환경에서 쓸 수 없어 QA가 화면과 이동 기록만 보고 판정. 범위 밖 참고: /login의 mock 전용 dev 로그인 링크는 높이 14px(dev 전용이라 판정에서 뺌). 판정: P0·P1·P2 없음.
+
+### 2026-11-13 Responders 편집 행 고정 (P3-K) + nonce CSP (feat/console-hardening-p3k @ 61b4bb2, mock)
+
+| 날짜 | 시나리오 | 버전(커밋) | 페르소나 | 측정값 | 판정 | 캡처 |
+|---|---|---|---|---|---|---|
+| 2026-11-13 | Edit 누르기: 행이 움직이는가 | 61b4bb2 | MSP 관리자 (Admin, 1440, 390) | Edit 누른 전후 Mirae Pay 행 9개 위치 변화 0px(두 폭 모두). 편집 버튼이 같은 자리에서 Done으로 바뀜. 가로 스크롤 없음 | 통과 | `docs/qa/shots/2026-11-13-p3k/msp-admin/admin-{1440,390}-{2-before-edit,3-edit-mode}.png` |
+| 2026-11-13 | Add staff / Add person 찾기 | 61b4bb2 | MSP 관리자 (1440, 390) | 추가 입력(Add MSP staff… 선택, Add a Mirae Pay person 폼)은 마지막 행 아래. Edit 직후 화면에는 보이지 않고 패널을 내려야 함: 1440에서 첫 행 기준 약 1000px, 390에서 Edit 버튼 기준 약 2400px 아래. 편집 모드 안내문("each change applies at once")에 추가 위치 언급 없음. 찾으면 입력은 쓸 만함(390에서 버튼 44px) | P2 | `docs/qa/shots/2026-11-13-p3k/msp-admin/admin-{1440,390}-{3-edit-mode,4-add-area}.png` |
+| 2026-11-13 | 추가 후 아래 요소가 포인터 밑에서 움직이는가 | 61b4bb2 | MSP 관리자 (1440, 390) | Chromium(스크롤 앵커 켜짐): Add 버튼 화면 위치 변화 0px, 새 사람은 위쪽 목록에 들어가고 토스트 "… added to Responders of Mirae Pay". 앵커 끈 상태(Safari 모의, overflow-anchor:none): Add 버튼이 1440에서 +124px, 390에서 +100px 내려가 연속 추가 시 포인터가 버튼을 놓침. 추가 직후 "Reach now: OK" 줄이 갱신됨 | P2 | `docs/qa/shots/2026-11-13-p3k/msp-admin/admin-{1440,390}-5-after-add.png` |
+| 2026-11-13 | 읽기 모드 (호출 순서 읽기) | 61b4bb2 | 온콜 직원 (Operator, 1440, 390) | 패널 상단 문장·Paged·Steps·"Read only. Changing the call order needs the Admin role" 그대로. Responders 블록: 이유 문구 "Changing Responders needs the Admin role. You are signed in as Operator."와 Edit 비활성. Add 입력·폼은 없음. 가로 스크롤 없음 | 통과 | `docs/qa/shots/2026-11-13-p3k/oncall/operator-{1440,390}-6-read-responders.png` |
+| 2026-11-13 | 읽기 모드 (호출 순서 읽기) | 61b4bb2 | 고객 포털 열람자 (Viewer, 1440, 390) | 위와 같음(Viewer 문구). 편집용 빈칸·Add 컨트롤 0개. 담당 연락처는 마스킹 유지. 한계: mock에서는 Viewer도 고객 전체(14곳)가 보임(고객 범위 격리는 live에서만 확인 가능, 이번 변경과 무관) | 통과 | `docs/qa/shots/2026-11-13-p3k/portal/viewer-{1440,390}-6-read-responders.png`, `portal/viewer-390-2-before-edit.png` |
+| 2026-11-13 | nonce CSP: 브라우저 콘솔 위반 | 61b4bb2 | 세 역할 (1440, 390) | next build + start. 응답 헤더 CSP: script-src 'self' 'nonce-…' 'strict-dynamic', style-src 'self' 'unsafe-inline', frame-ancestors 'none'. /login, /incidents, /call-order, /c/mirae/call-order, /people, /monitoring, /customers, /settings 방문 중 CSP 위반 0건, 페이지 오류 0건. 404 리소스 1건(Operator 1440 첫 실행에서만, CSP 아님, 어느 주소인지 미확인) | 통과 | (콘솔 출력만) `docs/qa/shoot-p3k-csp.mjs` |
+
+mock 모드(`MOCK_API=1 E2E_ALLOW_MOCK=1 next build` 후 `next start -p 3191`), Chromium은 /opt/pw-browsers/chromium 지정. 스크립트 `docs/qa/shoot-p3k*.mjs`. 검증자 분리 서브에이전트는 이 환경에서 쓸 수 없어 QA가 소스를 읽지 않고 화면과 측정값만 보고 판정. 판정: P0·P1 없음, P2 2건(Add 입구가 첫 화면에 없음, 앵커 없는 브라우저에서 Add 버튼 이동).
+
+후속 수정(권고 반영, 재검증 필요): Add staff / Add person ↓ 바로가기 링크(Done 옆), 추가 후 Add 버튼 뷰포트 위치 유지(스크롤 앵커 없음에서 ≤4px, e2e), /auth/session 세션 키는 서명 검증 뒤에만, CONSOLE_ORIGIN 예외는 mockMode 공통 판정, HTML no-store.
+
+### 2026-11-13 Responders 후속 수정 재검증 (P3-K 권고 A·B) (feat/console-hardening-p3k @ 9eeb544, mock)
+
+| 날짜 | 시나리오 | 버전(커밋) | 페르소나 | 측정값 | 판정 | 캡처 |
+|---|---|---|---|---|---|---|
+| 2026-11-13 | A. 편집 후 "Add staff / Add person ↓" 바로가기 찾기·동작 | 9eeb544 | MSP 관리자 (1440, 390) | Edit 누르면 Done 바로 왼쪽에 링크가 나타나 같은 헤더 줄에서 보임(1440: 169x26, 390: 169x44). 누르면 직원 추가 선택 칸으로 스크롤되고 포커스 이동(두 폭 모두 화면 안, 가로 스크롤 없음). 누르기 전후 기존 행 간격 변화 0px(두 폭, 앵커 켜짐·꺼짐). 한계: 1440에서 링크 높이 26px(데스크톱이라 44px 기준 밖, 참고) | 통과 | `docs/qa/shots/2026-11-13-p3k-recheck/msp-admin/admin-{1440,390}-anchor{on,off}-{1-edit-mode-link,2-after-link}.png` |
+| 2026-11-13 | B. 연속 추가 2회 시 Add 버튼 화면 위치 | 9eeb544 | MSP 관리자 (1440, 390; 스크롤 앵커 켜짐·꺼짐) | 직원 추가 2회: Add 버튼 y 변화 0px(4개 조건 모두), 포커스는 직원 선택 칸으로 이동(화면 안). 사람 추가 2회: 변화 -1~+1px(≤4px), 포커스는 이름 칸으로 이동, 토스트 "… added to Mirae Pay as Notify only", Now/Reach now 줄 갱신. 이전 측정 +100~124px에서 해소 | 통과 | `docs/qa/shots/2026-11-13-p3k-recheck/msp-admin/admin-{1440,390}-anchor{on,off}-{3-staff-add1,3-staff-add2,4-person-add1,4-person-add2}.png` |
+| 2026-11-13 | CSP 위반 | 9eeb544 | MSP 관리자 (1440, 390) | /c/mirae/call-order에서 Edit, 링크, 추가 4회 전 과정 중 securitypolicyviolation 이벤트 0건, 콘솔 CSP 메시지·페이지 오류 0건(4개 조건) | 통과 | (콘솔 출력만) |
+
+mock 모드(`MOCK_API=1 E2E_ALLOW_MOCK=1 next build` 후 `next start -p 3217`), Chromium /opt/pw-browsers/chromium. 폭마다 서버를 새로 띄워 mock 상태 초기화. 앵커 끔은 `*{overflow-anchor:none}` 주입. 스크립트는 저장소 밖에 둠. 검증자 분리 서브에이전트는 쓸 수 없어 소스를 읽지 않고 화면·측정값만 봄. 판정: P0·P1·P2 없음, 두 권고 해소.
