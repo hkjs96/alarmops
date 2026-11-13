@@ -119,7 +119,8 @@ Customer.responderTemplateId text? FK — 고객이 쓰는 템플릿(하나, 선
 | name | text UQ | org-tenant R1-1 |
 | slug | text UQ | 콘솔 주소·API 범위 필터의 고객 이름(`/c/<slug>/…`, `?customer=<slug>`). 형식·예약어는 아래 "slug 규칙" |
 | isInternal | bool default false | 내부 시스템용 가짜 고객사(R1-2) |
-| status | enum `CustomerStatus` `ACTIVE \| SUSPENDED \| TERMINATED`, default `ACTIVE` | D-42(마이그레이션 `0003_customer_status`). `ACTIVE`가 아니면 그 고객의 **포털 사용자는 세션이 없다**(`sessionPrincipal` → null → 401). 데이터는 지우지 않고, MSP 직원은 계속 본다. `SUSPENDED` = 잠시 멈춤(예: 결제), `TERMINATED` = 계약 종료. 바꾸는 API·콘솔 화면은 아직 없다(DB에서만). 수집(ingest)·틱은 이 값을 보지 않는다(Q-DM-20) |
+| status | enum `CustomerStatus` `ACTIVE \| SUSPENDED \| TERMINATED`, default `ACTIVE` | D-42(마이그레이션 `0003_customer_status`). `ACTIVE`가 아니면 그 고객의 **포털 사용자는 세션이 없다**(`sessionPrincipal` → null → 401). 데이터는 지우지 않고, MSP 직원은 계속 본다. `SUSPENDED` = 잠시 멈춤(예: 결제), `TERMINATED` = 계약 종료. 바꾸는 API는 `PATCH /customers/{id}/status`(API-CONTRACT §8.4, 구현 전). 수집·틱 동작은 D-43: `SUSPENDED`는 기록만 하고 호출 없음, `TERMINATED`는 오프보딩 후 이벤트를 "정리 필요"로만 남김 |
+| statusChangedAt | timestamptz? | D-43. 마지막 상태 변경 시각(해지 보관 기간 계산의 기준) |
 | loginDomains | text[] | 비면 고객사 담당자 로그인 불가(R4-3) |
 | portalGrants | text[] | `contacts, silences, channels` 중 선택, 기본 빈 값(R4-4) |
 | defaultGroupWaitSec | int? | null이면 `SuppressionPolicy` 값 |
@@ -315,6 +316,7 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 | title | text | 대표 = 가장 심각한 구성원(G-9) |
 | severity | enum SEV | |
 | status | enum `TRIGGERED, ACKNOWLEDGED, RESOLVED` | I-1 |
+| pagingSuppressed | enum `CUSTOMER_SUSPENDED`? | D-43. 정지 고객의 인시던트. 있으면 틱이 호출하지 않고, 고객이 `ACTIVE`로 돌아와도 지우지 않는다(뒤늦은 호출 방지). 구현 전 |
 | triggeredAt, acknowledgedAt, resolvedAt | timestamptz? | |
 | acknowledgedBy, resolvedBy | text? FK User/Contact | |
 | resolvedVia | enum `MANUAL, AUTO, RECONCILE`? | I-6, oncall R7-1 |
@@ -831,6 +833,27 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 
 - 3분 넘게 `lastFinishedAt`이 묵으면 경보(oncall 새 구현 1). 경보 발송 주체는 틱 밖이어야 한다 → 미결(Q-DM-17).
 
+### CustomerOffboarding (D-43, 구현 전)
+해지(`TERMINATED`)할 때 하나 만든다. 고객당 하나(UQ customerId).
+| 필드 | 타입 | 비고 |
+|---|---|---|
+| id | text PK | |
+| customerId | text UQ | |
+| startedByUserId | text | 해지한 ADMIN |
+| reason | text | |
+| steps | jsonb | `{ PAGING_STOPPED, ALARMS_DELETED, CUSTOMER_STACK_REMOVED, ACCOUNTS_DISABLED, BUS_ALLOWLIST_REMOVED }` → `{ state: DONE\|PENDING\|MANUAL, at?, byUserId?, detail? }`. `ALARMS_DELETED`는 `OFFBOARD_ACCOUNT` 결과로 채움(AlarmWriter 없으면 MANUAL) |
+| startedAt / completedAt | timestamptz | 모든 단계가 DONE이면 completedAt |
+
+### OffboardResidual (D-43, 구현 전)
+해지 뒤에도 들어온 이벤트. 인시던트를 만들지 않고 집계만 한다. "정리 필요" 알림의 근거.
+| 필드 | 타입 | 비고 |
+|---|---|---|
+| customerId | text | PK(customerId, sourceKey) |
+| sourceKey | text | `aws:{accountId}` 또는 `integration:{id}` |
+| firstAt / lastAt | timestamptz | |
+| count | int | |
+| lastNotifiedAt | timestamptz? | 업무 시간 알림은 소스당 하루 한 번 |
+
 ## 8. ER 다이어그램 (주요 관계)
 
 ```mermaid
@@ -911,4 +934,6 @@ DECISIONS.md "아직 정하지 않은 것"과 명세의 제안 중 이 문서가
 | Q-DM-17 | heartbeat 정체 경보를 누가 보내나(틱이 죽었을 때) | 미정. 후보: AWS CloudWatch 합성 점검 → SNS | D-10 |
 | Q-DM-18 | 그룹 키에 서비스를 넣을지 | 넣지 않음(G-1 그대로) | grouping 새 구현 5 |
 | Q-DM-19 | 미관리(고객 자체) CloudWatch 알람을 Alert로 받을지와 그 등급 | 받음(F-2), 등급은 Q-DM-08에 종속 | severity 새 구현 2 |
-| Q-DM-20 | `ACTIVE`가 아닌 고객(D-42)의 수집·호출: 웹훅·EventBridge 이벤트를 계속 받을지(거부 / 받되 호출 안 함 / 그대로), 틱이 그 고객 사람을 계속 호출할지 | **그대로**(수집·틱은 `Customer.status`를 보지 않는다). 바꾸지 않고 질문으로 남김 | D-42, 11/12 |
+| ~~Q-DM-20~~ | ~~`ACTIVE`가 아닌 고객(D-42)의 수집·호출~~ | **닫힘(11/13, 사용자 결정): D-43.** 정지 = 기록만, 호출 없음(MSP 포함), 업무 시간 요약. 해지 = 오프보딩(알람 삭제·연결 해제), 이후 이벤트는 "정리 필요" 알림 | D-43, 11/13 |
+| Q-DM-21 | 해지(`TERMINATED`) 고객 데이터의 보관 기간과 삭제 방식(인시던트·알림·감사 기록) | 미정. 그때까지 지우지 않는다 | D-43, 11/13 |
+| Q-DM-22 | D-43의 "업무 시간"(요약·정리 필요 알림을 보내는 시간대)과 받는 채널 | 제안: 평일 09:00–18:00 KST, MSP 공용 Slack 채널 | D-43, 11/13 |

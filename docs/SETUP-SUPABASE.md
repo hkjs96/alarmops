@@ -127,9 +127,9 @@ Supabase는 프로젝트마다 **Data API**(데이터베이스를 인터넷 주�
 처음 초록 체크가 나온 직후 한 번 한다. Data API를 정말 껐는지 밖에서 두드려 보는 것이다.
 
 1. Supabase 프로젝트 설정의 API 키 화면에서 **anon**(또는 "publishable", 공개용) 키를 복사한다. `service_role`(또는 "secret") 키는 쓰지 않는다. 복사하지도 않는다.
-2. 회사 PC의 Git Bash에서 아래 한 줄을 실행한다. `<프로젝트ID>`와 `<anon 키>` 두 곳(키는 두 번)을 바꿔 넣는다. 키를 넣은 명령은 채팅·이슈에 붙여 넣지 않는다.
+2. 회사 PC의 Git Bash에서 아래 한 줄을 실행한다. `<프로젝트ID>`와 `<anon 키>`를 바꿔 넣는다. 키를 넣은 명령은 채팅·이슈에 붙여 넣지 않는다.
    ```
-   curl -s -w "\n%{http_code}\n" "https://<프로젝트ID>.supabase.co/rest/v1/Contact?select=id&limit=1" -H "apikey: <anon 키>" -H "Authorization: Bearer <anon 키>"
+   curl -s -w "\n%{http_code}\n" "https://<프로젝트ID>.supabase.co/rest/v1/Contact?select=id&limit=1" -H "apikey: <anon 키>"
    ```
 3. 마지막 줄의 숫자를 본다.
 
@@ -140,6 +140,10 @@ Supabase는 프로젝트마다 **Data API**(데이터베이스를 인터넷 주�
 | 숫자 없이 접속 오류 | 프로젝트 ID가 틀렸거나 네트워크 문제 | 주소를 확인하고 다시 실행 |
 
 거부될 때의 숫자와 문구는 Supabase 버전에 따라 다르다. 기준은 하나다: **200이면 안 된다.**
+
+- 2026-11 화면 기준, Data API를 끈 프로젝트는 `503`과 `{"code":"PGRST002",...,"message":"Could not query the database for the schema cache. Retrying."}`를 돌려준다. 설정 화면의 경고("You will see errors from the Postgrest endpoint /rest/v1/")와 같은 뜻이며 정상이다. 설정 화면에서 **Enable Data API**가 꺼져 있는지 한 번 더 본다.
+- 새 `sb_publishable_…` 키는 `apikey` 헤더 하나만 보낸다. `Authorization: Bearer`에 넣으면 Data API가 켜져 있어도 거부될 수 있어 확인이 틀린다.
+- 기록: alarmops-dev, 2026-11-13, `503 PGRST002`, Data API 꺼짐 확인.
 
 ## 7. 회사 PC의 `.env`에 같은 값 넣기 (나중에)
 
