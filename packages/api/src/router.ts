@@ -3,11 +3,12 @@
  * `createApi(deps).handle(request)` is all an adapter needs.
  */
 import { createHash } from 'node:crypto';
-import { IDEMPOTENCY_MAX_PER_USER, errorTag } from '@alarmops/core';
+import { IDEMPOTENCY_MAX_PER_USER, errorTag, type RetentionConfig } from '@alarmops/core';
 import { strictApiConfig, type ApiConfig } from './audience.js';
 import { requireAuth, scopeKey } from './auth.js';
 import { ApiError, assertCleanInput, errorResponse, header, isRecord, notFound, type ApiRequest, type ApiResponse } from './http.js';
 import { actOnIncident, bulkIncidents, getIncident, getNotifications, getTimeline, listIncidents, undoIncidents } from './incidents.js';
+import { deleteLegalHold, exportCsv, getLatestDigest, getPurgeLog, putLegalHold } from './retentionApi.js';
 import { getCustomerStatus, getOffboarding, patchCustomerStatus, patchOffboarding, type CommandPublisher } from './customerApi.js';
 import { deletePagingOverride, getCustomerPaging, getPagingPath, putCustomerPaging, putPagingOverride } from './pagingApi.js';
 import type { ApiRepository } from './repo.js';
@@ -19,6 +20,8 @@ export interface ApiDeps {
   now?: () => Date;
   /** `alarm-commands` queue (D-43 OFFBOARD_ACCOUNT). Without it a TERMINATED change is refused (503) before any write. */
   commands?: CommandPublisher;
+  /** D-45 retention periods (default DEFAULT_RETENTION; build with `retentionConfigFromEnv(process.env)`). Decides the CSV export window and the schedule shown with the purge log. */
+  retention?: RetentionConfig;
   /**
    * Policy switches with safe defaults (see audience.ts). Build it with `loadApiConfig(process.env)`; a value that
    * is not the boolean `true` is treated as off (R-15).
@@ -27,7 +30,7 @@ export interface ApiDeps {
   log?: (level: 'warn' | 'error', msg: string, data?: Record<string, unknown>) => void;
 }
 
-type Handler = (req: ApiRequest, deps: { repo: ApiRepository; now: () => Date; config: ApiConfig; commands?: CommandPublisher; log?: ApiDeps['log'] }, p: string[]) => Promise<ApiResponse>;
+type Handler = (req: ApiRequest, deps: { repo: ApiRepository; now: () => Date; config: ApiConfig; commands?: CommandPublisher; retention?: RetentionConfig; log?: ApiDeps['log'] }, p: string[]) => Promise<ApiResponse>;
 interface Route {
   method: ApiRequest['method']; pattern: string[]; run: Handler;
   /**
@@ -72,6 +75,11 @@ export const ROUTES: Route[] = [
   route('PATCH', '/customers/:id/status', (r, d, p) => patchCustomerStatus(r, d, p[0]!)),
   route('GET', '/customers/:id/offboarding', (r, d, p) => getOffboarding(r, d, p[0]!)),
   route('PATCH', '/customers/:id/offboarding', (r, d, p) => patchOffboarding(r, d, p[0]!)),
+  route('PUT', '/customers/:id/legal-hold', (r, d, p) => putLegalHold(r, d, p[0]!)),
+  route('DELETE', '/customers/:id/legal-hold', (r, d, p) => deleteLegalHold(r, d, p[0]!)),
+  route('GET', '/customers/:id/purge-log', (r, d, p) => getPurgeLog(r, d, p[0]!)),
+  route('GET', '/customers/:id/export.csv', (r, d, p) => exportCsv(r, d, p[0]!)),
+  route('GET', '/digests/latest', (r, d) => getLatestDigest(r, d)),
   route('GET', '/rotations', (r, d) => listRotations(r, d)),
   route('GET', '/staff', (r, d) => listStaff(r, d)),
 ];
@@ -110,7 +118,7 @@ const stable = (v: unknown): string =>
       : JSON.stringify(v) ?? 'null';
 
 export function createApi(deps: ApiDeps) {
-  const inner = { repo: deps.repo, now: deps.now ?? (() => new Date()), config: strictApiConfig(deps.config), commands: deps.commands, log: deps.log };
+  const inner = { repo: deps.repo, now: deps.now ?? (() => new Date()), config: strictApiConfig(deps.config), commands: deps.commands, retention: deps.retention, log: deps.log };
   async function handle(req: ApiRequest): Promise<ApiResponse> {
     try {
       const auth = requireAuth(req); // every console route needs a session (401 before anything else)

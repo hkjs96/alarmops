@@ -19,10 +19,11 @@ import {
   type AuditInput, type Contact, type CustomerStatus, type DeliveryLog, type DeliveryReason, type GroupDeliveryCommit, type GroupMember, type GroupRow, type HeartbeatRow,
   type HeartbeatWrite, type IncidentCommit, type IncidentEventInput, type IncidentRow, type Leave, type MaintenanceWindow, type NotificationIntent,
   type NotificationJob, type Override, type PagingConfig, type PagingWorld, type ResolutionInput, type Responder, type Rotation, type SenderKind,
-  type SuppressionPolicy, type TickJob, type TickRepository, TICK_JOBS, MAX_MEMBERS,
+  type SuppressionPolicy, type TickJob, type RetentionRepository, type RetentionCandidate, type RetentionStage, type StageResult, type TickRepository, TICK_JOBS, MAX_MEMBERS,
 } from '@alarmops/core';
 import { PG, pgCode, type SqlClient, type SqlExecutor, type SqlRow } from './client.js';
 import { CONTACT_COLS, GROUP_COLS, d, dReq, incidentCols, iso, jobCols, js, newId, toContact, toGroup, toIncident, toJob } from './rows.js';
+import * as retention from './retentionSql.js';
 
 /** Thrown inside a transaction to roll it back and return a value (e.g. 'CONFLICT') to the caller. */
 class Abort<T> { constructor(readonly value: T) {} }
@@ -32,8 +33,15 @@ const SLACK_CHANNEL_KINDS = ['SLACK_BOT', 'SLACK_WEBHOOK'];
 /** `(ARRAY[30,60,120,300,600])[attempt]` — retryAt() of core as SQL. */
 const RETRY_SQL = `(ARRAY[${RETRY_DELAYS_SEC.join(',')}])`;
 
-export class SqlTickStore implements TickRepository {
+export class SqlTickStore implements TickRepository, RetentionRepository {
   constructor(protected readonly sql: SqlClient) {}
+
+  // D-45 retention (retentionSql.ts)
+  claimRetentionDay(day: string): Promise<boolean> { return retention.claimDay(this.sql, day); }
+  finishRetentionDay(day: string): Promise<void> { return retention.finishDay(this.sql, day); }
+  releaseRetentionDay(day: string): Promise<void> { return retention.releaseDay(this.sql, day); }
+  retentionCandidates(limit: number): Promise<RetentionCandidate[]> { return retention.candidates(this.sql, limit); }
+  runRetentionStage(customerId: string, stage: RetentionStage, opts: { deadlineMs: number; now: Date; days: number | null }): Promise<StageResult> { return retention.runStage(this.sql, customerId, stage, opts); }
 
   /** Run `fn` in one transaction; an `Abort` rolls back and yields its value. */
   protected async tx<T>(fn: (tx: SqlExecutor) => Promise<T>): Promise<T> {

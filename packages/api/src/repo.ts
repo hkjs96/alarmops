@@ -6,6 +6,7 @@
 import type {
   AuditInput, Contact, Leave, Override, Rotation, DeliveryLog, IncidentCommit, IncidentEventInput, IncidentRow, MaintenanceWindow, PagingConfig, PagingWorld, Severity, Source, SuppressionPolicy,
 } from '@alarmops/core';
+import type { DigestData, PurgeLogEntry } from '@alarmops/core';
 import type { UserInfo } from './audience.js';
 import type { Role, ScopeFilter } from './auth.js';
 
@@ -144,6 +145,16 @@ export type ChangeStatusOutcome =
   | { status: CustomerStatusValue; statusChangedAt: Date; version: number; offboardingId: string | null; cloudAccountIds: string[] };
 export type MarkStepOutcome = 'OK' | 'ALREADY_DONE' | 'NOT_FOUND' | 'NOT_ALLOWED';
 
+// ── retention (D-45), export, digest (D-46) ──
+export interface LegalHoldState { active: boolean; at: Date | null; byUserId: string | null; reason: string | null }
+export interface RetentionView { name: string; status: CustomerStatusValue; statusChangedAt: Date | null; legalHold: LegalHoldState }
+/** One incident of the history export. The columns the customer already owns; no people, no contact values. */
+export interface ExportIncidentRow {
+  number: number; id: string; title: string; severity: Severity; status: 'TRIGGERED' | 'ACKNOWLEDGED' | 'RESOLVED';
+  triggeredAt: Date; acknowledgedAt: Date | null; resolvedAt: Date | null; mttaSec: number | null; mttrSec: number | null;
+  memberCount: number; eventCount: number; accountIds: string[]; resourceTypes: string[]; pagingSuppressed: string | null;
+}
+
 export interface ApiRepository {
   // ── org / scope ──
   orgTree(scope: ScopeFilter): Promise<OrgTree>;
@@ -221,6 +232,24 @@ export interface ApiRepository {
   cloudAccountIds(customerId: string): Promise<string[]>;
   /** Command publish failed after commit: ALARMS_DELETED (unless DONE) becomes MANUAL and `COMMAND_PUBLISH_FAILED: <ids>` is APPENDED to its detail (the engine's earlier detail stays). */
   recordOffboardPublishFailure(customerId: string, cloudAccountIds: string[], at: Date): Promise<void>;
+
+  // ── retention (D-45) / export / digest (D-46) ──
+  /** Caller has already checked the customer is visible. */
+  retentionView(customerId: string): Promise<RetentionView | null>;
+  /**
+   * ONE transaction: lock the customer row; `hold` set -> legal hold on (reason/who/when), null -> off. Writes `audit` and a
+   * RetentionPurgeLog row (LEGAL_HOLD_SET / LEGAL_HOLD_RELEASED, actor = the user). 'NOOP' = already in that state, nothing written.
+   */
+  setLegalHold(customerId: string, hold: { byUserId: string; reason: string; at: Date } | null, audit: AuditInput): Promise<'OK' | 'NOOP' | 'NOT_FOUND'>;
+  purgeLog(customerId: string): Promise<PurgeLogEntry[]>;
+  /** Number of incidents the export would contain. */
+  countExportIncidents(customerId: string): Promise<number>;
+  /** Keyset page ordered by `number`, strictly after `afterNumber`. Always `WHERE customerId = ?`. */
+  exportIncidents(customerId: string, afterNumber: number, limit: number): Promise<ExportIncidentRow[]>;
+  /** A write that has no store method of its own (the export is audited before it streams). */
+  recordAudit(audit: AuditInput): Promise<void>;
+  /** Suspended-customer incidents (pagingSuppressed = CUSTOMER_SUSPENDED, triggeredAt in [from, to)) and TERMINATED residual sources (lastAt in [from, to)). Only customers inside `scope` (B-1): residuals need the whole customer in scope, incidents follow the usual scope rule. */
+  digestData(scope: ScopeFilter, from: Date, to: Date): Promise<DigestData>;
 
   // ── idempotency (API-CONTRACT §2 "멱등", 24h) ──
   getIdempotent(key: string, now: Date): Promise<IdempotentEntry | null>;

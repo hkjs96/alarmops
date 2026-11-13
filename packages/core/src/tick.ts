@@ -26,9 +26,11 @@ import {
 import type { Contact, PagingConfig, PagingWorld } from './paging.js';
 import type { SuppressionPolicy } from './policy.js';
 import type { CustomerStatus, PagingSuppressedReason, Severity, Source } from './types.js';
+import { DEFAULT_RETENTION, runRetention, type RetentionConfig, type RetentionRepository, type RetentionSummary } from './retention.js';
 
-export type TickJob = 'group' | 'reconcile' | 'escalation' | 'notify';
-export const TICK_JOBS: readonly TickJob[] = ['group', 'reconcile', 'escalation', 'notify'];
+export type TickJob = 'group' | 'reconcile' | 'escalation' | 'notify' | 'retention';
+/** `retention` (D-45) is daily: the first tick of each KST day claims it, every other tick of the day does nothing and writes no heartbeat. */
+export const TICK_JOBS: readonly TickJob[] = ['group', 'reconcile', 'escalation', 'notify', 'retention'];
 
 /** One alert's firing events inside a group (RawEvent rows with this groupId, aggregated per alert). */
 export interface GroupMember {
@@ -138,7 +140,7 @@ export type HeartbeatWrite = Omit<HeartbeatRow, 'consecutiveFailures'>;
  * transaction, each guarded write is `UPDATE … WHERE version = ?`). Tests/local: MemoryTickStore. Both run the same
  * contract suite (test/contract).
  */
-export interface TickRepository {
+export interface TickRepository extends Partial<RetentionRepository> {
   /**
    * The STORE's clock (R-14, security review SQL R-2): SQL → the database's `now()`. `runTick` asks it first,
    * refuses to tick when the runner's clock is more than CLOCK_SKEW_LIMIT_MS away from it, and otherwise makes its
@@ -275,6 +277,8 @@ export interface TickDeps {
   /** Max rows per phase (default 200; outbox 50 per R1-4). */
   batch?: number;
   notifyBatch?: number;
+  /** D-45 retention periods (default DEFAULT_RETENTION; the app builds it with `retentionConfigFromEnv`). */
+  retention?: RetentionConfig;
   /**
    * Wall-clock budget; phases stop taking new work after it (default 45 s). The call returns within
    * budget + sendTimeoutMs + 1 s ≤ TICK_RESPONSE_LIMIT_MS (60 s); a budget that would break that is cut down.
@@ -323,6 +327,8 @@ export interface TickSummary {
      */
     probeCursor: Partial<Record<SenderKind, string>>;
   };
+  /** Present only when the daily retention job ran in this tick (D-45). */
+  retention?: RetentionSummary;
   errors: TickError[];
   /** A phase hit its batch limit or the time budget; the remainder runs next tick. */
   truncated: boolean;
@@ -375,7 +381,7 @@ export async function runTick(input: TickInput, deps: TickDeps): Promise<TickRes
     // On the record, and visible to the health check: status ERROR and NO finish time, so the job reads as stale.
     const storeNow = new Date(clock().getTime() - ms);
     for (const name of TICK_JOBS) {
-      if (!jobs.has(name)) continue;
+      if (!jobs.has(name) || name === 'retention') continue;
       try {
         await guarded(deps.repo.writeHeartbeat({ name, lastStartedAt: storeNow, lastFinishedAt: null, lastStatus: 'ERROR', lastDurationMs: 0, lastStats: { skipped: 'clock-skew', clockSkewMs: ms, errors: 1 } }), guardMs());
       } catch { /* the heartbeat goes stale either way */ }
@@ -490,6 +496,8 @@ export async function runTick(input: TickInput, deps: TickDeps): Promise<TickRes
       sum.errors.push({ phase: name, id: 'heartbeat', message: errMsg(err) });
     }
   }
+  // D-45: the daily retention job. After the pages went out; it takes what is left of the call (at most RETENTION_SHARE_MS).
+  if (jobs.has('retention')) await retentionPhase(ctx, hardStop, offsetMs);
   // R-7: expired rows of every owner go here, not only when their owner happens to write again.
   try {
     const purged = await guarded(deps.repo.purgeExpired(), guardMs());
@@ -500,6 +508,43 @@ export async function runTick(input: TickInput, deps: TickDeps): Promise<TickRes
   for (const e of sum.errors) deps.log?.('error', 'tick_item_failed', { ...e });
   sum.durationMs = Math.max(0, clock().getTime() - started.getTime());
   return sum;
+}
+
+/** Time the retention job may take inside one tick (the response limit still holds: it also stops at the hard stop). */
+const RETENTION_SHARE_MS = 8_000;
+
+async function retentionPhase(c: Ctx, hardStop: number, offsetMs: number): Promise<void> {
+  const left = hardStop - c.clock().getTime() - TAIL_RESERVE_MS;
+  const share = Math.min(RETENTION_SHARE_MS, left);
+  if (share < 1_500) return; // no time left: do not even claim the day, the next tick will
+  const t0 = c.clock();
+  let failed = false;
+  try {
+    const r = await guarded(runRetention(c.repo, c.retention ?? DEFAULT_RETENTION, c.at(), { deadlineMs: Date.now() + share, log: c.log }), share + 1_000);
+    if (r.timedOut) {
+      failed = true;
+      c.sum.truncated = true;
+      c.sum.errors.push({ phase: 'retention', id: '*', message: 'retention did not finish within its share of the tick; it continues on the next tick' });
+    } else if (r.value.ran) {
+      c.sum.retention = r.value;
+      for (const e of r.value.errors) { failed = true; c.sum.errors.push({ phase: 'retention', id: e.customerId, message: `${e.stage}: ${e.message}` }); }
+      if (r.value.partial) c.sum.truncated = true;
+      // Nothing to retain (the usual day) leaves no heartbeat: it would only say "ran once today".
+      if (r.value.customers === 0 && !failed) return;
+    } else return;
+  } catch (err) {
+    failed = true;
+    c.sum.errors.push({ phase: 'retention', id: '*', message: errMsg(err) });
+  }
+  const t1 = c.clock();
+  try {
+    await guarded(c.repo.writeHeartbeat({
+      name: 'retention', lastStartedAt: new Date(t0.getTime() + offsetMs), lastFinishedAt: new Date(t1.getTime() + offsetMs), lastStatus: failed ? 'ERROR' : 'OK',
+      lastDurationMs: Math.max(0, t1.getTime() - t0.getTime()), lastStats: structuredClone({ ...(c.sum.retention ?? {}), errors: c.sum.errors.filter((e) => e.phase === 'retention').length }),
+    }), STORE_CALL_TIMEOUT_MS);
+  } catch (err) {
+    c.sum.errors.push({ phase: 'retention', id: 'heartbeat', message: errMsg(err) });
+  }
 }
 
 const emptySummary = (key: string): TickSummary => ({
@@ -1135,11 +1180,14 @@ export interface HeartbeatHealth {
  */
 export function heartbeatHealth(rows: HeartbeatRow[], now: Date, opts: { maxAgeSec?: number; jobs?: readonly TickJob[] } = {}): HeartbeatHealth {
   const max = opts.maxAgeSec ?? HEARTBEAT_STALE_SEC;
-  const jobs = (opts.jobs ?? TICK_JOBS).map((name) => {
+  const jobs = (opts.jobs ?? TICK_JOBS.filter((j) => j !== 'retention')).map((name) => {
     const hb = rows.find((r) => r.name === name);
     const ageSec = hb?.lastFinishedAt ? Math.max(0, Math.floor((now.getTime() - hb.lastFinishedAt.getTime()) / 1000)) : null;
     return { name, ageSec, stale: ageSec == null || ageSec > max, degraded: hb?.lastStatus === 'DEGRADED', lastStatus: hb?.lastStatus ?? null, consecutiveFailures: hb?.consecutiveFailures ?? 0 };
   });
+  // D-45: the retention job runs once a day, so its age is never "stale"; a failed last run is degraded until the next run succeeds.
+  const ret = opts.jobs ? undefined : rows.find((r) => r.name === 'retention');
+  if (ret) jobs.push({ name: 'retention', ageSec: ret.lastFinishedAt ? Math.max(0, Math.floor((now.getTime() - ret.lastFinishedAt.getTime()) / 1000)) : null, stale: false, degraded: ret.lastStatus === 'ERROR', lastStatus: ret.lastStatus, consecutiveFailures: ret.consecutiveFailures });
   const stale = jobs.some((j) => j.stale);
   const degraded = jobs.some((j) => j.degraded);
   return { stale, degraded, ok: !stale && !degraded, jobs };

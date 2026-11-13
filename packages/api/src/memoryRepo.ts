@@ -2,9 +2,10 @@
  * In-memory ApiRepository on top of the tick store, so the API and the tick see one world.
  * Scope is applied inside every read, the same way the SQL adapter must do it. Tests and local runs only.
  */
-import { MemoryTickStore, incidentMute, parseSnapshot, type AuditInput, type Contact, type IncidentRow, type PagingConfig } from '@alarmops/core';
+import { MemoryTickStore, incidentMute, type DigestData, type PurgeLogEntry, type RetentionStage, parseSnapshot, type AuditInput, type Contact, type IncidentRow, type PagingConfig } from '@alarmops/core';
 import { inScope, nodeVisible, seesCustomer, type Role, type ScopeFilter } from './auth.js';
 import type { UserInfo } from './audience.js';
+import type { ExportIncidentRow, RetentionView } from './repo.js';
 import { OFFBOARD_STEP_KEYS, type ChangeStatusOutcome, type CustomerStatusState, type CustomerStatusValue, type MarkStepOutcome, type OffboardStepKey, type OffboardingState, type Principal, ResponderOp, ResponderWriteOutcome, RespondersState, RotationsWorld, AlertMemberRow, ApiRepository, IdempotentEntry, IncidentFilter, IncidentPage, NodeFilter, NotifiedPerson, OpenCounts, StatusCounts, UndoRecord } from './repo.js';
 
 export interface ContactScopeRow { contactId: string; customerId: string; scopeType: 'CUSTOMER' | 'PROJECT' | 'SERVICE'; scopeId: string; role: 'NOTIFY' | 'APPROVER' | 'PORTAL_USER' }
@@ -196,6 +197,72 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
       if (hit && c?.active && c.customerId === customerId) out.push({ contactId: c.id, name: c.name, scope: { level: s.scopeType, id: s.scopeId, name: name(s.scopeType, s.scopeId) } });
     }
     return out;
+  }
+  // ───────────── retention (D-45), export, digest (D-46) ─────────────
+  protected override offboardingCompletedAt(customerId: string): Date | null { return this.offboardings.get(customerId)?.completedAt ?? null; }
+  /** Portal users, resources and contact scopes of the customer (the tick store does not know them). */
+  protected override retentionExtra(stage: RetentionStage, customerId: string): Record<string, number> {
+    const out: Record<string, number> = {};
+    if (stage === 'CONNECTIONS') {
+      let n = 0;
+      for (const [id, r] of this.resources) if (r.customerId === customerId) { this.resources.delete(id); n++; }
+      if (n) out.Resource = n;
+    } else if (stage === 'RETURN_PERIOD') {
+      const gone = [...this.users.values()].filter((u) => u.customerId === customerId);
+      for (const u of gone) this.users.delete(u.id);
+      if (gone.length) out.User = gone.length;
+      const sc = this.contactScopes.length;
+      this.contactScopes = this.contactScopes.filter((x) => x.customerId !== customerId);
+      if (sc !== this.contactScopes.length) out.ContactScope = sc - this.contactScopes.length;
+    }
+    return out;
+  }
+  async retentionView(customerId: string): Promise<RetentionView | null> {
+    const c = this.customers.get(customerId);
+    if (!c) return null;
+    const h = c.legalHold;
+    return { name: c.name, status: c.status ?? 'ACTIVE', statusChangedAt: c.statusChangedAt ?? null, legalHold: { active: !!h, at: h?.at ?? null, byUserId: h?.byUserId ?? null, reason: h?.reason ?? null } };
+  }
+  async setLegalHold(customerId: string, hold: { byUserId: string; reason: string; at: Date } | null, audit: AuditInput): Promise<'OK' | 'NOOP' | 'NOT_FOUND'> {
+    const c = this.customers.get(customerId);
+    if (!c || audit.customerId !== customerId) return 'NOT_FOUND';
+    if (!!c.legalHold === !!hold) return 'NOOP';
+    c.legalHold = hold ? { ...hold } : null;
+    this.purgeLogs.push({ id: this.nextId('purge'), customerId, stage: hold ? 'LEGAL_HOLD_SET' : 'LEGAL_HOLD_RELEASED', counts: {}, actor: hold ? hold.byUserId : (audit.actorId ?? 'unknown'), at: audit.at });
+    this.audits.push(audit);
+    return 'OK';
+  }
+  async purgeLog(customerId: string): Promise<PurgeLogEntry[]> {
+    return structuredClone(this.purgeLogs.filter((e) => e.customerId === customerId)).sort((a, b) => a.at.getTime() - b.at.getTime() || a.id.localeCompare(b.id));
+  }
+  private exportable(customerId: string): IncidentRow[] {
+    return [...this.incidents.values()].filter((i) => i.customerId === customerId).sort((a, b) => a.number - b.number);
+  }
+  async countExportIncidents(customerId: string): Promise<number> { return this.exportable(customerId).length; }
+  async exportIncidents(customerId: string, afterNumber: number, limit: number): Promise<ExportIncidentRow[]> {
+    return this.exportable(customerId).filter((i) => i.number > afterNumber).slice(0, limit).map((i) => ({
+      number: i.number, id: i.id, title: i.title, severity: i.severity, status: i.status, triggeredAt: i.triggeredAt, acknowledgedAt: i.acknowledgedAt, resolvedAt: i.resolvedAt,
+      mttaSec: i.mttaSec, mttrSec: i.mttrSec, memberCount: i.memberCount, eventCount: i.eventCount, accountIds: [...i.accountIds], resourceTypes: [...i.resourceTypes], pagingSuppressed: i.pagingSuppressed ?? null,
+    }));
+  }
+  async recordAudit(audit: AuditInput): Promise<void> { this.audits.push(audit); }
+  async digestData(scope: ScopeFilter, from: Date, to: Date): Promise<DigestData> {
+    const inWin = (t: Date): boolean => t.getTime() >= from.getTime() && t.getTime() < to.getTime();
+    const by = new Map<string, { customerId: string; customerName: string; incidents: number; firstAt: Date; lastAt: Date }>();
+    for (const i of this.incidents.values()) {
+      if (i.pagingSuppressed !== 'CUSTOMER_SUSPENDED' || !i.customerId || !inWin(i.triggeredAt) || !inScope(scope, i)) continue;
+      const cur = by.get(i.customerId);
+      if (cur) { cur.incidents++; if (i.triggeredAt < cur.firstAt) cur.firstAt = i.triggeredAt; if (i.triggeredAt > cur.lastAt) cur.lastAt = i.triggeredAt; }
+      else by.set(i.customerId, { customerId: i.customerId, customerName: this.customers.get(i.customerId)?.name ?? i.customerId, incidents: 1, firstAt: i.triggeredAt, lastAt: i.triggeredAt });
+    }
+    const terminated: DigestData['terminatedResiduals'] = [];
+    for (const [cid, rs] of this.residuals) {
+      if (!inScope(scope, { customerId: cid, projectId: null, serviceId: null })) continue; // whole customer only
+      const hit = rs.filter((r) => inWin(r.lastAt));
+      if (!hit.length) continue;
+      terminated.push({ customerId: cid, customerName: this.customers.get(cid)?.name ?? cid, sources: hit.length, lastEventAt: new Date(Math.max(...hit.map((r) => r.lastAt.getTime()))), totalEvents: rs.reduce((n, r) => n + r.count, 0) });
+    }
+    return { suspended: [...by.values()], terminatedResiduals: terminated };
   }
   // ───────────── customer status / offboarding (D-43) ─────────────
   private statusVersionOf(customerId: string): number {
