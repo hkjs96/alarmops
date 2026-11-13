@@ -927,3 +927,13 @@ mock 모드(`MOCK_API=1 next dev -p 3107`), 스크립트 `docs/qa/shoot-ended-no
 mock 모드(`MOCK_API=1 E2E_ALLOW_MOCK=1 next build` 후 `next start -p 3191`), Chromium은 /opt/pw-browsers/chromium 지정. 스크립트 `docs/qa/shoot-p3k*.mjs`. 검증자 분리 서브에이전트는 이 환경에서 쓸 수 없어 QA가 소스를 읽지 않고 화면과 측정값만 보고 판정. 판정: P0·P1 없음, P2 2건(Add 입구가 첫 화면에 없음, 앵커 없는 브라우저에서 Add 버튼 이동).
 
 후속 수정(권고 반영, 재검증 필요): Add staff / Add person ↓ 바로가기 링크(Done 옆), 추가 후 Add 버튼 뷰포트 위치 유지(스크롤 앵커 없음에서 ≤4px, e2e), /auth/session 세션 키는 서명 검증 뒤에만, CONSOLE_ORIGIN 예외는 mockMode 공통 판정, HTML no-store.
+
+### 2026-11-13 Responders 후속 수정 재검증 (P3-K 권고 A·B) (feat/console-hardening-p3k @ 9eeb544, mock)
+
+| 날짜 | 시나리오 | 버전(커밋) | 페르소나 | 측정값 | 판정 | 캡처 |
+|---|---|---|---|---|---|---|
+| 2026-11-13 | A. 편집 후 "Add staff / Add person ↓" 바로가기 찾기·동작 | 9eeb544 | MSP 관리자 (1440, 390) | Edit 누르면 Done 바로 왼쪽에 링크가 나타나 같은 헤더 줄에서 보임(1440: 169x26, 390: 169x44). 누르면 직원 추가 선택 칸으로 스크롤되고 포커스 이동(두 폭 모두 화면 안, 가로 스크롤 없음). 누르기 전후 기존 행 간격 변화 0px(두 폭, 앵커 켜짐·꺼짐). 한계: 1440에서 링크 높이 26px(데스크톱이라 44px 기준 밖, 참고) | 통과 | `docs/qa/shots/2026-11-13-p3k-recheck/msp-admin/admin-{1440,390}-anchor{on,off}-{1-edit-mode-link,2-after-link}.png` |
+| 2026-11-13 | B. 연속 추가 2회 시 Add 버튼 화면 위치 | 9eeb544 | MSP 관리자 (1440, 390; 스크롤 앵커 켜짐·꺼짐) | 직원 추가 2회: Add 버튼 y 변화 0px(4개 조건 모두), 포커스는 직원 선택 칸으로 이동(화면 안). 사람 추가 2회: 변화 -1~+1px(≤4px), 포커스는 이름 칸으로 이동, 토스트 "… added to Mirae Pay as Notify only", Now/Reach now 줄 갱신. 이전 측정 +100~124px에서 해소 | 통과 | `docs/qa/shots/2026-11-13-p3k-recheck/msp-admin/admin-{1440,390}-anchor{on,off}-{3-staff-add1,3-staff-add2,4-person-add1,4-person-add2}.png` |
+| 2026-11-13 | CSP 위반 | 9eeb544 | MSP 관리자 (1440, 390) | /c/mirae/call-order에서 Edit, 링크, 추가 4회 전 과정 중 securitypolicyviolation 이벤트 0건, 콘솔 CSP 메시지·페이지 오류 0건(4개 조건) | 통과 | (콘솔 출력만) |
+
+mock 모드(`MOCK_API=1 E2E_ALLOW_MOCK=1 next build` 후 `next start -p 3217`), Chromium /opt/pw-browsers/chromium. 폭마다 서버를 새로 띄워 mock 상태 초기화. 앵커 끔은 `*{overflow-anchor:none}` 주입. 스크립트는 저장소 밖에 둠. 검증자 분리 서브에이전트는 쓸 수 없어 소스를 읽지 않고 화면·측정값만 봄. 판정: P0·P1·P2 없음, 두 권고 해소.
