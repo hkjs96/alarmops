@@ -225,3 +225,22 @@ test.describe("Not paged marker", () => {
     await expect(page.getByTestId("not-paged")).toHaveCount(0);
   });
 });
+
+test("390 px: after the 503 the error is in view, not under the buttons, and has the focus", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 600 });
+  await signIn(page, "/customers/dasol");
+  await page.getByTestId("cs-change").click();
+  await page.getByTestId("cs-terminate").click();
+  await page.getByTestId("cs-reason").fill("Contract ended");
+  await page.getByTestId("cs-confirm-name").fill("Dasol Health");
+  await page.waitForTimeout(700);
+  await confirmBtn(page).click();
+  const err = page.getByTestId("cs-err");
+  await expect(err).toBeVisible();
+  await expect(err).toBeFocused();
+  const e = (await err.boundingBox())!;
+  const buttons = (await dialog(page).locator(".dguard-acts").boundingBox())!;
+  expect(e.y).toBeGreaterThanOrEqual(0);
+  expect(e.y + e.height, "the whole message is inside the window").toBeLessThanOrEqual(600);
+  expect(e.y + e.height, "and above the dialog's buttons").toBeLessThanOrEqual(buttons.y + 1);
+});

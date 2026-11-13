@@ -566,3 +566,5 @@ div.co-refused { margin-top: 6px; }
 .cs-form .inp.cs-in { min-height: 36px; }
 @media (max-width: 760px) { .cs-form .inp.cs-in { min-height: 44px; height: 44px; } }
 .cdlg .btn.danger:not([disabled]) { background: var(--red); border-color: var(--red); color: var(--on-red); font-weight: 600; }
+.cs-errbox { scroll-margin-bottom: 16px; }
+.cs-errbox:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }

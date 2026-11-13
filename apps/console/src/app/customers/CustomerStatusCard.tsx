@@ -1,6 +1,6 @@
 "use client";
 import { useRouter } from "next/navigation";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Card, ConfirmDialog, CustomerStatusBadge } from "@alarmops/design-system";
 import type { CustomerStatusValue } from "@/lib/api/types";
 import { hasRole, roleReason, useShell } from "@/components/ShellContext";
@@ -31,6 +31,9 @@ export function CustomerStatusCard({ customerId, customerName, status, statusCha
   const [typed, setTyped] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<{ text: string; code: string } | null>(null);
+  const errBox = useRef<HTMLDivElement>(null);
+  // a failed action: the message takes the focus and is scrolled into view, clear of the dialog's buttons (QA recheck, 390 px)
+  useEffect(() => { if (err) { errBox.current?.focus({ preventScroll: true }); errBox.current?.scrollIntoView({ block: "nearest" }); } }, [err]);
 
   const terminated = status === "TERMINATED";
   const unknown = status === null;
@@ -127,7 +130,7 @@ export function CustomerStatusCard({ customerId, customerName, status, statusCha
               </span>
             ) : null}
             {err ? (
-              <div className="co-err" role="alert" data-testid="cs-err">
+              <div className="co-err cs-errbox" role="alert" tabIndex={-1} ref={errBox} data-testid="cs-err">
                 <span>{err.text}</span>
                 {stale ? <button type="button" className="btn sm" data-testid="cs-reload" onClick={() => { setAsk(null); refocus(); router.refresh(); }}>Reload</button> : null}
               </div>

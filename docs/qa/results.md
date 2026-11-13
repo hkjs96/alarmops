@@ -956,3 +956,20 @@ mock 모드(`MOCK_API=1 E2E_ALLOW_MOCK=1 next build` 후 `next start -p 3217`), 
 mock 모드(`MOCK_API=1 E2E_ALLOW_MOCK=1 next build` 후 `next start -p 3191`), Chromium /opt/pw-browsers/chromium. 스크립트는 저장소 밖(scratchpad)에 둠. 검증자 분리 서브에이전트는 쓸 수 없어 소스를 읽지 않고 화면·측정값만 보고 판정. 서버는 흐름 중 상태가 쌓이므로(종료는 되돌릴 수 없음) 일부 캡처는 앞서 종료·일시중지한 고객이 트리에 함께 보임. 판정: P0·P1 없음, P2 2건(포털 열람자에게 직원용 비활성 컨트롤·문구 노출, Esc 후 초점 소실).
 
 2026-11-13 후속: qa-ux 권고(포털 사용자에게 직원 컨트롤 숨김, /customers 문구, Esc 후 초점 복귀, 503 문구, CAPABILITY_DISABLED 설명, 확인 입력칸 44px, 활성 위험 버튼) 및 security 권고(상태 미상은 ACTIVE로 보이지 않음, 사유·메모 500자, 오류는 errorLine) 반영 — 이 커밋의 다음 커밋, mock e2e 전체 재실행.
+
+### 2026-11-13 재검증: 고객 상태 화면 후속 수정 (feat/console-customer-status @ 3f39240, mock)
+
+| 날짜 | 시나리오 | 버전(커밋) | 페르소나 | 측정값 | 판정 | 캡처 |
+|---|---|---|---|---|---|---|
+| 2026-11-13 | 1. 포털 사용자에게 직원 컨트롤 숨김 | 3f39240 | 고객 포털 (as=portal, 1440, 390) | /customers/{mirae,eden,iruda}: Change status 버튼 0개, "Admin role"·"not shown to your role" 문구 0건, 상태 카드 없음. 머리 배지(ACTIVE/SUSPENDED/TERMINATED)와 Incidents/Call order 링크만 보임. 가로 스크롤 없음 | 통과 | `docs/qa/shots/2026-11-13-customer-status-recheck/portal/viewer-{1440,390}-{mirae,eden,iruda}.png` |
+| 2026-11-13 | 2. /customers 머리글 | 3f39240 | 포털·관리자 (1440, 390) | "Each customer, its status and open incidents." | 통과 | (본문 출력) |
+| 2026-11-13 | 3. Esc 후 초점 | 3f39240 | MSP 관리자 (키보드, 1440, 390) | Suspend 양식 Esc, Terminate 양식 Esc: 초점이 Change status로 복귀. Mark done 입력 Esc: 초점이 Mark done…으로 복귀. 옵션 목록(Suspend…/Terminate…)은 Esc로 닫히지 않음(대화상자 아님, 초점은 유지) | 통과 (참고 1) | (콘솔 출력) |
+| 2026-11-13 | 4a. 503 문구 | 3f39240 | MSP 관리자 (1440, 390) | "Alarm deletion can't be sent right now, so the customer was not terminated. Nothing was changed. Try again later or ask the platform team. (requestId …)" 내부 큐 이름 없음. 사유·이름 입력 유지. 1440은 입력칸 바로 아래 보임. 390은 오류가 스크롤 위치 맨 위로 리셋된 대화상자의 아래쪽에 있어 처음 화면에는 얇은 붉은 선만 보이고 스크롤해야 읽힘(고정 하단 버튼이 가림) | 통과 (권고 1) | `.../msp-admin/admin-{1440,390}-27-dasol-503-viewport.png`, `admin-390-27-dasol-503-scrolled.png` |
+| 2026-11-13 | 4b. CAPABILITY_DISABLED | 3f39240 | MSP 관리자 (1440, 390) | 쉬운 문장 "This account has no AlarmWriter role. Delete the AlarmOps alarms by hand, then mark this step done." 이 먼저, 코드 줄은 그 아래 | 통과 | `.../msp-admin/admin-{1440,390}-23-iruda.png` |
+| 2026-11-13 | 4c. 종료 입력칸·버튼 | 3f39240 | MSP 관리자 (1440, 390) | 390: 입력칸 316x44, 종료 버튼 316x44. 1440: 36px, 30px(데스크톱). 활성 종료 버튼 배경 rgb(180,35,24) 흰 글자(단색 적색), 비활성은 회색 | 통과 | `.../msp-admin/admin-{1440,390}-21-terminate-ready-red.png` |
+| 2026-11-13 | 5. 부작용: Responders 제거 확인에 적색 스타일 | 3f39240 | MSP 관리자 (/c/mirae/call-order, 1440, 390) | Remove… 후 모달 "Remove Taemin Jung from Responders of Mirae Pay?" 의 확정 버튼이 같은 단색 적색(rgb 180,35,24), 취소 "Keep …"은 흰 버튼. 초점은 안전한 Keep에서 시작, Esc 후 Remove…로 복귀. 390에서 두 버튼 316x44. 되돌릴 수 있는(Undo) 작업이지만 호출 대상에서 빠지는 삭제성 동작이라 적색이 어울리고 종료 대화상자와 일관 | 통과 (허용) | `.../msp-admin/admin-{1440,390}-25-responders-remove-confirm.png` |
+| 2026-11-13 | 역할 회귀 · CSP | 3f39240 | 관리자·온콜(Operator)·포털 (1440, 390) | 관리자: 일시중지/종료/체크리스트/Not paged 이전과 동일. Operator: Change status 비활성+Admin 문구, Mark done 0개. 전 과정 securitypolicyviolation 0건, 콘솔 CSP·페이지 오류·4xx/5xx 0건 | 통과 | (콘솔 출력) |
+
+mock 모드(MOCK_API=1 E2E_ALLOW_MOCK=1 next build 후 next start -p 3191), Chromium /opt/pw-browsers/chromium. 소스를 읽지 않고 화면·측정값만 봄. 판정: P0·P1 없음. 권고 1(390 폭에서 503 오류가 첫 화면에 안 보임), 참고 1(옵션 목록 Esc로 안 닫힘; 같은 줄 Change status 토글로 닫음), 참고 2(오류 후 초점이 body로 감: 재시도 시 Tab 위치 소실). 변경 요청 중 /customers 이외에도 mock 상태가 서버 재시작 사이에 이어진 구간이 있어 일부 단계(체크리스트 알람 삭제)는 이미 완료 상태에서 시작.
+
+2026-11-13 재검증 후속: 대화상자 동작 실패 시 오류 줄(role=alert, tabIndex=-1)로 초점 이동 + scrollIntoView(nearest)로 390px에서 하단 버튼 위에 보이게 함(상태 변경·Mark done 모두), 390px e2e 추가.

@@ -1,6 +1,6 @@
 "use client";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Banner, Card, ConfirmDialog, Mark } from "@alarmops/design-system";
 import type { Shape } from "@alarmops/design-system";
 import type { Offboarding, OffboardStep, OffboardStepKey, OffboardStepState } from "@/lib/api/types";
@@ -50,6 +50,8 @@ export function OffboardingCard({ customerId, customerName, off }: { customerId:
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [stale, setStale] = useState(false);
+  const errBox = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (err) { errBox.current?.focus({ preventScroll: true }); errBox.current?.scrollIntoView({ block: "nearest" }); } }, [err]);
 
   /** back to the step's button when the dialog closes without a change; after a change the step has no button, so the checklist */
   const refocus = (key: OffboardStepKey, done = false) => { setTimeout(() => { document.querySelector<HTMLElement>(done ? "[data-testid=offboarding]" : `[data-testid=ob-mark-${key}]`)?.focus(); }, 0); };
@@ -122,7 +124,7 @@ export function OffboardingCard({ customerId, customerName, off }: { customerId:
               <textarea className="inp cs-ta" data-testid="ob-note" rows={3} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} />
             </label>
             {err ? (
-              <div className="co-err" role="alert" data-testid="ob-err" style={{ marginTop: 8 }}>
+              <div className="co-err cs-errbox" role="alert" tabIndex={-1} ref={errBox} data-testid="ob-err" style={{ marginTop: 8 }}>
                 <span>{err}</span>
                 {stale ? <button type="button" className="btn sm" onClick={() => { setAsk(null); router.refresh(); }}>Reload</button> : null}
               </div>
