@@ -49,7 +49,7 @@ const internalOnly = (auth: AuthContext): void => { if (auth.kind !== 'INTERNAL'
 const iso = (d: Date | null): string | null => (d ? d.toISOString() : null);
 
 /** Customer visible to this staff member, whole-customer only (a narrowed staff scope does not exist today; same rule as Responders). */
-async function adminCustomer(req: ApiRequest, deps: Deps, customerId: string, admin: boolean) {
+export async function adminCustomer(req: ApiRequest, deps: Deps, customerId: string, admin: boolean) {
   const auth = requireAuth(req);
   internalOnly(auth);
   const { customer } = await visibleCustomer(deps, auth, customerId, 'CUSTOMER');

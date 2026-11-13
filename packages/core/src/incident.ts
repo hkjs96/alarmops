@@ -52,6 +52,10 @@ export interface IncidentRow {
   source: Source | null;
   /** D-43: set => the tick never pages this incident. Never cleared (a customer that is ACTIVE again is not paged late). Absent = null. */
   pagingSuppressed?: PagingSuppressedReason | null;
+  /** D-45: set when the incident was reduced to its pseudonymized SLA record (retention). Absent = null. */
+  purgedAt?: Date | null;
+  /** D-45: set together with purgedAt. */
+  pagingOutcome?: 'DELIVERED' | 'FAILED' | 'NOT_PAGED' | null;
   /** Display sequence (DATA-MODEL Incident.number); assigned by the repository on create. */
   number: number;
   version: number;

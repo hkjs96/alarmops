@@ -9,6 +9,7 @@ import type { MaintenanceWindow } from './maintenance.js';
 import { CLAIM_LEASE_SEC, CLOCK_SKEW_LIMIT_MS, RELEASE_HOLD_MAX_SEC } from './limits.js';
 import { LANE_CHANNELS, MAX_ATTEMPTS, retryAt, sanitizeProviderError, selectForClaim, type DeliveryLog, type DeliveryReason, type NotificationJob, type SenderKind } from './notify.js';
 import type { CustomerStatus } from './types.js';
+import { AUDIT_CONTACT_VALUE_KEYS, PROTECTED_AUDIT_TARGET_TYPES, type PurgeLogEntry, type RetentionCandidate, type RetentionRepository, type RetentionStage, type StageResult } from './retention.js';
 import type { Contact, Leave, Override, PagingConfig, PagingWorld, Responder, Rotation } from './paging.js';
 import { DEFAULT_POLICY, type SuppressionPolicy } from './policy.js';
 import type {
@@ -16,18 +17,26 @@ import type {
 } from './tick.js';
 
 /** `status` (D-42, D-43): absent = ACTIVE. Read by the session lookup, by ingest and by the tick. */
-export interface OrgCustomer { id: string; name: string; slug: string; status?: CustomerStatus; statusChangedAt?: Date | null }
+/** `legalHold` (D-45): present = held. */
+export interface OrgCustomer { id: string; name: string; slug: string; status?: CustomerStatus; statusChangedAt?: Date | null; legalHold?: { at: Date; byUserId: string; reason: string } | null }
 export interface OrgProject { id: string; customerId: string; name: string; slug: string }
 export interface OrgService { id: string; customerId: string; projectId: string; name: string; slug: string }
-export interface OrgAccount { awsAccountId: string; customerId: string; serviceId: string | null }
+/** `externalId`/`roleArns`/`disabled`/`purgedAt` (D-45): the connection data the retention job empties; the row itself stays. */
+export interface OrgAccount { awsAccountId: string; customerId: string; serviceId: string | null; externalId?: string | null; roleArns?: string[]; disabled?: boolean; purgedAt?: Date | null }
+export interface OrgSource { id: string; customerId: string; tokenHash: string | null; enabled: boolean }
 
-export class MemoryTickStore implements TickRepository {
+export class MemoryTickStore implements TickRepository, RetentionRepository {
   policy: SuppressionPolicy = { ...DEFAULT_POLICY };
   // org
   customers = new Map<string, OrgCustomer>();
   projects = new Map<string, OrgProject>();
   services = new Map<string, OrgService>();
   accounts = new Map<string, OrgAccount>();
+  /** Webhook integration sources (D-45 retention empties the token). */
+  sources = new Map<string, OrgSource>();
+  /** D-45: KST days the retention job has claimed, and the purge log (one entry per stage that changed something). */
+  retentionDays = new Set<string>();
+  purgeLogs: PurgeLogEntry[] = [];
   // paging
   contacts = new Map<string, Contact>();
   responders: Responder[] = [];
@@ -85,6 +94,89 @@ export class MemoryTickStore implements TickRepository {
     let n = 0;
     for (const k of this.ticks) if (new Date(k.replace(/Z$/, ':00Z')).getTime() < before) { this.ticks.delete(k); n++; }
     return n;
+  }
+
+  // ───────────── D-45 retention ─────────────
+  async claimRetentionDay(day: string) { if (this.retentionDays.has(day)) return false; this.retentionDays.add(day); return true; }
+  async releaseRetentionDay(day: string) { this.retentionDays.delete(day); }
+  /** CustomerOffboarding.completedAt: the API store owns that table in memory. */
+  protected offboardingCompletedAt(_customerId: string): Date | null { return null; }
+  /** Rows the subclass holds for a stage (portal users, resources, contact scopes, …). Called inside the same stage, same scoping. */
+  protected retentionExtra(_stage: RetentionStage, _customerId: string): Record<string, number> { return {}; }
+  async retentionCandidates(limit: number): Promise<RetentionCandidate[]> {
+    return [...this.customers.values()]
+      .filter((c) => c.status === 'TERMINATED' && !c.legalHold && c.statusChangedAt)
+      .sort((a, b) => a.statusChangedAt!.getTime() - b.statusChangedAt!.getTime() || a.id.localeCompare(b.id)).slice(0, limit)
+      .map((c) => ({ customerId: c.id, statusChangedAt: c.statusChangedAt!, offboardingCompletedAt: this.offboardingCompletedAt(c.id) }));
+  }
+  async runRetentionStage(customerId: string, stage: RetentionStage, opts: { deadlineMs: number; now: Date }): Promise<StageResult> {
+    const cus = this.customers.get(customerId);
+    if (!cus || cus.status !== 'TERMINATED' || cus.legalHold) return { counts: {}, partial: false, skipped: true };
+    const counts: Record<string, number> = {};
+    const bump = (k: string, n: number): void => { if (n > 0) counts[k] = (counts[k] ?? 0) + n; };
+    if (stage === 'CONNECTIONS') {
+      for (const a of this.accounts.values()) {
+        if (a.customerId !== customerId || a.purgedAt) continue;
+        a.externalId = null; a.roleArns = []; a.disabled = true; a.purgedAt = opts.now;
+        bump('CloudAccount', 1);
+      }
+      for (const s of this.sources.values()) if (s.customerId === customerId && (s.tokenHash || s.enabled)) { s.tokenHash = null; s.enabled = false; bump('IntegrationSource', 1); }
+    } else if (stage === 'RETURN_PERIOD') {
+      // Pseudonymized SLA record: the paging outcome comes from the delivery logs, so it is computed BEFORE they go.
+      const mine = [...this.incidents.values()].filter((i) => i.customerId === customerId && !i.purgedAt).sort((a, b) => a.triggeredAt.getTime() - b.triggeredAt.getTime() || a.number - b.number);
+      const labels = new Map<string, string>();
+      const label = (who: string | null): string | null => {
+        if (!who) return null;
+        if (!labels.has(who)) labels.set(who, `Responder ${labels.size + 1}`);
+        return labels.get(who)!;
+      };
+      for (const i of mine) {
+        const logs = this.logs.filter((l) => l.customerId === customerId && l.incidentId === i.id);
+        i.pagingOutcome = logs.some((l) => l.status === 'SENT') ? 'DELIVERED' : logs.length ? 'FAILED' : 'NOT_PAGED';
+        i.acknowledgedBy = label(i.acknowledgedBy); i.resolvedBy = label(i.resolvedBy);
+        i.title = '[purged]'; i.accountIds = []; i.resourceTypes = []; i.assignmentSnapshot = null; i.axis = `purged:${i.id}`; i.isMergeTarget = false;
+        i.purgedAt = opts.now; i.version++;
+        bump('Incident', 1);
+      }
+      const mineIds = new Set([...this.incidents.values()].filter((i) => i.customerId === customerId).map((i) => i.id));
+      const before = { ev: this.events.length, jobs: this.jobs.size, logs: this.logs.length, res: this.resolutions.length };
+      this.events = this.events.filter((e) => e.customerId !== customerId);
+      for (const [k, j] of this.jobs) if (j.customerId === customerId) this.jobs.delete(k);
+      this.logs = this.logs.filter((l) => l.customerId !== customerId);
+      this.resolutions = this.resolutions.filter((r) => r.customerId !== customerId);
+      for (const id of mineIds) this.incidentMembers.delete(id);
+      bump('IncidentEvent', before.ev - this.events.length); bump('NotificationJob', before.jobs - this.jobs.size); bump('NotificationLog', before.logs - this.logs.length); bump('Resolution', before.res - this.resolutions.length);
+      for (const [gid, g] of this.groups) {
+        if (g.customerId !== customerId) continue;
+        bump('Alert', this.members.get(gid)?.length ?? 0); this.members.delete(gid); this.groups.delete(gid); bump('AlertGroup', 1);
+      }
+      for (const [id, c] of this.contacts) if (c.kind === 'CUSTOMER' && c.customerId === customerId) { this.contacts.delete(id); bump('Contact', 1); }
+      const gone = new Set([...this.responders].filter((r) => r.customerId === customerId && !this.contacts.has(r.contactId)).map((r) => r.contactId));
+      this.responders = this.responders.filter((r) => !(r.customerId === customerId && gone.has(r.contactId)));
+      let masked = 0;
+      for (const a of this.audits) {
+        if (a.customerId !== customerId) continue;
+        for (const side of ['before', 'after'] as const) {
+          const v = a[side];
+          if (v && typeof v === 'object' && !Array.isArray(v) && AUDIT_CONTACT_VALUE_KEYS.some((k) => k in (v as object))) {
+            a[side] = Object.fromEntries(Object.entries(v as object).filter(([k]) => !AUDIT_CONTACT_VALUE_KEYS.includes(k)));
+            masked++;
+          }
+        }
+      }
+      bump('AuditLog.masked', masked);
+    } else if (stage === 'AUDIT_EXPIRY') {
+      const n = this.audits.length;
+      this.audits = this.audits.filter((a) => a.customerId !== customerId || PROTECTED_AUDIT_TARGET_TYPES.includes(a.targetType));
+      bump('AuditLog', n - this.audits.length);
+    } else {
+      const ids = [...this.incidents.values()].filter((i) => i.customerId === customerId).map((i) => i.id);
+      for (const id of ids) this.incidents.delete(id);
+      bump('Incident', ids.length);
+    }
+    for (const [k, n] of Object.entries(this.retentionExtra(stage, customerId))) bump(k, n);
+    if (Object.keys(counts).length) this.purgeLogs.push({ id: this.nextId('purge'), customerId, stage, counts, actor: 'system', at: opts.now });
+    return { counts, partial: false };
   }
   async loadPolicy() { return this.policy; }
 

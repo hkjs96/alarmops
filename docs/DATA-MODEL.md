@@ -855,6 +855,17 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 | count | int | |
 | lastNotifiedAt | timestamptz? | 업무 시간 알림은 소스당 하루 한 번 |
 
+### 보관·파기 (D-45, 0005_retention)
+- **Customer**: `legalHold`(bool), `legalHoldAt`, `legalHoldByUserId`, `legalHoldReason`. 켜져 있으면(CHECK: 사유·시각·작성자 필수) 보관 작업이 그 고객을 건드리지 않는다.
+- **CloudAccount**: `disabled`, `connectionPurgedAt`. 오프보딩 완료 시 `externalId`는 `purged-<id>`, 역할 ARN은 비움, 선택 기능 꺼짐. **행은 지우지 않는다**(잔여 이벤트가 미매핑으로 보여 MSP를 호출하는 것을 막는다, d43 보안 검토).
+- **Incident**: `purgedAt`, `pagingOutcome`(DELIVERED/FAILED/NOT_PAGED; CHECK: 둘은 함께 null 또는 함께 값). 30일 뒤 제목은 `[purged]`, `axis`는 `purged:<id>`(병합 대상 아님), `accountIds`·`resourceTypes`·`assignmentSnapshot` 비움, `acknowledgedBy`·`resolvedBy`는 "Responder N"(첫 등장 순서). 발생·확인·해결 시각, 심각도, mtta/mttr, 호출 결과는 5년 유지.
+- **RetentionPurgeLog**(고객 FK, 고객 행이 남는 한 유지): `customerId, stage(CONNECTIONS|RETURN_PERIOD|AUDIT_EXPIRY|SLA_EXPIRY|LEGAL_HOLD_SET|LEGAL_HOLD_RELEASED), counts(json 건수만), actor('system' 또는 user id), at`. 삭제·가림이 있었던 단계만 1행(건수 0인 재실행은 쓰지 않음).
+- **RetentionClaim**(`day` 'YYYY-MM-DD' KST PK): 하루 한 번 실행 선점. 중간에 멈추면(`partial`) 행을 돌려줘 다음 틱이 이어서 한다.
+- 기준 시각은 모두 `Customer.statusChangedAt`(해지 시각): 30일(`returnDays`), 2년(`auditDays`=730), 5년(`slaDays`=1826). 환경변수 `RETENTION_RETURN_DAYS|AUDIT_DAYS|SLA_DAYS`(정수 ≥1, 순서 return ≤ audit ≤ sla, 아니면 전체 무시).
+- **AuditLog/ContactRevealLog**: 30일에 `before/after`의 최상위 키 `email|phone|slackUserId|name|contactName` 제거, ContactRevealLog.contactName은 지워진 연락처면 `[purged]`. 2년에 삭제하되 **`targetType` = `CustomerStatus`, `Responders` 행은 삭제하지 않는다**(버전이 그 행 수라서). 최상위 키만 가리므로 중첩 JSON의 연락처 값은 못 가린다(알려진 한계).
+- 포털 사용자(User)는 삭제. 단 ContactRevealLog·BulkChange가 가리키는(FK RESTRICT) 사용자는 이메일 `purged-<id>@invalid.invalid`, 이름 "Removed user", DISABLED로 가린다.
+- 삭제 순서(30일 단계): Incident 가명화 → NotificationLog → NotificationJob → SlackMessage → IncidentEvent → Resolution → RawEvent → Alert → AlertGroup → Contact(CUSTOMER) → User → 감사 가림. 모든 문장에 `customerId = ?`와 "TERMINATED이고 hold 아님" 확인이 들어 있다.
+
 ## 8. ER 다이어그램 (주요 관계)
 
 ```mermaid

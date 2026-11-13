@@ -24,8 +24,13 @@ export interface ApiRequest {
 export interface ApiResponse {
   status: number;
   headers: Record<string, string>;
-  /** JSON-serialisable; undefined for 304. */
+  /** JSON-serialisable; undefined for 304 and for streamed responses. */
   body?: unknown;
+  /**
+   * Streamed text body (CSV export, D-45). When set the adapter writes the chunks as they come instead of JSON.stringify(body),
+   * so memory stays flat whatever the size. An error thrown by the iterator after the headers were sent aborts the connection.
+   */
+  stream?: AsyncIterable<string>;
 }
 
 const BASE_HEADERS = { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } as const;
