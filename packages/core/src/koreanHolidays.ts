@@ -4,14 +4,13 @@
  * TODO(D-46 follow-up): hard-coded for 2026-2027 by hand and NOT verified against the official calendar. Source it from
  * the special-day API of data.go.kr (특일 정보) or the MSP's own calendar, and warn (health) when `now` is past the last
  * year listed: after 2027-12-31 every weekday counts as a business day, so a digest would go out on a holiday.
- * Also confirm 2026-05-01 (Labour Day) with the MSP: it is listed because the company observes it.
+ * May 1 (Labour Day) is a working day for the MSP (confirmed 11/13), so it is not listed.
  */
 export const KOREAN_HOLIDAYS: ReadonlySet<string> = new Set([
   // 2026
   '2026-01-01',
   '2026-02-16', '2026-02-17', '2026-02-18', // Seollal
   '2026-03-01', '2026-03-02', // Independence Movement Day (Sunday) + substitute
-  '2026-05-01',
   '2026-05-05',
   '2026-05-24', '2026-05-25', // Buddha's Birthday (Sunday) + substitute
   '2026-06-03', // local election day
