@@ -7,6 +7,7 @@ import type { IncidentListItem } from "@/lib/api/types";
 import { displayStatus, orgChainParts } from "@/lib/incidents";
 import { age, groupDigits, kstTime } from "@/lib/format";
 import { RowMenu } from "@/components/RowMenu";
+import { NotPaged } from "./NotPaged";
 import { hasRole, roleReason, useShell } from "@/components/ShellContext";
 import { errorText } from "@/lib/errors";
 import { SESSION_ENDED, callAction, sessionEndReason } from "@/lib/session-ended";
@@ -303,6 +304,7 @@ export function IncidentsTable({ items, nowMs, openId, emptyKind, listKey = "", 
                       {stale
                         ? <div className="org warn" title="Changed since you loaded this list. It was not acknowledged.">Changed since loaded</div>
                         : <div className="org">{what(i)}</div>}
+                      {i.pagingSuppressed ? <div className="org"><NotPaged reason={i.pagingSuppressed} /></div> : null}
                     </td>
                     <td className="c-paged">
                       {i.assignee ? (

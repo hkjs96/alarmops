@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { NotPaged } from "./NotPaged";
 import { Avatar, Card, EmptyState, Mark, SevBadge, SourceChip, StatusBadge, Tabs, cx, type Shape } from "@alarmops/design-system";
 import { safeExternalUrl } from "@/lib/safe-url";
 import type { IncidentDetail, IncidentEvent, NotificationLogEntry, RemediationStage } from "@/lib/api/types";
@@ -171,6 +172,7 @@ export function IncidentDetailBody({ inc, timeline, notifs, now }: { inc: Incide
                 {inc.region ? <> · {inc.region}</> : null}
                 {inc.env === "prd" ? <> · <span className="pill prd">Production</span></> : null}
               </div>
+              {inc.pagingSuppressed ? <div style={{ margin: "8px 0" }}><NotPaged reason={inc.pagingSuppressed} detail /></div> : null}
               {paged.length || stopped || inc.org.customer ? (
                 <div className="paged" data-testid="paged-line">
                   <span className="ov">Paged</span>

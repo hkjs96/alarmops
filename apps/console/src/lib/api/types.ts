@@ -99,6 +99,9 @@ export interface EscalationProgress {
   mutedByMaintenance: boolean;
 }
 
+/** API-CONTRACT 8.1 `pagingSuppressed` */
+export type PagingSuppressed = null | "CUSTOMER_SUSPENDED" | "CUSTOMER_TERMINATED";
+
 export interface IncidentListItem {
   id: string;
   number: number;
@@ -126,6 +129,8 @@ export interface IncidentListItem {
   acknowledgedBy?: PersonRef | null;
   resolvedAt: string | null;
   resolvedVia?: "MANUAL" | "AUTO" | "RECONCILE";
+  /** D-43: the customer was suspended or terminated when this incident opened (or was found), so nobody is paged for it. Kept after the customer returns to ACTIVE. */
+  pagingSuppressed?: PagingSuppressed;
   version: number;
 }
 
@@ -547,3 +552,25 @@ export interface CallOrderRow {
 export interface CallOrderListQuery { customer?: string; project?: string; service?: string; mine?: boolean; onlyProblems?: boolean }
 /** GET /oncall/now */
 export interface CallOrderListResponse { rotations: RotationSummary[]; rows: CallOrderRow[] }
+
+/* ------------------------------------------------------------------------------------------------------------------
+ * Customer status and offboarding (API-CONTRACT 8.4, D-42 / D-43 / D-45). ADMIN only.
+ * ---------------------------------------------------------------------------------------------------------------- */
+export type CustomerStatusValue = "ACTIVE" | "SUSPENDED" | "TERMINATED";
+/** GET /customers/{id}/status; `version` is the ETag and the If-Match of PATCH */
+export interface CustomerStatusResponse { status: CustomerStatusValue; statusChangedAt: string | null; version: number }
+/** PATCH /customers/{id}/status body */
+export interface CustomerStatusInput { status: CustomerStatusValue; reason: string; confirmName?: string }
+/** PATCH answer: the new state, and for a termination what was sent to the alarm engine */
+export interface CustomerStatusChange extends CustomerStatusResponse { offboardingId?: string; commandsSent?: number; commandsFailed?: string[] }
+
+export type OffboardStepKey = "PAGING_STOPPED" | "ALARMS_DELETED" | "CUSTOMER_STACK_REMOVED" | "ACCOUNTS_DISABLED" | "BUS_ALLOWLIST_REMOVED";
+export type OffboardStepState = "DONE" | "PENDING" | "MANUAL";
+export interface OffboardStep { key: OffboardStepKey; state: OffboardStepState; at?: string; byUserId?: string; detail?: string }
+/** GET and PATCH /customers/{id}/offboarding */
+export interface Offboarding {
+  id: string; startedAt: string; completedAt: string | null; reason: string;
+  steps: OffboardStep[];
+  /** events that still arrive from a terminated customer ("Cleanup needed") */
+  residual: { lastEventAt?: string; count: number };
+}

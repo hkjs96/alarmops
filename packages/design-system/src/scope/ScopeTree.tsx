@@ -36,12 +36,18 @@ const HEALTH = {
   AT_RISK: { cls: "ar", label: "At risk", tip: "First on shift has no verified phone." },
 } as const;
 
+const STATUS_TIP = {
+  SUSPENDED: "Suspended: alarms are recorded but nobody is paged.",
+  TERMINATED: "Terminated: paging has stopped and the customer is being offboarded.",
+} as const;
+
 function Tags({ row }: { row: TreeRow }) {
   const collapsed = row.hasKids && !row.expanded;
   if (row.kind === "root" || (row.kind === "group" && row.expanded)) return null;
   const h = row.health ? HEALTH[row.health] : null;
   return (
     <span className="stree-tags">
+      {row.status ? <span className={cx("stag", row.status === "SUSPENDED" ? "susp" : "term")} data-testid="tree-status" title={STATUS_TIP[row.status]}>{row.status === "SUSPENDED" ? "Suspended" : "Terminated"}</span> : null}
       {row.ownSteps ? <span className="stag own" title="Own steps: this project or service has its own call order instead of the customer's">Own steps</span> : null}
       {row.ownInside > 0 && collapsed ? <span className="stag-in" role="img" aria-label="Contains own steps" title={`Contains ${row.ownInside} level${row.ownInside === 1 ? "" : "s"} with own steps. Expand to see.`} /> : null}
       {h ? <span className={cx("stag", h.cls)} title={`${h.label}: ${h.tip}`}>{h.label}</span> : null}

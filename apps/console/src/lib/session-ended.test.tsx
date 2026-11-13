@@ -103,9 +103,9 @@ describe("every server action goes through callAction", () => {
   const actionFiles = files.filter((f) => /^\s*["']use server["']/.test(readFileSync(f, "utf8")));
   const names = actionFiles.flatMap((f) => [...readFileSync(f, "utf8").matchAll(/^export async function (\w+)/gm)].map((m) => m[1]!));
 
-  it("finds the actions (ack, resolve, escalate, bulk, undo, call-order save, own steps, Responders)", () => {
+  it("finds the actions (ack, resolve, escalate, bulk, undo, call-order save, own steps, Responders, customer status, offboarding)", () => {
     expect(names.sort()).toEqual([
-      "ackIncident", "addResponder", "escalateIncident", "executeBulk", "previewBulk", "removeOwnSteps", "removeResponder", "resolveIncident", "saveCallOrder", "setResponderRole", "undoBulk",
+      "ackIncident", "addResponder", "changeCustomerStatus", "escalateIncident", "executeBulk", "markOffboardingStep", "previewBulk", "removeOwnSteps", "removeResponder", "resolveIncident", "saveCallOrder", "setResponderRole", "undoBulk",
     ]);
   });
   it("no client file calls one of them outside callAction(() => …)", () => {

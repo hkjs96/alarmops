@@ -90,6 +90,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .sev.s1.hot { background: var(--red); color: var(--on-red); padding: 3px 7px 3px 6px; }
 .st { display: inline-flex; align-items: center; gap: 6px; font: 700 12px var(--mono); letter-spacing: 0.05em; text-transform: uppercase; white-space: nowrap; }
 .st.trig { color: var(--red); } .st.esc { color: var(--orange); } .st.ack { color: var(--slate); }
+.st.susp { color: var(--amber); } .st.term { color: var(--ink2); }
 .st.res { color: var(--green); } .st.mute { color: var(--gray); } .st.warn { color: var(--amber); } .st.info { color: var(--accent); }
 
 /* ---------- source chip / pill ---------- */

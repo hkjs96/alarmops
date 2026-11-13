@@ -8,6 +8,8 @@
 .stag { display: inline-flex; align-items: center; font: 700 11px/1 var(--mono); letter-spacing: 0.03em; text-transform: uppercase; padding: 2px 3px; border: 1px solid currentColor; background: var(--surface); white-space: nowrap; flex: none; }
 .stag.unr { color: var(--red); }
 .stag.ar { color: var(--amber); }
+.stag.susp { color: var(--amber); }
+.stag.term { color: var(--ink2); }
 .stag.own { color: var(--accent); background: var(--accent-t); }
 .stag-in { display: inline-block; width: 6px; height: 6px; background: var(--accent); flex: none; }
 .stag-n { font: 700 11px var(--mono); background: var(--red); color: var(--on-red); padding: 1px 4px; min-width: 18px; text-align: center; flex: none; }

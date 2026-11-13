@@ -3,6 +3,8 @@
  * A scope is customer › project › service, addressed by slugs. "mine" = the My customers filter.
  */
 export type CallHealth = "OK" | "AT_RISK" | "UNREACHABLE";
+/** Customer.status (D-42, D-43). Absent = not told = shown as ACTIVE (no tag). */
+export type CustomerStatus = "ACTIVE" | "SUSPENDED" | "TERMINATED";
 
 export interface ScopeServiceNode {
   id: string;
@@ -24,6 +26,8 @@ export interface ScopeCustomerNode {
   mine: boolean;
   openIncidents: number;
   callHealth: CallHealth;
+  /** SUSPENDED / TERMINATED customers carry a tag in the tree (D-43). Optional: the scope-tree of API-CONTRACT 8.0 does not send it yet. */
+  status?: CustomerStatus;
   projects: ScopeProjectNode[];
 }
 
@@ -116,6 +120,8 @@ export interface TreeRow {
   shown?: number;
   openIncidents: number;
   health: Exclude<CallHealth, "OK"> | null;
+  /** customer rows only: SUSPENDED or TERMINATED */
+  status?: Exclude<CustomerStatus, "ACTIVE"> | null;
   ownSteps: boolean;
   /** levels with own steps somewhere below (shown while collapsed) */
   ownInside: number;
@@ -204,6 +210,7 @@ export function buildTree(customers: ScopeCustomerNode[], opts: BuildTreeOptions
       key: c.slug, kind: "customer", label: c.name, depth: 0, level: 2, hasKids: true, expanded: e,
       selected: isSel && !sel.project, filterInside: isSel && Boolean(sel.project) && !e, hit: cm,
       openIncidents: c.openIncidents, health: c.callHealth === "OK" ? null : c.callHealth, ownSteps: false,
+      status: c.status && c.status !== "ACTIVE" ? c.status : null,
       ownInside: ownInsideOf(c), sel: { customer: c.slug },
     });
     if (!e) return;

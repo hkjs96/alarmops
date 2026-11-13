@@ -25,6 +25,9 @@ function fieldText(f: { field?: unknown; message?: unknown }): string {
   if (p.step && p.field === "channels") return `Step ${p.step}: choose at least one way to send it, each one once (Slack, Slack DM, SMS, Call, Email).`;
   if (p.step && p.field === "targetId") return `Step ${p.step}: the person or rotation it calls does not exist any more. Choose who it calls.`;
   if (p.step && p.field === "targetType") return `Step ${p.step}: choose who it calls.`;
+  if (p.field === "confirmName") return "The name does not match. Type the customer name exactly as shown.";
+  if (p.field === "reason") return "Give a reason, up to 500 characters.";
+  if (p.field === "detail") return "Say what you checked or did, up to 500 characters.";
   if (p.step) return `Step ${p.step}: ${said || "is not valid."}`;
   return said || "A value is not valid.";
 }
@@ -64,6 +67,9 @@ export function errorText(f: Failure, ctx: ErrorContext = {}): string {
       const p = parseField(d.field);
       return p.step ? `Step ${p.step}: the person or rotation it calls was not found for this customer. Choose who it calls.` : "Not found.";
     }
+    case "COMMANDS_UNAVAILABLE": return "The queue that deletes the customer's alarms is not available, so the customer was not terminated. Nothing was changed: its status and paging are as they were. Try again in a few minutes, or ask the platform team to check the alarm-commands queue.";
+    case "CUSTOMER_TERMINATED": return "A terminated customer cannot change status. To use it again, connect it as a new customer. Reload to see the current state.";
+    case "STEP_NOT_MANUAL": return "This step is done by AlarmOps itself and is not waiting for a person. Reload to see where it stands.";
     case "NOT_FOUND": return "Not found. It may have been removed, or you may not have access to it.";
     case "ROLE_REQUIRED": case "FORBIDDEN": case "PORTAL_GRANT_REQUIRED": {
       const role = typeof d.role === "string" ? ROLE_NAME[d.role] ?? d.role : null;

@@ -4,6 +4,7 @@ export { Mark } from "./components/Mark";
 export { Button, type ButtonProps, type ButtonVariant } from "./components/Button";
 export { SevBadge } from "./components/SevBadge";
 export { StatusBadge } from "./components/StatusBadge";
+export { CustomerStatusBadge } from "./components/CustomerStatusBadge";
 export { Card, type CardProps, type CardAccent } from "./components/Card";
 export { Table, type Column, type TableProps } from "./components/Table";
 export { Tabs, type TabItem } from "./components/Tabs";

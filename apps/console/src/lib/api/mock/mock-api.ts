@@ -6,6 +6,7 @@ import * as fx from "./fixtures";
 import { customers14, customers34, type FxCustomer } from "./scope-fixtures";
 import { createPaging, type FxPaging } from "./paging-fixtures";
 import { createPagingApi, hasOwnSteps, healthOf } from "./paging-mock";
+import { createStatusApi, createStatusStore, type StatusStore } from "./status-mock";
 
 interface Store {
   customers: FxCustomer[];
@@ -13,6 +14,7 @@ interface Store {
   timelines: Record<string, IncidentEvent[]>;
   undo: Map<string, { snapshot: IncidentListItem[]; after: Record<string, number>; by: string; exp: number }>;
   paging: FxPaging;
+  customerStatus: StatusStore;
 }
 
 export interface MockUser { id: string; contactId: string; name: string; email: string; role: Role }
@@ -32,8 +34,8 @@ const RANK: Record<Role, number> = { VIEWER: 0, OPERATOR: 1, ADMIN: 2 };
 export function createStore(opts: { customers?: 14 | 34 } = {}): Store {
   const customers = opts.customers === 34 ? customers34 : customers14;
   return {
-    customers, paging: createPaging(customers),
-    incidents: structuredClone([...fx.openIncidents, ...fx.resolvedIncidents]),
+    customers, paging: createPaging(customers), customerStatus: createStatusStore(),
+    incidents: structuredClone([...fx.openIncidents, ...fx.resolvedIncidents, ...fx.suppressedIncidents]),
     timelines: structuredClone(fx.timelines),
     undo: new Map(),
   };
@@ -129,8 +131,14 @@ export function createMockApi(store: Store = createStore(), clock: () => number 
     err: (status, code, message, details) => new ApiError(status, code, message, `req_mock_${++reqSeq}`, details),
   });
 
+  const statusApi = createStatusApi({
+    store: store.customerStatus, customers: store.customers, incidents: () => store.incidents, me: ME, now: nowIso, need,
+    err: (status, code, message, details) => new ApiError(status, code, message, `req_mock_${++reqSeq}`, details),
+  });
+
   return {
     ...pagingApi,
+    ...statusApi,
     async me() { return { id: ME.id, name: ME.name, email: ME.email, role: ME.role }; },
     async listIncidents(q = {}) {
       const scope = scopeOf(q);
@@ -245,7 +253,7 @@ export function createMockApi(store: Store = createStore(), clock: () => number 
       const n = (f: (i: IncidentListItem) => boolean) => open.filter(f).length;
       return {
         customers: store.customers.map((c) => ({
-          id: c.id, slug: c.slug, name: c.name, mine: c.mine, callHealth: healthOf(store.paging, c).level,
+          id: c.id, slug: c.slug, name: c.name, mine: c.mine, callHealth: healthOf(store.paging, c).level, status: store.customerStatus.status[c.id]?.status ?? "ACTIVE",
           openIncidents: n((i) => i.org.customer?.id === c.id),
           projects: c.projects.map((p) => ({
             id: p.id, slug: p.slug, name: p.name, ownSteps: hasOwnSteps(store.paging, c.id, "PROJECT", p.id),

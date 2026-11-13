@@ -535,3 +535,29 @@ div.co-refused { margin-top: 6px; }
 .co-ghost { display: inline-block; box-sizing: border-box; pointer-events: none; }
 .co-pctl .inp.co-ghost { width: auto; min-width: 0; padding-right: 28px; white-space: nowrap; }
 .co-ctl:not(.co-pctl) { display: inline-flex; align-items: center; }
+
+/* ---------- customer status and offboarding (D-43) ---------- */
+.cs-actions { margin-top: 12px; gap: 8px; }
+.cs-why { margin: 8px 0 0; }
+.cs-form { display: grid; gap: 8px; margin-top: 12px; }
+.cs-f { display: grid; gap: 4px; }
+.cs-ta { height: auto; min-height: 80px; padding: 8px 10px; resize: vertical; font-family: inherit; width: 100%; }
+.cs-in { width: 100%; }
+.cs-form .co-err { justify-content: space-between; flex-wrap: wrap; }
+.np { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 13px; font-weight: 600; color: var(--amber); }
+.np-d { flex-basis: 100%; font-weight: 400; color: var(--ink2); }
+.ob-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
+.ob-step { display: grid; grid-template-columns: 150px minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 12px 0; border-top: 1px solid var(--rule); }
+.ob-step:first-child { border-top: 0; }
+.ob-state { padding-top: 2px; }
+.ob-detail { margin-top: 4px; padding: 6px 10px; border-left: 3px solid var(--amber); background: var(--amber-t); overflow-wrap: anywhere; }
+.ob-mark { white-space: nowrap; }
+.cust-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.cust-item { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding: 10px 14px; border: 1px solid var(--rule); background: var(--surface); }
+.cust-name { font-weight: 700; flex: 1 1 200px; min-width: 0; display: inline-flex; align-items: center; min-height: 44px; }
+@media (max-width: 760px) {
+  .ob-step { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .ob-mark { justify-self: start; }
+  .cs-ta, .cs-in { font-size: 16px; }
+  .cs-in { height: 44px; }
+}
