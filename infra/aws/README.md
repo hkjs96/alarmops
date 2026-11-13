@@ -28,7 +28,17 @@ DB가 연결 정보의 원본이고(`CloudAccount`), 버스의 목록은 그 사
 3. 워크플로가 성공하면(정책에서 계정이 사라진 것을 확인) 사람이 콘솔 체크리스트의 `BUS_ALLOWLIST_REMOVED`를 완료로 표시한다. 자동 표시는 하지 않는다. 이 단계는 `MANUAL`이다.
 4. 그 뒤에도 해당 계정에서 이벤트가 오면 목록에서 빠진 것이므로 버스가 거절한다(백엔드에는 닿지 않음). 이미 허용된 상태에서 온 이벤트는 D-43대로 "정리 필요"로 처리된다.
 
-필요한 GitHub 설정(사람이 한 번): `central` 환경(브랜치 `main`만, 필수 승인자), 변수 `CENTRAL_BUS_DEPLOY_ROLE_ARN`(OIDC로 맡는 배포 역할; 버스 스택의 `DescribeStacks`/`UpdateStack`과 `events:DescribeEventBus` 정도만 허용). 스택 이름은 `alarmops-central-bus`로 가정한다.
+필요한 GitHub 설정(사람이 한 번): `central` 환경(브랜치 `main`만, 필수 승인자), 변수 `CENTRAL_BUS_DEPLOY_ROLE_ARN`(OIDC로 맡는 배포 역할; 버스 스택의 `DescribeStacks`/`UpdateStack`과 `events:DescribeEventBus` 정도만 허용). 스택 이름은 `alarmops-central-bus`로 가정한다. 버스 이름은 스택 출력 `BusName`에서 읽는다(하드코딩 없음; 출력이 없는 옛 스택이면 워크플로가 멈추므로 먼저 현재 템플릿으로 갱신).
+
+OIDC 신뢰 정책(AWS 쪽 역할): `token.actions.githubusercontent.com:aud = sts.amazonaws.com`, `token.actions.githubusercontent.com:sub = repo:hkjs96/alarmops:environment:central` (와일드카드 금지). 워크플로 작업에는 `if: github.ref == 'refs/heads/main'`이 있다. 워크플로의 `uses:`를 전체 커밋 SHA로 고정하는 일은 TODO로 표시돼 있다(저장소에 복사할 실제 SHA가 아직 없다).
+
+### 정책 조건과 ingest 규칙
+
+버스 정책은 `events:source`가 `aws.*`이고 `events:detail-type`이 `CloudWatch Alarm State Change` 또는 `AWS API Call via CloudTrail`인 호출만 허용한다. 고객 계정은 이 정책을 통과해도 `detail` 안의 내용을 마음대로 쓸 수 있다. **ingest는 이벤트 최상위 `account` 필드(EventBridge가 호출자 기준으로 채움)만 믿고**, `detail` 안의 계정 ID나 알람 ARN의 계정은 최상위 `account`와 같을 때만 쓴다.
+
+## 알람 명령 큐 (B9)
+
+`alarm-commands-queue.yaml`: 표준 SQS 큐(Q-API-15 사용자 결정 전의 추천안; 엔진이 `commandId`로 멱등 처리하므로 최소 한 번 전달로 충분) + DLQ(`MaxReceiveCount` 기본 5) + SSE(SQS 관리형). 큐 정책: `ConsoleSenderRoleArn`만 `SendMessage`, `EngineRoleArn`만 `ReceiveMessage`/`DeleteMessage`; 그 밖의 주체는 `aws:PrincipalArn` 조건으로 명시적 Deny; `aws:SecureTransport=false`는 전부 Deny. DLQ에 메시지가 있으면 CloudWatch 알람(`...-dlq-not-empty`)이 울린다(선택: `AlarmTopicArn`). 가시성 제한 시간은 엔진 Lambda 제한 시간의 6배 이상으로 맞춘다.
 
 ## 콘솔 배포 전 환경 검사
 

@@ -80,6 +80,7 @@ jobs:
       - name: Postgres tests ran (not skipped)
         working-directory: services/alarm-engine
         run: |
+          set -o pipefail
           python -m pytest tests/test_pg_repository.py -q -rs 2>&1 | tee "$RUNNER_TEMP/pg-tests.log"
           if grep -qiE "skipped" "$RUNNER_TEMP/pg-tests.log"; then
             echo "::error::The Postgres tests were skipped. ALARM_ENGINE_TEST_PG_URL must point at the postgres service."
@@ -98,9 +99,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install "cfn-lint>=1,<2"
+      - run: pip install "cfn-lint==1.60.1"
       - name: cfn-lint (customer stack, central bus)
-        run: cfn-lint infra/customer-stack/template.yaml infra/aws/central-bus.yaml
+        run: cfn-lint infra/customer-stack/template.yaml infra/aws/central-bus.yaml infra/aws/alarm-commands-queue.yaml
       - name: Template structure tests (roles, trust, Deny rules)
         run: python -m unittest discover -s infra/test -v
       - name: Workflow script tests (console deploy environment check, bus allow list)

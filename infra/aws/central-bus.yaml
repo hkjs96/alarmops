@@ -26,6 +26,9 @@ Resources:
 
   # One statement, principals = the allow list. Removing an account id and updating the stack removes its access.
   # Without any account the policy is not created and the bus accepts events only from this account.
+  # Conditions: only AWS-service sources (aws.*) and only the two detail types the customer rules send. A put call
+  # with any other entry is rejected as a whole. The event's top-level `account` is set by EventBridge from the
+  # caller and cannot be forged; ingest must trust only that field, never an account id inside `detail`.
   CustomerPutEventsPolicy:
     Type: AWS::Events::EventBusPolicy
     Condition: HasAllowedAccounts
@@ -38,8 +41,16 @@ Resources:
           AWS: !Split [",", !Ref AllowedAccountIds]
         Action: events:PutEvents
         Resource: !GetAtt CentralBus.Arn
+        Condition:
+          StringLike:
+            "events:source": ["aws.*"]
+          StringEquals:
+            "events:detail-type": ["CloudWatch Alarm State Change", "AWS API Call via CloudTrail"]
 
 Outputs:
   CentralBusArn:
     Value: !GetAtt CentralBus.Arn
     Description: Give this value to customers as the CentralEventBusArn stack parameter.
+  BusName:
+    Value: !Ref CentralBus
+    Description: Event bus name (read by the bus-allowlist workflow).

@@ -31,7 +31,7 @@ export function checkConsoleDeployEnv(env) {
     }
     if (!u) problems.push('CONSOLE_ORIGIN is not a URL');
     else if (u.protocol !== 'https:') problems.push('CONSOLE_ORIGIN must be an https origin');
-    else if (u.username || u.password || u.search || u.hash || (u.pathname !== '/' && u.pathname !== '') || origin.endsWith('/'))
+    else if (origin.includes('?') || origin.includes('#') || u.username || u.password || u.search || u.hash || (u.pathname !== '/' && u.pathname !== '') || origin.endsWith('/'))
       problems.push('CONSOLE_ORIGIN must be only scheme://host[:port], with no path, query, credentials or trailing slash');
   }
 
@@ -43,13 +43,13 @@ export function checkConsoleDeployEnv(env) {
   return problems;
 }
 
-/** KEY=VALUE lines; blank lines and # comments skipped; optional `export ` and surrounding quotes removed. */
+/** KEY=VALUE, KEY = VALUE and KEY: VALUE (YAML-style) lines; blank lines and # comments skipped; optional `export ` and surrounding quotes removed. */
 export function parseEnvFile(text) {
   const out = {};
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
     if (!line || line.startsWith('#')) continue;
-    const m = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(line);
+    const m = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*[=:]\s*(.*)$/.exec(line);
     if (!m) continue;
     let v = m[2].trim();
     if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);

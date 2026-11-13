@@ -9,7 +9,12 @@ name: bus-allowlist
 # have a required reviewer (workflow_dispatch runs the workflow file of whatever branch it is started from), and
 # the role in the CENTRAL_BUS_DEPLOY_ROLE_ARN variable must be allowed only cloudformation:DescribeStacks/UpdateStack
 # on the bus stack, events:DescribeEventBus, and the stack's own resource actions.
-# Follow-up (same as ci.yml): pin the actions to full commit SHAs.
+# OIDC: the AWS role's trust policy must require
+#   token.actions.githubusercontent.com:aud = sts.amazonaws.com
+#   token.actions.githubusercontent.com:sub = repo:hkjs96/alarmops:environment:central
+# (the `sub` of a job that uses `environment: central`; do not use a wildcard).
+# TODO(security, 권고 5): pin every `uses:` below to a full commit SHA. The repository has no pinned SHAs to copy yet
+# and none are invented here; a person (or Dependabot) copies them from each action's release page.
 
 on:
   workflow_dispatch:
@@ -49,6 +54,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: central
+    # workflow_dispatch can start any branch's copy of this file; only main may touch the central account.
+    if: github.ref == 'refs/heads/main'
     steps:
       - name: Check confirmation
         env:
@@ -78,15 +85,21 @@ jobs:
             --query "Stacks[0].Parameters[?ParameterKey=='AllowedAccountIds'].ParameterValue | [0]" --output text)
           [ "$CURRENT" = "None" ] && CURRENT=""
           export CURRENT
+          export PARAMS_FILE="$RUNNER_TEMP/stack-params.json"
           NEXT=$(node .github/scripts/bus-allowlist.mjs)
           echo "next=$NEXT" >> "$GITHUB_OUTPUT"
+          BUS_NAME=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" \
+            --query "Stacks[0].Outputs[?OutputKey=='BusName'].OutputValue | [0]" --output text)
+          if [ -z "$BUS_NAME" ] || [ "$BUS_NAME" = "None" ]; then
+            echo "::error::The stack has no BusName output. Update the stack with the current infra/aws/central-bus.yaml first."
+            exit 1
+          fi
+          echo "bus_name=$BUS_NAME" >> "$GITHUB_OUTPUT"
       - name: Update the bus stack (previous template, only this parameter changes)
-        env:
-          NEXT: ${{ steps.next.outputs.next }}
         run: |
           set +e
           out=$(aws cloudformation update-stack --stack-name "$STACK_NAME" --use-previous-template \
-            --parameters "ParameterKey=AllowedAccountIds,ParameterValue=$NEXT" ParameterKey=BusName,UsePreviousValue=true 2>&1)
+            --parameters "file://$RUNNER_TEMP/stack-params.json" 2>&1)
           code=$?
           set -e
           echo "$out"
@@ -96,7 +109,7 @@ jobs:
         env:
           ACTION: ${{ inputs.action }}
           ACCOUNT_ID: ${{ inputs.account_id }}
-          BUS_NAME: alarmops-central
+          BUS_NAME: ${{ steps.next.outputs.bus_name }}
         run: |
           policy=$(aws events describe-event-bus --name "$BUS_NAME" --query Policy --output text)
           [ "$policy" = "None" ] && policy=""

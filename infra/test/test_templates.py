@@ -67,7 +67,8 @@ class CustomerStack(unittest.TestCase):
         self.assertIn(":role/", T["Parameters"]["CentralRoleArn"]["AllowedPattern"])   # not :root
         for role in ASSUMED_BY_CENTRAL:
             (st,) = RES[role]["Properties"]["AssumeRolePolicyDocument"]["Statement"]
-            self.assertEqual(st["Principal"], {"AWS": {"Ref": "CentralRoleArn"}}, role)
+            want = "RemediatorCallerRoleArn" if role == "RemediatorRole" else "CentralRoleArn"
+            self.assertEqual(st["Principal"], {"AWS": {"Ref": want}}, role)
             self.assertEqual(st["Action"], "sts:AssumeRole")
             self.assertEqual(st["Condition"], {"StringEquals": {"sts:ExternalId": {"Ref": "ExternalId"}}}, role)
 
@@ -105,26 +106,32 @@ class CustomerStack(unittest.TestCase):
                   "s3:GetObject", "kms:Decrypt"):
             self.assertIn(a, denied)
 
-    def test_alarm_writer_delete_only_with_managed_by_tag_and_tag_via_request(self):
+    def test_alarm_writer_manages_only_managed_by_alarmops(self):
         sts = statements("AlarmWriterRole")
-        for s in sts:
-            if s["Effect"] == "Allow" and "cloudwatch:DeleteAlarms" in as_list(s["Action"]):
-                self.assertEqual(s["Condition"], {"StringEquals": {"aws:ResourceTag/ManagedBy": "AlarmOps"}})
-        deletes = [s for s in sts if "cloudwatch:DeleteAlarms" in as_list(s["Action"])]
-        self.assertEqual(len(deletes), 1)
-        create = [s for s in sts if s.get("Sid") == "CreateAlarmWithManagedByTag"][0]
-        self.assertEqual(create["Condition"], {"StringEquals": {"aws:RequestTag/ManagedBy": "AlarmOps"}})
-        self.assertNotIn("cloudwatch:DeleteAlarms", [a for s in sts if s is create for a in as_list(s["Action"])])
-        # nothing but cloudwatch actions
-        for s in sts:
+        allows = [s for s in sts if s["Effect"] == "Allow"]
+        for s in allows:
             for a in as_list(s["Action"]):
                 self.assertTrue(a.startswith("cloudwatch:"), a)
+        create = [s for s in allows if s.get("Sid") == "CreateAlarmWithManagedByTag"][0]
+        self.assertEqual(as_list(create["Action"]), ["cloudwatch:PutMetricAlarm"])
+        self.assertEqual(create["Condition"], {"StringEquals": {"aws:RequestTag/ManagedBy": "AlarmOps"}})
+        own = [s for s in allows if s.get("Sid") == "ChangeOwnAlarms"][0]
+        self.assertEqual(own["Condition"], {"StringEquals": {"aws:ResourceTag/ManagedBy": "AlarmOps"}})
+        # every statement that can delete, tag or untag is bound to the ResourceTag condition; RequestTag only creates
+        for s in allows:
+            acts = as_list(s["Action"])
+            if s is not own and s is not create:
+                self.assertFalse({"cloudwatch:DeleteAlarms", "cloudwatch:TagResource", "cloudwatch:UntagResource"} & set(acts))
+        deny = [s for s in sts if s["Effect"] == "Deny"][0]
+        self.assertEqual(sorted(as_list(deny["Action"])), ["cloudwatch:TagResource", "cloudwatch:UntagResource"])
+        self.assertEqual(deny["Condition"], {"ForAnyValue:StringEquals": {"aws:TagKeys": ["ManagedBy"]}})
 
     def test_tag_writer_only_monitoring_key_no_s3_route53(self):
         for s in statements("TagWriterRole"):
             self.assertEqual(s["Effect"], "Allow")
             self.assertEqual(s["Condition"]["ForAllValues:StringEquals"], {"aws:TagKeys": ["Monitoring"]})
             self.assertEqual(s["Condition"]["Null"], {"aws:TagKeys": "false"})
+            self.assertEqual(s["Condition"]["StringEquals"], {"aws:RequestTag/Monitoring": "on"})
             for a in as_list(s["Action"]):
                 self.assertFalse(a.startswith(("s3:", "route53:")), a)
                 self.assertRegex(a.split(":")[1], r"(?i)tag")
@@ -136,6 +143,14 @@ class CustomerStack(unittest.TestCase):
             acts += as_list(s["Action"])
         self.assertEqual(sorted(acts), sorted(["ec2:StopInstances", "rds:StopDBInstance", "rds:StopDBCluster",
                                                "elasticloadbalancing:DeleteLoadBalancer"]))
+
+    def test_reader_has_no_lambda_listing(self):
+        allowed = [a for s in statements("ReaderRole") if s["Effect"] == "Allow" for a in as_list(s["Action"])]
+        self.assertFalse([a for a in allowed if a.startswith("lambda:")])
+
+    def test_remediator_caller_required_when_enabled(self):
+        self.assertIn("RemediatorNeedsCaller", T["Rules"])
+        self.assertEqual(T["Parameters"]["RemediatorCallerRoleArn"]["Default"], "")
 
     def test_no_wildcard_actions_in_allow(self):
         for role in ROLES:
@@ -155,6 +170,27 @@ class CentralBus(unittest.TestCase):
         self.assertEqual(st["Action"], "events:PutEvents")
         self.assertEqual(st["Principal"], {"AWS": {"Fn::Split": [",", {"Ref": "AllowedAccountIds"}]}})
         self.assertNotIn("*", str(st["Principal"]))
+        cond = st["Condition"]
+        self.assertEqual(cond["StringLike"], {"events:source": ["aws.*"]})
+        self.assertEqual(sorted(cond["StringEquals"]["events:detail-type"]),
+                         ["AWS API Call via CloudTrail", "CloudWatch Alarm State Change"])
+        self.assertIn("BusName", B["Outputs"])
+
+
+class CommandsQueue(unittest.TestCase):
+    def test_queue_hardening(self):
+        Q = _load(ROOT / "aws" / "alarm-commands-queue.yaml")
+        r = Q["Resources"]
+        self.assertTrue(r["CommandsQueue"]["Properties"]["SqsManagedSseEnabled"])
+        self.assertFalse(r["CommandsQueue"]["Properties"].get("FifoQueue", False))
+        self.assertIn("RedrivePolicy", r["CommandsQueue"]["Properties"])
+        sts = r["CommandsQueuePolicy"]["Properties"]["PolicyDocument"]["Statement"]
+        text = str(sts)
+        self.assertIn("aws:SecureTransport", text)
+        self.assertIn("ConsoleSenderRoleArn", text)
+        self.assertIn("EngineRoleArn", text)
+        self.assertIn("aws:PrincipalArn", text)
+        self.assertEqual(r["DlqNotEmptyAlarm"]["Type"], "AWS::CloudWatch::Alarm")
 
 
 if __name__ == "__main__":

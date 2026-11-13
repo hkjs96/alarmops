@@ -17,7 +17,7 @@ test('good environment passes', () => {
 });
 
 test('CONSOLE_ORIGIN unset, empty, http, malformed or with a path fails', () => {
-  for (const v of [undefined, '', '  ', 'http://console.example.com', 'console.example.com', 'https://console.example.com/app', 'https://console.example.com/', 'https://u:p@console.example.com', 'https://console.example.com?x=1']) {
+  for (const v of [undefined, '', '  ', 'http://console.example.com', 'console.example.com', 'https://console.example.com/app', 'https://console.example.com/', 'https://u:p@console.example.com', 'https://console.example.com?x=1', 'https://console.example.com?', 'https://console.example.com#']) {
     const env = { ...GOOD };
     if (v === undefined) delete env.CONSOLE_ORIGIN;
     else env.CONSOLE_ORIGIN = v;
@@ -40,6 +40,11 @@ test('MOCK_API and E2E_ALLOW_MOCK fail when present, whatever the value (even em
       assert.ok(checkConsoleDeployEnv({ ...GOOD, [k]: v }).some((p) => p.startsWith(k)), `${k}=${v}`);
     }
   }
+});
+
+test('parseEnvFile accepts spaces around =, colon form and export', () => {
+  assert.deepEqual(parseEnvFile('MOCK_API = 1\nE2E_ALLOW_MOCK: "1"\nexport  TRUSTED_PROXY =1'), { MOCK_API: '1', E2E_ALLOW_MOCK: '1', TRUSTED_PROXY: '1' });
+  assert.ok(checkConsoleDeployEnv(parseEnvFile('CONSOLE_ORIGIN: https://c.example.com\nTRUSTED_PROXY: 1\nMOCK_API : 1')).some((p) => p.startsWith('MOCK_API')));
 });
 
 test('parseEnvFile handles comments, export, quotes', () => {

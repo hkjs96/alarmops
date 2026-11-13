@@ -11,7 +11,7 @@ Metadata:
       - Label: { default: "Connection (given by the MSP)" }
         Parameters: [CentralRoleArn, ExternalId, CentralEventBusArn]
       - Label: { default: "Optional capabilities (all off by default)" }
-        Parameters: [EnableAlarmWriter, EnableTagWriter, EnableRemediator]
+        Parameters: [EnableAlarmWriter, EnableTagWriter, EnableRemediator, RemediatorCallerRoleArn]
 
 Parameters:
   CentralRoleArn:
@@ -29,6 +29,13 @@ Parameters:
     Type: String
     Description: ARN of the central AlarmOps event bus (ap-northeast-2) that receives forwarded events.
     AllowedPattern: '^arn:aws:events:ap-northeast-2:[0-9]{12}:event-bus/[A-Za-z0-9._-]+$'
+  RemediatorCallerRoleArn:
+    Type: String
+    Default: ""
+    Description: >-
+      Only used when EnableRemediator is true (then required). ARN of the separate central role that executes approved
+      remediations. Kept apart from CentralRoleArn so the discovery/alarm role can never stop or delete anything.
+    AllowedPattern: '^$|^arn:aws:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$'
   EnableAlarmWriter:
     Type: String
     Default: "false"
@@ -44,6 +51,13 @@ Parameters:
     Default: "false"
     AllowedValues: ["true", "false"]
     Description: Stop EC2/RDS and delete load balancers that carry Monitoring=on, only after a person approves in Slack.
+
+Rules:
+  RemediatorNeedsCaller:
+    RuleCondition: !Equals [!Ref EnableRemediator, "true"]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref RemediatorCallerRoleArn, ""]]
+        AssertDescription: RemediatorCallerRoleArn is required when EnableRemediator is true.
 
 Conditions:
   UseAlarmWriter: !Equals [!Ref EnableAlarmWriter, "true"]
@@ -83,7 +97,8 @@ Resources:
                   - cloudwatch:GetMetricStatistics
                   - cloudwatch:GetMetricWidgetImage
                 Resource: "*"
-              # Provisional inventory list; trimmed/extended with the 29-type collectors (not written yet).
+              # No lambda:ListFunctions/GetFunction*: function environment variables can hold secrets. Lambda is found
+              # through tag:GetResources (ARNs and tags only). Provisional inventory list; trimmed/extended with the 29-type collectors (not written yet).
               - Sid: ResourceInventoryAndTags
                 Effect: Allow
                 Action:
@@ -102,8 +117,6 @@ Resources:
                   - elasticloadbalancing:DescribeLoadBalancers
                   - elasticloadbalancing:DescribeTargetGroups
                   - elasticloadbalancing:DescribeTags
-                  - lambda:ListFunctions
-                  - lambda:ListTags
                   - sqs:ListQueues
                   - sqs:ListQueueTags
                   - sqs:GetQueueAttributes
@@ -253,14 +266,15 @@ Resources:
                 Effect: Allow
                 Action: [cloudwatch:ListTagsForResource]
                 Resource: !Sub "arn:${AWS::Partition}:cloudwatch:*:${AWS::AccountId}:alarm:*"
-              # New alarm: the ManagedBy tag may only arrive in the create request (aws:RequestTag).
+              # Create: one PutMetricAlarm call whose Tags include ManagedBy=AlarmOps (aws:RequestTag).
+              # There is deliberately NO TagResource permission that can add ManagedBy to an existing alarm.
               - Sid: CreateAlarmWithManagedByTag
                 Effect: Allow
-                Action: [cloudwatch:PutMetricAlarm, cloudwatch:TagResource]
+                Action: [cloudwatch:PutMetricAlarm]
                 Resource: !Sub "arn:${AWS::Partition}:cloudwatch:*:${AWS::AccountId}:alarm:*"
                 Condition:
                   StringEquals: { "aws:RequestTag/ManagedBy": AlarmOps }
-              # Existing alarm: update, tag (Severity, AlarmOps:Console:*), untag and delete only if already ours.
+              # Update, tag (Severity, AlarmOps:Console:*), untag and delete: only alarms that already carry ManagedBy=AlarmOps.
               - Sid: ChangeOwnAlarms
                 Effect: Allow
                 Action:
@@ -271,19 +285,12 @@ Resources:
                 Resource: !Sub "arn:${AWS::Partition}:cloudwatch:*:${AWS::AccountId}:alarm:*"
                 Condition:
                   StringEquals: { "aws:ResourceTag/ManagedBy": AlarmOps }
-              # ManagedBy can never be removed, and never be added or changed on an alarm that already has one.
-              - Sid: DenyUntagManagedBy
+              # TagResource/UntagResource may never name the ManagedBy key (no add, change or removal after creation).
+              - Sid: DenyManagedByTagEdits
                 Effect: Deny
-                Action: cloudwatch:UntagResource
+                Action: [cloudwatch:TagResource, cloudwatch:UntagResource]
                 Resource: "*"
                 Condition:
-                  ForAnyValue:StringEquals: { "aws:TagKeys": [ManagedBy] }
-              - Sid: DenyRetagManagedBy
-                Effect: Deny
-                Action: cloudwatch:TagResource
-                Resource: "*"
-                Condition:
-                  "Null": { "aws:ResourceTag/ManagedBy": "false" }
                   ForAnyValue:StringEquals: { "aws:TagKeys": [ManagedBy] }
 
   # ---------------------------------------------------------------- TagWriter (optional)
@@ -329,6 +336,7 @@ Resources:
                 Condition:
                   "Null": { "aws:TagKeys": "false" }
                   ForAllValues:StringEquals: { "aws:TagKeys": [Monitoring] }
+                  StringEquals: { "aws:RequestTag/Monitoring": "on" }
 
   # ---------------------------------------------------------------- Remediator (optional)
   # The backend calls this role only for a request a person approved in Slack (D-15).
@@ -343,7 +351,7 @@ Resources:
         Version: "2012-10-17"
         Statement:
           - Effect: Allow
-            Principal: { AWS: !Ref CentralRoleArn }
+            Principal: { AWS: !Ref RemediatorCallerRoleArn }
             Action: sts:AssumeRole
             Condition:
               StringEquals: { "sts:ExternalId": !Ref ExternalId }

@@ -4,7 +4,9 @@
 //
 // Prints the new comma-separated list on stdout (possibly empty) and a summary on stderr. Exit 1 on bad input.
 // `remove` of an account that is not in the list succeeds (idempotent: a re-run after a partial failure is fine).
+// With PARAMS_FILE set it also writes the update-stack parameters JSON there.
 // `add` of an account already in the list also succeeds.
+import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const ID = /^[0-9]{12}$/;
@@ -25,10 +27,19 @@ export function nextAllowlist(current, action, accountId) {
   return { list: [...new Set(next)].sort().join(','), changed: next.length !== cur.length };
 }
 
+/** `aws cloudformation update-stack --parameters file://...` content. The CLI shorthand cannot carry commas in a value. */
+export function updateParameters(list) {
+  return [
+    { ParameterKey: 'AllowedAccountIds', ParameterValue: list },
+    { ParameterKey: 'BusName', UsePreviousValue: true },
+  ];
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   try {
     const { list, changed } = nextAllowlist(process.env.CURRENT, process.env.ACTION, process.env.ACCOUNT_ID);
     console.error(`allow list: ${changed ? 'changed' : 'unchanged'}, ${list ? list.split(',').length : 0} account(s) after`);
+    if (process.env.PARAMS_FILE) writeFileSync(process.env.PARAMS_FILE, JSON.stringify(updateParameters(list)));
     process.stdout.write(list);
   } catch (e) {
     console.error(`::error::${e.message}`);
