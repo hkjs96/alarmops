@@ -27,7 +27,7 @@ Slack ──▶ POST /api/slack/interactive        문자·음성 업체 ──�
 | B6 | `POST /api/slack/interactive` | Slack → `apps/console` | Slack 서명 | notification R6-1 |
 | B7 | `GET /a/{signedToken}` (확인 링크) | 이메일·문자 수신자 → `apps/console` | HMAC 서명 토큰 | 기존 계약 |
 | B8 | `POST /api/callbacks/{provider}` | 문자·음성 업체 → `apps/console` | 업체 서명/비밀(업체 미정) | D-11, notification 새 구현 2 |
-| B9 | SQS `alarm-commands` | 콘솔·틱 → `services/alarm-engine` | IAM(콘솔 쪽 자격증명 방식 미결 Q-API-03) | D-05, D-08 |
+| B9 | SQS `alarm-commands` | 콘솔·틱 → `services/alarm-engine` | IAM(콘솔 쪽 자격증명은 Vercel OIDC 역할, D-49 — 이전 Q-API-03) | D-05, D-08 |
 | B10 | 알람 엔진 ↔ Postgres | `services/alarm-engine` → DB | DB 역할(엔진 전용 사용자) | §7 |
 
 "큐는 SQS 하나"(D-09 원칙 2)는 큐 기술이 SQS 하나라는 뜻으로 읽고 큐 2개(+각 DLQ)를 둔다. 해석이 틀리면 Q-API-01에서 바로잡는다.
@@ -261,7 +261,7 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 | `OFFBOARD_ACCOUNT` | `{ offboardingId }` (+ 최상위 `cloudAccountId` 필수) | **구현됨.** 고객이 `TERMINATED`가 아니면 `REFUSED`. 계정 리전 + us-east-1에서 목록(ARN 계정·리전, `ManagedBy=AlarmOps` 태그) → 삭제 직전 배치마다 다시 읽어 확인 → `DeleteAlarms`. 결과는 `CustomerOffboarding.steps.ALARMS_DELETED`에 계정별로 합쳐 기록(전부 OK=DONE, 하나라도 `CAPABILITY_DISABLED`·`FAILED`=MANUAL, 사람이 DONE으로 표시한 것은 덮지 않음). 실패는 기록 후 재시도. 해지 고객의 계정만 건드린다. 해지 고객 계정의 `ManagedBy=AlarmOps` 알람만 삭제(다른 알람은 건드리지 않음). 삭제 전 계정·리전·태그를 다시 확인. 결과는 계정별 `deleted`·`failed`·`CAPABILITY_DISABLED` | AlarmWriter | D-43 |
 
 - **SQS 메시지 형식 (콘솔 발행기 `SqsCommandPublisher`, `packages/api`).** `MessageBody` = 위 JSON 한 개(UTF-8, 256KiB 미만, `schemaVersion: 1`·`commandId`·`type`·`customerId` 필수, `OFFBOARD_ACCOUNT` 등 계정 명령은 `cloudAccountId`도 필수). 메시지 속성은 쓰지 않는다. 명령 하나가 `SendMessage` 한 번이라 실패가 계정 하나로 귀속되고, `PATCH /customers/{id}/status`의 `commandsFailed`로 이어진다. 오류 문구(큐 URL 포함 가능)는 응답·로그에 싣지 않는다. 계약 고정 예: `services/alarm-engine/tests/fixtures/offboard-account.command.json`(TS `packages/api/test/fixtures/`와 동일 사본, 양쪽 테스트가 같은 모양을 확인).
-- **큐 종류.** 계약은 표준/FIFO를 정하지 않았다. 엔진이 `commandId`로 멱등 처리하므로 **표준 큐(최소 1회 전달)를 기본**으로 하고, URL이 `.fifo`로 끝나면 FIFO로 보내 `MessageDeduplicationId = commandId`, `MessageGroupId = customerId`를 붙인다(별도 설정 없음, 큐 URL 접미사로 판정). 큐 종류 확정은 infra 몫(Q-API-15).
+- **큐 종류(D-48: 표준 큐로 확정).** 계약은 표준/FIFO를 정하지 않았다. 엔진이 `commandId`로 멱등 처리하므로 **표준 큐(최소 1회 전달)를 기본**으로 하고, URL이 `.fifo`로 끝나면 FIFO로 보내 `MessageDeduplicationId = commandId`, `MessageGroupId = customerId`를 붙인다(별도 설정 없음, 큐 URL 접미사로 판정). 큐 종류 확정은 infra 몫(Q-API-15).
 - **환경변수** `ALARM_COMMANDS_QUEUE_URL` = `https://sqs.ap-northeast-2.amazonaws.com/<12자리 계정>/<큐 이름>[.fifo]`. 비어 있으면 발행기 없음 → 해지 요청은 503 `COMMANDS_UNAVAILABLE`(fail-closed). 값이 있는데 형식·리전이 틀리면 기동 시 예외. 값이 있으면 **`ALARM_COMMANDS_EXPECTED_ACCOUNT`(12자리)도 필수**이고 URL의 계정 번호와 다르면 기동 시 예외(다른 계정의 큐로 보내는 설정 오류·변조 차단). 발행기는 `OFFBOARD_ACCOUNT`만 보내고(다른 type은 거부), `commandId`·`customerId`는 표준·FIFO 모두 SQS ID 문자 규칙을 검사하며, 본문은 허용 키(schemaVersion, commandId, type, customerId, cloudAccountId, requestedBy, requestedAt, payload)만 직렬화한다. `AWS_REGION`은 읽지 않는다(Vercel이 함수 리전으로 채움). 자격증명은 주입한 SQS 클라이언트가 가진다(Q-API-03 미결: OIDC 역할이든 키든 어댑터는 같다). 콘솔은 `createApi({ …, commands: commandPublisherFromEnv(process.env, { client: new SQSClient({ region: 'ap-northeast-2', … }) }) })`로 연결한다. 필요한 IAM: 해당 큐 `sqs:SendMessage`만.
 - 멱등: `commandId` = 메시지 중복 제거 키. 엔진은 처리 전 `ThresholdChange.applyStatus`·`RemediationRequest.status`를 조건부로 선점한다. `APPLY_THRESHOLD`가 `PENDING`이 아니면 무시.
 - 역할이 없거나 꺼져 있으면 실행하지 않고 결과를 `CAPABILITY_DISABLED`로 기록.
@@ -565,7 +565,7 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 |---|---|---|
 | Q-API-01 | "큐는 SQS 하나"가 큐 1개인가, SQS 기술 하나인가 | 큐 2개 + DLQ |
 | Q-API-02 | pg_cron이 HTTP를 부르는 수단(pg_net은 Supabase 확장 → 이전 시 대체 필요) | D-23: pg_net(§5 SQL). 이전 때 EventBridge Scheduler |
-| Q-API-03 | Vercel 콘솔이 SQS에 보낼 AWS 자격증명(Vercel OIDC → IAM 역할 vs 접근 키) | 미정, security 검토 |
+| ~~Q-API-03~~ | ~~Vercel 콘솔이 SQS에 보낼 AWS 자격증명~~ | **닫힘(11/13): D-49.** Vercel OIDC → IAM 역할, `sqs:SendMessage` 하나 |
 | Q-API-04 | group_wait 30초를 SQS 지연 메시지로 지킬지, 1분 단위로 올릴지 | 지연 메시지 제안 |
 | Q-API-05 | 알람 엔진 언어(Python 이식)와 DB 접근 방식(Prisma 외 드라이버 허용 범위) | 표 밖 쓰기 금지 |
 | Q-API-06 | 국내 문자·음성 업체 선정과 콜백 서명 방식 | 솔라피 후보 |
@@ -577,5 +577,5 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 | ~~Q-API-13~~ | ~~콘솔 주소 형식(문서 vs 콘솔 브랜치 구현)~~ **닫힘(11/10, 사용자 결정): 콘솔 구현 형식으로 확정** — 목록 `?customer=&project=&service=` · `?mine=1`, 패널 `/c/<customer>/<project>/<service>/incident/<id>`, 미매핑 `/c/-/incident/<id>`. 기준 `docs/ui/screens/shell-scope.md` §7 | 닫힘 |
 | ~~Q-API-12~~ | ~~연락처 열람 규칙의 예외~~ **닫힘(11/10, 사용자 결정, D-35): ADMIN 비상 열람 + 사유 필수, 모든 열람 기록, 비상 열람은 검토 목록 + 주 Responder 알림** — §8 `/contacts/{id}/reveal`, `/contact-reveals` | 닫힘 |
 | Q-API-14 | D-35의 "주 Responder"(비상 열람 알림 대상)를 무엇으로 정하나: 고객 호출 순서 1단계의 첫 대상 vs 고객마다 지정하는 컬럼. 비상 `reason` 최소 길이, 비상 호출 한도 | 호출 순서 1단계 첫 대상(없으면 다른 ADMIN 전원), 1자 이상, 시간당 10회. security 검토 |
-| Q-API-15 | `alarm-commands` 큐를 표준으로 둘지 FIFO로 둘지(§6). 발행기는 URL 접미사로 둘 다 지원 | 표준 큐 + `commandId` 멱등(DLQ 연결) |
+| ~~Q-API-15~~ | ~~`alarm-commands` 표준 vs FIFO~~ | **닫힘(11/13): D-48.** 표준 큐 + `commandId` 멱등 + DLQ |
 | (DATA-MODEL Q-DM-01~19) | | DATA-MODEL §9 |
