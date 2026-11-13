@@ -212,7 +212,7 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     if (this.statusVersionOf(customerId) !== expectedVersion) return 'CONFLICT';
     const from = c.status ?? 'ACTIVE';
     if (from === 'TERMINATED' && to !== 'TERMINATED') return 'CUSTOMER_TERMINATED';
-    if (from === to) throw new Error('changeCustomerStatus: same status is a no-op the caller must not write');
+    if (from === to) return 'NOOP';
     if (to === 'TERMINATED' && !offboarding) throw new Error('changeCustomerStatus: TERMINATED needs an offboarding');
     const at = audit.at;
     c.status = to; c.statusChangedAt = at;
@@ -250,10 +250,15 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     this.audits.push(audit);
     return 'OK';
   }
+  async cloudAccountIds(customerId: string): Promise<string[]> {
+    return [...this.accounts.values()].filter((a) => a.customerId === customerId).map((a) => a.awsAccountId);
+  }
   async recordOffboardPublishFailure(customerId: string, cloudAccountIds: string[], at: Date): Promise<void> {
     const o = this.offboardings.get(customerId);
     if (!o || o.steps.ALARMS_DELETED.state === 'DONE') return;
-    o.steps.ALARMS_DELETED = { ...o.steps.ALARMS_DELETED, state: 'MANUAL', detail: `COMMAND_PUBLISH_FAILED: ${cloudAccountIds.join(',')}` };
+    const prev = o.steps.ALARMS_DELETED.detail;
+    const mark = `COMMAND_PUBLISH_FAILED: ${cloudAccountIds.join(',')}`;
+    o.steps.ALARMS_DELETED = { ...o.steps.ALARMS_DELETED, state: 'MANUAL', detail: prev ? (prev.includes(mark) ? prev : `${prev}; ${mark}`) : mark };
     void at;
   }
 

@@ -482,7 +482,7 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
       if (!c) return 'NOT_FOUND' as const;
       if ((await this.statusVersionOf(tx, customerId)) !== expectedVersion) return 'CONFLICT' as const;
       if (c.status === 'TERMINATED' && to !== 'TERMINATED') return 'CUSTOMER_TERMINATED' as const;
-      if (c.status === to) throw new Error('changeCustomerStatus: same status is a no-op the caller must not write');
+      if (c.status === to) return 'NOOP' as const;
       const [u] = await tx.query(`UPDATE "Customer" SET "status" = $2::"CustomerStatus", "statusChangedAt" = ${this.sql.now()}, "updatedAt" = ${this.sql.now()} WHERE "id" = $1 RETURNING "statusChangedAt"`, [customerId, to]);
       let offboardingId: string | null = null;
       let cloudAccountIds: string[] = [];
@@ -527,6 +527,9 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
       return 'OK' as const;
     });
   }
+  async cloudAccountIds(customerId: string): Promise<string[]> {
+    return (await this.sql.query(`SELECT "id" FROM "CloudAccount" WHERE "customerId" = $1 ORDER BY "id"`, [customerId])).map((r) => r.id as string);
+  }
   async recordOffboardPublishFailure(customerId: string, cloudAccountIds: string[]): Promise<void> {
     await this.sql.transaction(async (tx) => {
       const [o] = await tx.query(`SELECT "steps" FROM "CustomerOffboarding" WHERE "customerId" = $1 FOR UPDATE`, [customerId]);
@@ -534,7 +537,8 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
       const steps = { ...(o.steps ?? {}) } as Record<string, OffboardStep>;
       const st = steps.ALARMS_DELETED ?? { state: 'PENDING' };
       if (st.state === 'DONE') return;
-      steps.ALARMS_DELETED = { ...st, state: 'MANUAL', detail: `COMMAND_PUBLISH_FAILED: ${cloudAccountIds.join(',')}` };
+      const mark = `COMMAND_PUBLISH_FAILED: ${cloudAccountIds.join(',')}`;
+      steps.ALARMS_DELETED = { ...st, state: 'MANUAL', detail: st.detail ? (st.detail.includes(mark) ? st.detail : `${st.detail}; ${mark}`) : mark };
       await tx.query(`UPDATE "CustomerOffboarding" SET "steps" = $2::jsonb WHERE "customerId" = $1`, [customerId, js(steps)]);
     });
   }

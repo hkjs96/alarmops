@@ -139,6 +139,8 @@ export interface OffboardingState {
 /** 'CONFLICT': not at `expectedVersion`. 'CUSTOMER_TERMINATED': TERMINATED never changes to another status. 'NOT_FOUND': no such customer. */
 export type ChangeStatusOutcome =
   | 'CONFLICT' | 'CUSTOMER_TERMINATED' | 'NOT_FOUND'
+  /** The row already has `to` (changed outside the API, e.g. by SQL, between the caller's read and this write): nothing was written. */
+  | 'NOOP'
   | { status: CustomerStatusValue; statusChangedAt: Date; version: number; offboardingId: string | null; cloudAccountIds: string[] };
 export type MarkStepOutcome = 'OK' | 'ALREADY_DONE' | 'NOT_FOUND' | 'NOT_ALLOWED';
 
@@ -215,7 +217,9 @@ export interface ApiRepository {
   offboardingState(customerId: string): Promise<OffboardingState | null>;
   /** MANUAL/PENDING → DONE under a row lock; DONE is never overwritten; ALARMS_DELETED only from MANUAL. completedAt when all steps are DONE. */
   markOffboardStepDone(customerId: string, key: OffboardStepKey, userId: string, detail: string | null, at: Date, audit: AuditInput): Promise<MarkStepOutcome>;
-  /** Command publish failed after commit: ALARMS_DELETED (unless DONE) becomes MANUAL with `COMMAND_PUBLISH_FAILED: <ids>`. */
+  /** CloudAccount ids of the customer (one OFFBOARD_ACCOUNT each). */
+  cloudAccountIds(customerId: string): Promise<string[]>;
+  /** Command publish failed after commit: ALARMS_DELETED (unless DONE) becomes MANUAL and `COMMAND_PUBLISH_FAILED: <ids>` is APPENDED to its detail (the engine's earlier detail stays). */
   recordOffboardPublishFailure(customerId: string, cloudAccountIds: string[], at: Date): Promise<void>;
 
   // ── idempotency (API-CONTRACT §2 "멱등", 24h) ──

@@ -57,6 +57,26 @@ async function adminCustomer(req: ApiRequest, deps: Deps, customerId: string, ad
   return { auth, customer };
 }
 
+/** Publish one OFFBOARD_ACCOUNT per account. Returns the accounts that failed (no error text: it may carry queue URLs). */
+async function publishOffboard(deps: Deps, commands: CommandPublisher, customerId: string, offboardingId: string, userId: string, accountIds: string[], now: Date): Promise<string[]> {
+  const failed: string[] = [];
+  for (const cloudAccountId of accountIds) {
+    try {
+      await commands.publish({
+        schemaVersion: 1, commandId: `offboard-${offboardingId}-${cloudAccountId}`, type: 'OFFBOARD_ACCOUNT', customerId, cloudAccountId,
+        requestedBy: { type: 'USER', id: userId }, requestedAt: now.toISOString(), payload: { offboardingId },
+      });
+    } catch {
+      failed.push(cloudAccountId);
+    }
+  }
+  if (failed.length) {
+    deps.log?.('error', 'offboard_publish_failed', { customerId, offboardingId, accounts: failed });
+    await deps.repo.recordOffboardPublishFailure(customerId, failed, now).catch(() => undefined);
+  }
+  return failed;
+}
+
 // ───────────────────────────── status ─────────────────────────────
 
 export async function getCustomerStatus(req: ApiRequest, deps: Deps, customerId: string): Promise<ApiResponse> {
@@ -82,11 +102,7 @@ export async function patchCustomerStatus(req: ApiRequest, deps: Deps, customerI
   if (!st) throw notFound();
   if (st.version !== expected) throw versionConflict('The customer status', st.version);
   if (st.status === 'TERMINATED' && to !== 'TERMINATED') throw new ApiError(409, 'CUSTOMER_TERMINATED', 'A terminated customer cannot change status. Connect it again as a new customer.');
-  if (st.status === to) {
-    // No-op: nothing written, no audit row, the version does not move.
-    const off = to === 'TERMINATED' ? await deps.repo.offboardingState(customer.id) : null;
-    return ok({ status: st.status, statusChangedAt: iso(st.statusChangedAt), version: st.version, ...(off ? { offboardingId: off.id } : {}) }, { etag: `"${st.version}"` });
-  }
+  if (st.status === to) return noop(req, deps, auth.userId, customer.id, st);
   // Fail closed BEFORE any write: a termination whose alarm-deletion commands cannot be sent would strand the checklist.
   if (to === 'TERMINATED' && !deps.commands) throw new ApiError(503, 'COMMANDS_UNAVAILABLE', 'The command queue is not configured; the customer was not terminated.');
 
@@ -97,29 +113,34 @@ export async function patchCustomerStatus(req: ApiRequest, deps: Deps, customerI
   };
   const r = await deps.repo.changeCustomerStatus(customer.id, expected, to, to === 'TERMINATED' ? { startedByUserId: auth.userId, reason } : null, audit);
   if (r === 'NOT_FOUND') throw notFound();
+  if (r === 'NOOP') return noop(req, deps, auth.userId, customer.id, (await deps.repo.customerStatusState(customer.id)) ?? st);
   if (r === 'CONFLICT') throw versionConflict('The customer status', (await deps.repo.customerStatusState(customer.id))?.version);
   if (r === 'CUSTOMER_TERMINATED') throw new ApiError(409, 'CUSTOMER_TERMINATED', 'A terminated customer cannot change status. Connect it again as a new customer.');
 
   // After the commit (no outbox table yet: see API-CONTRACT §8.4). A failed publish is recorded on the checklist and
   // reported in the response; the status change itself stands (paging is already stopped).
-  const failed: string[] = [];
-  if (r.offboardingId && deps.commands) {
-    for (const cloudAccountId of r.cloudAccountIds) {
-      try {
-        await deps.commands.publish({
-          schemaVersion: 1, commandId: `offboard-${r.offboardingId}-${cloudAccountId}`, type: 'OFFBOARD_ACCOUNT', customerId: customer.id, cloudAccountId,
-          requestedBy: { type: 'USER', id: auth.userId }, requestedAt: now.toISOString(), payload: { offboardingId: r.offboardingId },
-        });
-      } catch {
-        failed.push(cloudAccountId); // no error text: it may carry queue URLs
-      }
-    }
-    if (failed.length) {
-      deps.log?.('error', 'offboard_publish_failed', { customerId: customer.id, offboardingId: r.offboardingId, accounts: failed });
-      await deps.repo.recordOffboardPublishFailure(customer.id, failed, now).catch(() => undefined);
-    }
-  }
+  let failed: string[] = [];
+  if (r.offboardingId && deps.commands) failed = await publishOffboard(deps, deps.commands, customer.id, r.offboardingId, auth.userId, r.cloudAccountIds, now);
   return ok({ status: r.status, statusChangedAt: r.statusChangedAt.toISOString(), version: r.version, ...(r.offboardingId ? { offboardingId: r.offboardingId, commandsSent: r.cloudAccountIds.length - failed.length, ...(failed.length ? { commandsFailed: failed } : {}) } : {}) }, { etag: `"${r.version}"` });
+}
+
+/**
+ * Same status: nothing is written (no audit row, the version does not move). One exception, the PoC's substitute for
+ * an outbox: an already TERMINATED customer whose ALARMS_DELETED is still PENDING (the process died after the commit)
+ * or MANUAL because a publish failed gets its deterministic commands sent again. The engine is idempotent by
+ * commandId, so a repeat is harmless. The answer says what was sent.
+ */
+async function noop(req: ApiRequest, deps: Deps, userId: string, customerId: string, st: { status: CustomerStatusValue; statusChangedAt: Date | null; version: number }): Promise<ApiResponse> {
+  const off = st.status === 'TERMINATED' ? await deps.repo.offboardingState(customerId) : null;
+  let resend: { commandsSent: number; commandsFailed?: string[] } | null = null;
+  const step = off?.steps.ALARMS_DELETED;
+  if (off && deps.commands && step && (step.state === 'PENDING' || (step.state === 'MANUAL' && (step.detail ?? '').includes('COMMAND_PUBLISH_FAILED')))) {
+    const ids = await deps.repo.cloudAccountIds(customerId);
+    const failed = await publishOffboard(deps, deps.commands, customerId, off.id, userId, ids, deps.now());
+    resend = { commandsSent: ids.length - failed.length, ...(failed.length ? { commandsFailed: failed } : {}) };
+  }
+  void req;
+  return ok({ status: st.status, statusChangedAt: iso(st.statusChangedAt), version: st.version, ...(off ? { offboardingId: off.id } : {}), ...(resend ?? {}) }, { etag: `"${st.version}"` });
 }
 
 // ───────────────────────────── offboarding ─────────────────────────────
@@ -155,12 +176,19 @@ export async function patchOffboarding(req: ApiRequest, deps: Deps, customerId: 
   if (b.state !== 'DONE') throw invalid('state', 'state must be DONE.');
   if (b.detail !== undefined && (typeof b.detail !== 'string' || b.detail.length > DETAIL_MAX)) throw invalid('detail', `detail must be text of at most ${DETAIL_MAX} characters.`);
   const key = b.key as OffboardStepKey;
+  const human = typeof b.detail === 'string' && b.detail.trim() ? b.detail.trim() : null;
+  const cur = await deps.repo.offboardingState(customer.id);
+  if (!cur) throw notFound();
+  const prior = cur.steps[key];
+  // MANUAL ALARMS_DELETED means an account failed or could not be reached: a person closing it must say what they checked
+  // (the text replaces the engine's detail on the step; the audit row keeps the engine's text as `before.detail`).
+  if (key === 'ALARMS_DELETED' && prior.state === 'MANUAL' && !human) throw invalid('detail', 'Say what you checked: detail is required to close a failed ALARMS_DELETED step.');
   const now = deps.now();
   const audit = {
     at: now, customerId: customer.id, actorType: 'USER' as const, actorId: auth.userId, action: 'customer.offboarding.step_done', targetType: 'CustomerOffboarding', targetId: key,
-    before: { key }, after: { key, state: 'DONE' }, requestId: req.requestId,
+    before: { key, state: prior.state, ...(prior.detail ? { detail: prior.detail.slice(0, 500) } : {}) }, after: { key, state: 'DONE', ...(human ? { detail: human } : {}) }, requestId: req.requestId,
   };
-  const r = await deps.repo.markOffboardStepDone(customer.id, key, auth.userId, typeof b.detail === 'string' && b.detail.trim() ? b.detail.trim() : null, now, audit);
+  const r = await deps.repo.markOffboardStepDone(customer.id, key, auth.userId, human, now, audit);
   if (r === 'NOT_FOUND') throw notFound();
   if (r === 'NOT_ALLOWED') throw new ApiError(409, 'STEP_NOT_MANUAL', 'ALARMS_DELETED is set by the alarm engine; it can be marked only when it needs a person (MANUAL).');
   const o = await deps.repo.offboardingState(customer.id);

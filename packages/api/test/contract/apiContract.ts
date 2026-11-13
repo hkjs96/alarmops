@@ -657,11 +657,13 @@ export function apiContract(make: MakeApiFixture): void {
       expect(back.status).toBe(409);
       expect(body(back).error.code).toBe('CUSTOMER_TERMINATED');
       expect((await patch(USERS.minjae, 'SUSPENDED', {}, 1)).status).toBe(409);
-      // same status again: no-op, no second checklist, no second command
+      // same status again: no new checklist, no audit row; ALARMS_DELETED is still PENDING so the SAME command is sent again (engine dedupes by commandId)
       const again = await patch(USERS.minjae, 'TERMINATED', { confirmName: name }, 1);
       expect(again.status).toBe(200);
-      expect(body(again)).toMatchObject({ status: 'TERMINATED', version: 1, offboardingId: out.offboardingId });
-      expect(w.commands.sent).toHaveLength(1);
+      expect(body(again)).toMatchObject({ status: 'TERMINATED', version: 1, offboardingId: out.offboardingId, commandsSent: 1 });
+      expect(w.commands.sent).toHaveLength(2);
+      expect(w.commands.sent[1]!.commandId).toBe(w.commands.sent[0]!.commandId);
+      expect((await w.fx.audits()).filter((a) => a.targetType === 'CustomerStatus')).toHaveLength(1);
       // staff keep seeing it; the portal user has no session
       expect(await w.fx.repo.sessionPrincipal('usr_yuna')).toBeNull();
       expect((await w.call(USERS.haeun, 'GET', '/customers/cus_mirae/offboarding')).status).toBe(403);
@@ -686,6 +688,43 @@ export function apiContract(make: MakeApiFixture): void {
       expect(body(r).commandsFailed).toHaveLength(1);
       const o = body(await w.call(USERS.minjae, 'GET', '/customers/cus_mirae/offboarding'));
       expect(o.steps.find((s: any) => s.key === 'ALARMS_DELETED')).toMatchObject({ state: 'MANUAL', detail: expect.stringContaining('COMMAND_PUBLISH_FAILED') });
+    });
+
+    it('repeating TERMINATED re-sends the commands while ALARMS_DELETED is PENDING or its publish failed; closing a failed step needs a human detail', async () => {
+      await open();
+      const name = await nameOf();
+      w.commands.failFor = new Set(['111111111111', 'ca_111111111111']);
+      await patch(USERS.minjae, 'TERMINATED', { confirmName: name });
+      expect(w.commands.sent).toHaveLength(0);
+      w.commands.failFor.clear();
+      const again = await patch(USERS.minjae, 'TERMINATED', { confirmName: name }, 1);
+      expect(again.status).toBe(200);
+      expect(body(again)).toMatchObject({ status: 'TERMINATED', version: 1, commandsSent: 1 });
+      expect(w.commands.sent).toHaveLength(1);
+      const id1 = w.commands.sent[0]!.commandId;
+      // the step is still MANUAL (publish failure marker): a repeat sends the same deterministic command again
+      await patch(USERS.minjae, 'TERMINATED', { confirmName: name }, 1);
+      expect(w.commands.sent.at(-1)!.commandId).toBe(id1);
+      // the marker text is appended, never replacing earlier detail
+      await w.fx.repo.recordOffboardPublishFailure('cus_mirae', ['x1'], T0);
+      const d = body(await w.call(USERS.minjae, 'GET', '/customers/cus_mirae/offboarding')).steps.find((s: any) => s.key === 'ALARMS_DELETED').detail as string;
+      expect(d).toContain('COMMAND_PUBLISH_FAILED: 111111111111'.slice(0, 22));
+      expect(d).toContain('COMMAND_PUBLISH_FAILED: x1');
+      const mark = (detail?: string) => w.call(USERS.minjae, 'PATCH', '/customers/cus_mirae/offboarding', { body: { key: 'ALARMS_DELETED', state: 'DONE', ...(detail ? { detail } : {}) } });
+      expect((await mark()).status).toBe(400);
+      expect((await mark('   ')).status).toBe(400);
+      const ok = await mark('checked CloudWatch, no ManagedBy=AlarmOps alarms left');
+      expect(ok.status).toBe(200);
+      const audit = (await w.fx.audits()).find((a) => a.targetType === 'CustomerOffboarding' && a.targetId === 'ALARMS_DELETED')!;
+      expect(JSON.stringify(audit.before)).toContain('COMMAND_PUBLISH_FAILED');
+    });
+
+    it('a status that already equals the target when the write happens (changed outside the API) is a no-op, not an error', async () => {
+      await open();
+      await w.fx.setCustomerStatus('cus_mirae', 'SUSPENDED');
+      const audit = { at: T0, customerId: 'cus_mirae', actorType: 'USER' as const, actorId: 'usr_minjae', action: 'x', targetType: 'CustomerStatus', targetId: 'cus_mirae' };
+      expect(await w.fx.repo.changeCustomerStatus('cus_mirae', 0, 'SUSPENDED', null, audit)).toBe('NOOP');
+      expect((await w.fx.audits()).filter((a) => a.targetType === 'CustomerStatus')).toHaveLength(0);
     });
 
     it('offboarding PATCH: marks MANUAL steps DONE, never overwrites DONE, ALARMS_DELETED only from MANUAL', async () => {
