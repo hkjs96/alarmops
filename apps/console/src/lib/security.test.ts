@@ -6,6 +6,7 @@ import { assertBulkItems, assertVersion, assertId, assertBulkAction, isId, isSlu
 import { parsePanelRoute, parseScopeParams } from "./scope";
 import { ApiError, isHidden } from "./api/client";
 import { securityHeaders } from "../../next.config";
+import { buildCsp } from "./csp";
 import { signSession, verifySession, sessionSecret, DEV_USER } from "./auth/session";
 import { createHttpApi } from "./api/client";
 
@@ -132,20 +133,21 @@ describe("R-4 security response headers", () => {
     expect(p["X-Frame-Options"]).toBe("DENY");
     expect(p["X-Content-Type-Options"]).toBe("nosniff");
     expect(p["Referrer-Policy"]).toBe("strict-origin-when-cross-origin");
-    expect(p["Content-Security-Policy"]).toContain("frame-ancestors 'none'");
+    expect(buildCsp("n", true)).toContain("frame-ancestors 'none'");
+    expect(p["Content-Security-Policy"]).toBeUndefined(); // per request, set by middleware
   });
   it("CSP: own origin only (fonts are self-hosted); no eval and no remote scripts in production", () => {
-    const d = Object.fromEntries(h(true)["Content-Security-Policy"]!.split("; ").map((x) => [x.split(" ")[0]!, x.split(" ").slice(1)]));
+    const d = Object.fromEntries(buildCsp("abc123", true).split("; ").map((x) => [x.split(" ")[0]!, x.split(" ").slice(1)]));
     expect(d["default-src"]).toEqual(["'self'"]);
-    expect(d["script-src"]).toEqual(["'self'", "'unsafe-inline'"]);
+    expect(d["script-src"]).toEqual(["'self'", "'nonce-abc123'", "'strict-dynamic'"]); // no 'unsafe-inline' for scripts
     expect(d["style-src"]).toEqual(["'self'", "'unsafe-inline'"]);
     expect(d["font-src"]).toEqual(["'self'"]);
     expect(d["connect-src"]).toEqual(["'self'"]);
     expect(d["object-src"]).toEqual(["'none'"]);
     expect(d["base-uri"]).toEqual(["'self'"]);
     expect(d["form-action"]).toEqual(["'self'"]);
-    expect(h(true)["Content-Security-Policy"]).not.toMatch(/unsafe-eval|\*|http:/);
-    expect(h(false)["Content-Security-Policy"]).toContain("'unsafe-eval'"); // next dev only
+    expect(buildCsp("n", true)).not.toMatch(/unsafe-eval|\*|http:/);
+    expect(buildCsp("n", false)).toContain("'unsafe-eval'"); // next dev only
   });
 });
 

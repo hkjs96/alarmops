@@ -291,32 +291,8 @@ export function RespondersCard({ customer, customerName, services, responders, s
       <div className="co-resp-b" ref={listRef}>
         {why ? <p className="sm mut co-resp-n" id="co-resp-why" data-testid="co-resp-why">{why}</p> : null}
         <p className="sm mut co-resp-n">“Everyone in Responders” is {pageable === 1 ? "this 1 person" : `these ${pageable} people`}: all MSP staff here plus the Pageable people of {customerName}. Responders belong to the whole customer, whatever level this panel shows.</p>
-        {on ? <p className="sm co-resp-n" data-testid="co-resp-rule">Each change applies at once to all of {customerName}. Rows keep their place: a removed person stays as “Removed · Undo” until you press Done. The summary at the top of this panel is marked “Before your changes” and shows how things are now on one line.</p> : null}
-        {/* one line, one height, there for as long as Responders are edited: what it says changes, nothing below it moves */}
-        {on ? (
-          <div className={cx("co-resp-live", conflict || err ? "warn" : now.level === "UNREACHABLE" ? "unr" : now.level === "AT_RISK" ? "ar" : null)} data-testid="co-resp-live">
-            <span className="co-resp-live-t" role="status">
-              {conflict ? <><b>Changed — reload.</b> The last change was not applied · details below</>
-                : err ? <><b>Not applied.</b> The reason is below</>
-                  : now.level === "UNREACHABLE" ? <><span className="stag unr">Unreachable</span> <b>Nobody for {customerName} is reached now</b> · details below</>
-                    : now.level === "AT_RISK" ? <><span className="stag ar">At risk</span> <b>{customerName} is harder to reach now</b> · details below</>
-                      : <><b>Reach now: OK</b> · {customerName}</>}
-              {tombstones && !conflict && !err ? ` · ${tombstones} removed, shown until Done` : ""}
-            </span>
-            {conflict ? <button type="button" className="btn sm" data-testid="co-resp-reload-top" onClick={reload}>Reload</button> : null}
-          </div>
-        ) : null}
 
         <div className="ov co-resp-g">MSP staff ({responders.staff.length})</div>
-        {on ? (
-          <div className="row co-addrow">
-            <select className="inp" aria-label="MSP staff to add" value={pick} onChange={(e) => setPick(e.target.value)}>
-              <option value="">Add MSP staff…</option>
-              {others.map((s) => <option key={s.contactId} value={s.contactId}>{s.name}{s.title ? ` · ${s.title}` : ""}</option>)}
-            </select>
-            <button type="button" className="btn" disabled={Boolean(busy.add) || !pick || conflict} data-list-action="responder.add" onClick={(e) => { void addStaff(e); }}>Add to {customerName}</button>
-          </div>
-        ) : null}
         <ul className="co-people" data-testid="co-staff-list">
           {staffRows.rows.map(({ item: p, gone }) => {
             const t = tomb(p.id, p.name, gone);
@@ -329,10 +305,14 @@ export function RespondersCard({ customer, customerName, services, responders, s
                       <div className="sm mut">{p.source === "TEMPLATE" ? `from ${p.templateName ?? "a template"}` : "added directly"} · <Masked p={p} /></div>
                       <Channels p={p} />
                     </div>
-                    {on ? (p.source === "DIRECT"
-                      ? <button type="button" className="btn sm danger" disabled={Boolean(busy[p.id]) || conflict} data-list-action="responder.remove" aria-haspopup="dialog" aria-label={`Remove ${p.name} from Responders of ${customerName}`}
-                          onClick={(e) => askRemove(e, { kind: "remove", id: p.id, name: p.name, staff: true })}>{busy[p.id] === "remove" ? "Removing…" : "Remove…"}</button>
-                      : <span className="sm mut co-tpl">set by the template</span>) : null}
+                    {/* P3-K: until Edit, an invisible stand-in of the same size (no input, no button) holds the room, so the row has its edit-mode height from the start */}
+                    <span className={cx("co-ctl", !on && "off")} aria-hidden={!on || undefined}>
+                      {!on ? (p.source === "DIRECT" ? <span className="btn sm danger co-ghost">Remove…</span> : <span className="sm mut co-tpl">set by the template</span>)
+                        : p.source === "DIRECT"
+                        ? <button type="button" className="btn sm danger" disabled={Boolean(busy[p.id]) || conflict} data-list-action="responder.remove" aria-haspopup="dialog" aria-label={`Remove ${p.name} from Responders of ${customerName}`}
+                            onClick={(e) => askRemove(e, { kind: "remove", id: p.id, name: p.name, staff: true })}>{busy[p.id] === "remove" ? "Removing…" : "Remove…"}</button>
+                        : <span className="sm mut co-tpl">set by the template</span>}
+                    </span>
                   </>
                 )}
               </li>
@@ -342,23 +322,6 @@ export function RespondersCard({ customer, customerName, services, responders, s
         </ul>
 
         <div className="ov co-resp-g">{customerName} people ({responders.people.length})</div>
-        {on ? (
-          <form className="co-newp" onSubmit={addPerson} data-testid="co-add-person">
-            <div className="ov">Add a {customerName} person</div>
-            <label><span className="lab">Name</span><input className="inp" value={form.name} maxLength={80} autoComplete="off" onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
-            <label><span className="lab">Email</span><input className="inp" type="email" value={form.email} autoComplete="off" onChange={(e) => setForm({ ...form, email: e.target.value })} /></label>
-            <label><span className="lab">Phone</span><input className="inp" type="tel" value={form.phone} autoComplete="off" onChange={(e) => setForm({ ...form, phone: e.target.value })} /></label>
-            <label><span className="lab">Role</span>
-              <select className="inp" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as CustomerPersonRole })}>
-                <option value="NOTIFY_ONLY">Notify only (status mail)</option>
-                <option value="PAGEABLE">Pageable (calls, SMS, part of “everyone”)</option>
-              </select>
-            </label>
-            <button type="submit" className="btn" disabled={Boolean(busy.add) || conflict} data-list-action="responder.add-person">Add to {customerName}</button>
-            {/* always there, one line high: saying what is missing does not push the people below */}
-            <div className="co-newp-e" role="alert" data-testid="co-add-err">{formErr}</div>
-          </form>
-        ) : null}
         <ul className="co-people" data-testid="co-people-list">
           {peopleRows.rows.map(({ item: p, gone }) => {
             const t = tomb(p.id, p.name, gone);
@@ -377,8 +340,8 @@ export function RespondersCard({ customer, customerName, services, responders, s
                       <div className="sm mut">Notified for {p.scope.level === "CUSTOMER" ? `all of ${customerName}` : p.scope.name} · <Masked p={p} /></div>
                       <Channels p={p} />
                     </div>
-                    {on ? (
-                      <span className="co-pctl">
+                    {!on ? <span className="co-pctl co-ctl off" aria-hidden="true"><span className="inp co-ghost">Pageable (calls, SMS)</span><span className="btn sm danger co-ghost">Remove…</span></span> : (
+                      <span className="co-pctl co-ctl">
                         <select className="inp" aria-label={`Role of ${p.name}`} value={p.role} disabled={Boolean(busy[p.id]) || conflict} data-list-action="responder.role"
                           onChange={(e) => onRole(p, e.target.value as CustomerPersonRole)}>
                           <option value="PAGEABLE">Pageable (calls, SMS)</option>
@@ -387,7 +350,7 @@ export function RespondersCard({ customer, customerName, services, responders, s
                         <button type="button" className="btn sm danger" disabled={Boolean(busy[p.id]) || conflict} data-list-action="responder.remove" aria-haspopup="dialog" aria-label={`Remove ${p.name} from ${customerName}`}
                           onClick={(e) => askRemove(e, { kind: "remove", id: p.id, name: p.name, staff: false, role: p.role })}>{busy[p.id] === "remove" ? "Removing…" : "Remove…"}</button>
                       </span>
-                    ) : null}
+                    )}
                   </>
                 )}
               </li>
@@ -395,6 +358,52 @@ export function RespondersCard({ customer, customerName, services, responders, s
           })}
           {peopleRows.rows.length === 0 ? <li className="sm mut">No customer people yet.</li> : null}
         </ul>
+        {/* P3-K: everything Edit brings in sits below the last row, so pressing Edit moves no row. Rows reserve the room their controls need (.co-resp .co-people li). */}
+        {on ? (
+          <div className="co-resp-ed" data-testid="co-resp-ed">
+        {/* one line, one height, there for as long as Responders are edited: what it says changes, nothing below it moves */}
+        {on ? (
+          <div className={cx("co-resp-live", conflict || err ? "warn" : now.level === "UNREACHABLE" ? "unr" : now.level === "AT_RISK" ? "ar" : null)} data-testid="co-resp-live">
+            <span className="co-resp-live-t" role="status">
+              {conflict ? <><b>Changed — reload.</b> The last change was not applied · details below</>
+                : err ? <><b>Not applied.</b> The reason is below</>
+                  : now.level === "UNREACHABLE" ? <><span className="stag unr">Unreachable</span> <b>Nobody for {customerName} is reached now</b> · details below</>
+                    : now.level === "AT_RISK" ? <><span className="stag ar">At risk</span> <b>{customerName} is harder to reach now</b> · details below</>
+                      : <><b>Reach now: OK</b> · {customerName}</>}
+              {tombstones && !conflict && !err ? ` · ${tombstones} removed, shown until Done` : ""}
+            </span>
+            {conflict ? <button type="button" className="btn sm" data-testid="co-resp-reload-top" onClick={reload}>Reload</button> : null}
+          </div>
+        ) : null}
+        {on ? <p className="sm co-resp-n" data-testid="co-resp-rule">Each change applies at once to all of {customerName}. Rows keep their place: a removed person stays as “Removed · Undo” until you press Done. The summary at the top of this panel is marked “Before your changes” and shows how things are now on one line.</p> : null}
+        {on ? (
+          <div className="row co-addrow">
+            <select className="inp" aria-label="MSP staff to add" value={pick} onChange={(e) => setPick(e.target.value)}>
+              <option value="">Add MSP staff…</option>
+              {others.map((s) => <option key={s.contactId} value={s.contactId}>{s.name}{s.title ? ` · ${s.title}` : ""}</option>)}
+            </select>
+            <button type="button" className="btn" disabled={Boolean(busy.add) || !pick || conflict} data-list-action="responder.add" onClick={(e) => { void addStaff(e); }}>Add to {customerName}</button>
+          </div>
+        ) : null}
+        {on ? (
+          <form className="co-newp" onSubmit={addPerson} data-testid="co-add-person">
+            <div className="ov">Add a {customerName} person</div>
+            <label><span className="lab">Name</span><input className="inp" value={form.name} maxLength={80} autoComplete="off" onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
+            <label><span className="lab">Email</span><input className="inp" type="email" value={form.email} autoComplete="off" onChange={(e) => setForm({ ...form, email: e.target.value })} /></label>
+            <label><span className="lab">Phone</span><input className="inp" type="tel" value={form.phone} autoComplete="off" onChange={(e) => setForm({ ...form, phone: e.target.value })} /></label>
+            <label><span className="lab">Role</span>
+              <select className="inp" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as CustomerPersonRole })}>
+                <option value="NOTIFY_ONLY">Notify only (status mail)</option>
+                <option value="PAGEABLE">Pageable (calls, SMS, part of “everyone”)</option>
+              </select>
+            </label>
+            <button type="submit" className="btn" disabled={Boolean(busy.add) || conflict} data-list-action="responder.add-person">Add to {customerName}</button>
+            {/* always there, one line high: saying what is missing does not push the people below */}
+            <div className="co-newp-e" role="alert" data-testid="co-add-err">{formErr}</div>
+          </form>
+        ) : null}
+          </div>
+        ) : null}
         {/* below the last row: whatever is said here, however long, cannot move a row */}
         <div className="co-resp-status" data-testid="co-resp-status" style={reloaded && on ? { minHeight: reloaded.status, boxSizing: "border-box" } : undefined}>
           {reloaded && on && !conflict ? <p className="sm co-resp-reloaded" role="status" data-testid="co-resp-reloaded"><b>Reloaded.</b> These are the Responders of {customerName} as they are now. Your last change was not applied — make it again if it is still needed.</p> : null}

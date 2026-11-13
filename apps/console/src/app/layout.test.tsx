@@ -12,6 +12,7 @@ vi.mock("@/components/ThemeToggle", () => ({ themeInitScript: "" }));
 vi.mock("@/lib/auth", () => ({ getSession: async () => ({ sub: "usr_a", email: "", name: "", exp: 0, token: "t" }) }));
 const me = vi.fn();
 vi.mock("@/lib/api", () => ({ getApi: async () => ({ me, listIncidents: async () => ({ counts: { open: 0 } }), scopeTree: async () => ({ customers: [] }) }) }));
+vi.mock("next/headers", () => ({ headers: async () => new Headers({ "x-nonce": "test-nonce" }) }));
 const redirect = vi.fn((to: string) => { throw Object.assign(new Error("NEXT_REDIRECT"), { to }); });
 vi.mock("next/navigation", () => ({ redirect: (to: string) => redirect(to) }));
 

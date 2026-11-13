@@ -5,29 +5,11 @@ import type { NextConfig } from "next";
  * every address and Acknowledge is one click, so the console must never render inside someone else's frame and must
  * not leak its paths in Referer.
  *
- * CSP notes — kept as tight as a static header allows:
- * - script-src needs 'unsafe-inline': Next streams the page data as inline scripts, and the two pre-paint scripts
- *   (theme, tree rail) are inline. No remote script origin is allowed. A nonce-based policy is the next step
- *   (it has to be set per request in middleware).
- * - 'unsafe-eval' only outside production (React Refresh in `next dev`).
- * - style-src: the app sets inline style attributes. Fonts are the console's own files (src/app/fonts.ts):
- *   nothing — no stylesheet, font, script or image — is fetched from another origin.
+ * The Content-Security-Policy is not here: it carries a nonce that changes with every request, so middleware.ts sets
+ * it (lib/csp.ts).
  */
 export function securityHeaders(production: boolean): { key: string; value: string }[] {
-  const csp = [
-    "default-src 'self'",
-    `script-src 'self' 'unsafe-inline'${production ? "" : " 'unsafe-eval'"}`,
-    "style-src 'self' 'unsafe-inline'",
-    "font-src 'self'",
-    "img-src 'self' data:",
-    `connect-src 'self'${production ? "" : " ws: wss:"}`,
-    "object-src 'none'",
-    "base-uri 'self'",
-    "form-action 'self'",
-    "frame-ancestors 'none'",
-  ].join("; ");
   return [
-    { key: "Content-Security-Policy", value: csp },
     { key: "X-Frame-Options", value: "DENY" },
     { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
     { key: "X-Content-Type-Options", value: "nosniff" },

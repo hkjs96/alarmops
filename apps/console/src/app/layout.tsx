@@ -9,12 +9,14 @@ import { getApi } from "@/lib/api";
 import { getSession } from "@/lib/auth";
 import { ApiError } from "@/lib/api/client";
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { ENDED_FROM_LAYOUT } from "@/lib/auth/ended-flags";
 
 export const metadata: Metadata = { title: "AlarmOps", description: "AlarmOps console" };
 export const dynamic = "force-dynamic";
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
   // /login renders without a session; everything else is gated by middleware.
   let shell: { user: { id: string; name: string; role: "VIEWER" | "OPERATOR" | "ADMIN" }; open: number; customers: Awaited<ReturnType<Awaited<ReturnType<typeof getApi>>["scopeTree"]>>["customers"] } | null = null;
   if (await getSession()) {
@@ -44,8 +46,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         `metadata`; fonts from ./fonts.ts.
       */}
       <body>
-        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
-        {shell ? <script dangerouslySetInnerHTML={{ __html: shellInitScript }} /> : null}
+        {/* the nonce is made per request in middleware.ts; without it the CSP (no 'unsafe-inline') would not run these */}
+        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+        {shell ? <script nonce={nonce} dangerouslySetInnerHTML={{ __html: shellInitScript }} /> : null}
         <a href="#main" className="skip">Skip to content</a>
         {shell ? (
           <ScopeShell customers={shell.customers} user={shell.user} openCount={shell.open}>{children}</ScopeShell>

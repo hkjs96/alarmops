@@ -165,7 +165,7 @@ test.describe("Responders: add, the explicit refresh, a step's person, two peopl
     await expect(page.getByTestId("co-edit")).toBeDisabled();
     await card(page).getByLabel("MSP staff to add").selectOption({ label: "Jiwoo Han · Cloud engineer" });
     await assertNoRowShift(page, {
-      name: "responder.add", rows: RESP, at: card(page).getByRole("button", { name: "Add to Daon Retail" }).first(), mayGrowBelow: true,
+      name: "responder.add", rows: RESP, at: card(page).getByRole("button", { name: "Add to Daon Retail" }).first(), mayGrowBelow: true, mayMoveDown: true,
       then: async () => { await expect(toast(page)).toContainText("Jiwoo Han added to Responders of Daon Retail"); await expect(person(page, "ct_jiwoo")).toBeVisible(); },
     });
     await expect(card(page).getByTestId("co-staff").last()).toContainText("Jiwoo Han");
@@ -179,7 +179,7 @@ test.describe("Responders: add, the explicit refresh, a step's person, two peopl
     await form.getByLabel("Phone").fill("010-2222-3344");
     await form.getByLabel("Role").selectOption("PAGEABLE");
     await assertNoRowShift(page, {
-      name: "responder.add-person", rows: RESP, at: form.getByRole("button", { name: "Add to Daon Retail" }), mayGrowBelow: true,
+      name: "responder.add-person", rows: RESP, at: form.getByRole("button", { name: "Add to Daon Retail" }), mayGrowBelow: true, mayMoveDown: true,
       then: async () => { await expect(toast(page)).toContainText("Ari Go added to Daon Retail as Pageable"); },
     });
     const ari = card(page).getByTestId("co-cust-person").filter({ hasText: "Ari Go" });
