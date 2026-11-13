@@ -4,9 +4,10 @@
  * with the same result.
  */
 import { createHash } from 'node:crypto';
-import { incidentMute, type Contact, type Leave, type Override, type Rotation, type AuditInput, type DeliveryLog, type IncidentEventInput, type IncidentRow, type MaintenanceWindow, type PagingConfig } from '@alarmops/core';
-import { nodeVisible, type ApiRepository, type AlertMemberRow, type IdempotentEntry, type IncidentFilter, type IncidentPage, type NodeFilter, type NotifiedPerson, type OpenCounts, type OrgTree, type ScopeFilter, type StatusCounts, type UndoRecord, type UserInfo, type Principal, type ResponderOp, type ResponderWriteOutcome, type RespondersState, type RotationsWorld, type ChangeStatusOutcome, type CustomerStatusState, type CustomerStatusValue, type MarkStepOutcome, type OffboardStep, type OffboardStepKey, type OffboardingState, OFFBOARD_STEP_KEYS } from '@alarmops/api';
+import { incidentMute, type DigestData, type PurgeLogEntry, type Contact, type Leave, type Override, type Rotation, type AuditInput, type DeliveryLog, type IncidentEventInput, type IncidentRow, type MaintenanceWindow, type PagingConfig } from '@alarmops/core';
+import { nodeVisible, type ApiRepository, type AlertMemberRow, type IdempotentEntry, type IncidentFilter, type IncidentPage, type NodeFilter, type NotifiedPerson, type OpenCounts, type OrgTree, type ScopeFilter, type StatusCounts, type UndoRecord, type UserInfo, type Principal, type ResponderOp, type ResponderWriteOutcome, type RespondersState, type RotationsWorld, type ChangeStatusOutcome, type CustomerStatusState, type CustomerStatusValue, type ExportIncidentRow, type RetentionView, type MarkStepOutcome, type OffboardStep, type OffboardStepKey, type OffboardingState, OFFBOARD_STEP_KEYS } from '@alarmops/api';
 import { PG, pgCode, type SqlExecutor } from './client.js';
+import { purgeLogOf } from './retentionSql.js';
 import { CONTACT_COLS, toContact, Params, d, dReq, incidentCols, iso, js, newId, num, toEvent, toIncident, toLog } from './rows.js';
 import { SqlTickStore, insertAudit, toWindow } from './tickRepo.js';
 
@@ -49,14 +50,14 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
     const all = scope.customerIds === '*';
     const ids = all ? [] : [...scope.customerIds];
     const [customers, projects, services] = await Promise.all([
-      this.sql.query(`SELECT "id", "name", "slug" FROM "Customer" WHERE $1::boolean OR "id" = ANY($2::text[]) ORDER BY "createdAt", "id"`, [all, ids]),
+      this.sql.query(`SELECT "id", "name", "slug", "status" FROM "Customer" WHERE $1::boolean OR "id" = ANY($2::text[]) ORDER BY "createdAt", "id"`, [all, ids]),
       this.sql.query(`SELECT "id", "name", "slug", "customerId" FROM "Project" WHERE $1::boolean OR "customerId" = ANY($2::text[]) ORDER BY "name", "id"`, [all, ids]),
       this.sql.query(`SELECT "id", "name", "slug", "customerId", "projectId" FROM "Service" WHERE $1::boolean OR "customerId" = ANY($2::text[]) ORDER BY "name", "id"`, [all, ids]),
     ]);
     const projectOf = new Map(services.map((s) => [s.id as string, s.projectId as string]));
     const svcProject = (id: string): string | undefined => projectOf.get(id);
     return {
-      customers: customers.map((c) => ({ id: c.id, name: c.name, slug: c.slug })),
+      customers: customers.map((c) => ({ id: c.id, name: c.name, slug: c.slug, status: c.status as CustomerStatusValue })),
       projects: projects.filter((p) => nodeVisible(scope, { customerId: p.customerId, projectId: p.id }, svcProject)).map((p) => ({ id: p.id, name: p.name, slug: p.slug, customerId: p.customerId })),
       services: services.filter((s) => nodeVisible(scope, { customerId: s.customerId, projectId: s.projectId, serviceId: s.id }, svcProject))
         .map((s) => ({ id: s.id, name: s.name, slug: s.slug, customerId: s.customerId, projectId: s.projectId })),
@@ -458,6 +459,72 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
 
   async staffContacts(): Promise<Contact[]> {
     return (await this.sql.query(`SELECT ${CONTACT_COLS} FROM "Contact" WHERE "kind" = 'INTERNAL' AND "active" ORDER BY "name", "id"`)).map(toContact);
+  }
+
+  // ───────────────────────────── retention (D-45), export, digest (D-46) ─────────────────────────────
+
+  async retentionView(customerId: string): Promise<RetentionView | null> {
+    const [c] = await this.sql.query(`SELECT "name", "status", "statusChangedAt", "legalHold", "legalHoldAt", "legalHoldByUserId", "legalHoldReason" FROM "Customer" WHERE "id" = $1`, [customerId]);
+    if (!c) return null;
+    return { name: c.name, status: c.status, statusChangedAt: d(c.statusChangedAt), legalHold: { active: c.legalHold === true, at: d(c.legalHoldAt), byUserId: c.legalHoldByUserId ?? null, reason: c.legalHoldReason ?? null } };
+  }
+  async setLegalHold(customerId: string, hold: { byUserId: string; reason: string; at: Date } | null, audit: AuditInput): Promise<'OK' | 'NOOP' | 'NOT_FOUND'> {
+    if (typeof customerId !== 'string' || !customerId || audit.customerId !== customerId) throw new Error('setLegalHold: audit must be for the same customer');
+    return this.sql.transaction(async (tx) => {
+      const [c] = await tx.query(`SELECT "legalHold" FROM "Customer" WHERE "id" = $1 FOR UPDATE`, [customerId]);
+      if (!c) return 'NOT_FOUND' as const;
+      if ((c.legalHold === true) === !!hold) return 'NOOP' as const;
+      // The retention statements take FOR SHARE on this row (retentionSql GUARD): this FOR UPDATE waits for a chunk that is running,
+      // so a hold committed here is seen by every chunk that starts afterwards. A chunk already running finishes first.
+      if (hold) {
+        await tx.query(`UPDATE "Customer" SET "legalHold" = true, "legalHoldAt" = $2::timestamptz, "legalHoldByUserId" = $3, "legalHoldReason" = $4, "updatedAt" = ${this.sql.now()} WHERE "id" = $1`, [customerId, iso(hold.at), hold.byUserId, hold.reason]);
+      } else {
+        await tx.query(`UPDATE "Customer" SET "legalHold" = false, "legalHoldAt" = NULL, "legalHoldByUserId" = NULL, "legalHoldReason" = NULL, "updatedAt" = ${this.sql.now()} WHERE "id" = $1`, [customerId]);
+      }
+      await tx.query(`INSERT INTO "RetentionPurgeLog"("id", "customerId", "stage", "counts", "actor", "at") VALUES ($1, $2, $3::"RetentionStage", '{}'::jsonb, $4, ${this.sql.now()})`,
+        [newId('purge'), customerId, hold ? 'LEGAL_HOLD_SET' : 'LEGAL_HOLD_RELEASED', hold ? hold.byUserId : (audit.actorId ?? 'unknown')]);
+      await insertAudit(tx, audit);
+      return 'OK' as const;
+    });
+  }
+  purgeLog(customerId: string): Promise<PurgeLogEntry[]> { return purgeLogOf(this.sql, customerId); }
+  async countExportIncidents(customerId: string): Promise<number> {
+    const [r] = await this.sql.query(`SELECT count(*)::int AS "n" FROM "Incident" WHERE "customerId" = $1`, [customerId]);
+    return (r?.n as number) ?? 0;
+  }
+  async exportIncidents(customerId: string, afterNumber: number, limit: number): Promise<ExportIncidentRow[]> {
+    const rows = await this.sql.query(
+      `SELECT "number", "id", "title", "severity", "status", "triggeredAt", "acknowledgedAt", "resolvedAt", "mttaSec", "mttrSec", "memberCount", "eventCount", "accountIds", "resourceTypes", "pagingSuppressed"
+         FROM "Incident" WHERE "customerId" = $1 AND "number" > $2 ORDER BY "number" LIMIT $3`, [customerId, afterNumber, limit]);
+    return rows.map((r) => ({
+      number: r.number, id: r.id, title: r.title, severity: r.severity, status: r.status, triggeredAt: dReq(r.triggeredAt), acknowledgedAt: d(r.acknowledgedAt), resolvedAt: d(r.resolvedAt),
+      mttaSec: r.mttaSec ?? null, mttrSec: r.mttrSec ?? null, memberCount: r.memberCount, eventCount: r.eventCount, accountIds: r.accountIds ?? [], resourceTypes: r.resourceTypes ?? [], pagingSuppressed: r.pagingSuppressed ?? null,
+    }));
+  }
+  async recordAudit(audit: AuditInput): Promise<void> { await insertAudit(this.sql, audit); }
+  async digestData(scope: ScopeFilter, from: Date, to: Date): Promise<DigestData> {
+    // One parameter list per statement: Postgres cannot type a parameter the statement does not use.
+    const ps = new Params();
+    const [f, t] = [ps.add(iso(from)), ps.add(iso(to))];
+    const susScope = scopeSql(ps, scope, 'i');
+    const pr = new Params();
+    const [rf, rt] = [pr.add(iso(from)), pr.add(iso(to))];
+    const resScope = scopeSql(pr, scope, 'r', { project: 'NULL', service: 'NULL' }); // residuals have no project/service: the whole customer must be in scope
+    const [sus, res] = await Promise.all([
+      this.sql.query(
+        `SELECT i."customerId", c."name", count(*)::int AS "n", min(i."triggeredAt") AS "firstAt", max(i."triggeredAt") AS "lastAt"
+           FROM "Incident" i JOIN "Customer" c ON c."id" = i."customerId"
+          WHERE i."pagingSuppressed" = 'CUSTOMER_SUSPENDED' AND i."triggeredAt" >= ${f}::timestamptz AND i."triggeredAt" < ${t}::timestamptz AND ${susScope} GROUP BY i."customerId", c."name" ORDER BY c."name"`, ps.values),
+      this.sql.query(
+        `SELECT r."customerId", c."name", count(*) FILTER (WHERE r."lastAt" >= ${rf}::timestamptz AND r."lastAt" < ${rt}::timestamptz)::int AS "sources", max(r."lastAt") FILTER (WHERE r."lastAt" >= ${rf}::timestamptz AND r."lastAt" < ${rt}::timestamptz) AS "lastAt",
+                (SELECT COALESCE(sum(r2."count"), 0)::int FROM "OffboardResidual" r2 WHERE r2."customerId" = r."customerId") AS "total"
+           FROM "OffboardResidual" r JOIN "Customer" c ON c."id" = r."customerId"
+          WHERE r."lastAt" >= ${rf}::timestamptz AND r."lastAt" < ${rt}::timestamptz AND ${resScope} GROUP BY r."customerId", c."name" ORDER BY c."name"`, pr.values),
+    ]);
+    return {
+      suspended: sus.map((r) => ({ customerId: r.customerId, customerName: r.name, incidents: r.n, firstAt: dReq(r.firstAt), lastAt: dReq(r.lastAt) })),
+      terminatedResiduals: res.map((r) => ({ customerId: r.customerId, customerName: r.name, sources: r.sources, lastEventAt: dReq(r.lastAt), totalEvents: r.total })),
+    };
   }
 
   // ───────────────────────────── idempotency ─────────────────────────────

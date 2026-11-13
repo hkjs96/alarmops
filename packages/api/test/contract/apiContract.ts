@@ -14,7 +14,7 @@ import { USERS, body, wire } from '../helpers.js';
 type Repo = TickRepository & ApiRepository;
 export type MakeApiFixture = MakeFixture<Repo>;
 
-interface CWorld {
+export interface CWorld {
   fx: StoreFixture<Repo>;
   sim: CSim;
   commands: InMemoryCommandPublisher;
@@ -25,7 +25,7 @@ interface CWorld {
 }
 
 /** The world of test/helpers.ts (two customers + one unmapped account, one open incident each), built through the fixture. */
-async function cworld(make: MakeApiFixture, extra: (s: MemoryApiStore) => void = () => undefined): Promise<CWorld> {
+export async function cworld(make: MakeApiFixture, extra: (s: MemoryApiStore) => void = () => undefined): Promise<CWorld> {
   const seed = seedWorld(new MemoryApiStore()) as MemoryApiStore;
   for (const [id, name, contactId, customerId] of [['usr_haeun', 'Haeun Kim', 'ct_haeun', null], ['usr_minjae', 'Minjae Lee', 'ct_minjae', null], ['usr_viewer', 'Viewer', null, null], ['usr_yuna', 'Yuna Seo', 'ct_yuna', 'cus_mirae'], ['usr_dohyun', 'Dohyun Han', 'ct_dohyun', 'cus_hanbit']] as const) {
     seed.users.set(id, { id, name, contactId, customerId });
@@ -573,6 +573,16 @@ export function apiContract(make: MakeApiFixture): void {
       expect((await w.call(USERS.yuna, 'GET', '/customers/cus_mirae/status')).status).toBe(404);
       expect((await w.call(USERS.minjae, 'GET', '/customers/cus_nope/status')).status).toBe(404);
       expect((await w.call(null, 'GET', '/customers/cus_mirae/status')).status).toBe(401);
+    });
+
+    it('GET /scope-tree carries each customer status for every staff role (not ADMIN-only) and follows a status change', async () => {
+      await open();
+      const statuses = async (who: AuthContext) => Object.fromEntries(body(await w.call(who, 'GET', '/scope-tree')).customers.map((c: any) => [c.id, c.status]));
+      expect(await statuses(USERS.haeun)).toMatchObject({ cus_mirae: 'ACTIVE', cus_hanbit: 'ACTIVE' });
+      expect((await patch(USERS.minjae, 'SUSPENDED')).status).toBe(200);
+      expect(await statuses(USERS.haeun)).toMatchObject({ cus_mirae: 'SUSPENDED', cus_hanbit: 'ACTIVE' });
+      expect((await patch(USERS.minjae, 'TERMINATED', { confirmName: await nameOf() }, 1)).status).toBe(200);
+      expect(await statuses(USERS.minjae)).toMatchObject({ cus_mirae: 'TERMINATED', cus_hanbit: 'ACTIVE' });
     });
 
     it('PATCH: ADMIN only; portal never; needs If-Match and a reason; unknown status is 400', async () => {

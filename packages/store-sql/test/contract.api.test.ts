@@ -2,6 +2,7 @@
 import { afterAll, beforeAll, describe } from 'vitest';
 import { peopleContract } from '../../api/test/contract/peopleContract.js';
 import { apiContract } from '../../api/test/contract/apiContract.js';
+import { retentionContract } from '../../api/test/contract/retentionContract.js';
 import { openTestDb, type TestDb } from './db.js';
 import { sqlFixture } from './sqlFixture.js';
 
@@ -11,5 +12,6 @@ afterAll(async () => { await db?.close(); });
 
 describe(`api store contract: sql (${process.env.TEST_DATABASE_URL ? 'postgres' : 'pglite'})`, () => {
   apiContract((seed) => sqlFixture(db, seed));
+  retentionContract((seed) => sqlFixture(db, seed));
   peopleContract((seed) => sqlFixture(db, seed));
 });

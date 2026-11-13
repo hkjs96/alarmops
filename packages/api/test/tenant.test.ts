@@ -12,9 +12,9 @@ describe('GET /scope-tree — the response is the isolation (security R-1)', () 
     const r = await w.call(USERS.haeun, 'GET', '/scope-tree');
     expect(r.status).toBe(200);
     expect(body(r)).toEqual({ customers: [
-      { id: 'cus_hanbit', slug: 'hanbit', name: 'Hanbit Retail', mine: false, openIncidents: 1, callHealth: 'AT_RISK', projects: [
+      { id: 'cus_hanbit', slug: 'hanbit', name: 'Hanbit Retail', status: 'ACTIVE', mine: false, openIncidents: 1, callHealth: 'AT_RISK', projects: [
         { id: 'prj_shop', slug: 'shop', name: 'Shop', openIncidents: 1, ownSteps: false, services: [{ id: 'svc_web', slug: 'web', name: 'Web', openIncidents: 1, ownSteps: false }] }] },
-      { id: 'cus_mirae', slug: 'mirae', name: 'Mirae Pay', mine: true, openIncidents: 1, callHealth: 'OK', projects: [
+      { id: 'cus_mirae', slug: 'mirae', name: 'Mirae Pay', status: 'ACTIVE', mine: true, openIncidents: 1, callHealth: 'OK', projects: [
         { id: 'prj_core', slug: 'core', name: 'Core', openIncidents: 1, ownSteps: false, services: [{ id: 'svc_pay', slug: 'payments-api', name: 'Payments API', openIncidents: 1, ownSteps: false }] },
         { id: 'prj_data', slug: 'data-platform', name: 'Data platform', openIncidents: 0, ownSteps: true, services: [] }] },
     ] });
@@ -151,7 +151,7 @@ describe('404 parity: unknown and out-of-scope are the same bytes, never 403 (AP
       expect(res.status, `${r.method} ${path}`).toBe(404);
       tested.push(`${r.method} ${path}`);
     }
-    expect(tested).toHaveLength(19); // + paging-health, the four Responders routes and the four status/offboarding routes (D-43)
+    expect(tested).toHaveLength(23); // +legal-hold PUT/DELETE, purge-log, export.csv (D-45), digests/latest (D-46), + paging-health, the four Responders routes and the four status/offboarding routes (D-43)
     // the scope tree is the only source of slugs/ids: nothing of Hanbit's is in any list response either
     for (const path of ['/scope-tree', '/incidents']) expect(JSON.stringify((await w.call(USERS.yuna, 'GET', path)).body)).not.toMatch(/hanbit|Hanbit|svc_web|shop/);
   });
@@ -316,5 +316,21 @@ describe('list query rules (§2)', () => {
     const mine = body(await w.call(USERS.haeun, 'GET', '/incidents', { query: { assignee: 'me' } }));
     expect(mine.items.map((i: any) => i.id)).toEqual([w.ids.mirae]);
     expect(body(await w.call(USERS.viewer, 'GET', '/incidents', { query: { assignee: 'me' } })).items).toEqual([]);
+  });
+});
+
+describe('D-46 digest scope (security review B-1)', () => {
+  it('GET /digests/latest: staff limited to one customer never get another customer\'s name, id or counts; portal users get 404', async () => {
+    const w = await world();
+    w.store.customers.set('cus_hanbit', { ...w.store.customers.get('cus_hanbit')!, status: 'TERMINATED', statusChangedAt: w.sim.now });
+    w.store.residuals.set('cus_hanbit', [{ sourceKey: 'aws:222222222222', lastAt: new Date('2026-11-09T05:00:00Z'), count: 3 }]);
+    w.sim.now = new Date('2026-11-10T02:00:00Z');
+    const mirae = { userId: 'usr_haeun', name: 'Haeun Kim', kind: 'INTERNAL', customerIds: ['cus_mirae'], role: 'OPERATOR' } as const;
+    const r = await w.call(mirae, 'GET', '/digests/latest');
+    expect(r.status).toBe(200);
+    expect(JSON.stringify(r.body)).not.toMatch(/Hanbit|cus_hanbit|222222222222/);
+    const all = await w.call({ ...mirae, customerIds: '*' }, 'GET', '/digests/latest');
+    expect(JSON.stringify(all.body)).toContain('cus_hanbit');
+    expect((await w.call({ userId: 'usr_yuna', name: 'Y', kind: 'CUSTOMER', customerIds: ['cus_mirae'], role: 'VIEWER' }, 'GET', '/digests/latest')).status).toBe(404);
   });
 });
