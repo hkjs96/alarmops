@@ -31,7 +31,7 @@ CI 작업: `test`, `e2e`(mock), `e2e-live`(postgres:16), `db`(migrate deploy, dr
 
 | ID | 질문 | 허브 추천 |
 |---|---|---|
-| Q-DM-20 | 정지·해지된 고객사의 수집과 호출 | 고객 쪽 담당자 호출만 건너뛰고, MSP 직원 호출과 수집은 유지 |
+| ~~Q-DM-20~~ | ~~정지·해지된 고객사의 수집과 호출~~ | **닫힘 → D-43**(11/13). 남은 질문 Q-DM-21(보관 기간), Q-DM-22(업무 시간·채널) |
 | Q-DM-11 | 디스크 경로별 키(`Disk_*`)에 고객사·MSP 기본값 계층 적용 여부 | 미정. 레거시는 적용 안 함 |
 | Q-DM-12 | 콘솔 임계값을 알람 태그(`AlarmOps:Console:*`)에 둘지 DB에 둘지 | 현재 태그 + DB 대체. 확정 필요 |
 | Q-DM-13 | 자동 조치 승인 요청의 만료 시간 | 미정 |
@@ -48,7 +48,7 @@ CI 작업: `test`, `e2e`(mock), `e2e-live`(postgres:16), `db`(migrate deploy, dr
    - 문자·전화·Slack 어댑터. 멱등 키 전달을 확인한다.
    - 부분 장애 운영 규칙과 DEGRADED를 누가 볼지 정한다.
    - seed 번호(`+82100000…`, `phoneVerifiedVia='admin:seed'`)를 거부하는 코드 가드를 넣는다.
-   - 정지된 고객사 처리(Q-DM-20)를 반영한다.
+   - 정지·해지 고객 처리(D-43)를 반영한다.
 3. **알람 엔진 마무리** (services/alarm-engine, infra)
    - 리소스 수집기 29종. 지금은 인터페이스만 있고, `wiring.py`가 SYNC_ACCOUNT를 거부한다.
    - CloudTrail 이벤트 소스, SAM 템플릿.

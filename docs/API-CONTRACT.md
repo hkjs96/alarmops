@@ -161,6 +161,14 @@ Grafana legacy, PagerDuty, generic은 PoC 범위 밖(fingerprint 제안 4).
 | 응답 | `202 { "accepted": n, "rejected": m }` — SQS 적재까지만 동기 |
 | 멱등 | dedupKey = hash(sourceId, fingerprint, startsAt, status) |
 
+**고객 상태별 수집 (D-43, 구현 전).** 웹훅(B2)과 EventBridge(B1) 모두 같다. 토큰·계정 검사는 상태와 무관하게 먼저 한다.
+
+| `Customer.status` | 수집 | 인시던트 | 호출 |
+|---|---|---|---|
+| `ACTIVE` | 평소대로 | 만든다 | 한다 |
+| `SUSPENDED` | 받는다(202) | 만든다. `Incident.pagingSuppressed = 'CUSTOMER_SUSPENDED'` | 안 한다(MSP 포함). 업무 시간 요약에 집계 |
+| `TERMINATED` | 받는다(202, 공급자가 재시도하지 않도록) | 만들지 않는다. `OffboardResidual`에 계정·소스별 마지막 수신 시각·건수만 남긴다 | 안 한다. 업무 시간에 "정리 필요" 알림(MSP) |
+
 ## 5. 1분 틱 (B4)
 
 `POST /api/internal/tick` — 콘솔 앱 안의 라우트(`apps/console/src/app/api/internal/tick/route.ts`, Node 런타임, 세션 없음). D-23: pg_cron + pg_net이 매분 호출한다. 실행기는 실제 시계를 쓰고(N-40) 저장소는 `packages/store-sql`(DB `now()` 기준, R-2). 업체 발송기는 아직 없어 잡은 `NOT_CONFIGURED`로 아웃박스에 남는다.
@@ -196,6 +204,7 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 | 조건 | 동작 | 근거 |
 |---|---|---|
 | Incident.status ≠ TRIGGERED | 건너뜀(ack가 멈춘다) | oncall R6-3 |
+| 고객 `status ≠ ACTIVE` 또는 `pagingSuppressed` 있음 | 건너뜀, 잡을 만들지 않음(`suppressed++`). 아웃박스 드레인(③)도 발송 직전 같은 조건을 다시 보고 `SKIPPED_CUSTOMER_INACTIVE`로 닫는다. `ACTIVE`로 돌아와도 정지 중 인시던트는 호출하지 않는다 | D-43 |
 | 점검 창이 덮고 severity ≠ SEV-1 | 건너뜀, 단계 유지, `muted++` | D-17, R4-6 |
 | `now − escalationBaseAt ≥ step.waitMin` | 선점(`WHERE version=?`) → IncidentEvent(기준 시각 포함 문구) → 채널별 NotificationJob | R4-2, R4-3, R4-5 |
 | 마지막 단계 이후 `escalationRepeat < pagingConfig.repeatCount` | step=0, repeat+1, 처음부터 | D-20 (기본 1회) |
@@ -248,6 +257,7 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 | `CHECK_ALARM_LIVENESS` | `{ incidentId, fingerprints[] }` | DescribeAlarms로 deleted/not_firing/firing/unknown 분류 후 DB 반영 | Reader | grouping I-6 |
 | `EXECUTE_REMEDIATION` | `{ remediationRequestId }` | 상태 APPROVED 재확인 후 실행 | Remediator | D-15 |
 | `CHECK_CONNECTION` | `{}` | 역할별 AssumeRole(ExternalId) 점검 | 각 역할 | D-07, P4-1 |
+| `OFFBOARD_ACCOUNT` | `{ offboardingId }` | 해지 고객 계정의 `ManagedBy=AlarmOps` 알람만 삭제(다른 알람은 건드리지 않음). 삭제 전 계정·리전·태그를 다시 확인. 결과는 계정별 `deleted`·`failed`·`CAPABILITY_DISABLED` | AlarmWriter | D-43 |
 
 - 멱등: `commandId` = 메시지 중복 제거 키. 엔진은 처리 전 `ThresholdChange.applyStatus`·`RemediationRequest.status`를 조건부로 선점한다. `APPLY_THRESHOLD`가 `PENDING`이 아니면 무시.
 - 역할이 없거나 꺼져 있으면 실행하지 않고 결과를 `CAPABILITY_DISABLED`로 기록.
@@ -437,6 +447,8 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 | 메서드 경로 | 설명 | 권한 |
 |---|---|---|
 | GET/POST `/customers`, GET/PATCH/DELETE `/customers/{id}` | | A (GET V) |
+| PATCH `/customers/{id}/status` | **D-43, 구현 전.** `{ status: ACTIVE\|SUSPENDED\|TERMINATED, reason, confirmName? }` (If-Match). `TERMINATED`로 갈 때는 `confirmName`이 고객사 이름과 같아야 한다(아니면 400). `TERMINATED`에서 다른 상태로는 409 `CUSTOMER_TERMINATED`. `TERMINATED`가 되면 서버가 `CustomerOffboarding`을 만들고 계정마다 `OFFBOARD_ACCOUNT`를 발행 → `200 { status, offboardingId? }`. 감사 기록 남김. 일반 PATCH `/customers/{id}`로는 상태를 바꿀 수 없다 | A |
+| GET `/customers/{id}/offboarding` | D-43 체크리스트: `{ steps[{ key: PAGING_STOPPED\|ALARMS_DELETED\|CUSTOMER_STACK_REMOVED\|ACCOUNTS_DISABLED\|BUS_ALLOWLIST_REMOVED, state: DONE\|PENDING\|MANUAL, detail? }], residual: { lastEventAt?, count } }`. `CUSTOMER_STACK_REMOVED`는 사람이 표시(고객 계정이라 우리가 지울 수 없다). PATCH로 MANUAL·PENDING 항목 완료 표시 | A |
 | GET/POST `/customers/{id}/projects`, `/projects/{id}/services` (+PATCH/DELETE) | 이름 유일 409 | A |
 | GET/POST `/customers/{id}/accounts`, PATCH/DELETE `/accounts/{id}` | 12자리 검증, ExternalId 발급, 역할 ARN, 선택 기능 토글 | A |
 | POST `/accounts/{id}/check` | `CHECK_CONNECTION` 발행 → `202 { commandId }` | A |
