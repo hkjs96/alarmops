@@ -23,6 +23,7 @@ from alarm_engine.aws import (
     AlarmWriter,
     CapabilityDisabled,
     CloudAccount,
+    NotOwned,
     SessionFactory,
     assert_arn_in_account,
     console_tags,
@@ -104,6 +105,7 @@ class ResourceResult:
     plan: SyncPlan
     errors: list[str] = field(default_factory=list)
     read_only: bool = False
+    collisions: list[str] = field(default_factory=list)   # same-name alarms we do not own (D-43)
 
 
 class Engine:
@@ -170,13 +172,18 @@ class Engine:
                 arn = w.apply(cmd, console_tags(new_console))
                 stale = [k for k in existing_console if k not in new_console]
                 if stale and arn:
-                    w.cw.untag_resource(ResourceARN=arn, TagKeys=[f"AlarmOps:Console:{k}" for k in stale])
+                    w.untag(arn, [f"AlarmOps:Console:{k}" for k in stale])
                 if cmd.op == "DELETE":
                     self.repo.delete_managed_alarm(row.customer_id, row.id, cmd.metric_key)
                 else:
                     assert cmd.desired is not None and arn is not None
                     self._save_alarm(row, account, cmd.desired, cmd.name, arn, cmd.severity or cmd.desired.severity,
                                      cmd.severity_manual, console, "IN_SYNC", None)
+            except NotOwned as e:
+                # Same-name alarm that is not ours: untouched, recorded, never overwritten (D-43).
+                logger.warning("apply %s %s: %s", cmd.op, cmd.name, e)
+                res.collisions.append(cmd.name)
+                res.errors.append(f"{cmd.op} {cmd.name}: {e}")
             except Exception as e:  # noqa: BLE001 — one alarm's failure must not stop the resource
                 logger.exception("apply %s %s failed", cmd.op, cmd.name)
                 res.errors.append(f"{cmd.op} {cmd.name}: {e}")
@@ -311,6 +318,7 @@ class Engine:
             for ck, cv in r.plan.counts().items():
                 counts[ck] = counts.get(ck, 0) + cv
             counts["errors"] += len(r.errors)
+            counts["nameCollisions"] = counts.get("nameCollisions", 0) + len(r.collisions)
             counts["readOnly"] = counts["readOnly"] or r.read_only
             self.repo.heartbeat_sync_run(account.customer_id, run)
         counts["needsReview"] = sum(1 for rr in self.repo.list_resources(account.id)

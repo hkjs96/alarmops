@@ -45,6 +45,25 @@ jobs:
     # services/alarm-engine is Python (D-05 port, Lambda); not an npm workspace (no package.json there).
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      # Throwaway server inside this job only. Not a secret. tests/test_pg_repository.py creates its own database on it
+      # (from db/prisma/migrations) and drops it, so it cannot touch anything else. Without this variable those tests
+      # are skipped (offboarding queries, D-43).
+      ALARM_ENGINE_TEST_PG_URL: postgresql://postgres:postgres@localhost:5432/postgres
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v5
@@ -57,6 +76,36 @@ jobs:
         run: npm run lint:engine
       - name: Tests (alarm engine, all AWS calls mocked)
         run: npm run test:engine
+      # A skip would mean the Postgres tests silently stopped running (variable renamed, service not reachable).
+      - name: Postgres tests ran (not skipped)
+        working-directory: services/alarm-engine
+        run: |
+          set -o pipefail
+          python -m pytest tests/test_pg_repository.py -q -rs 2>&1 | tee "$RUNNER_TEMP/pg-tests.log"
+          if grep -qiE "skipped" "$RUNNER_TEMP/pg-tests.log"; then
+            echo "::error::The Postgres tests were skipped. ALARM_ENGINE_TEST_PG_URL must point at the postgres service."
+            exit 1
+          fi
+
+  # Offline checks of the infrastructure templates and the workflow helper scripts. No AWS access, no credentials.
+  infra:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install "cfn-lint==1.60.1"
+      - name: cfn-lint (customer stack, central bus)
+        run: cfn-lint infra/customer-stack/template.yaml infra/aws/central-bus.yaml infra/aws/alarm-commands-queue.yaml
+      - name: Template structure tests (roles, trust, Deny rules)
+        run: python -m unittest discover -s infra/test -v
+      - name: Workflow script tests (console deploy environment check, bus allow list)
+        run: node --test .github/scripts/check-console-deploy-env.test.mjs .github/scripts/bus-allowlist.test.mjs
 
   e2e:
     runs-on: ubuntu-24.04
@@ -181,7 +230,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Workflow script tests (drift check, connection string check)
-        run: node --test .github/scripts/check-migration-drift.test.mjs .github/scripts/mask-db-urls.test.mjs
+        run: node --test .github/scripts/check-migration-drift.test.mjs .github/scripts/mask-db-urls.test.mjs .github/scripts/check-console-deploy-env.test.mjs .github/scripts/bus-allowlist.test.mjs
       - name: Prisma generate
         run: npx prisma generate
         working-directory: db

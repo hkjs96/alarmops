@@ -1,0 +1,121 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  AlarmOps alarm-commands queue (B9, API-CONTRACT section 6) with a dead-letter queue. Standard queue (Q-API-15
+  recommendation, pending user decision): the engine is idempotent per commandId, so at-least-once delivery is fine.
+  Only the console sender role may send; only the engine role may receive and delete.
+
+Parameters:
+  QueueName:
+    Type: String
+    Default: alarmops-alarm-commands
+    AllowedPattern: '^[A-Za-z0-9_-]{1,70}$'
+  ConsoleSenderRoleArn:
+    Type: String
+    AllowedPattern: '^arn:aws:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$'
+    Description: The one role (console/tick backend) allowed to sqs:SendMessage.
+  EngineRoleArn:
+    Type: String
+    AllowedPattern: '^arn:aws:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$'
+    Description: The alarm-engine role allowed to receive and delete messages.
+  MaxReceiveCount:
+    Type: Number
+    Default: 5
+    MinValue: 1
+    MaxValue: 100
+  VisibilityTimeoutSeconds:
+    Type: Number
+    Default: 360
+    MinValue: 30
+    MaxValue: 43200
+    Description: At least 6 times the engine Lambda timeout.
+  AlarmTopicArn:
+    Type: String
+    Default: ""
+    Description: Optional SNS topic notified when the DLQ is not empty.
+
+Conditions:
+  HasAlarmTopic: !Not [!Equals [!Ref AlarmTopicArn, ""]]
+
+Resources:
+  CommandsDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${QueueName}-dlq"
+      SqsManagedSseEnabled: true
+      MessageRetentionPeriod: 1209600
+
+  CommandsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Ref QueueName
+      SqsManagedSseEnabled: true
+      VisibilityTimeout: !Ref VisibilityTimeoutSeconds
+      MessageRetentionPeriod: 345600
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt CommandsDlq.Arn
+        maxReceiveCount: !Ref MaxReceiveCount
+
+  CommandsQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues: [!Ref CommandsQueue]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: ConsoleSendOnly
+            Effect: Allow
+            Principal: { AWS: !Ref ConsoleSenderRoleArn }
+            Action: sqs:SendMessage
+            Resource: !GetAtt CommandsQueue.Arn
+          - Sid: EngineReceiveDelete
+            Effect: Allow
+            Principal: { AWS: !Ref EngineRoleArn }
+            Action: [sqs:ReceiveMessage, sqs:DeleteMessage, sqs:GetQueueAttributes, sqs:ChangeMessageVisibility]
+            Resource: !GetAtt CommandsQueue.Arn
+          - Sid: DenySendFromOthers
+            Effect: Deny
+            Principal: "*"
+            Action: sqs:SendMessage
+            Resource: !GetAtt CommandsQueue.Arn
+            Condition:
+              ArnNotEquals: { "aws:PrincipalArn": !Ref ConsoleSenderRoleArn }
+          - Sid: DenyReceiveFromOthers
+            Effect: Deny
+            Principal: "*"
+            Action: [sqs:ReceiveMessage, sqs:DeleteMessage, sqs:ChangeMessageVisibility]
+            Resource: !GetAtt CommandsQueue.Arn
+            Condition:
+              ArnNotEquals: { "aws:PrincipalArn": !Ref EngineRoleArn }
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: sqs:*
+            Resource: !GetAtt CommandsQueue.Arn
+            Condition:
+              Bool: { "aws:SecureTransport": "false" }
+
+  DlqNotEmptyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${QueueName}-dlq-not-empty"
+      AlarmDescription: Commands the engine could not process (DLQ). Look at them; an offboarding command may be among them.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt CommandsDlq.QueueName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmTopicArn], !Ref "AWS::NoValue"]
+
+Outputs:
+  QueueUrl:
+    Value: !Ref CommandsQueue
+  QueueArn:
+    Value: !GetAtt CommandsQueue.Arn
+  DlqArn:
+    Value: !GetAtt CommandsDlq.Arn

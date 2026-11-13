@@ -1,0 +1,386 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  AlarmOps customer connection stack (D-07). One stack, five roles: Reader and EventForwarder are required;
+  AlarmWriter, TagWriter and Remediator are optional (parameters, default off). Every role the central account
+  assumes requires the ExternalId and trusts one specific central role ARN (never the account root).
+  Delete this stack to disconnect (see OFFBOARDING.md).
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label: { default: "Connection (given by the MSP)" }
+        Parameters: [CentralRoleArn, ExternalId, CentralEventBusArn]
+      - Label: { default: "Optional capabilities (all off by default)" }
+        Parameters: [EnableAlarmWriter, EnableTagWriter, EnableRemediator, RemediatorCallerRoleArn]
+
+Parameters:
+  CentralRoleArn:
+    Type: String
+    Description: ARN of the one central AlarmOps role that may assume the roles of this stack (not an account root).
+    AllowedPattern: '^arn:aws:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$'
+    ConstraintDescription: Must be an IAM role ARN, e.g. arn:aws:iam::111122223333:role/AlarmOpsEngine
+  ExternalId:
+    Type: String
+    Description: ExternalId issued by the AlarmOps console for this connection. Required.
+    MinLength: 16
+    MaxLength: 128
+    AllowedPattern: '^[A-Za-z0-9+=,.@:/_-]+$'
+  CentralEventBusArn:
+    Type: String
+    Description: ARN of the central AlarmOps event bus (ap-northeast-2) that receives forwarded events.
+    AllowedPattern: '^arn:aws:events:ap-northeast-2:[0-9]{12}:event-bus/[A-Za-z0-9._-]+$'
+  RemediatorCallerRoleArn:
+    Type: String
+    Default: ""
+    Description: >-
+      Only used when EnableRemediator is true (then required). ARN of the separate central role that executes approved
+      remediations. Kept apart from CentralRoleArn so the discovery/alarm role can never stop or delete anything.
+    AllowedPattern: '^$|^arn:aws:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$'
+  EnableAlarmWriter:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Create/update CloudWatch alarms tagged ManagedBy=AlarmOps, delete only those.
+  EnableTagWriter:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Let the console add the Monitoring tag (the only tag key allowed). S3 and Route 53 are never included.
+  EnableRemediator:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Stop EC2/RDS and delete load balancers that carry Monitoring=on, only after a person approves in Slack.
+
+Rules:
+  RemediatorNeedsCaller:
+    RuleCondition: !Equals [!Ref EnableRemediator, "true"]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref RemediatorCallerRoleArn, ""]]
+        AssertDescription: RemediatorCallerRoleArn is required when EnableRemediator is true.
+
+Conditions:
+  UseAlarmWriter: !Equals [!Ref EnableAlarmWriter, "true"]
+  UseTagWriter: !Equals [!Ref EnableTagWriter, "true"]
+  UseRemediator: !Equals [!Ref EnableRemediator, "true"]
+
+Resources:
+  # ---------------------------------------------------------------- Reader (required)
+  ReaderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: AlarmOps-Reader
+      Description: AlarmOps read-only discovery, metrics and graph images. No secret or data access.
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { AWS: !Ref CentralRoleArn }
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals: { "sts:ExternalId": !Ref ExternalId }
+      Policies:
+        - PolicyName: read-metadata
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: CloudWatchRead
+                Effect: Allow
+                Action:
+                  - cloudwatch:DescribeAlarms
+                  - cloudwatch:DescribeAlarmsForMetric
+                  - cloudwatch:DescribeAlarmHistory
+                  - cloudwatch:ListMetrics
+                  - cloudwatch:ListTagsForResource
+                  - cloudwatch:GetMetricData
+                  - cloudwatch:GetMetricStatistics
+                  - cloudwatch:GetMetricWidgetImage
+                Resource: "*"
+              # No lambda:ListFunctions/GetFunction*: function environment variables can hold secrets. Lambda is found
+              # through tag:GetResources (ARNs and tags only). Provisional inventory list; trimmed/extended with the 29-type collectors (not written yet).
+              - Sid: ResourceInventoryAndTags
+                Effect: Allow
+                Action:
+                  - tag:GetResources
+                  - tag:GetTagKeys
+                  - tag:GetTagValues
+                  - ec2:DescribeInstances
+                  - ec2:DescribeVolumes
+                  - ec2:DescribeNatGateways
+                  - ec2:DescribeVpnConnections
+                  - ec2:DescribeTags
+                  - ec2:DescribeRegions
+                  - rds:DescribeDBInstances
+                  - rds:DescribeDBClusters
+                  - rds:ListTagsForResource
+                  - elasticloadbalancing:DescribeLoadBalancers
+                  - elasticloadbalancing:DescribeTargetGroups
+                  - elasticloadbalancing:DescribeTags
+                  - sqs:ListQueues
+                  - sqs:ListQueueTags
+                  - sqs:GetQueueAttributes
+                  - sns:ListTopics
+                  - sns:ListTagsForResource
+                  - dynamodb:ListTables
+                  - dynamodb:DescribeTable
+                  - dynamodb:ListTagsOfResource
+                  - elasticache:DescribeCacheClusters
+                  - elasticache:DescribeReplicationGroups
+                  - elasticache:ListTagsForResource
+                  - ecs:ListClusters
+                  - ecs:DescribeClusters
+                  - ecs:ListServices
+                  - ecs:DescribeServices
+                  - es:ListDomainNames
+                  - es:DescribeDomain
+                  - es:ListTags
+                  - kafka:ListClusters
+                  - kafka:ListClustersV2
+                  - kafka:ListTagsForResource
+                  - cloudfront:ListDistributions
+                  - cloudfront:ListTagsForResource
+                  - route53:ListHealthChecks
+                  - route53:ListTagsForResource
+                  - s3:ListAllMyBuckets
+                  - s3:GetBucketTagging
+                  - s3:GetBucketLocation
+                Resource: "*"
+              # Explicit Deny: no other policy attached to this role can re-grant these.
+              - Sid: DenySecretsAndData
+                Effect: Deny
+                Action:
+                  - secretsmanager:*
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                  - ssm:GetParametersByPath
+                  - ssm:GetParameterHistory
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:GetObjectAcl
+                  - s3:GetObjectTagging
+                  - s3:ListBucket
+                  - s3:ListBucketVersions
+                  - kms:Decrypt
+                  - kms:GenerateDataKey*
+                  - kms:ReEncrypt*
+                Resource: "*"
+
+  # ---------------------------------------------------------------- EventForwarder (required)
+  # Assumed by the EventBridge service, not by the central account, so there is no sts:ExternalId to check here.
+  # Confused-deputy protection instead: aws:SourceAccount + aws:SourceArn pin the trust to this stack's rules.
+  # See infra/customer-stack/README.md ("EventForwarder and ExternalId").
+  EventForwarderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: AlarmOps-EventForwarder
+      Description: Lets this account's EventBridge rules put events on the central AlarmOps bus. Nothing else.
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: events.amazonaws.com }
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals: { "aws:SourceAccount": !Ref "AWS::AccountId" }
+              ArnLike:
+                "aws:SourceArn":
+                  - !Sub "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/AlarmOps-*"
+      Policies:
+        - PolicyName: put-events-central-bus
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: events:PutEvents
+                Resource: !Ref CentralEventBusArn
+
+  AlarmStateRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: AlarmOps-AlarmStateChange
+      Description: Forward CloudWatch alarm state changes to the central AlarmOps bus.
+      State: ENABLED
+      EventPattern:
+        source: [aws.cloudwatch]
+        detail-type: [CloudWatch Alarm State Change]
+      Targets:
+        - Id: central-bus
+          Arn: !Ref CentralEventBusArn
+          RoleArn: !GetAtt EventForwarderRole.Arn
+
+  TagChangeRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: AlarmOps-TagChange
+      Description: Forward CloudTrail tag add/remove events (Monitoring tag changes, D-16) to the central bus.
+      State: ENABLED
+      EventPattern:
+        detail-type: [AWS API Call via CloudTrail]
+        detail:
+          eventName:
+            - CreateTags
+            - DeleteTags
+            - AddTagsToResource
+            - RemoveTagsFromResource
+            - AddTags
+            - RemoveTags
+            - TagResource
+            - UntagResource
+            - TagResources
+            - UntagResources
+            - TagQueue
+            - UntagQueue
+      Targets:
+        - Id: central-bus
+          Arn: !Ref CentralEventBusArn
+          RoleArn: !GetAtt EventForwarderRole.Arn
+
+  # ---------------------------------------------------------------- AlarmWriter (optional)
+  AlarmWriterRole:
+    Type: AWS::IAM::Role
+    Condition: UseAlarmWriter
+    Properties:
+      RoleName: AlarmOps-AlarmWriter
+      Description: AlarmOps creates/updates CloudWatch alarms and deletes only alarms tagged ManagedBy=AlarmOps.
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { AWS: !Ref CentralRoleArn }
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals: { "sts:ExternalId": !Ref ExternalId }
+      Policies:
+        - PolicyName: manage-alarmops-alarms
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ReadAlarms
+                Effect: Allow
+                Action: [cloudwatch:DescribeAlarms]
+                Resource: "*"
+              - Sid: ReadAlarmTags
+                Effect: Allow
+                Action: [cloudwatch:ListTagsForResource]
+                Resource: !Sub "arn:${AWS::Partition}:cloudwatch:*:${AWS::AccountId}:alarm:*"
+              # Create: one PutMetricAlarm call whose Tags include ManagedBy=AlarmOps (aws:RequestTag).
+              # There is deliberately NO TagResource permission that can add ManagedBy to an existing alarm.
+              - Sid: CreateAlarmWithManagedByTag
+                Effect: Allow
+                Action: [cloudwatch:PutMetricAlarm]
+                Resource: !Sub "arn:${AWS::Partition}:cloudwatch:*:${AWS::AccountId}:alarm:*"
+                Condition:
+                  StringEquals: { "aws:RequestTag/ManagedBy": AlarmOps }
+              # Update, tag (Severity, AlarmOps:Console:*), untag and delete: only alarms that already carry ManagedBy=AlarmOps.
+              - Sid: ChangeOwnAlarms
+                Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricAlarm
+                  - cloudwatch:TagResource
+                  - cloudwatch:UntagResource
+                  - cloudwatch:DeleteAlarms
+                Resource: !Sub "arn:${AWS::Partition}:cloudwatch:*:${AWS::AccountId}:alarm:*"
+                Condition:
+                  StringEquals: { "aws:ResourceTag/ManagedBy": AlarmOps }
+              # TagResource/UntagResource may never name the ManagedBy key (no add, change or removal after creation).
+              - Sid: DenyManagedByTagEdits
+                Effect: Deny
+                Action: [cloudwatch:TagResource, cloudwatch:UntagResource]
+                Resource: "*"
+                Condition:
+                  ForAnyValue:StringEquals: { "aws:TagKeys": [ManagedBy] }
+
+  # ---------------------------------------------------------------- TagWriter (optional)
+  # PROVISIONAL service list: the per-type check (does the tag API honour aws:TagKeys, does it replace the whole tag
+  # list) is the TagWriter verification task, docs/specs/alarm-rules.md. Types that fail are removed here.
+  # S3 and Route 53 are excluded on purpose (D-07).
+  TagWriterRole:
+    Type: AWS::IAM::Role
+    Condition: UseTagWriter
+    Properties:
+      RoleName: AlarmOps-TagWriter
+      Description: AlarmOps console adds the Monitoring tag. No other tag key, no S3 or Route 53.
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { AWS: !Ref CentralRoleArn }
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals: { "sts:ExternalId": !Ref ExternalId }
+      Policies:
+        - PolicyName: tag-monitoring-only
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: TagMonitoringKeyOnly
+                Effect: Allow
+                Action:
+                  - tag:TagResources
+                  - ec2:CreateTags
+                  - rds:AddTagsToResource
+                  - elasticloadbalancing:AddTags
+                  - lambda:TagResource
+                  - sqs:TagQueue
+                  - sns:TagResource
+                  - dynamodb:TagResource
+                  - elasticache:AddTagsToResource
+                  - ecs:TagResource
+                  - es:AddTags
+                  - kafka:TagResource
+                Resource: "*"
+                Condition:
+                  "Null": { "aws:TagKeys": "false" }
+                  ForAllValues:StringEquals: { "aws:TagKeys": [Monitoring] }
+                  StringEquals: { "aws:RequestTag/Monitoring": "on" }
+
+  # ---------------------------------------------------------------- Remediator (optional)
+  # The backend calls this role only for a request a person approved in Slack (D-15).
+  RemediatorRole:
+    Type: AWS::IAM::Role
+    Condition: UseRemediator
+    Properties:
+      RoleName: AlarmOps-Remediator
+      Description: Stop EC2/RDS and delete ELB, only on resources tagged Monitoring=on. Used only after Slack approval.
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { AWS: !Ref RemediatorCallerRoleArn }
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals: { "sts:ExternalId": !Ref ExternalId }
+      Policies:
+        - PolicyName: remediate-monitored-only
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:StopInstances
+                  - rds:StopDBInstance
+                  - rds:StopDBCluster
+                  - elasticloadbalancing:DeleteLoadBalancer
+                Resource: "*"
+                Condition:
+                  StringEquals: { "aws:ResourceTag/Monitoring": "on" }
+
+Outputs:
+  ReaderRoleArn:
+    Value: !GetAtt ReaderRole.Arn
+  EventForwarderRoleArn:
+    Value: !GetAtt EventForwarderRole.Arn
+  AlarmWriterRoleArn:
+    Condition: UseAlarmWriter
+    Value: !GetAtt AlarmWriterRole.Arn
+  TagWriterRoleArn:
+    Condition: UseTagWriter
+    Value: !GetAtt TagWriterRole.Arn
+  RemediatorRoleArn:
+    Condition: UseRemediator
+    Value: !GetAtt RemediatorRole.Arn

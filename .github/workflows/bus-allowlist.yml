@@ -1,0 +1,142 @@
+name: bus-allowlist
+
+# Adds or removes ONE customer AWS account in the central event bus allow list (infra/aws/central-bus.yaml,
+# parameter AllowedAccountIds). Started by a person with workflow_dispatch; an agent never runs it.
+# Removal is the D-43 offboarding step BUS_ALLOWLIST_REMOVED: run it with action=remove after the customer's
+# CUSTOMER_STACK_REMOVED / ACCOUNTS_DISABLED steps, then mark the step DONE in the console.
+#
+# AWS access: GitHub OIDC only (no long-lived keys). The `central` environment must allow the `main` branch only and
+# have a required reviewer (workflow_dispatch runs the workflow file of whatever branch it is started from), and
+# the role in the CENTRAL_BUS_DEPLOY_ROLE_ARN variable must be allowed only cloudformation:DescribeStacks/UpdateStack
+# on the bus stack, events:DescribeEventBus, and the stack's own resource actions.
+# OIDC: the AWS role's trust policy must require
+#   token.actions.githubusercontent.com:aud = sts.amazonaws.com
+#   token.actions.githubusercontent.com:sub = repo:hkjs96/alarmops:environment:central
+# (the `sub` of a job that uses `environment: central`; do not use a wildcard).
+# TODO(security, 권고 5): pin every `uses:` below to a full commit SHA. The repository has no pinned SHAs to copy yet
+# and none are invented here; a person (or Dependabot) copies them from each action's release page.
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "add or remove"
+        required: true
+        type: choice
+        options: [remove, add]
+      account_id:
+        description: "Customer AWS account id (12 digits)"
+        required: true
+        type: string
+      reference:
+        description: "Offboarding id (remove) or connection id (add), for the run summary"
+        required: true
+        type: string
+      confirm:
+        description: 'Type the 12-digit account id again'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: bus-allowlist
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-northeast-2
+  STACK_NAME: alarmops-central-bus
+
+jobs:
+  update:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: central
+    # workflow_dispatch can start any branch's copy of this file; only main may touch the central account.
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Check confirmation
+        env:
+          ACCOUNT_ID: ${{ inputs.account_id }}
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if [ "$ACCOUNT_ID" != "$CONFIRM" ]; then
+            echo "::error::Nothing was changed. The confirmation does not match the account id."
+            exit 1
+          fi
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.CENTRAL_BUS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: bus-allowlist
+      - name: Compute the new allow list
+        id: next
+        env:
+          ACTION: ${{ inputs.action }}
+          ACCOUNT_ID: ${{ inputs.account_id }}
+        run: |
+          CURRENT=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" \
+            --query "Stacks[0].Parameters[?ParameterKey=='AllowedAccountIds'].ParameterValue | [0]" --output text)
+          [ "$CURRENT" = "None" ] && CURRENT=""
+          export CURRENT
+          export PARAMS_FILE="$RUNNER_TEMP/stack-params.json"
+          NEXT=$(node .github/scripts/bus-allowlist.mjs)
+          echo "next=$NEXT" >> "$GITHUB_OUTPUT"
+          BUS_NAME=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" \
+            --query "Stacks[0].Outputs[?OutputKey=='BusName'].OutputValue | [0]" --output text)
+          if [ -z "$BUS_NAME" ] || [ "$BUS_NAME" = "None" ]; then
+            echo "::error::The stack has no BusName output. Update the stack with the current infra/aws/central-bus.yaml first."
+            exit 1
+          fi
+          echo "bus_name=$BUS_NAME" >> "$GITHUB_OUTPUT"
+      - name: Update the bus stack (previous template, only this parameter changes)
+        run: |
+          set +e
+          out=$(aws cloudformation update-stack --stack-name "$STACK_NAME" --use-previous-template \
+            --parameters "file://$RUNNER_TEMP/stack-params.json" 2>&1)
+          code=$?
+          set -e
+          echo "$out"
+          if [ $code -ne 0 ] && ! echo "$out" | grep -q "No updates are to be performed"; then exit 1; fi
+          if [ $code -eq 0 ]; then aws cloudformation wait stack-update-complete --stack-name "$STACK_NAME"; fi
+      - name: Verify the bus policy
+        env:
+          ACTION: ${{ inputs.action }}
+          ACCOUNT_ID: ${{ inputs.account_id }}
+          BUS_NAME: ${{ steps.next.outputs.bus_name }}
+        run: |
+          policy=$(aws events describe-event-bus --name "$BUS_NAME" --query Policy --output text)
+          [ "$policy" = "None" ] && policy=""
+          if [ "$ACTION" = "remove" ] && echo "$policy" | grep -q "$ACCOUNT_ID"; then
+            echo "::error::Account is still in the bus policy."
+            exit 1
+          fi
+          if [ "$ACTION" = "add" ] && ! echo "$policy" | grep -q "$ACCOUNT_ID"; then
+            echo "::error::Account is not in the bus policy after the update."
+            exit 1
+          fi
+      - name: Summary
+        env:
+          ACTION: ${{ inputs.action }}
+          ACCOUNT_ID: ${{ inputs.account_id }}
+          REFERENCE: ${{ inputs.reference }}
+          NEXT: ${{ steps.next.outputs.next }}
+        run: |
+          {
+            echo "### central bus allow list"
+            echo
+            echo "- action: $ACTION"
+            echo "- account: $ACCOUNT_ID"
+            echo "- reference: $REFERENCE"
+            echo "- accounts allowed now: $(echo -n "$NEXT" | tr ',' '\n' | grep -c . || true)"
+            if [ "$ACTION" = "remove" ]; then
+              echo
+              echo "Next: mark BUS_ALLOWLIST_REMOVED as done in the console (customer offboarding checklist)."
+            fi
+          } | tee -a "$GITHUB_STEP_SUMMARY"
