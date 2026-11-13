@@ -347,6 +347,11 @@ function sendWithTimeout(sender: NotificationSender, msg: OutboundMessage, ms: n
 /** D-43: `NotificationJob.lastError` of a job closed because its customer is SUSPENDED / TERMINATED (or the incident was opened while suspended). */
 export const CUSTOMER_INACTIVE_REASON = 'SKIPPED_CUSTOMER_INACTIVE';
 
+/** HANDOFF: demo/seed numbers (`+82100000…`) and phones verified by `admin:seed` are never sent to a real SMS/voice provider. */
+export const SEED_PHONE_REASON = 'skipped_seed_phone';
+export const isSeedPhone = (phone: string | null | undefined, verifiedVia?: string | null): boolean =>
+  verifiedVia === 'admin:seed' || (typeof phone === 'string' && phone.replace(/[\s-]/g, '').startsWith('+82100000'));
+
 export async function dispatchJob(job: NotificationJob, ctx: DispatchContext): Promise<DeliveryOutcome> {
   if (ctx.customerInactive) return { status: 'SKIPPED', reason: CUSTOMER_INACTIVE_REASON };
   if (ctx.incidentStatus == null || ctx.incidentStatus === 'RESOLVED') return { status: 'SKIPPED', reason: 'incident_closed' };
@@ -360,6 +365,9 @@ export async function dispatchJob(job: NotificationJob, ctx: DispatchContext): P
   const dest = resolveDestination(job, ctx.contact, ctx.slackChannels, { requireVerifiedPhone: ctx.requireVerifiedPhone, now: ctx.now });
   if (!dest.ok) return { status: 'SKIPPED', reason: dest.reason.toLowerCase() };
   const kind = senderKind(job.channel);
+  // Fail closed: a seed number must not reach a real SMS/voice adapter, whatever sender is wired (HANDOFF). Checked on the
+  // address actually used, so a FakeSender in tests still sees non-seed numbers only.
+  if ((kind === 'SMS' || kind === 'VOICE') && isSeedPhone(dest.to[0], ctx.contact?.phoneVerifiedVia)) return { status: 'SKIPPED', reason: SEED_PHONE_REASON };
   const toChannel = job.channel === 'SLACK_BOT' || job.channel === 'SLACK_WEBHOOK';
   const targetKind: DeliveryTargetKind = toChannel ? (ctx.slackOwner === 'CUSTOMER' ? 'CUSTOMER_CHANNEL' : 'MSP_CHANNEL') : ctx.contact?.kind === 'CUSTOMER' ? 'CUSTOMER_PERSON' : 'STAFF';
   const targetSummary = toChannel ? (targetKind === 'CUSTOMER_CHANNEL' ? 'Customer Slack channel' : 'MSP Slack channel') : job.contactName ?? ctx.contact?.name ?? 'Unknown person';

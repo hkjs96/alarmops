@@ -32,6 +32,8 @@ export interface StoreFixture<R extends TickRepository = TickRepository> {
   setEpisode(alertId: string, open: boolean): Promise<void>;
   /** D-43: Customer.status changes after the incident exists (a person did it through PATCH /customers/{id}/status). */
   setCustomerStatus(customerId: string, status: 'ACTIVE' | 'SUSPENDED' | 'TERMINATED'): Promise<void>;
+  /** D-43: an event that arrived after TERMINATED (OffboardResidual row). */
+  addResidual(customerId: string, sourceKey: string, count: number, lastAt: Date): Promise<void>;
   addWindow(w: MaintenanceWindow): Promise<void>;
   revokeWindow(id: string, at: Date): Promise<void>;
   putJob(j: NotificationJob): Promise<void>;
@@ -70,6 +72,11 @@ export function memoryFixture<S extends MemoryTickStore>(store: S): StoreFixture
     },
     async setEpisode(alertId, open) { store.episodes.set(alertId, open); },
     async setCustomerStatus(customerId, status) { store.customers.set(customerId, { ...store.customers.get(customerId)!, status }); },
+    async addResidual(customerId, sourceKey, count, lastAt) {
+      // MemoryApiStore keeps them; the tick store alone has no offboarding.
+      const m = (store as unknown as { residuals: Map<string, Array<{ sourceKey: string; lastAt: Date; count: number }>> }).residuals;
+      m.set(customerId, [...(m.get(customerId) ?? []), { sourceKey, lastAt, count }]);
+    },
     async addWindow(w) { store.windows.push({ ...w }); },
     async revokeWindow(id, at) { store.windows.find((w) => w.id === id)!.revokedAt = at; },
     async putJob(j) { store.jobs.set(j.idempotencyKey, structuredClone(j)); },
