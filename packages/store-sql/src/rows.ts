@@ -31,7 +31,7 @@ export const INCIDENT_COLS = [
   'id', 'axis', 'customerId', 'number', 'title', 'severity', 'status', 'triggeredAt', 'acknowledgedAt', 'resolvedAt', 'acknowledgedBy', 'resolvedBy',
   'resolvedVia', 'mttaSec', 'mttrSec', 'memberCount', 'eventCount', 'accountIds', 'resourceTypes', 'assignmentSnapshot', 'pagingConfigId',
   'escalationStep', 'escalationRepeat', 'escalationBaseAt', 'escalationDoneAt', 'renotifiedAt', 'version', 'isMergeTarget', 'nextEscalationAt',
-  'lastMergedAt', 'renotifyCount', 'projectId', 'serviceId', 'source', 'lastManualEscalationAt',
+  'lastMergedAt', 'renotifyCount', 'projectId', 'serviceId', 'source', 'lastManualEscalationAt', 'pagingSuppressed',
 ] as const;
 export const incidentCols = (alias = ''): string => INCIDENT_COLS.map((c) => `${alias ? `${alias}.` : ''}"${c}"`).join(', ');
 
@@ -44,7 +44,7 @@ export function toIncident(r: SqlRow): IncidentRow {
     accountIds: r.accountIds ?? [], resourceTypes: r.resourceTypes ?? [], isMergeTarget: r.isMergeTarget,
     escalationStep: r.escalationStep, escalationRepeat: r.escalationRepeat, escalationBaseAt: d(r.escalationBaseAt), escalationDoneAt: d(r.escalationDoneAt),
     nextEscalationAt: d(r.nextEscalationAt), renotifiedAt: d(r.renotifiedAt), renotifyCount: r.renotifyCount,
-    lastManualEscalationAt: d(r.lastManualEscalationAt), lastMergedAt: d(r.lastMergedAt),
+    lastManualEscalationAt: d(r.lastManualEscalationAt), lastMergedAt: d(r.lastMergedAt), pagingSuppressed: r.pagingSuppressed ?? null,
     pagingConfigId: r.pagingConfigId ?? null, assignmentSnapshot: r.assignmentSnapshot ?? null,
     projectId: r.projectId ?? null, serviceId: r.serviceId ?? null, source: r.source ?? null, number: r.number, version: r.version,
   };

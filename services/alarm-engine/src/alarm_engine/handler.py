@@ -12,7 +12,7 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-from alarm_engine import remediation
+from alarm_engine import offboard, remediation
 from alarm_engine.aws import CapabilityDisabled
 from alarm_engine.engine import Engine, classify_liveness
 
@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 COMMAND_TYPES = frozenset({
     "SYNC_ACCOUNT", "SYNC_RESOURCE", "APPLY_THRESHOLD", "APPLY_CUSTOMER_DEFAULT", "SET_SEVERITY",
     "SET_MONITORING_TAG", "STOP_MONITORING", "CHECK_ALARM_LIVENESS", "EXECUTE_REMEDIATION", "CHECK_CONNECTION",
+    "OFFBOARD_ACCOUNT",
 })
 
 
@@ -42,8 +43,9 @@ REQUIRED: dict[str, dict[str, tuple[type, ...]]] = {
     "CHECK_ALARM_LIVENESS": {"incidentId": _STR, "alarmNames": (list,)},
     "EXECUTE_REMEDIATION": {"remediationRequestId": _STR},
     "CHECK_CONNECTION": {},
+    "OFFBOARD_ACCOUNT": {"offboardingId": _STR},
 }
-NEEDS_ACCOUNT = frozenset({"SYNC_ACCOUNT", "CHECK_ALARM_LIVENESS", "CHECK_CONNECTION"})
+NEEDS_ACCOUNT = frozenset({"SYNC_ACCOUNT", "CHECK_ALARM_LIVENESS", "CHECK_CONNECTION", "OFFBOARD_ACCOUNT"})
 OPTIONAL: dict[str, dict[str, tuple[type, ...]]] = {
     "SYNC_ACCOUNT": {"mode": _STR},
     "SYNC_RESOURCE": {"restoreDrift": _BOOL},
@@ -156,9 +158,16 @@ def dispatch(engine: Engine, cmd: dict, liveness_sink: Callable[[str, str, dict]
             return {"status": ex.status, "reason": ex.reason}
         if t == "CHECK_CONNECTION":
             return {"status": "OK", "roles": engine.check_connection(_account_of(engine, cmd))}
+        if t == "OFFBOARD_ACCOUNT":
+            # D-43: deletes only `ManagedBy=AlarmOps` alarms of a TERMINATED customer; every check is inside offboard.run
+            return offboard.run(engine.repo, engine.sessions, cus, _account_of(engine, cmd), p["offboardingId"])
     except CapabilityDisabled as e:
         return {"status": "CAPABILITY_DISABLED", "role": e.role}
+    except offboard.TargetNotFound as e:   # unknown offboarding for this customer: poison
+        raise InvalidCommand(f"not found: {e}") from e
     except (KeyError, LookupError) as e:   # unknown resource/alarm/account for this customer: poison
+        if t == "OFFBOARD_ACCOUNT":
+            raise   # a KeyError inside the destructive path is a bug: retry / DLQ, never silently dropped
         raise InvalidCommand(f"not found: {e}") from e
     raise InvalidCommand(t)
 

@@ -14,7 +14,7 @@ describe(`ingest store contract: sql (${process.env.TEST_DATABASE_URL ? 'postgre
     await db.reset();
     const q = (t: string, p?: unknown[]) => db.client.query(t, p);
     await q(`INSERT INTO "SuppressionPolicy"("id", "updatedAt") VALUES ('global', now())`);
-    for (const [i, c] of seed.customers.entries()) await q(`INSERT INTO "Customer"("id", "name", "slug", "updatedAt") VALUES ($1, $2, $3, now())`, [c, `Customer ${i}`, `c-${i}`]);
+    for (const [i, c] of seed.customers.entries()) await q(`INSERT INTO "Customer"("id", "name", "slug", "status", "updatedAt") VALUES ($1, $2, $3, $4::"CustomerStatus", now())`, [c, `Customer ${i}`, `c-${i}`, seed.statuses?.[c] ?? 'ACTIVE']);
     for (const s of seed.sources) {
       await q(`INSERT INTO "IntegrationSource"("id", "customerId", "kind", "name", "tokenHash", "enabled", "allowQueryToken") VALUES ($1, $2, $3::"SourceKind", $1, $4, $5, $6)`,
         [s.id, s.customerId, s.kind, s.tokenHash, s.enabled, s.allowQueryToken]);
@@ -34,6 +34,7 @@ describe(`ingest store contract: sql (${process.env.TEST_DATABASE_URL ? 'postgre
       counts: async () => ({ rawEvents: await n('RawEvent'), alerts: await n('Alert'), groups: await n('AlertGroup'), rejections: await n('IngestRejection') }),
       rawEvent: async (id) => { const [r] = await q(`SELECT "decision", "decisionReason", "groupId", "alertId" FROM "RawEvent" WHERE "id" = $1`, [id]); return r ? { decision: r.decision ?? null, decisionReason: r.decisionReason ?? null, groupId: r.groupId ?? null, alertId: r.alertId } : null; },
       sourceLastReceivedAt: async (id) => { const [r] = await q(`SELECT "lastReceivedAt" FROM "IntegrationSource" WHERE "id" = $1`, [id]); return r?.lastReceivedAt ? new Date(r.lastReceivedAt) : null; },
+      residual: async (c, k) => { const [r] = await q(`SELECT "firstAt", "lastAt", "count" FROM "OffboardResidual" WHERE "customerId" = $1 AND "sourceKey" = $2`, [c, k]); return r ? { firstAt: new Date(r.firstAt), lastAt: new Date(r.lastAt), count: r.count } : null; },
       close: async () => undefined,
     };
   });

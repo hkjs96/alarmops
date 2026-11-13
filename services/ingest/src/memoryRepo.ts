@@ -1,4 +1,4 @@
-import { DEFAULT_POLICY, DEFAULT_SEVERITY_TABLE, type GroupRow, type MaintenanceWindow, type NormalizedEvent, type Severity, type SuppressionPolicy } from '@alarmops/core';
+import { DEFAULT_POLICY, DEFAULT_SEVERITY_TABLE, type CustomerStatus, type GroupRow, type MaintenanceWindow, type NormalizedEvent, type Severity, type SuppressionPolicy } from '@alarmops/core';
 import type { AlertRepository, AlertRow, IngestRejectionInput, IntegrationSourceRow, RawEventDecision, SourceRepository } from './ports.js';
 
 /**
@@ -14,6 +14,10 @@ export class MemoryStore implements AlertRepository, SourceRepository {
   sources: IntegrationSourceRow[] = [];
   accounts = new Map<string, string>();
   rejections: IngestRejectionInput[] = [];
+  /** D-43: absent = ACTIVE. */
+  statuses = new Map<string, CustomerStatus>();
+  /** D-43: `${customerId}|${sourceKey}` → counts of events that arrived after TERMINATED. */
+  residuals = new Map<string, { customerId: string; sourceKey: string; firstAt: Date; lastAt: Date; count: number }>();
   touched: Array<{ sourceId: string; at: Date }> = [];
   windows: MaintenanceWindow[] = [];
   policy: SuppressionPolicy = { ...DEFAULT_POLICY };
@@ -92,6 +96,13 @@ export class MemoryStore implements AlertRepository, SourceRepository {
   async recordRejection(r: IngestRejectionInput) { this.rejections.push(r); }
   async customerForAccount(a: string) { return this.accounts.get(a) ?? null; }
   async severityTable() { return this.table; }
+  async customerStatus(customerId: string) { return this.statuses.get(customerId) ?? 'ACTIVE'; }
+  async recordResidual(r: { customerId: string; sourceKey: string; at: Date; count: number }) {
+    const k = `${r.customerId}|${r.sourceKey}`;
+    const cur = this.residuals.get(k);
+    if (!cur) this.residuals.set(k, { customerId: r.customerId, sourceKey: r.sourceKey, firstAt: r.at, lastAt: r.at, count: r.count });
+    else { cur.firstAt = new Date(Math.min(cur.firstAt.getTime(), r.at.getTime())); cur.lastAt = new Date(Math.max(cur.lastAt.getTime(), r.at.getTime())); cur.count += r.count; }
+  }
 }
 
 export const alertScopeKey = (customerId: string | null, fingerprint: string): string => `${customerId ?? '-'}|${fingerprint}`;

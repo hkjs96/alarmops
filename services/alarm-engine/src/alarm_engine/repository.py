@@ -131,6 +131,55 @@ class SyncRunRow:
     error: str | None = None
 
 
+OFFBOARD_STEP_KEYS = ("PAGING_STOPPED", "ALARMS_DELETED", "CUSTOMER_STACK_REMOVED", "ACCOUNTS_DISABLED",
+                      "BUS_ALLOWLIST_REMOVED")
+
+
+@dataclass
+class OffboardingRow:
+    """CustomerOffboarding (D-43) with the status of its customer. `steps` is the stored jsonb."""
+    id: str
+    customer_id: str
+    customer_status: str
+    steps: dict[str, Any] = dc_field(default_factory=dict)
+    completed_at: datetime | None = None
+
+
+def merge_offboard_result(steps: dict[str, Any], account_ids: list[str], cloud_account_id: str, result: dict,
+                          at: datetime) -> tuple[dict[str, Any], bool]:
+    """Fold one account's OFFBOARD_ACCOUNT result into `steps.ALARMS_DELETED` (pure; the repositories call it).
+
+    - a step a person already marked DONE is never touched;
+    - state: MANUAL as soon as one account is not OK (CAPABILITY_DISABLED / FAILED: a person has to act or retry),
+      PENDING while accounts are missing, DONE when every account of the customer is OK;
+    - returns the new steps and whether every step is DONE now (CustomerOffboarding.completedAt).
+    """
+    out = {k: dict(v) if isinstance(v, dict) else v for k, v in steps.items()}
+    step = dict(out.get("ALARMS_DELETED") or {"state": "PENDING"})
+    if step.get("state") == "DONE":
+        return out, all((out.get(k) or {}).get("state") == "DONE" for k in OFFBOARD_STEP_KEYS)
+    accounts = dict(step.get("accounts") or {})
+    accounts[cloud_account_id] = result
+    bad = sorted(a for a, r in accounts.items() if r.get("status") != "OK")
+    missing = [a for a in account_ids if a not in accounts]
+    deleted = sum(int(r.get("deleted", 0)) for r in accounts.values())
+    if bad:
+        state = "MANUAL"
+    elif missing:
+        state = "PENDING"
+    else:
+        state = "DONE"
+    parts = [f"{len(accounts) - len(bad)}/{len(account_ids)} accounts done, {deleted} alarms deleted"]
+    parts += [f"{a}: {accounts[a].get('status')}" for a in bad]
+    step.update({"state": state, "accounts": accounts, "detail": "; ".join(parts)})
+    if state == "DONE":
+        step["at"] = at.isoformat()
+    else:
+        step.pop("at", None)
+    out["ALARMS_DELETED"] = step
+    return out, all((out.get(k) or {}).get("state") == "DONE" for k in OFFBOARD_STEP_KEYS)
+
+
 class Repository(Protocol):
     def get_account(self, cloud_account_id: str) -> CloudAccount: ...
     def update_account_status(self, cloud_account_id: str, statuses: dict[str, str]) -> None: ...
@@ -156,6 +205,10 @@ class Repository(Protocol):
     def get_remediation_request(self, customer_id: str | None, request_id: str) -> RemediationRequestRow | None: ...
     def transition_remediation(self, customer_id: str, request_id: str, from_status: str, to_status: str,
                                result: dict | None = None) -> bool: ...
+    def get_offboarding(self, customer_id: str, offboarding_id: str) -> OffboardingRow | None: ...
+    def customer_account_ids(self, customer_id: str) -> list[str]: ...
+    def record_offboard_result(self, customer_id: str, offboarding_id: str, cloud_account_id: str,
+                              result: dict) -> str: ...
 
 
 _ids = itertools.count(1)
@@ -179,6 +232,8 @@ class InMemoryRepository:
         self.runs: dict[str, SyncRunRow] = {}
         self.policies: dict[str, RemediationPolicyRow] = {}
         self.remediations: dict[str, RemediationRequestRow] = {}
+        self.offboardings: dict[str, OffboardingRow] = {}
+        self.customer_status: dict[str, str] = {}      # absent = ACTIVE
 
     # accounts
     def get_account(self, cloud_account_id: str) -> CloudAccount:
@@ -319,3 +374,25 @@ class InMemoryRepository:
         if to_status in ("SUCCEEDED", "FAILED"):
             r.executed_at = now()
         return True
+
+    # offboarding (D-43): the engine only writes steps.ALARMS_DELETED of a CustomerOffboarding
+    def get_offboarding(self, customer_id: str, offboarding_id: str) -> OffboardingRow | None:
+        o = self.offboardings.get(offboarding_id)
+        if o is None or o.customer_id != customer_id:
+            return None
+        return replace(o, customer_status=self.customer_status.get(customer_id, "ACTIVE"), steps=dict(o.steps))
+
+    def customer_account_ids(self, customer_id: str) -> list[str]:
+        return sorted(a.id for a in self.accounts.values() if a.customer_id == customer_id)
+
+    def record_offboard_result(self, customer_id: str, offboarding_id: str, cloud_account_id: str,
+                               result: dict) -> str:
+        o = self.offboardings.get(offboarding_id)
+        if o is None or o.customer_id != customer_id:
+            raise LookupError(offboarding_id)
+        steps, done = merge_offboard_result(o.steps, self.customer_account_ids(customer_id), cloud_account_id, result,
+                                            now())
+        o.steps = steps
+        if done and o.completed_at is None:
+            o.completed_at = now()
+        return str(steps["ALARMS_DELETED"]["state"])

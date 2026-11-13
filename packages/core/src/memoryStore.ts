@@ -8,15 +8,15 @@ import type { IncidentRow } from './incident.js';
 import type { MaintenanceWindow } from './maintenance.js';
 import { CLAIM_LEASE_SEC, CLOCK_SKEW_LIMIT_MS, RELEASE_HOLD_MAX_SEC } from './limits.js';
 import { LANE_CHANNELS, MAX_ATTEMPTS, retryAt, sanitizeProviderError, selectForClaim, type DeliveryLog, type DeliveryReason, type NotificationJob, type SenderKind } from './notify.js';
+import type { CustomerStatus } from './types.js';
 import type { Contact, Leave, Override, PagingConfig, PagingWorld, Responder, Rotation } from './paging.js';
 import { DEFAULT_POLICY, type SuppressionPolicy } from './policy.js';
 import type {
   AuditInput, GroupDeliveryCommit, GroupMember, HeartbeatRow, HeartbeatWrite, IncidentCommit, IncidentEventInput, ResolutionInput, TickRepository,
 } from './tick.js';
 
-/** `status` (D-42): absent = ACTIVE. Only the session lookup reads it; ingest and the tick do not. */
-export type CustomerStatus = 'ACTIVE' | 'SUSPENDED' | 'TERMINATED';
-export interface OrgCustomer { id: string; name: string; slug: string; status?: CustomerStatus }
+/** `status` (D-42, D-43): absent = ACTIVE. Read by the session lookup, by ingest and by the tick. */
+export interface OrgCustomer { id: string; name: string; slug: string; status?: CustomerStatus; statusChangedAt?: Date | null }
 export interface OrgProject { id: string; customerId: string; name: string; slug: string }
 export interface OrgService { id: string; customerId: string; projectId: string; name: string; slug: string }
 export interface OrgAccount { awsAccountId: string; customerId: string; serviceId: string | null }
@@ -123,6 +123,8 @@ export class MemoryTickStore implements TickRepository {
     const s = this.services.get(a.serviceId);
     return s && s.customerId === customerId ? { projectId: s.projectId, serviceId: s.id } : null;
   }
+  /** Unknown customer = ACTIVE: when in doubt the tick pages (a missing row must never silence an outage). */
+  async customerStatus(customerId: string): Promise<CustomerStatus> { return this.customers.get(customerId)?.status ?? 'ACTIVE'; }
   async pagingContext(customerId: string) { return { configs: this.configsOf(customerId), world: this.worldOf(customerId) }; }
   configsOf(customerId: string): PagingConfig[] { return structuredClone(this.configs.filter((c) => c.customerId === customerId)); }
   /** Only this customer's people, responders and rotations (plus INTERNAL staff and shared MSP rotations). */

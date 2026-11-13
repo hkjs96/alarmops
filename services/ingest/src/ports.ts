@@ -1,4 +1,4 @@
-import type { NormalizedEvent, Severity, SuppressionPolicy, MaintenanceWindow, GroupRow, FingerprintState } from '@alarmops/core';
+import type { CustomerStatus, NormalizedEvent, Severity, SuppressionPolicy, MaintenanceWindow, GroupRow, FingerprintState } from '@alarmops/core';
 
 /** Queue message on `alert-events` (API-CONTRACT §3, §5 GROUP_CLOSE proposal Q-API-04). */
 export type AlertEventsMessage = NormalizedEvent | { type: 'GROUP_CLOSE'; schemaVersion: 1; groupId: string; groupKey: string };
@@ -42,6 +42,17 @@ export interface SourceRepository {
   /** CloudAccount.awsAccountId → customerId, null if unmapped. */
   customerForAccount(awsAccountId: string): Promise<string | null>;
   severityTable(): Promise<Record<string, Severity>>;
+  /**
+   * D-43: Customer.status, read on every call (never cached: a termination must take effect at once). A customer
+   * that is not found is 'ACTIVE' (the event goes on as before).
+   */
+  customerStatus(customerId: string): Promise<CustomerStatus>;
+  /**
+   * D-43: an event arrived after the customer was TERMINATED. No incident, no alert, no page: only this count.
+   * One row per (customerId, sourceKey): `firstAt` stays, `lastAt` = the later of the two, `count += count`.
+   * `sourceKey` = `aws:{accountId}` or `integration:{id}`; it is built from the trusted lookup, never from the body.
+   */
+  recordResidual(r: { customerId: string; sourceKey: string; at: Date; count: number }): Promise<void>;
 }
 
 export interface AlertRow extends FingerprintState {

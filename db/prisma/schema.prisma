@@ -37,6 +37,13 @@ enum CustomerStatus {
   TERMINATED
 }
 
+/// D-43: why paging is off for an incident. Set when the incident is opened for (or found at) a SUSPENDED / TERMINATED
+/// customer; never cleared, so a customer that comes back to ACTIVE is not paged late for what happened meanwhile.
+enum PagingSuppressedReason {
+  CUSTOMER_SUSPENDED
+  CUSTOMER_TERMINATED
+}
+
 enum ContactKind {
   INTERNAL
   CUSTOMER
@@ -561,8 +568,11 @@ model Customer {
   /// D-33 slug: `^[a-z0-9][a-z0-9-]{0,63}$` (CHECK in raw SQL), unique across the MSP. Reserved words are checked in the service layer.
   slug                String             @unique
   isInternal          Boolean            @default(false)
-  /// D-42: only ACTIVE customers' portal users get a session. Ingest does not look at it (open question).
+  /// D-42: only ACTIVE customers' portal users get a session. D-43: SUSPENDED = events recorded, nobody paged;
+  /// TERMINATED = offboarding, events only counted (OffboardResidual).
   status              CustomerStatus     @default(ACTIVE)
+  /// D-43: last status change (the base of the retention period after TERMINATED).
+  statusChangedAt     DateTime?          @db.Timestamptz(3)
   loginDomains        String[]           @default([])
   portalGrants        String[]           @default([])
   defaultGroupWaitSec Int?
@@ -592,6 +602,35 @@ model Customer {
   pagingConfigs        PagingConfig[]
   maintenanceWindows   MaintenanceWindow[]
   notificationChannels NotificationChannel[]
+  offboarding          CustomerOffboarding?
+  offboardResiduals    OffboardResidual[]
+}
+
+/// D-43: one per TERMINATED customer. `steps` = { PAGING_STOPPED | ALARMS_DELETED | CUSTOMER_STACK_REMOVED | ACCOUNTS_DISABLED |
+/// BUS_ALLOWLIST_REMOVED → { state: DONE | PENDING | MANUAL, at?, byUserId?, detail? } }.
+model CustomerOffboarding {
+  id              String    @id @default(cuid())
+  customerId      String    @unique
+  customer        Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  startedByUserId String
+  reason          String
+  steps           Json
+  startedAt       DateTime  @default(now()) @db.Timestamptz(3)
+  completedAt     DateTime? @db.Timestamptz(3)
+}
+
+/// D-43: events that arrived after TERMINATED. No incident is made; this only counts them ("cleanup needed").
+model OffboardResidual {
+  customerId     String
+  customer       Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  /// `aws:{accountId}` or `integration:{id}`
+  sourceKey      String
+  firstAt        DateTime  @db.Timestamptz(3)
+  lastAt         DateTime  @db.Timestamptz(3)
+  count          Int       @default(0)
+  lastNotifiedAt DateTime? @db.Timestamptz(3)
+
+  @@id([customerId, sourceKey])
 }
 
 model Project {
@@ -867,6 +906,8 @@ model Incident {
   source                 SourceKind?
   /// Manual "Escalate now": at most one per 60 s per incident (R-7).
   lastManualEscalationAt DateTime?    @db.Timestamptz(3)
+  /// D-43: set => the tick never pages this incident (and never will, even after the customer is ACTIVE again).
+  pagingSuppressed       PagingSuppressedReason?
 
   alerts           IncidentAlert[]
   events           IncidentEvent[]

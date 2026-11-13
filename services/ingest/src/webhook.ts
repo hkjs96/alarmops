@@ -104,6 +104,13 @@ export function makeWebhookHandler(deps: WebhookDeps) {
     for (const r of rejected) {
       await deps.sources.recordRejection({ kind, reason: r.reason, sourceId: src.id, customerId: src.customerId });
     }
+    // D-43: token, kind and payload were checked above, whatever the status. A TERMINATED customer's events are
+    // answered 202 (the provider must not retry) but never queued: no alert, no incident, only the residual count.
+    if ((await deps.sources.customerStatus(src.customerId)) === 'TERMINATED') {
+      await deps.sources.recordResidual({ customerId: src.customerId, sourceKey: `integration:${src.id}`, at: now, count: Math.max(1, events.length) });
+      await deps.sources.touchSource(src.id, now);
+      return json(202, { accepted: events.length, rejected: rejected.filter((r) => r.index >= 0).length });
+    }
     if (events.length) {
       await deps.queue.send(events.map((e, i) => ({ id: String(i), body: e, attributes: messageAttributes(e.customerId, e.source) })));
     }

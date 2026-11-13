@@ -15,6 +15,7 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
+from psycopg.types.json import Jsonb
 
 URL = os.environ.get("ALARM_ENGINE_TEST_PG_URL")
 pytestmark = [pytest.mark.pg, pytest.mark.skipif(not URL, reason="ALARM_ENGINE_TEST_PG_URL not set (no local Postgres)")]
@@ -99,3 +100,23 @@ def test_threshold_defaults_and_remediation_transitions(pg):
     assert pg.create_remediation_request(RemediationRequestRow("rq2", "cus_1", "acc_1", rid, "EC2_STOP",
                                                                "PENDING_APPROVAL", {})) is None
     assert pg.transition_remediation("rq1", "APPROVED", "EXECUTING") is False
+
+
+def test_offboarding_result_is_merged_under_a_row_lock_and_scoped_by_customer(pg):
+    """D-43: the engine writes only steps.ALARMS_DELETED (and completedAt when every step is DONE)."""
+    pg._exec('''UPDATE "Customer" SET status = 'TERMINATED' WHERE id = 'cus_1' ''')
+    pg._exec('''INSERT INTO "CustomerOffboarding" (id, "customerId", "startedByUserId", reason, steps) VALUES
+                ('ob_1','cus_1','usr_1','contract ended', %s)''', Jsonb({
+        "PAGING_STOPPED": {"state": "DONE"}, "ALARMS_DELETED": {"state": "PENDING"},
+        "CUSTOMER_STACK_REMOVED": {"state": "DONE"}, "ACCOUNTS_DISABLED": {"state": "DONE"},
+        "BUS_ALLOWLIST_REMOVED": {"state": "DONE"}}))
+    assert pg.get_offboarding("cus_2", "ob_1") is None                    # another customer's id: not found
+    ob = pg.get_offboarding("cus_1", "ob_1")
+    assert ob is not None and ob.customer_status == "TERMINATED"
+    assert pg.customer_account_ids("cus_1") == ["acc_1"]
+    with pytest.raises(LookupError):
+        pg.record_offboard_result("cus_2", "ob_1", "acc_1", {"status": "OK", "deleted": 1, "failed": 0})
+    assert pg.record_offboard_result("cus_1", "ob_1", "acc_1", {"status": "OK", "deleted": 3, "failed": 0}) == "DONE"
+    after = pg.get_offboarding("cus_1", "ob_1")
+    assert after is not None and after.steps["ALARMS_DELETED"]["accounts"]["acc_1"]["deleted"] == 3
+    assert after.completed_at is not None

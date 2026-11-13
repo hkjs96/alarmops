@@ -18,10 +18,12 @@ from psycopg.types.json import Jsonb
 from alarm_engine.aws import CloudAccount
 from alarm_engine.repository import (
     ManagedAlarmRow,
+    OffboardingRow,
     RemediationPolicyRow,
     RemediationRequestRow,
     ResourceRow,
     ThresholdChangeRow,
+    merge_offboard_result,
 )
 from alarm_engine.thresholds import LayerValues
 
@@ -282,3 +284,33 @@ class PgRepository:
                              WHERE id = %s AND "customerId" = %s AND status = %s::"RemediationStatus"''',
                           to_status, Jsonb(result) if result is not None else None, to_status, request_id,
                           customer_id, from_status) == 1
+
+    # offboarding (D-43): the engine writes only steps.ALARMS_DELETED (and completedAt when every step is DONE)
+    def get_offboarding(self, customer_id: str, offboarding_id: str) -> OffboardingRow | None:
+        r = self._one('''SELECT o.id, o."customerId", o.steps, o."completedAt", c.status
+                         FROM "CustomerOffboarding" o JOIN "Customer" c ON c.id = o."customerId"
+                         WHERE o.id = %s AND o."customerId" = %s''', offboarding_id, customer_id)
+        if r is None:
+            return None
+        return OffboardingRow(id=r["id"], customer_id=r["customerId"], customer_status=r["status"],
+                              steps=dict(r["steps"] or {}), completed_at=r["completedAt"])
+
+    def customer_account_ids(self, customer_id: str) -> list[str]:
+        return [r["id"] for r in self._all('SELECT id FROM "CloudAccount" WHERE "customerId" = %s ORDER BY id',
+                                           customer_id)]
+
+    def record_offboard_result(self, customer_id: str, offboarding_id: str, cloud_account_id: str,
+                               result: dict) -> str:
+        from datetime import UTC, datetime
+        with self.conn.transaction():
+            # the row lock serialises the accounts' results of one offboarding (one command per account)
+            r = self._one('''SELECT steps, "completedAt" FROM "CustomerOffboarding"
+                             WHERE id = %s AND "customerId" = %s FOR UPDATE''', offboarding_id, customer_id)
+            if r is None:
+                raise LookupError(offboarding_id)
+            steps, done = merge_offboard_result(dict(r["steps"] or {}), self.customer_account_ids(customer_id),
+                                                cloud_account_id, result, datetime.now(UTC))
+            self._exec('''UPDATE "CustomerOffboarding" SET steps = %s,
+                             "completedAt" = CASE WHEN %s AND "completedAt" IS NULL THEN now() ELSE "completedAt" END
+                           WHERE id = %s AND "customerId" = %s''', Jsonb(steps), done, offboarding_id, customer_id)
+        return str(steps["ALARMS_DELETED"]["state"])
