@@ -6,6 +6,7 @@ import * as fx from "./fixtures";
 import { customers14, customers34, type FxCustomer } from "./scope-fixtures";
 import { createPaging, type FxPaging } from "./paging-fixtures";
 import { createPagingApi, hasOwnSteps, healthOf } from "./paging-mock";
+import { createStatusApi, createStatusStore, type StatusStore } from "./status-mock";
 
 interface Store {
   customers: FxCustomer[];
@@ -13,9 +14,10 @@ interface Store {
   timelines: Record<string, IncidentEvent[]>;
   undo: Map<string, { snapshot: IncidentListItem[]; after: Record<string, number>; by: string; exp: number }>;
   paging: FxPaging;
+  customerStatus: StatusStore;
 }
 
-export interface MockUser { id: string; contactId: string; name: string; email: string; role: Role }
+export interface MockUser { id: string; contactId: string; name: string; email: string; role: Role; kind?: "INTERNAL" | "CUSTOMER" }
 /**
  * The people who can sign in to the mock (/auth/dev-login?as=…), by session subject. Changing who gets called is an
  * ADMIN action in the contract (§8.3), acknowledging an OPERATOR one, so the default user is an admin and the other
@@ -25,6 +27,8 @@ export const MOCK_USERS: Record<string, MockUser> = {
   "usr-haeun": { id: "usr_haeun", contactId: "ct_haeun", name: "Haeun Kim", email: "haeun@msp.example", role: "ADMIN" },
   "usr-minjae": { id: "usr_minjae", contactId: "ct_minjae", name: "Minjae Lee", email: "minjae@msp.example", role: "OPERATOR" },
   "usr-sora": { id: "usr_sora", contactId: "ct_sora", name: "Sora Yoon", email: "sora@msp.example", role: "VIEWER" },
+  /** a portal (customer) user: VIEWER, and the customer-status routes do not exist for them (404, D-36) */
+  "usr-portal": { id: "usr_portal", contactId: "", name: "Yuna Seo", email: "yuna@mirae.example", role: "VIEWER", kind: "CUSTOMER" },
 };
 const RANK: Record<Role, number> = { VIEWER: 0, OPERATOR: 1, ADMIN: 2 };
 
@@ -32,8 +36,8 @@ const RANK: Record<Role, number> = { VIEWER: 0, OPERATOR: 1, ADMIN: 2 };
 export function createStore(opts: { customers?: 14 | 34 } = {}): Store {
   const customers = opts.customers === 34 ? customers34 : customers14;
   return {
-    customers, paging: createPaging(customers),
-    incidents: structuredClone([...fx.openIncidents, ...fx.resolvedIncidents]),
+    customers, paging: createPaging(customers), customerStatus: createStatusStore(),
+    incidents: structuredClone([...fx.openIncidents, ...fx.resolvedIncidents, ...fx.suppressedIncidents]),
     timelines: structuredClone(fx.timelines),
     undo: new Map(),
   };
@@ -129,9 +133,15 @@ export function createMockApi(store: Store = createStore(), clock: () => number 
     err: (status, code, message, details) => new ApiError(status, code, message, `req_mock_${++reqSeq}`, details),
   });
 
+  const statusApi = createStatusApi({
+    store: store.customerStatus, customers: store.customers, incidents: () => store.incidents, me: ME, now: nowIso, need, portal: ME.kind === "CUSTOMER",
+    err: (status, code, message, details) => new ApiError(status, code, message, `req_mock_${++reqSeq}`, details),
+  });
+
   return {
     ...pagingApi,
-    async me() { return { id: ME.id, name: ME.name, email: ME.email, role: ME.role }; },
+    ...statusApi,
+    async me() { return { id: ME.id, name: ME.name, email: ME.email, role: ME.role, ...(ME.kind ? { kind: ME.kind } : {}) }; },
     async listIncidents(q = {}) {
       const scope = scopeOf(q);
       const base = store.incidents.filter((i) => scope.inView(i) && matchesBaseFilters(i, q, ME.contactId));
@@ -245,7 +255,7 @@ export function createMockApi(store: Store = createStore(), clock: () => number 
       const n = (f: (i: IncidentListItem) => boolean) => open.filter(f).length;
       return {
         customers: store.customers.map((c) => ({
-          id: c.id, slug: c.slug, name: c.name, mine: c.mine, callHealth: healthOf(store.paging, c).level,
+          id: c.id, slug: c.slug, name: c.name, mine: c.mine, callHealth: healthOf(store.paging, c).level, status: store.customerStatus.status[c.id]?.status ?? "ACTIVE",
           openIncidents: n((i) => i.org.customer?.id === c.id),
           projects: c.projects.map((p) => ({
             id: p.id, slug: p.slug, name: p.name, ownSteps: hasOwnSteps(store.paging, c.id, "PROJECT", p.id),

@@ -133,6 +133,20 @@ export const resolvedIncidents: IncidentListItem[] = RESOLVED_TITLES.map(([title
   };
 });
 
+/**
+ * D-43: Eden Mobility is SUSPENDED in the mock (status-mock.ts). This incident opened during the suspension: nobody was
+ * paged. Resolved 3 days ago, so it is in no count of the 24-hour views and only the Resolved list shows it.
+ */
+export const suppressedIncidents: IncidentListItem[] = [
+  {
+    id: "inc-s1", number: 5480, key: "INC-S-5480", title: "fleet-telemetry-1 CPUUtilization above 90%", severity: "SEV_3", status: "RESOLVED", escalated: false,
+    org: org("eden", "Fleet", "Telemetry"), unmapped: false, awsAccountIds: [], resourceTypes: ["EC2"], source: "CLOUDWATCH", memberCount: 1,
+    assignee: null, assigneeNote: "resolved automatically",
+    escalation: esc({ state: "STOPPED_RESOLVED", stoppedAt: "2026-11-05T09:20:00Z" }), triggeredAt: "2026-11-05T09:00:00Z", acknowledgedAt: null, resolvedAt: "2026-11-05T09:20:00Z", version: 2,
+    resolvedVia: "AUTO", pagingSuppressed: "CUSTOMER_SUSPENDED",
+  },
+];
+
 /** Alerts muted by maintenance windows (tile "Muted 5 · 2 maintenance windows"). */
 export const mutedAlerts: { customerId: string; severity: Severity; windowId: string }[] = [
   { customerId: "cus_hanbit", severity: "SEV_3", windowId: "mw_1" },

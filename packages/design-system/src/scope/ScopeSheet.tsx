@@ -16,9 +16,10 @@ export interface ScopeSheetProps {
 
 type Step = 1 | 2 | 3;
 
-function Tags({ open, health, own }: { open: number; health?: string; own?: boolean }) {
+function Tags({ open, health, own, status }: { open: number; health?: string; own?: boolean; status?: string }) {
   return (
     <span className="stree-tags">
+      {status === "SUSPENDED" ? <span className="stag susp">Suspended</span> : status === "TERMINATED" ? <span className="stag term">Terminated</span> : null}
       {own ? <span className="stag own">Own steps</span> : null}
       {health === "UNREACHABLE" ? <span className="stag unr">Unreachable</span> : health === "AT_RISK" ? <span className="stag ar">At risk</span> : null}
       {open > 0 ? <span className="stag-n"><span className="sr-only">open incidents: </span>{open}</span> : null}
@@ -82,7 +83,7 @@ export function ScopeSheet({ open, customers, value, onApply, onClose }: ScopeSh
   );
   const customerRow = (c: ScopeCustomerNode) => (
     <Row key={c.slug} label={<b>{c.name}</b>} on={cur.customer === c.slug} next testid="sheet-customer"
-      tags={<Tags open={c.openIncidents} health={c.callHealth} />}
+      tags={<Tags open={c.openIncidents} health={c.callHealth} status={c.status} />}
       onClick={() => { setCSlug(c.slug); setPSlug(undefined); setStep(2); }} />
   );
   const title = s === 1 ? "Choose a customer" : s === 2 ? `Choose a project of ${customer!.name}` : `Choose a service of ${project!.name}`;

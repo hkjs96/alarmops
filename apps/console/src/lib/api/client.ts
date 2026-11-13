@@ -3,6 +3,7 @@ import type {
   NotificationLogEntry, Paginated, ResolveKind, ApiErrorBody, ScopeTreeResponse,
   AddResponderInput, CallOrderListQuery, CallOrderListResponse, CustomerPersonRole, PagingConfig, PagingConfigInput, PagingHealth, PagingPath, PagingPathQuery,
   RespondersResponse, RotationSummary, StaffSummary, ResponderWriteOptions, RespondersWriteResult, UndoResult,
+  CustomerStatusChange, CustomerStatusInput, CustomerStatusResponse, Offboarding, OffboardStepKey,
 } from "./types";
 
 export class ApiError extends Error {
@@ -72,6 +73,16 @@ export interface ConsoleApi {
   listRotations(q?: { scope?: "MSP" | "CUSTOMER"; customerId?: string }): Promise<RotationSummary[]>;
   /** GET /staff?q= */
   listStaff(q?: string): Promise<StaffSummary[]>;
+
+  /* ---- Customer status and offboarding (API-CONTRACT 8.4) ---- */
+  /** GET /customers/{id}/status. ADMIN only (403 for other staff). */
+  getCustomerStatus(customerId: string): Promise<CustomerStatusResponse>;
+  /** PATCH /customers/{id}/status, If-Match = the version read. 409 VERSION_CONFLICT / CUSTOMER_TERMINATED, 503 COMMANDS_UNAVAILABLE (nothing changed) */
+  patchCustomerStatus(customerId: string, body: CustomerStatusInput, version: number): Promise<CustomerStatusChange>;
+  /** GET /customers/{id}/offboarding. 404 for a customer that was never terminated. */
+  getOffboarding(customerId: string): Promise<Offboarding>;
+  /** PATCH /customers/{id}/offboarding: a person marks a step DONE (no If-Match; ALARMS_DELETED needs `detail`, only when MANUAL) */
+  markOffboardStep(customerId: string, body: { key: OffboardStepKey; state: "DONE"; detail?: string }): Promise<Offboarding>;
 }
 
 /** Empty params are dropped (known-bugs 9-6). */
@@ -138,5 +149,9 @@ export function createHttpApi(opts: { baseUrl: string; fetch?: typeof fetch; hea
     removeResponder: (id, contactId, o) => call("DELETE", `/customers/${enc(id)}/responders/${enc(contactId)}` + unreachable(o), undefined, { "If-Match": String(o.version) }),
     listRotations: (q = {}) => call("GET", "/rotations" + toQuery({ ...q })),
     listStaff: (q) => call("GET", "/staff" + toQuery({ q })),
+    getCustomerStatus: (id) => call("GET", `/customers/${enc(id)}/status`),
+    patchCustomerStatus: (id, body, version) => call("PATCH", `/customers/${enc(id)}/status`, body, { "If-Match": String(version) }),
+    getOffboarding: (id) => call("GET", `/customers/${enc(id)}/offboarding`),
+    markOffboardStep: (id, body) => call("PATCH", `/customers/${enc(id)}/offboarding`, body),
   };
 }

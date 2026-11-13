@@ -63,6 +63,8 @@ export const DEV_USERS: Record<string, typeof DEV_USER> = {
   admin: DEV_USER,
   operator: { sub: "usr-minjae", email: "minjae.lee@example.com", name: "Minjae Lee" },
   viewer: { sub: "usr-sora", email: "sora.yoon@example.com", name: "Sora Yoon" },
+  /** a portal (customer) user, mock only */
+  portal: { sub: "usr-portal", email: "yuna@mirae.example", name: "Yuna Seo" },
 };
 /** Live dev sign-in (LIVE_DEV_LOGIN=1, never production): the users db/prisma/seed.ts creates. */
 export const LIVE_DEV_USERS: Record<string, string> = { admin: "usr_dev_admin", operator: "usr_dev_operator", viewer: "usr_dev_viewer" };

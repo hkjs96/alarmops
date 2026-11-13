@@ -64,3 +64,16 @@
 ## v4 점검 반영 (2026-11-09)
 - "Paging health" 열 + 필터 칩 "Paging problems (N)" (`#customers?f=prob`). 정의는 oncall-now.md와 동일.
 - 샘플 문제 고객: Kumho Clinic(호출 가능자 0), Lumen Bank(로테이션 멤버 미검증·Notify only).
+
+## 상태 변경·오프보딩 (D-43, D-45) — 콘솔 구현 메모
+| 항목 | 내용 |
+|---|---|
+| 경로 | `/customers`(고객별 카드: 이름·상태 배지·열린 인시던트), `/customers/{slug}`(헤더 상태 배지, Status 카드, 해지 고객이면 Offboarding checklist) |
+| 상태 배지 | `Active`(✓) · `Suspended`(─, amber) · `Terminated`(◆, ink2). 색 + 도형 + 글자. 트리·시트에는 `Suspended`/`Terminated` 태그(ACTIVE는 태그 없음) |
+| Change status | ADMIN만. 다른 역할은 비활성 + 이유("…needs the Admin role. You are signed in as Operator."). TERMINATED는 누구에게나 비활성(되돌릴 수 없음) |
+| Suspend | 사유 필수. "Alarms from this customer are recorded but nobody is paged (customer contacts and MSP staff). A business-hours summary is sent instead." |
+| Resume | 사유 필수. 정지 중 생긴 인시던트는 호출하지 않고 "Not paged"로 남는다는 안내 |
+| Terminate | 사유 필수 + 고객 이름을 똑같이 입력해야 확인 버튼이 켜진다. 되돌릴 수 없음, 호출 중단·AlarmOps 관리 알람 삭제·고객의 연결 스택 삭제 필요·30일 뒤 연락처/상세 삭제(D-45) 안내. 503 `COMMANDS_UNAVAILABLE`은 "상태는 바뀌지 않았다"로 말하고 창을 유지, 409 `VERSION_CONFLICT`는 Reload |
+| 인시던트 | `pagingSuppressed`가 있으면 목록 행과 상세에 "Not paged (customer suspended/terminated)" 표시(도형 + 글자) |
+| Offboarding checklist | 5단계 DONE/PENDING/MANUAL + detail. ADMIN이 MANUAL 단계를 "Mark done…"(ALARMS_DELETED는 메모 필수, UI에서 강제). 남은 이벤트가 있으면 "Cleanup needed" 알림(건수·마지막 시각) |
+| 열린 문제 | `GET /scope-tree`와 고객 목록이 `status`를 주지 않는다. 콘솔은 `customers[].status?`가 있으면 태그를 그리고(목은 채워 준다), 없으면 그리지 않는다. ADMIN이 아닌 직원은 `GET /customers/{id}/status`(ADMIN 전용)를 못 읽으므로 이 필드가 있어야 배지를 본다 → API-CONTRACT §8.0 scope-tree에 `status` 추가 필요(backend 이슈) |
