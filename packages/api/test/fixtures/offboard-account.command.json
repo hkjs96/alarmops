@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "commandId": "offboard-ob_1-acc_1",
+  "type": "OFFBOARD_ACCOUNT",
+  "customerId": "cus_1",
+  "cloudAccountId": "acc_1",
+  "requestedBy": { "type": "USER", "id": "usr_9" },
+  "requestedAt": "2026-11-13T00:00:00.000Z",
+  "payload": { "offboardingId": "ob_1" }
+}

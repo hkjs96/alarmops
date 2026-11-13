@@ -25,8 +25,7 @@ export interface AlarmCommand {
 }
 
 /**
- * Port to the `alarm-commands` queue. Production adapter = SQS SendMessage (infra wires it; this package has no AWS
- * client). Publishing happens AFTER the database commit and may fail: see `PATCH /customers/{id}/status`.
+ * Port to the `alarm-commands` queue. Production adapter = `SqsCommandPublisher` (sqsCommandPublisher.ts; the console injects the SQS client). Publishing happens AFTER the database commit and may fail: see `PATCH /customers/{id}/status`.
  */
 export interface CommandPublisher { publish(cmd: AlarmCommand): Promise<void> }
 

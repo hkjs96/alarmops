@@ -10,3 +10,4 @@ export { MAX_STEPS, MAX_AT_MIN, MAX_REPEAT } from './pagingApi.js';
 export * from './slug.js';
 export { authFromPrincipal, channelStates, maskEmail, maskPhone } from './peopleApi.js';
 export { InMemoryCommandPublisher, type AlarmCommand, type CommandPublisher } from './customerApi.js';
+export { SqsCommandPublisher, CommandPublishError, commandPublisherFromEnv, COMMANDS_REGION, type SqsSender } from './sqsCommandPublisher.js';
