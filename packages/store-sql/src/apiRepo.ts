@@ -5,7 +5,7 @@
  */
 import { createHash } from 'node:crypto';
 import { incidentMute, type Contact, type Leave, type Override, type Rotation, type AuditInput, type DeliveryLog, type IncidentEventInput, type IncidentRow, type MaintenanceWindow, type PagingConfig } from '@alarmops/core';
-import { nodeVisible, type ApiRepository, type AlertMemberRow, type IdempotentEntry, type IncidentFilter, type IncidentPage, type NodeFilter, type NotifiedPerson, type OpenCounts, type OrgTree, type ScopeFilter, type StatusCounts, type UndoRecord, type UserInfo, type Principal, type ResponderOp, type ResponderWriteOutcome, type RespondersState, type RotationsWorld } from '@alarmops/api';
+import { nodeVisible, type ApiRepository, type AlertMemberRow, type IdempotentEntry, type IncidentFilter, type IncidentPage, type NodeFilter, type NotifiedPerson, type OpenCounts, type OrgTree, type ScopeFilter, type StatusCounts, type UndoRecord, type UserInfo, type Principal, type ResponderOp, type ResponderWriteOutcome, type RespondersState, type RotationsWorld, type ChangeStatusOutcome, type CustomerStatusState, type CustomerStatusValue, type MarkStepOutcome, type OffboardStep, type OffboardStepKey, type OffboardingState, OFFBOARD_STEP_KEYS } from '@alarmops/api';
 import { PG, pgCode, type SqlExecutor } from './client.js';
 import { CONTACT_COLS, toContact, Params, d, dReq, incidentCols, iso, js, newId, num, toEvent, toIncident, toLog } from './rows.js';
 import { SqlTickStore, insertAudit, toWindow } from './tickRepo.js';
@@ -461,6 +461,87 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
   }
 
   // ───────────────────────────── idempotency ─────────────────────────────
+
+  // ───────────────────────────── customer status / offboarding (D-43) ─────────────────────────────
+
+  /** Status version = number of 'CustomerStatus' audit rows of the customer (same transaction as each change; no extra column). */
+  private async statusVersionOf(q: SqlExecutor, customerId: string): Promise<number> {
+    const [r] = await q.query(`SELECT count(*)::int AS "n" FROM "AuditLog" WHERE "customerId" = $1 AND "targetType" = 'CustomerStatus'`, [customerId]);
+    return (r?.n as number) ?? 0;
+  }
+  async customerStatusState(customerId: string): Promise<CustomerStatusState | null> {
+    const [c] = await this.sql.query(`SELECT "name", "status", "statusChangedAt" FROM "Customer" WHERE "id" = $1`, [customerId]);
+    if (!c) return null;
+    return { name: c.name, status: c.status, statusChangedAt: d(c.statusChangedAt), version: await this.statusVersionOf(this.sql, customerId) };
+  }
+  async changeCustomerStatus(customerId: string, expectedVersion: number, to: CustomerStatusValue, offboarding: { startedByUserId: string; reason: string } | null, audit: AuditInput): Promise<ChangeStatusOutcome> {
+    if (typeof customerId !== 'string' || !customerId || audit.customerId !== customerId || audit.targetType !== 'CustomerStatus') throw new Error('changeCustomerStatus: audit must be a CustomerStatus audit of the same customer');
+    if (to === 'TERMINATED' && !offboarding) throw new Error('changeCustomerStatus: TERMINATED needs an offboarding');
+    return this.sql.transaction(async (tx) => {
+      const [c] = await tx.query(`SELECT "status" FROM "Customer" WHERE "id" = $1 FOR UPDATE`, [customerId]);
+      if (!c) return 'NOT_FOUND' as const;
+      if ((await this.statusVersionOf(tx, customerId)) !== expectedVersion) return 'CONFLICT' as const;
+      if (c.status === 'TERMINATED' && to !== 'TERMINATED') return 'CUSTOMER_TERMINATED' as const;
+      if (c.status === to) return 'NOOP' as const;
+      const [u] = await tx.query(`UPDATE "Customer" SET "status" = $2::"CustomerStatus", "statusChangedAt" = ${this.sql.now()}, "updatedAt" = ${this.sql.now()} WHERE "id" = $1 RETURNING "statusChangedAt"`, [customerId, to]);
+      let offboardingId: string | null = null;
+      let cloudAccountIds: string[] = [];
+      if (to === 'TERMINATED' && offboarding) {
+        offboardingId = newId('off');
+        const at = iso(audit.at);
+        const steps = {
+          PAGING_STOPPED: { state: 'DONE', at, byUserId: offboarding.startedByUserId }, ALARMS_DELETED: { state: 'PENDING' },
+          CUSTOMER_STACK_REMOVED: { state: 'MANUAL' }, ACCOUNTS_DISABLED: { state: 'MANUAL' }, BUS_ALLOWLIST_REMOVED: { state: 'MANUAL' },
+        };
+        await tx.query(
+          `INSERT INTO "CustomerOffboarding"("id", "customerId", "startedByUserId", "reason", "steps", "startedAt") VALUES ($1, $2, $3, $4, $5::jsonb, ${this.sql.now()})`,
+          [offboardingId, customerId, offboarding.startedByUserId, offboarding.reason, js(steps)]);
+        cloudAccountIds = (await tx.query(`SELECT "id" FROM "CloudAccount" WHERE "customerId" = $1 ORDER BY "id"`, [customerId])).map((r) => r.id as string);
+      }
+      await insertAudit(tx, audit);
+      return { status: to, statusChangedAt: dReq(u!.statusChangedAt), version: expectedVersion + 1, offboardingId, cloudAccountIds };
+    });
+  }
+  async offboardingState(customerId: string): Promise<OffboardingState | null> {
+    const [o] = await this.sql.query(`SELECT "id", "customerId", "startedByUserId", "reason", "steps", "startedAt", "completedAt" FROM "CustomerOffboarding" WHERE "customerId" = $1`, [customerId]);
+    if (!o) return null;
+    const [r] = await this.sql.query(`SELECT max("lastAt") AS "lastAt", COALESCE(sum("count"), 0)::int AS "n" FROM "OffboardResidual" WHERE "customerId" = $1`, [customerId]);
+    const raw = (o.steps ?? {}) as Record<string, OffboardStep>;
+    const steps = Object.fromEntries(OFFBOARD_STEP_KEYS.map((k) => [k, raw[k] ?? { state: 'PENDING' }])) as Record<OffboardStepKey, OffboardStep>;
+    return { id: o.id, customerId: o.customerId, startedByUserId: o.startedByUserId, reason: o.reason, startedAt: dReq(o.startedAt), completedAt: d(o.completedAt), steps, residual: { lastEventAt: d(r?.lastAt), count: (r?.n as number) ?? 0 } };
+  }
+  async markOffboardStepDone(customerId: string, key: OffboardStepKey, userId: string, detail: string | null, at: Date, audit: AuditInput): Promise<MarkStepOutcome> {
+    if (audit.customerId !== customerId) throw new Error('markOffboardStepDone: audit must be for the same customer');
+    return this.sql.transaction(async (tx) => {
+      // Same row lock as the engine's record_offboard_result: a person's mark and an account's result never interleave.
+      const [o] = await tx.query(`SELECT "steps" FROM "CustomerOffboarding" WHERE "customerId" = $1 FOR UPDATE`, [customerId]);
+      if (!o) return 'NOT_FOUND' as const;
+      const steps = { ...(o.steps ?? {}) } as Record<string, OffboardStep>;
+      const st = steps[key] ?? { state: 'PENDING' };
+      if (st.state === 'DONE') return 'ALREADY_DONE' as const;
+      if (key === 'ALARMS_DELETED' && st.state !== 'MANUAL') return 'NOT_ALLOWED' as const;
+      steps[key] = { ...st, state: 'DONE', at: at.toISOString(), byUserId: userId, ...(detail ? { detail } : {}) };
+      const all = OFFBOARD_STEP_KEYS.every((k) => steps[k]?.state === 'DONE');
+      await tx.query(`UPDATE "CustomerOffboarding" SET "steps" = $2::jsonb, "completedAt" = CASE WHEN $3::boolean AND "completedAt" IS NULL THEN ${this.sql.now()} ELSE "completedAt" END WHERE "customerId" = $1`, [customerId, js(steps), all]);
+      await insertAudit(tx, audit);
+      return 'OK' as const;
+    });
+  }
+  async cloudAccountIds(customerId: string): Promise<string[]> {
+    return (await this.sql.query(`SELECT "id" FROM "CloudAccount" WHERE "customerId" = $1 ORDER BY "id"`, [customerId])).map((r) => r.id as string);
+  }
+  async recordOffboardPublishFailure(customerId: string, cloudAccountIds: string[]): Promise<void> {
+    await this.sql.transaction(async (tx) => {
+      const [o] = await tx.query(`SELECT "steps" FROM "CustomerOffboarding" WHERE "customerId" = $1 FOR UPDATE`, [customerId]);
+      if (!o) return;
+      const steps = { ...(o.steps ?? {}) } as Record<string, OffboardStep>;
+      const st = steps.ALARMS_DELETED ?? { state: 'PENDING' };
+      if (st.state === 'DONE') return;
+      const mark = `COMMAND_PUBLISH_FAILED: ${cloudAccountIds.join(',')}`;
+      steps.ALARMS_DELETED = { ...st, state: 'MANUAL', detail: st.detail ? (st.detail.includes(mark) ? st.detail : `${st.detail}; ${mark}`) : mark };
+      await tx.query(`UPDATE "CustomerOffboarding" SET "steps" = $2::jsonb WHERE "customerId" = $1`, [customerId, js(steps)]);
+    });
+  }
 
   async getIdempotent(key: string, now: Date): Promise<IdempotentEntry | null> {
     const [r] = await this.sql.query(`SELECT "fingerprint", "response" FROM "IdempotencyKey" WHERE "key" = $1 AND "expiresAt" > $2::timestamptz`, [key, iso(now)]);

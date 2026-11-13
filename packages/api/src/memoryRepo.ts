@@ -5,7 +5,7 @@
 import { MemoryTickStore, incidentMute, parseSnapshot, type AuditInput, type Contact, type IncidentRow, type PagingConfig } from '@alarmops/core';
 import { inScope, nodeVisible, seesCustomer, type Role, type ScopeFilter } from './auth.js';
 import type { UserInfo } from './audience.js';
-import type { Principal, ResponderOp, ResponderWriteOutcome, RespondersState, RotationsWorld, AlertMemberRow, ApiRepository, IdempotentEntry, IncidentFilter, IncidentPage, NodeFilter, NotifiedPerson, OpenCounts, StatusCounts, UndoRecord } from './repo.js';
+import { OFFBOARD_STEP_KEYS, type ChangeStatusOutcome, type CustomerStatusState, type CustomerStatusValue, type MarkStepOutcome, type OffboardStepKey, type OffboardingState, type Principal, ResponderOp, ResponderWriteOutcome, RespondersState, RotationsWorld, AlertMemberRow, ApiRepository, IdempotentEntry, IncidentFilter, IncidentPage, NodeFilter, NotifiedPerson, OpenCounts, StatusCounts, UndoRecord } from './repo.js';
 
 export interface ContactScopeRow { contactId: string; customerId: string; scopeType: 'CUSTOMER' | 'PROJECT' | 'SERVICE'; scopeId: string; role: 'NOTIFY' | 'APPROVER' | 'PORTAL_USER' }
 
@@ -23,6 +23,9 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
   idempotent = new Map<string, { entry: IdempotentEntry; expiresAt: Date; owner: string }>();
   /** Last version of deleted paging configs, so a re-created one continues the sequence (N-3). */
   configTombstones = new Map<string, number>();
+  /** D-43: CustomerOffboarding per customer, and the events that arrived after TERMINATED (tests fill `residuals`). */
+  offboardings = new Map<string, Omit<OffboardingState, 'residual'>>();
+  residuals = new Map<string, Array<{ sourceKey: string; lastAt: Date; count: number }>>();
   /** Counts scoped reads, so tests can assert that out-of-scope ids never reach an unscoped lookup. */
   reads: string[] = [];
 
@@ -194,6 +197,71 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     }
     return out;
   }
+  // ───────────── customer status / offboarding (D-43) ─────────────
+  private statusVersionOf(customerId: string): number {
+    return this.audits.filter((a) => a.customerId === customerId && a.targetType === 'CustomerStatus').length;
+  }
+  async customerStatusState(customerId: string): Promise<CustomerStatusState | null> {
+    const c = this.customers.get(customerId);
+    return c ? { name: c.name, status: c.status ?? 'ACTIVE', statusChangedAt: c.statusChangedAt ?? null, version: this.statusVersionOf(customerId) } : null;
+  }
+  async changeCustomerStatus(customerId: string, expectedVersion: number, to: CustomerStatusValue, offboarding: { startedByUserId: string; reason: string } | null, audit: AuditInput): Promise<ChangeStatusOutcome> {
+    if (audit.customerId !== customerId || audit.targetType !== 'CustomerStatus') throw new Error('changeCustomerStatus: audit must be a CustomerStatus audit of the same customer');
+    const c = this.customers.get(customerId);
+    if (!c) return 'NOT_FOUND';
+    if (this.statusVersionOf(customerId) !== expectedVersion) return 'CONFLICT';
+    const from = c.status ?? 'ACTIVE';
+    if (from === 'TERMINATED' && to !== 'TERMINATED') return 'CUSTOMER_TERMINATED';
+    if (from === to) return 'NOOP';
+    if (to === 'TERMINATED' && !offboarding) throw new Error('changeCustomerStatus: TERMINATED needs an offboarding');
+    const at = audit.at;
+    c.status = to; c.statusChangedAt = at;
+    let offboardingId: string | null = null;
+    if (to === 'TERMINATED' && offboarding) {
+      offboardingId = this.nextId('off');
+      const at_ = at.toISOString();
+      this.offboardings.set(customerId, {
+        id: offboardingId, customerId, startedByUserId: offboarding.startedByUserId, reason: offboarding.reason, startedAt: at, completedAt: null,
+        steps: {
+          PAGING_STOPPED: { state: 'DONE', at: at_, byUserId: offboarding.startedByUserId }, ALARMS_DELETED: { state: 'PENDING' },
+          CUSTOMER_STACK_REMOVED: { state: 'MANUAL' }, ACCOUNTS_DISABLED: { state: 'MANUAL' }, BUS_ALLOWLIST_REMOVED: { state: 'MANUAL' },
+        },
+      });
+    }
+    this.audits.push(audit);
+    // In memory a CloudAccount is identified by its AWS account id.
+    return { status: to, statusChangedAt: at, version: expectedVersion + 1, offboardingId, cloudAccountIds: to === 'TERMINATED' ? [...this.accounts.values()].filter((a) => a.customerId === customerId).map((a) => a.awsAccountId) : [] };
+  }
+  async offboardingState(customerId: string): Promise<OffboardingState | null> {
+    const o = this.offboardings.get(customerId);
+    if (!o) return null;
+    const rs = this.residuals.get(customerId) ?? [];
+    const last = rs.reduce<Date | null>((m, r) => (m === null || r.lastAt > m ? r.lastAt : m), null);
+    return { ...structuredClone(o), residual: { lastEventAt: last, count: rs.reduce((n, r) => n + r.count, 0) } };
+  }
+  async markOffboardStepDone(customerId: string, key: OffboardStepKey, userId: string, detail: string | null, at: Date, audit: AuditInput): Promise<MarkStepOutcome> {
+    const o = this.offboardings.get(customerId);
+    if (!o || audit.customerId !== customerId) return 'NOT_FOUND';
+    const st = o.steps[key];
+    if (st.state === 'DONE') return 'ALREADY_DONE';
+    if (key === 'ALARMS_DELETED' && st.state !== 'MANUAL') return 'NOT_ALLOWED';
+    o.steps[key] = { ...st, state: 'DONE', at: at.toISOString(), byUserId: userId, ...(detail ? { detail } : {}) };
+    if (OFFBOARD_STEP_KEYS.every((k) => o.steps[k].state === 'DONE') && !o.completedAt) o.completedAt = at;
+    this.audits.push(audit);
+    return 'OK';
+  }
+  async cloudAccountIds(customerId: string): Promise<string[]> {
+    return [...this.accounts.values()].filter((a) => a.customerId === customerId).map((a) => a.awsAccountId);
+  }
+  async recordOffboardPublishFailure(customerId: string, cloudAccountIds: string[], at: Date): Promise<void> {
+    const o = this.offboardings.get(customerId);
+    if (!o || o.steps.ALARMS_DELETED.state === 'DONE') return;
+    const prev = o.steps.ALARMS_DELETED.detail;
+    const mark = `COMMAND_PUBLISH_FAILED: ${cloudAccountIds.join(',')}`;
+    o.steps.ALARMS_DELETED = { ...o.steps.ALARMS_DELETED, state: 'MANUAL', detail: prev ? (prev.includes(mark) ? prev : `${prev}; ${mark}`) : mark };
+    void at;
+  }
+
   async getIdempotent(key: string, now: Date) {
     const hit = this.idempotent.get(key);
     return hit && hit.expiresAt.getTime() > now.getTime() ? structuredClone(hit.entry) : null;

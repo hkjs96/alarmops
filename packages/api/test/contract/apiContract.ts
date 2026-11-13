@@ -8,7 +8,7 @@ import { IDEMPOTENCY_MAX_PER_USER, type TickRepository } from '@alarmops/core';
 import { CSim } from '../../../core/test/contract/tickContract.js';
 import type { MakeFixture, StoreFixture } from '../../../core/test/contract/fixture.js';
 import { PATTERNS, T0, at, closedGroup, seedWorld } from '../../../core/test/world.js';
-import { createApi, MemoryApiStore, type ApiRepository, type ApiRequest, type ApiResponse, type AuthContext } from '../../src/index.js';
+import { createApi, InMemoryCommandPublisher, MemoryApiStore, type ApiRepository, type ApiRequest, type ApiResponse, type AuthContext } from '../../src/index.js';
 import { USERS, body, wire } from '../helpers.js';
 
 type Repo = TickRepository & ApiRepository;
@@ -17,6 +17,7 @@ export type MakeApiFixture = MakeFixture<Repo>;
 interface CWorld {
   fx: StoreFixture<Repo>;
   sim: CSim;
+  commands: InMemoryCommandPublisher;
   call: (auth: AuthContext | null, method: ApiRequest['method'], path: string, opts?: { query?: Record<string, string | undefined>; body?: unknown; headers?: Record<string, string>; requestId?: string }) => Promise<ApiResponse>;
   ids: { mirae: string; hanbit: string; unmapped: string };
   version(id: string): Promise<string>;
@@ -43,10 +44,11 @@ async function cworld(make: MakeApiFixture, extra: (s: MemoryApiStore) => void =
   await sim.tick();
   const incs = await fx.incidents();
   const by = (customerId: string | null): string => incs.find((i) => i.customerId === customerId)!.id;
-  const api = createApi({ repo: fx.repo, now: () => sim.now });
+  const commands = new InMemoryCommandPublisher();
+  const api = createApi({ repo: fx.repo, now: () => sim.now, commands });
   let seq = 0;
   return {
-    fx, sim, ids: { mirae: by('cus_mirae'), hanbit: by('cus_hanbit'), unmapped: by(null) },
+    fx, sim, commands, ids: { mirae: by('cus_mirae'), hanbit: by('cus_hanbit'), unmapped: by(null) },
     call: (auth, method, path, opts = {}) => api.handle({ method, path, auth, query: opts.query, body: opts.body, headers: opts.headers, requestId: opts.requestId ?? `req_${++seq}` }),
     version: async (id) => String((await fx.incidents()).find((i) => i.id === id)!.version),
     snapshot: async () => JSON.stringify([await fx.incidents(), (await fx.jobs()).map((j) => [j.idempotencyKey, j.status]), (await fx.audits()).length]),
@@ -552,6 +554,223 @@ export function apiContract(make: MakeApiFixture): void {
       expect(await w.fx.repo.findResource({ customerIds: ['cus_mirae'], unmapped: false, subScopes: [] }, 'res_shop')).toBeNull();
       expect(await w.fx.repo.findResource({ customerIds: ['cus_mirae'], unmapped: false, subScopes: [] }, 'res_web1')).toEqual({ id: 'res_web1', name: 'web-1', customerId: 'cus_mirae', projectId: 'prj_core', serviceId: 'svc_pay' });
       expect(await w.fx.repo.findResource({ customerIds: ['cus_mirae'], unmapped: false, subScopes: [{ customerId: 'cus_mirae', projectId: 'prj_data' }] }, 'res_web1')).toBeNull();
+    });
+  });
+
+  describe('customer status and offboarding (D-42, D-43)', () => {
+    const im = (v: number | string) => ({ 'if-match': String(v) });
+    const patch = (who: AuthContext | null, status: string, extra: Record<string, unknown> = {}, v: number | string = 0, cid = 'cus_mirae') =>
+      w.call(who, 'PATCH', `/customers/${cid}/status`, { headers: im(v), body: { status, reason: 'contract ended', ...extra } });
+    const nameOf = async (): Promise<string> => body(await w.call(USERS.minjae, 'GET', '/scope-tree')).customers.find((c: any) => c.id === 'cus_mirae').name;
+
+    it('GET status returns {status, statusChangedAt, version} with the version as ETag; ADMIN only, portal users and unknown ids get the 404', async () => {
+      await open();
+      const r = await w.call(USERS.minjae, 'GET', '/customers/cus_mirae/status');
+      expect(r.status).toBe(200);
+      expect(body(r)).toEqual({ status: 'ACTIVE', statusChangedAt: null, version: 0 });
+      expect(r.headers.etag).toBe('"0"');
+      expect((await w.call(USERS.haeun, 'GET', '/customers/cus_mirae/status')).status).toBe(403);
+      expect((await w.call(USERS.yuna, 'GET', '/customers/cus_mirae/status')).status).toBe(404);
+      expect((await w.call(USERS.minjae, 'GET', '/customers/cus_nope/status')).status).toBe(404);
+      expect((await w.call(null, 'GET', '/customers/cus_mirae/status')).status).toBe(401);
+    });
+
+    it('PATCH: ADMIN only; portal never; needs If-Match and a reason; unknown status is 400', async () => {
+      await open();
+      expect((await patch(USERS.haeun, 'SUSPENDED')).status).toBe(403);
+      expect((await patch(USERS.viewer, 'SUSPENDED')).status).toBe(403);
+      expect((await patch(USERS.yuna, 'SUSPENDED')).status).toBe(404);
+      expect((await patch(USERS.dohyun, 'SUSPENDED')).status).toBe(404);
+      expect((await w.call(USERS.minjae, 'PATCH', '/customers/cus_mirae/status', { body: { status: 'SUSPENDED', reason: 'x' } })).status).toBe(400);
+      expect((await w.call(USERS.minjae, 'PATCH', '/customers/cus_mirae/status', { headers: im(0), body: { status: 'SUSPENDED' } })).status).toBe(400);
+      expect((await w.call(USERS.minjae, 'PATCH', '/customers/cus_mirae/status', { headers: im(0), body: { status: 'SUSPENDED', reason: '  ' } })).status).toBe(400);
+      expect((await patch(USERS.minjae, 'GONE')).status).toBe(400);
+      expect((await patch(USERS.minjae, 'SUSPENDED', {}, 0, 'cus_nope')).status).toBe(404);
+      expect(body(await w.call(USERS.minjae, 'GET', '/customers/cus_mirae/status')).status).toBe('ACTIVE');
+      expect(w.commands.sent).toEqual([]);
+    });
+
+    it('SUSPENDED and back: version moves, statusChangedAt set, audit written, stale If-Match is 409, same status is a no-op 200', async () => {
+      await open();
+      const r = await patch(USERS.minjae, 'SUSPENDED');
+      expect(r.status).toBe(200);
+      expect(body(r)).toMatchObject({ status: 'SUSPENDED', version: 1 });
+      expect(body(r).statusChangedAt).toEqual(expect.any(String));
+      expect(r.headers.etag).toBe('"1"');
+      expect(w.commands.sent).toEqual([]); // suspension leaves the customer's AWS alone
+      const audits = (await w.fx.audits()).filter((a) => a.targetType === 'CustomerStatus');
+      expect(audits).toHaveLength(1);
+      expect(audits[0]).toMatchObject({ customerId: 'cus_mirae', actorId: 'usr_minjae', after: { status: 'SUSPENDED' } });
+      const stale = await patch(USERS.minjae, 'ACTIVE', {}, 0);
+      expect(stale.status).toBe(409);
+      expect(body(stale).error).toMatchObject({ code: 'VERSION_CONFLICT', details: { currentVersion: 1 } });
+      const same = await patch(USERS.minjae, 'SUSPENDED', {}, 1);
+      expect(same.status).toBe(200);
+      expect(body(same)).toMatchObject({ status: 'SUSPENDED', version: 1 });
+      expect((await w.fx.audits()).filter((a) => a.targetType === 'CustomerStatus')).toHaveLength(1);
+      const back = await patch(USERS.minjae, 'ACTIVE', {}, 1);
+      expect(body(back)).toMatchObject({ status: 'ACTIVE', version: 2 });
+      expect(await w.fx.repo.sessionPrincipal('usr_yuna')).not.toBeNull();
+    });
+
+    it('a suspended customer\'s portal user has no session; other customers are untouched', async () => {
+      await open();
+      await patch(USERS.minjae, 'SUSPENDED');
+      expect(await w.fx.repo.sessionPrincipal('usr_yuna')).toBeNull();
+      expect(await w.fx.repo.customerStatus('cus_mirae')).toBe('SUSPENDED');
+      expect(await w.fx.repo.customerStatus('cus_hanbit')).toBe('ACTIVE');
+      expect(body(await w.call(USERS.minjae, 'GET', '/customers/cus_hanbit/status'))).toMatchObject({ status: 'ACTIVE', version: 0 });
+    });
+
+    it('TERMINATED needs confirmName == customer name (400 otherwise, nothing written)', async () => {
+      await open();
+      const name = await nameOf();
+      for (const extra of [{}, { confirmName: '' }, { confirmName: name.toLowerCase() + '!' }, { confirmName: `${name}x` }]) {
+        const r = await patch(USERS.minjae, 'TERMINATED', extra);
+        expect(r.status).toBe(400);
+        expect(body(r).error.details.fields[0].field).toBe('confirmName');
+      }
+      expect(body(await w.call(USERS.minjae, 'GET', '/customers/cus_mirae/status'))).toMatchObject({ status: 'ACTIVE', version: 0 });
+      expect((await w.call(USERS.minjae, 'GET', '/customers/cus_mirae/offboarding')).status).toBe(404);
+      expect(w.commands.sent).toEqual([]);
+    });
+
+    it('TERMINATED: one transaction creates the checklist, one OFFBOARD_ACCOUNT per CloudAccount of THAT customer; irreversible', async () => {
+      await open();
+      const name = await nameOf();
+      const r = await patch(USERS.minjae, 'TERMINATED', { confirmName: name });
+      expect(r.status).toBe(200);
+      const out = body(r);
+      expect(out).toMatchObject({ status: 'TERMINATED', version: 1, commandsSent: 1 });
+      expect(out.offboardingId).toEqual(expect.any(String));
+      expect(w.commands.sent).toHaveLength(1);
+      expect(w.commands.sent[0]).toMatchObject({ schemaVersion: 1, type: 'OFFBOARD_ACCOUNT', customerId: 'cus_mirae', requestedBy: { type: 'USER', id: 'usr_minjae' }, payload: { offboardingId: out.offboardingId } });
+      expect(w.commands.sent[0]!.cloudAccountId).toContain('111111111111'); // never the other customer's account
+      expect(w.commands.sent[0]!.commandId).toEqual(expect.any(String));
+
+      const o = body(await w.call(USERS.minjae, 'GET', '/customers/cus_mirae/offboarding'));
+      expect(o.steps.map((s: any) => [s.key, s.state])).toEqual([['PAGING_STOPPED', 'DONE'], ['ALARMS_DELETED', 'PENDING'], ['CUSTOMER_STACK_REMOVED', 'MANUAL'], ['ACCOUNTS_DISABLED', 'MANUAL'], ['BUS_ALLOWLIST_REMOVED', 'MANUAL']]);
+      expect(o.residual).toEqual({ count: 0 });
+      expect(o.completedAt).toBeNull();
+
+      const back = await patch(USERS.minjae, 'ACTIVE', {}, 1);
+      expect(back.status).toBe(409);
+      expect(body(back).error.code).toBe('CUSTOMER_TERMINATED');
+      expect((await patch(USERS.minjae, 'SUSPENDED', {}, 1)).status).toBe(409);
+      // same status again: no new checklist, no audit row; ALARMS_DELETED is still PENDING so the SAME command is sent again (engine dedupes by commandId)
+      const again = await patch(USERS.minjae, 'TERMINATED', { confirmName: name }, 1);
+      expect(again.status).toBe(200);
+      expect(body(again)).toMatchObject({ status: 'TERMINATED', version: 1, offboardingId: out.offboardingId, commandsSent: 1 });
+      expect(w.commands.sent).toHaveLength(2);
+      expect(w.commands.sent[1]!.commandId).toBe(w.commands.sent[0]!.commandId);
+      expect((await w.fx.audits()).filter((a) => a.targetType === 'CustomerStatus')).toHaveLength(1);
+      // staff keep seeing it; the portal user has no session
+      expect(await w.fx.repo.sessionPrincipal('usr_yuna')).toBeNull();
+      expect((await w.call(USERS.haeun, 'GET', '/customers/cus_mirae/offboarding')).status).toBe(403);
+      expect((await w.call(USERS.yuna, 'GET', '/customers/cus_mirae/offboarding')).status).toBe(404);
+      expect((await w.call(USERS.minjae, 'GET', '/customers/cus_hanbit/offboarding')).status).toBe(404);
+    });
+
+    it('without a command queue a termination is refused before any write (503)', async () => {
+      await open();
+      const api = createApi({ repo: w.fx.repo, now: () => T0 });
+      const r = await api.handle({ method: 'PATCH', path: '/customers/cus_mirae/status', auth: USERS.minjae, headers: im(0), body: { status: 'TERMINATED', reason: 'x', confirmName: await nameOf() }, requestId: 'r1' });
+      expect(r.status).toBe(503);
+      expect(body(await w.call(USERS.minjae, 'GET', '/customers/cus_mirae/status')).status).toBe('ACTIVE');
+    });
+
+    it('a failed publish does not undo the termination: it is reported and the ALARMS_DELETED step becomes MANUAL', async () => {
+      await open();
+      w.commands.failFor = new Set(['111111111111', 'ca_111111111111']);
+      const r = await patch(USERS.minjae, 'TERMINATED', { confirmName: await nameOf() });
+      expect(r.status).toBe(200);
+      expect(body(r)).toMatchObject({ status: 'TERMINATED', commandsSent: 0 });
+      expect(body(r).commandsFailed).toHaveLength(1);
+      const o = body(await w.call(USERS.minjae, 'GET', '/customers/cus_mirae/offboarding'));
+      expect(o.steps.find((s: any) => s.key === 'ALARMS_DELETED')).toMatchObject({ state: 'MANUAL', detail: expect.stringContaining('COMMAND_PUBLISH_FAILED') });
+    });
+
+    it('repeating TERMINATED re-sends the commands while ALARMS_DELETED is PENDING or its publish failed; closing a failed step needs a human detail', async () => {
+      await open();
+      const name = await nameOf();
+      w.commands.failFor = new Set(['111111111111', 'ca_111111111111']);
+      await patch(USERS.minjae, 'TERMINATED', { confirmName: name });
+      expect(w.commands.sent).toHaveLength(0);
+      w.commands.failFor.clear();
+      const again = await patch(USERS.minjae, 'TERMINATED', { confirmName: name }, 1);
+      expect(again.status).toBe(200);
+      expect(body(again)).toMatchObject({ status: 'TERMINATED', version: 1, commandsSent: 1 });
+      expect(w.commands.sent).toHaveLength(1);
+      const id1 = w.commands.sent[0]!.commandId;
+      // the step is still MANUAL (publish failure marker): a repeat sends the same deterministic command again
+      await patch(USERS.minjae, 'TERMINATED', { confirmName: name }, 1);
+      expect(w.commands.sent.at(-1)!.commandId).toBe(id1);
+      // the marker text is appended, never replacing earlier detail
+      await w.fx.repo.recordOffboardPublishFailure('cus_mirae', ['x1'], T0);
+      const d = body(await w.call(USERS.minjae, 'GET', '/customers/cus_mirae/offboarding')).steps.find((s: any) => s.key === 'ALARMS_DELETED').detail as string;
+      expect(d).toContain('COMMAND_PUBLISH_FAILED: 111111111111'.slice(0, 22));
+      expect(d).toContain('COMMAND_PUBLISH_FAILED: x1');
+      const mark = (detail?: string) => w.call(USERS.minjae, 'PATCH', '/customers/cus_mirae/offboarding', { body: { key: 'ALARMS_DELETED', state: 'DONE', ...(detail ? { detail } : {}) } });
+      expect((await mark()).status).toBe(400);
+      expect((await mark('   ')).status).toBe(400);
+      const ok = await mark('checked CloudWatch, no ManagedBy=AlarmOps alarms left');
+      expect(ok.status).toBe(200);
+      const audit = (await w.fx.audits()).find((a) => a.targetType === 'CustomerOffboarding' && a.targetId === 'ALARMS_DELETED')!;
+      expect(JSON.stringify(audit.before)).toContain('COMMAND_PUBLISH_FAILED');
+    });
+
+    it('a status that already equals the target when the write happens (changed outside the API) is a no-op, not an error', async () => {
+      await open();
+      await w.fx.setCustomerStatus('cus_mirae', 'SUSPENDED');
+      const audit = { at: T0, customerId: 'cus_mirae', actorType: 'USER' as const, actorId: 'usr_minjae', action: 'x', targetType: 'CustomerStatus', targetId: 'cus_mirae' };
+      expect(await w.fx.repo.changeCustomerStatus('cus_mirae', 0, 'SUSPENDED', null, audit)).toBe('NOOP');
+      expect((await w.fx.audits()).filter((a) => a.targetType === 'CustomerStatus')).toHaveLength(0);
+    });
+
+    it('offboarding PATCH: marks MANUAL steps DONE, never overwrites DONE, ALARMS_DELETED only from MANUAL', async () => {
+      await open();
+      await patch(USERS.minjae, 'TERMINATED', { confirmName: await nameOf() });
+      const mark = (key: string, who: AuthContext | null = USERS.minjae, extra: Record<string, unknown> = {}) => w.call(who, 'PATCH', '/customers/cus_mirae/offboarding', { body: { key, state: 'DONE', ...extra } });
+      expect((await mark('CUSTOMER_STACK_REMOVED', USERS.haeun)).status).toBe(403);
+      expect((await mark('CUSTOMER_STACK_REMOVED', USERS.yuna)).status).toBe(404);
+      expect((await w.call(USERS.minjae, 'PATCH', '/customers/cus_mirae/offboarding', { body: { key: 'NOPE', state: 'DONE' } })).status).toBe(400);
+      expect((await w.call(USERS.minjae, 'PATCH', '/customers/cus_mirae/offboarding', { body: { key: 'ACCOUNTS_DISABLED', state: 'PENDING' } })).status).toBe(400);
+      const alarms = await mark('ALARMS_DELETED'); // still PENDING: the engine owns it
+      expect(alarms.status).toBe(409);
+      expect(body(alarms).error.code).toBe('STEP_NOT_MANUAL');
+      const r = await mark('CUSTOMER_STACK_REMOVED', USERS.minjae, { detail: 'stack deleted by customer' });
+      expect(r.status).toBe(200);
+      expect(body(r).steps.find((s: any) => s.key === 'CUSTOMER_STACK_REMOVED')).toMatchObject({ state: 'DONE', byUserId: 'usr_minjae', detail: 'stack deleted by customer' });
+      const again = await mark('CUSTOMER_STACK_REMOVED', USERS.minjae, { detail: 'overwrite attempt' });
+      expect(again.status).toBe(200);
+      expect(body(again).steps.find((s: any) => s.key === 'CUSTOMER_STACK_REMOVED').detail).toBe('stack deleted by customer');
+      await mark('ACCOUNTS_DISABLED');
+      await mark('BUS_ALLOWLIST_REMOVED');
+      expect(body(await w.call(USERS.minjae, 'GET', '/customers/cus_mirae/offboarding')).completedAt).toBeNull(); // ALARMS_DELETED is still PENDING
+      expect((await w.fx.audits()).filter((a) => a.targetType === 'CustomerOffboarding')).toHaveLength(3);
+    });
+
+    it('offboarding GET shows the residual events (count, lastEventAt) from OffboardResidual', async () => {
+      await open();
+      await patch(USERS.minjae, 'TERMINATED', { confirmName: await nameOf() });
+      await w.fx.addResidual('cus_mirae', 'aws:111111111111', 3, new Date('2026-11-10T01:02:03.000Z'));
+      await w.fx.addResidual('cus_mirae', 'integration:x', 2, new Date('2026-11-11T01:02:03.000Z'));
+      expect(body(await w.call(USERS.minjae, 'GET', '/customers/cus_mirae/offboarding')).residual).toEqual({ lastEventAt: '2026-11-11T01:02:03.000Z', count: 5 });
+    });
+
+    it('incidents carry pagingSuppressed (list and detail); null when the customer was ACTIVE', async () => {
+      await open((s) => { s.customers.set('cus_mirae', { ...s.customers.get('cus_mirae')!, status: 'SUSPENDED' }); });
+      const list = body(await w.call(USERS.haeun, 'GET', '/incidents'));
+      expect(list.items.find((i: any) => i.id === w.ids.mirae).pagingSuppressed).toBe('CUSTOMER_SUSPENDED');
+      expect(list.items.find((i: any) => i.id === w.ids.hanbit).pagingSuppressed).toBeNull();
+      expect(body(await w.call(USERS.haeun, 'GET', `/incidents/${w.ids.mirae}`)).pagingSuppressed).toBe('CUSTOMER_SUSPENDED');
+      expect(body(await w.call(USERS.haeun, 'GET', `/incidents/${w.ids.hanbit}`)).pagingSuppressed).toBeNull();
+    });
+
+    it('there is no status door besides PATCH /customers/{id}/status', async () => {
+      await open();
+      expect((await w.call(USERS.minjae, 'PATCH', '/customers/cus_mirae', { body: { status: 'TERMINATED' } })).status).toBe(404);
+      expect(body(await w.call(USERS.minjae, 'GET', '/customers/cus_mirae/status')).status).toBe('ACTIVE');
     });
   });
 }

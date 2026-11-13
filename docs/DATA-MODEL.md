@@ -790,6 +790,7 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 | requestId, ip, userAgent | |
 
 - IX(customerId, at desc), IX(targetType, targetId).
+- **보관·삭제 주의(이슈 #25, D-45 구현 메모):** 두 버전은 이 테이블의 **행 수**다 — 고객 상태 버전 = `targetType='CustomerStatus'` 행 수, Responders 버전 = `targetType='Responders'` 행 수(고객별). 보관 기간 삭제가 이 행들을 지우면 버전이 줄어 이전 `If-Match`가 다시 맞을 수 있다. **`targetType IN ('CustomerStatus','Responders')`인 행은 보관 삭제 대상에서 뺀다**(또는 삭제 전에 버전을 컬럼으로 옮긴다). 지금은 컬럼을 두지 않았다.
 
 ### ContactRevealLog (연락처 열람 기록, 추가만, D-35)
 | 필드 | 타입 | 비고 |

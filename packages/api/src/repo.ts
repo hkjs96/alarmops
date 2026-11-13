@@ -120,6 +120,30 @@ export type ResponderWriteOutcome = { contactId: string; version: number } | 'CO
 /** Rotations a caller may see (MSP ones + those of customers in the scope) with what decides who is on shift. */
 export interface RotationsWorld { rotations: Rotation[]; overrides: Override[]; leaves: Leave[]; contacts: Map<string, Contact> }
 
+// ── customer status / offboarding (D-42, D-43) ──
+export type CustomerStatusValue = 'ACTIVE' | 'SUSPENDED' | 'TERMINATED';
+export const OFFBOARD_STEP_KEYS = ['PAGING_STOPPED', 'ALARMS_DELETED', 'CUSTOMER_STACK_REMOVED', 'ACCOUNTS_DISABLED', 'BUS_ALLOWLIST_REMOVED'] as const;
+export type OffboardStepKey = (typeof OFFBOARD_STEP_KEYS)[number];
+export interface OffboardStep { state: 'DONE' | 'PENDING' | 'MANUAL'; at?: string; byUserId?: string; detail?: string; [extra: string]: unknown }
+/**
+ * `version` of the status: the number of 'CustomerStatus' audit rows of the customer (written in the same transaction as
+ * each change, like the Responders version). A no-op write writes no audit row, so the version does not move.
+ */
+export interface CustomerStatusState { name: string; status: CustomerStatusValue; statusChangedAt: Date | null; version: number }
+export interface OffboardingState {
+  id: string; customerId: string; startedByUserId: string; reason: string; startedAt: Date; completedAt: Date | null;
+  steps: Record<OffboardStepKey, OffboardStep>;
+  /** OffboardResidual summed over the customer's sources (events that still arrive after TERMINATED). */
+  residual: { lastEventAt: Date | null; count: number };
+}
+/** 'CONFLICT': not at `expectedVersion`. 'CUSTOMER_TERMINATED': TERMINATED never changes to another status. 'NOT_FOUND': no such customer. */
+export type ChangeStatusOutcome =
+  | 'CONFLICT' | 'CUSTOMER_TERMINATED' | 'NOT_FOUND'
+  /** The row already has `to` (changed outside the API, e.g. by SQL, between the caller's read and this write): nothing was written. */
+  | 'NOOP'
+  | { status: CustomerStatusValue; statusChangedAt: Date; version: number; offboardingId: string | null; cloudAccountIds: string[] };
+export type MarkStepOutcome = 'OK' | 'ALREADY_DONE' | 'NOT_FOUND' | 'NOT_ALLOWED';
+
 export interface ApiRepository {
   // ── org / scope ──
   orgTree(scope: ScopeFilter): Promise<OrgTree>;
@@ -179,6 +203,24 @@ export interface ApiRepository {
   rotationsWorld(scope: ScopeFilter): Promise<RotationsWorld>;
   /** Active MSP staff contacts (kind INTERNAL), name order. */
   staffContacts(): Promise<Contact[]>;
+
+  // ── customer status / offboarding (D-43) ──
+  /** Caller has already checked the customer is visible. */
+  customerStatusState(customerId: string): Promise<CustomerStatusState | null>;
+  /**
+   * ONE transaction: lock the customer row, re-check version and status, set `status` + `statusChangedAt`, write `audit`
+   * (targetType 'CustomerStatus' — it carries the version) and, when `to` is TERMINATED, create the CustomerOffboarding
+   * (steps PAGING_STOPPED=DONE, ALARMS_DELETED=PENDING, the other three MANUAL). Returns the customer's CloudAccount ids
+   * (one OFFBOARD_ACCOUNT command each) — the publish happens after this commit, never inside it.
+   */
+  changeCustomerStatus(customerId: string, expectedVersion: number, to: CustomerStatusValue, offboarding: { startedByUserId: string; reason: string } | null, audit: AuditInput): Promise<ChangeStatusOutcome>;
+  offboardingState(customerId: string): Promise<OffboardingState | null>;
+  /** MANUAL/PENDING → DONE under a row lock; DONE is never overwritten; ALARMS_DELETED only from MANUAL. completedAt when all steps are DONE. */
+  markOffboardStepDone(customerId: string, key: OffboardStepKey, userId: string, detail: string | null, at: Date, audit: AuditInput): Promise<MarkStepOutcome>;
+  /** CloudAccount ids of the customer (one OFFBOARD_ACCOUNT each). */
+  cloudAccountIds(customerId: string): Promise<string[]>;
+  /** Command publish failed after commit: ALARMS_DELETED (unless DONE) becomes MANUAL and `COMMAND_PUBLISH_FAILED: <ids>` is APPENDED to its detail (the engine's earlier detail stays). */
+  recordOffboardPublishFailure(customerId: string, cloudAccountIds: string[], at: Date): Promise<void>;
 
   // ── idempotency (API-CONTRACT §2 "멱등", 24h) ──
   getIdempotent(key: string, now: Date): Promise<IdempotentEntry | null>;

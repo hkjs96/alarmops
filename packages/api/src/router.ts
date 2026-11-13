@@ -8,6 +8,7 @@ import { strictApiConfig, type ApiConfig } from './audience.js';
 import { requireAuth, scopeKey } from './auth.js';
 import { ApiError, assertCleanInput, errorResponse, header, isRecord, notFound, type ApiRequest, type ApiResponse } from './http.js';
 import { actOnIncident, bulkIncidents, getIncident, getNotifications, getTimeline, listIncidents, undoIncidents } from './incidents.js';
+import { getCustomerStatus, getOffboarding, patchCustomerStatus, patchOffboarding, type CommandPublisher } from './customerApi.js';
 import { deletePagingOverride, getCustomerPaging, getPagingPath, putCustomerPaging, putPagingOverride } from './pagingApi.js';
 import type { ApiRepository } from './repo.js';
 import { getScopeTree } from './scope.js';
@@ -16,6 +17,8 @@ import { deleteResponder, getMe, getOncallNow, getPagingHealth, getResponders, l
 export interface ApiDeps {
   repo: ApiRepository;
   now?: () => Date;
+  /** `alarm-commands` queue (D-43 OFFBOARD_ACCOUNT). Without it a TERMINATED change is refused (503) before any write. */
+  commands?: CommandPublisher;
   /**
    * Policy switches with safe defaults (see audience.ts). Build it with `loadApiConfig(process.env)`; a value that
    * is not the boolean `true` is treated as off (R-15).
@@ -24,7 +27,7 @@ export interface ApiDeps {
   log?: (level: 'warn' | 'error', msg: string, data?: Record<string, unknown>) => void;
 }
 
-type Handler = (req: ApiRequest, deps: { repo: ApiRepository; now: () => Date; config: ApiConfig }, p: string[]) => Promise<ApiResponse>;
+type Handler = (req: ApiRequest, deps: { repo: ApiRepository; now: () => Date; config: ApiConfig; commands?: CommandPublisher; log?: ApiDeps['log'] }, p: string[]) => Promise<ApiResponse>;
 interface Route {
   method: ApiRequest['method']; pattern: string[]; run: Handler;
   /**
@@ -65,6 +68,10 @@ export const ROUTES: Route[] = [
   route('POST', '/customers/:id/responders', (r, d, p) => postResponder(r, d, p[0]!)),
   route('PATCH', '/customers/:id/responders/:contactId', (r, d, p) => patchResponder(r, d, p[0]!, p[1]!)),
   route('DELETE', '/customers/:id/responders/:contactId', (r, d, p) => deleteResponder(r, d, p[0]!, p[1]!)),
+  route('GET', '/customers/:id/status', (r, d, p) => getCustomerStatus(r, d, p[0]!)),
+  route('PATCH', '/customers/:id/status', (r, d, p) => patchCustomerStatus(r, d, p[0]!)),
+  route('GET', '/customers/:id/offboarding', (r, d, p) => getOffboarding(r, d, p[0]!)),
+  route('PATCH', '/customers/:id/offboarding', (r, d, p) => patchOffboarding(r, d, p[0]!)),
   route('GET', '/rotations', (r, d) => listRotations(r, d)),
   route('GET', '/staff', (r, d) => listStaff(r, d)),
 ];
@@ -103,7 +110,7 @@ const stable = (v: unknown): string =>
       : JSON.stringify(v) ?? 'null';
 
 export function createApi(deps: ApiDeps) {
-  const inner = { repo: deps.repo, now: deps.now ?? (() => new Date()), config: strictApiConfig(deps.config) };
+  const inner = { repo: deps.repo, now: deps.now ?? (() => new Date()), config: strictApiConfig(deps.config), commands: deps.commands, log: deps.log };
   async function handle(req: ApiRequest): Promise<ApiResponse> {
     try {
       const auth = requireAuth(req); // every console route needs a session (401 before anything else)

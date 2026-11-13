@@ -82,6 +82,8 @@ export function listItem(inc: IncidentRow, c: ViewCtx) {
       mutedByMaintenance: v.mutedByMaintenance,
     },
     triggeredAt: inc.triggeredAt.toISOString(), acknowledgedAt: iso(inc.acknowledgedAt), acknowledgedBy: c.ser.user(inc.acknowledgedBy, ectx),
+    /** D-43: opened/found while the customer was SUSPENDED or TERMINATED -> recorded but never paged (stays so after reactivation). */
+    pagingSuppressed: inc.pagingSuppressed ?? null,
     resolvedAt: iso(inc.resolvedAt), ...(inc.resolvedVia ? { resolvedVia: inc.resolvedVia } : {}), version: inc.version,
   };
 }

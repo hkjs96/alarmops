@@ -9,3 +9,4 @@ export { displayKey } from './incidents.js';
 export { MAX_STEPS, MAX_AT_MIN, MAX_REPEAT } from './pagingApi.js';
 export * from './slug.js';
 export { authFromPrincipal, channelStates, maskEmail, maskPhone } from './peopleApi.js';
+export { InMemoryCommandPublisher, type AlarmCommand, type CommandPublisher } from './customerApi.js';

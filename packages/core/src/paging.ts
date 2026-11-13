@@ -20,6 +20,8 @@ export interface Contact {
   slackUserId?: string | null;
   emailVerifiedAt?: Date | null;
   phoneVerifiedAt?: Date | null;
+  /** How the phone was verified (`admin:seed` = a seed/demo number that must never reach a real SMS/voice provider). */
+  phoneVerifiedVia?: string | null;
   slackVerifiedAt?: Date | null;
 }
 export interface Responder {

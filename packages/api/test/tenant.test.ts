@@ -151,7 +151,7 @@ describe('404 parity: unknown and out-of-scope are the same bytes, never 403 (AP
       expect(res.status, `${r.method} ${path}`).toBe(404);
       tested.push(`${r.method} ${path}`);
     }
-    expect(tested).toHaveLength(15); // + paging-health and the four Responders routes
+    expect(tested).toHaveLength(19); // + paging-health, the four Responders routes and the four status/offboarding routes (D-43)
     // the scope tree is the only source of slugs/ids: nothing of Hanbit's is in any list response either
     for (const path of ['/scope-tree', '/incidents']) expect(JSON.stringify((await w.call(USERS.yuna, 'GET', path)).body)).not.toMatch(/hanbit|Hanbit|svc_web|shop/);
   });
