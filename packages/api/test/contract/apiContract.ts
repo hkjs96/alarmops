@@ -14,7 +14,7 @@ import { USERS, body, wire } from '../helpers.js';
 type Repo = TickRepository & ApiRepository;
 export type MakeApiFixture = MakeFixture<Repo>;
 
-interface CWorld {
+export interface CWorld {
   fx: StoreFixture<Repo>;
   sim: CSim;
   commands: InMemoryCommandPublisher;
@@ -25,7 +25,7 @@ interface CWorld {
 }
 
 /** The world of test/helpers.ts (two customers + one unmapped account, one open incident each), built through the fixture. */
-async function cworld(make: MakeApiFixture, extra: (s: MemoryApiStore) => void = () => undefined): Promise<CWorld> {
+export async function cworld(make: MakeApiFixture, extra: (s: MemoryApiStore) => void = () => undefined): Promise<CWorld> {
   const seed = seedWorld(new MemoryApiStore()) as MemoryApiStore;
   for (const [id, name, contactId, customerId] of [['usr_haeun', 'Haeun Kim', 'ct_haeun', null], ['usr_minjae', 'Minjae Lee', 'ct_minjae', null], ['usr_viewer', 'Viewer', null, null], ['usr_yuna', 'Yuna Seo', 'ct_yuna', 'cus_mirae'], ['usr_dohyun', 'Dohyun Han', 'ct_dohyun', 'cus_hanbit']] as const) {
     seed.users.set(id, { id, name, contactId, customerId });

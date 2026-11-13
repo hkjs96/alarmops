@@ -44,6 +44,23 @@ enum PagingSuppressedReason {
   CUSTOMER_TERMINATED
 }
 
+/// D-45: which retention stage a RetentionPurgeLog row reports (the purge certificate lists them in time order).
+enum RetentionStage {
+  CONNECTIONS
+  RETURN_PERIOD
+  AUDIT_EXPIRY
+  SLA_EXPIRY
+  LEGAL_HOLD_SET
+  LEGAL_HOLD_RELEASED
+}
+
+/// D-45: whether the pages of an incident reached anyone, kept in the pseudonymized SLA record after the delivery logs are purged.
+enum PagingOutcome {
+  DELIVERED
+  FAILED
+  NOT_PAGED
+}
+
 enum ContactKind {
   INTERNAL
   CUSTOMER
@@ -573,6 +590,11 @@ model Customer {
   status              CustomerStatus     @default(ACTIVE)
   /// D-43: last status change (the base of the retention period after TERMINATED).
   statusChangedAt     DateTime?          @db.Timestamptz(3)
+  /// D-45: legal hold. While set, the retention job deletes nothing of this customer. Set/cleared by an ADMIN only (audited + RetentionPurgeLog).
+  legalHold           Boolean            @default(false)
+  legalHoldAt         DateTime?          @db.Timestamptz(3)
+  legalHoldByUserId   String?
+  legalHoldReason     String?
   loginDomains        String[]           @default([])
   portalGrants        String[]           @default([])
   defaultGroupWaitSec Int?
@@ -604,6 +626,30 @@ model Customer {
   notificationChannels NotificationChannel[]
   offboarding          CustomerOffboarding?
   offboardResiduals    OffboardResidual[]
+  purgeLogs            RetentionPurgeLog[]
+}
+
+/// D-45: one row per retention stage that deleted something (or per legal-hold change). Customer-facing purge certificate data.
+/// Counts only, never content. `actor` = 'system' (the daily job) or the ADMIN's user id. Kept after the customer's data is gone.
+model RetentionPurgeLog {
+  id         String         @id @default(cuid())
+  customerId String
+  customer   Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  stage      RetentionStage
+  /// { entity: rowsDeletedOrScrubbed } e.g. { "Contact": 4, "RawEvent": 120 }; for a hold change { "reason": … } is NOT stored here (see AuditLog).
+  counts     Json
+  actor      String
+  at         DateTime       @default(now()) @db.Timestamptz(3)
+
+  @@index([customerId, at])
+}
+
+/// D-45: the daily retention job runs once per KST day: the first tick of the day inserts the row (day = 'YYYY-MM-DD' in KST).
+model RetentionClaim {
+  day        String    @id
+  claimedAt  DateTime  @default(now()) @db.Timestamptz(3)
+  /// Set when the run ended. A claim that is not finished and older than 30 minutes can be taken again (the run died).
+  finishedAt DateTime? @db.Timestamptz(3)
 }
 
 /// D-43: one per TERMINATED customer. `steps` = { PAGING_STOPPED | ALARMS_DELETED | CUSTOMER_STACK_REMOVED | ACCOUNTS_DISABLED |
@@ -678,6 +724,10 @@ model CloudAccount {
   alarmWriterRoleArn    String?
   tagWriterRoleArn      String?
   remediatorRoleArn     String?
+  /// D-45: set when the offboarding is complete and the retention job removed the connection data. The row stays so that
+  /// residual events of this account still map to the (TERMINATED) customer instead of looking unmapped.
+  connectionPurgedAt    DateTime?    @db.Timestamptz(3)
+  disabled              Boolean      @default(false)
   alarmWriterEnabled    Boolean      @default(false)
   tagWriterEnabled      Boolean      @default(false)
   remediatorEnabled     Boolean      @default(false)
@@ -908,6 +958,10 @@ model Incident {
   lastManualEscalationAt DateTime?    @db.Timestamptz(3)
   /// D-43: set => the tick never pages this incident (and never will, even after the customer is ACTIVE again).
   pagingSuppressed       PagingSuppressedReason?
+  /// D-45: set when the incident was reduced to its pseudonymized SLA record (title, details, people names gone).
+  purgedAt               DateTime?    @db.Timestamptz(3)
+  /// D-45: set with purgedAt, computed from the delivery logs before they are deleted.
+  pagingOutcome          PagingOutcome?
 
   alerts           IncidentAlert[]
   events           IncidentEvent[]

@@ -44,7 +44,7 @@ const later = migNames.filter((m) => m !== '0001_init').map((m) => [m, fs.readFi
 //     generated statement (index, foreign key) present. Offline, statement by statement; CI's
 //     `prisma migrate diff --from-migrations` against a shadow database stays the authority.
 //     A later migration may hold CREATE TYPE … AS ENUM, CREATE TABLE, ALTER TABLE … ADD COLUMN, CREATE [UNIQUE] INDEX,
-//     ALTER TABLE … ADD CONSTRAINT and hand-written blocks (DO $$ … $$, ALTER TABLE … ENABLE ROW LEVEL SECURITY,
+//     ALTER TABLE … ADD CONSTRAINT and hand-written blocks (DO $$ … $$, CREATE FUNCTION, ALTER TABLE … ENABLE ROW LEVEL SECURITY,
 //     REVOKE, GRANT, COMMENT). Anything else (DROP, ALTER COLUMN, RENAME, ALTER TYPE …) is not folded: extend this check.
 if (later.length === 0) {
   if (!migration.startsWith(generated)) {
@@ -68,7 +68,7 @@ if (later.length === 0) {
       if (!t) { console.error(`${where}: ADD COLUMN on unknown table ${x[1]}`); process.exit(1); }
       for (const c of x[2].split(/, ADD COLUMN /)) t.add(c.replace(/^ADD COLUMN /, '').trim());
     } else if (/^(CREATE (UNIQUE )?INDEX|ALTER TABLE "[^"]+" ADD CONSTRAINT|CREATE EXTENSION)/.test(st)) m.other.add(st);
-    else if (strict && !/^(DO |ALTER TABLE "?[^" ]+"? ENABLE ROW LEVEL SECURITY|REVOKE |GRANT |COMMENT )/.test(st)) { console.error(`${where}: check.mjs cannot fold this statement; extend db/scripts/check.mjs:\n  ${st.slice(0, 160)}`); process.exit(1); }
+    else if (strict && !/^(DO |CREATE FUNCTION |ALTER TABLE "?[^" ]+"? ENABLE ROW LEVEL SECURITY|REVOKE |GRANT |COMMENT )/.test(st)) { console.error(`${where}: check.mjs cannot fold this statement; extend db/scripts/check.mjs:\n  ${st.slice(0, 160)}`); process.exit(1); }
   };
   const want = model();
   for (const st of statements(generated)) add(want, st, false, 'schema');
