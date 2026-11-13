@@ -1,0 +1,45 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  AlarmOps central EventBridge bus (B1) with a resource policy that lets only allow-listed customer accounts
+  put events (D-07, D-43). The allow list is the AllowedAccountIds parameter, changed only by the
+  bus-allowlist GitHub Actions workflow (infra/aws/README.md).
+
+Parameters:
+  BusName:
+    Type: String
+    Default: alarmops-central
+    AllowedPattern: '^[A-Za-z0-9._-]{1,64}$'
+  AllowedAccountIds:
+    Type: String
+    Default: ""
+    Description: Comma-separated 12-digit customer AWS account IDs allowed to put events. Empty = nobody.
+    AllowedPattern: '^$|^[0-9]{12}(,[0-9]{12})*$'
+
+Conditions:
+  HasAllowedAccounts: !Not [!Equals [!Ref AllowedAccountIds, ""]]
+
+Resources:
+  CentralBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: !Ref BusName
+
+  # One statement, principals = the allow list. Removing an account id and updating the stack removes its access.
+  # Without any account the policy is not created and the bus accepts events only from this account.
+  CustomerPutEventsPolicy:
+    Type: AWS::Events::EventBusPolicy
+    Condition: HasAllowedAccounts
+    Properties:
+      EventBusName: !Ref CentralBus
+      StatementId: AllowListedCustomerAccounts
+      Statement:
+        Effect: Allow
+        Principal:
+          AWS: !Split [",", !Ref AllowedAccountIds]
+        Action: events:PutEvents
+        Resource: !GetAtt CentralBus.Arn
+
+Outputs:
+  CentralBusArn:
+    Value: !GetAtt CentralBus.Arn
+    Description: Give this value to customers as the CentralEventBusArn stack parameter.
