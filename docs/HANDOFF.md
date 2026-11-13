@@ -21,7 +21,7 @@ CI 작업: `test`, `e2e`(mock), `e2e-live`(postgres:16), `db`(migrate deploy, dr
 
 ## 2. 사용자가 할 일 (막힌 것)
 
-1. **개발용 Supabase 프로젝트 생성.** `docs/SETUP-SUPABASE.md`의 1~6단계를 따른다. 끝나면 비밀값은 빼고 두 가지만 허브에 알린다.
+1. ~~**개발용 Supabase 프로젝트 생성.**~~ **완료(11/13):** alarmops-dev, dev-db 초록(0001~0003), anon 확인 `503 PGRST002`(Data API 꺼짐). `docs/SETUP-SUPABASE.md`의 1~6단계를 따른다. 끝나면 비밀값은 빼고 두 가지만 허브에 알린다.
    - dev-db 실행 결과(초록 또는 실패 단계)
    - anon curl 결과의 마지막 줄 숫자(200이 아니면 정상)
 2. **회사 PC `.env` 채우기.** SETUP-SUPABASE 7단계. 에이전트는 `.env`를 읽지 않는다.
@@ -46,7 +46,7 @@ CI 작업: `test`, `e2e`(mock), `e2e-live`(postgres:16), `db`(migrate deploy, dr
    - pg_cron과 pg_net으로 `/api/internal/tick` 호출을 시험한다(API-CONTRACT §5).
 2. **알림 발송기 연결** (이슈 #10)
    - 문자·전화·Slack 어댑터. 멱등 키 전달을 확인한다.
-   - 부분 장애 운영 규칙과 DEGRADED를 누가 볼지 정한다.
+   - 부분 장애 운영 규칙을 정한다. DEGRADED 알림 대상은 D-44(온콜 MSP 직원, Slack·이메일).
    - seed 번호(`+82100000…`, `phoneVerifiedVia='admin:seed'`)를 거부하는 코드 가드를 넣는다.
    - 정지·해지 고객 처리(D-43)를 반영한다.
 3. **알람 엔진 마무리** (services/alarm-engine, infra)
