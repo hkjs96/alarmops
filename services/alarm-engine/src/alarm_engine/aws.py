@@ -6,6 +6,7 @@ Rules:
 - AssumeRole always passes the account's ExternalId (D-07). A role that is missing or disabled raises
   `CapabilityDisabled` before any call.
 - Alarm clients are created per *alarm* region (global types → us-east-1, others → resource region; 4-3, 4-4).
+- Create is one PutMetricAlarm with Tags (ManagedBy=AlarmOps); ManagedBy is never sent to tag/untag (D-43).
 - After PutMetricAlarm the ARN is read back with the same client and must contain the customer account id; tagging
   failures raise (4-5, 1a1080b).
 """
@@ -35,6 +36,30 @@ class CapabilityDisabled(Exception):
 
 class TaggingFailed(Exception):
     pass
+
+
+class NotOwned(Exception):
+    """An alarm with this name exists but does not carry ManagedBy=AlarmOps (customer's own alarm, a legacy
+    `AlarmManager` alarm, ...). The AlarmWriter IAM policy cannot tell it apart on create, so the engine checks first
+    and never touches it (D-43). The sync records it as a name collision."""
+
+    def __init__(self, name: str, managed_by: str | None):
+        super().__init__(f"NAME_COLLISION: alarm {name!r} exists and is not managed by AlarmOps (ManagedBy={managed_by!r})")
+        self.alarm_name = name
+        self.managed_by = managed_by
+
+
+class ForbiddenTagKey(Exception):
+    """Programming error: TagResource/UntagResource must never name ManagedBy (IAM Deny, D-43)."""
+
+
+PROTECTED_TAG_KEYS = frozenset({"ManagedBy"})
+
+
+def assert_no_protected_tag_keys(keys: list[str]) -> None:
+    bad = sorted(set(keys) & PROTECTED_TAG_KEYS)
+    if bad:
+        raise ForbiddenTagKey(f"tag_resource/untag_resource must not name {bad}")
 
 
 @dataclass(frozen=True)
@@ -158,20 +183,51 @@ class AlarmWriter:
             raise TaggingFailed(f"alarm ARN {arn!r} is not in customer account {self.account_id}")
         return str(arn)
 
+    def _existing(self, name: str) -> tuple[str, dict[str, str]] | None:
+        """(ARN, tags) of an alarm with exactly this name, or None. ARN must be in the customer account."""
+        resp = self.cw.describe_alarms(AlarmNames=[name], AlarmTypes=["MetricAlarm", "CompositeAlarm"])
+        rows = [r for r in list(resp.get("MetricAlarms", [])) + list(resp.get("CompositeAlarms", []))
+                if r.get("AlarmName") == name]
+        if not rows:
+            return None
+        arn = str(rows[0].get("AlarmArn", ""))
+        if f":{self.account_id}:alarm:" not in arn:
+            raise TaggingFailed(f"alarm ARN {arn!r} is not in customer account {self.account_id}")
+        tags = {t["Key"]: t["Value"] for t in self.cw.list_tags_for_resource(ResourceARN=arn).get("Tags", [])}
+        return arn, tags
+
+    def _tag(self, arn: str, tags: list[dict[str, str]]) -> None:
+        assert_no_protected_tag_keys([t["Key"] for t in tags])
+        try:
+            self.cw.tag_resource(ResourceARN=arn, Tags=tags)
+        except Exception as e:  # noqa: BLE001 — surfaced, never swallowed (4-5)
+            raise TaggingFailed(f"TagResource failed for {arn}: {e}") from e
+
+    def untag(self, arn: str, keys: list[str]) -> None:
+        assert_no_protected_tag_keys(keys)
+        self.cw.untag_resource(ResourceARN=arn, TagKeys=keys)
+
     def put(self, d: DesiredAlarm, *, name: str, severity: str, extra_tags: list[dict[str, str]] | None = None) -> str:
+        """Create or update (D-43). Create = one PutMetricAlarm with Tags (ManagedBy=AlarmOps is only allowed there).
+        Update = PutMetricAlarm without Tags + TagResource without ManagedBy. A same-name alarm that is not ours
+        raises `NotOwned` before any write."""
         params = d.put_params(self.actions)
         params["AlarmName"] = name
         md = naming.parse_metadata(d.description)
         assert md is not None
         params["AlarmDescription"] = naming.build_description(md.resource_type, md.resource_id, md.metric_key,
                                                               severity, md.resource_name or "")
+        extra = list(extra_tags or [])
+        existing = self._existing(name)
+        if existing is None:
+            tags = [{"Key": "ManagedBy", "Value": naming.MANAGED_BY}, {"Key": "Severity", "Value": severity}] + extra
+            self.cw.put_metric_alarm(**params, Tags=tags)
+            return self._arn(name)
+        arn, current = existing
+        if current.get("ManagedBy") != naming.MANAGED_BY:
+            raise NotOwned(name, current.get("ManagedBy"))
         self.cw.put_metric_alarm(**params)
-        arn = self._arn(name)
-        tags = [{"Key": "ManagedBy", "Value": naming.MANAGED_BY}, {"Key": "Severity", "Value": severity}]
-        try:
-            self.cw.tag_resource(ResourceARN=arn, Tags=tags + list(extra_tags or []))
-        except Exception as e:  # noqa: BLE001 — surfaced, never swallowed (4-5)
-            raise TaggingFailed(f"TagResource failed for {arn}: {e}") from e
+        self._tag(arn, [{"Key": "Severity", "Value": severity}] + extra)
         return arn
 
     def apply(self, cmd: Command, extra_tags: list[dict[str, str]] | None = None) -> str | None:
@@ -196,7 +252,4 @@ class AlarmWriter:
         keep["AlarmDescription"] = naming.build_description(md.resource_type, md.resource_id, md.metric_key, severity,
                                                             md.resource_name or "")
         self.cw.put_metric_alarm(**keep)
-        try:
-            self.cw.tag_resource(ResourceARN=actual.arn, Tags=[{"Key": "Severity", "Value": severity}])
-        except Exception as e:  # noqa: BLE001
-            raise TaggingFailed(str(e)) from e
+        self._tag(actual.arn, [{"Key": "Severity", "Value": severity}])

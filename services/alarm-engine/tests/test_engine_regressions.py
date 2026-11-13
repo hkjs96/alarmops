@@ -251,12 +251,18 @@ def test_kb_4_5_arn_in_customer_account_and_managedby_tag(world):
 
 
 def test_kb_4_5_tagging_failure_is_surfaced(world):
+    """Create carries its tags in PutMetricAlarm (no TagResource). A later in-place update tags Severity and the
+    console tags with TagResource; its failure is surfaced, never swallowed."""
     repo, sessions, disc, eng, acc = world
-    sessions.cw(SEOUL).fail_tagging = True
+    cw = sessions.cw(SEOUL)
     disc.resources = [ec2()]
+    assert eng.sync_account(acc.id, "DAILY")["errors"] == 0
+    assert "tag_resource" not in cw.writes()
+    cw.fail_tagging = True
+    repo.defaults[("MSP", None, "EC2", "CPUUtilization")] = LayerValues(threshold=55.0)
     counts = eng.sync_account(acc.id, "DAILY")
-    assert counts["errors"] == 3
-    assert next(iter(repo.runs.values())).status == "PARTIAL"
+    assert counts["errors"] == 1
+    assert next(reversed(repo.runs.values())).status == "PARTIAL"
 
 
 # ── 4-6 ownership

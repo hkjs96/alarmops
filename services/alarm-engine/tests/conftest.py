@@ -51,7 +51,17 @@ class FakeCloudWatch:
 
     def put_metric_alarm(self, **kw: Any) -> dict:
         self.calls.append(("put_metric_alarm", kw))
-        row = dict(kw)
+        # AlarmWriter IAM policy (D-43): create needs request tag ManagedBy=AlarmOps; update needs resource tag.
+        name = kw["AlarmName"]
+        req = {t["Key"]: t["Value"] for t in kw.get("Tags", [])}
+        if name in self.alarms:
+            if self.tags.get(self.arn(name), {}).get("ManagedBy") != "AlarmOps":
+                raise ClientError("AccessDenied: update of alarm without ManagedBy=AlarmOps")
+        elif req.get("ManagedBy") != "AlarmOps":
+            raise ClientError("AccessDenied: create without request tag ManagedBy=AlarmOps")
+        row = {k: v for k, v in kw.items() if k != "Tags"}
+        if name not in self.alarms:
+            self.tags[self.arn(name)] = req
         row["AlarmArn"] = self.arn(kw["AlarmName"])
         row.setdefault("StateValue", self.alarms.get(kw["AlarmName"], {}).get("StateValue", "INSUFFICIENT_DATA"))
         self.alarms[kw["AlarmName"]] = row
@@ -69,11 +79,17 @@ class FakeCloudWatch:
         self.calls.append(("tag_resource", {"ResourceARN": ResourceARN, "Tags": Tags}))
         if self.fail_tagging:
             raise ClientError("AccessDenied")
+        if any(t["Key"] == "ManagedBy" for t in Tags):
+            raise ClientError("AccessDenied: explicit deny on ManagedBy")
+        if self.tags.get(ResourceARN, {}).get("ManagedBy") != "AlarmOps":
+            raise ClientError("AccessDenied: resource not tagged ManagedBy=AlarmOps")
         self.tags.setdefault(ResourceARN, {}).update({t["Key"]: t["Value"] for t in Tags})
         return {}
 
     def untag_resource(self, ResourceARN: str, TagKeys: list[str]) -> dict:
         self.calls.append(("untag_resource", {"ResourceARN": ResourceARN, "TagKeys": TagKeys}))
+        if "ManagedBy" in TagKeys:
+            raise ClientError("AccessDenied: explicit deny on ManagedBy")
         for k in TagKeys:
             self.tags.get(ResourceARN, {}).pop(k, None)
         return {}

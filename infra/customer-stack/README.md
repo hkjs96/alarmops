@@ -63,3 +63,5 @@ python -m unittest discover -s infra/test -v
 1. **생성**: `put_metric_alarm(..., Tags=[{ManagedBy: AlarmOps}, {Severity: ...}, ...extra])` 한 번. 생성 뒤 `tag_resource`로 `ManagedBy`를 붙이지 않는다.
 2. **갱신**: 기존 소유 알람에는 `Tags` 없이 `put_metric_alarm`. `tag_resource`·`untag_resource`의 키에 `ManagedBy`를 넣지 않는다(Severity, `AlarmOps:Console:*`만).
 3. 생성과 갱신을 가르려면 호출 전에 `describe_alarms`로 존재를 확인한다(같은 이름의 고객 알람이면 중단).
+
+엔진 반영 상태(백엔드): `services/alarm-engine/src/alarm_engine/aws.py`의 `AlarmWriter.put()`이 위 1~3을 따른다. 같은 이름의 소유가 아닌 알람은 `NotOwned`로 중단하고 동기화 결과에 `nameCollisions`로 기록한다. `tag_resource`·`untag_resource`에 `ManagedBy`를 넣으면 `ForbiddenTagKey`가 난다. 생성 시 `TagResource` 필요 여부(위 미확인 항목)는 여전히 개발 계정 실측이 필요하다.
