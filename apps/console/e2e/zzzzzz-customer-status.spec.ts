@@ -95,6 +95,7 @@ test.describe("customer status, ADMIN", () => {
     await page.getByTestId("cs-confirm-name").fill("Dasol Health");
     await confirmBtn(page).click();
     await expect(page.getByTestId("cs-err")).toContainText("was not terminated");
+    await expect(page.getByTestId("cs-err")).not.toContainText("alarm-commands");
     await expect(page.getByTestId("cs-err")).toContainText("Nothing was changed");
     await expect(dialog(page), "the dialog stays so it can be tried again").toBeVisible();
     await dialog(page).locator('button[data-role="cancel"]').click();
@@ -136,6 +137,24 @@ for (const as of ["operator", "viewer"]) {
   });
 }
 
+test("a portal user sees the badge but none of the staff controls", async ({ page }) => {
+  await signIn(page, "/customers/mirae", "portal");
+  await expect(page.getByTestId("customer-status-badge").first()).toBeVisible();
+  await expect(page.getByTestId("cs-change")).toHaveCount(0);
+  await expect(page.getByText("needs the Admin role")).toHaveCount(0);
+  await expect(page.getByText("not shown to your role")).toHaveCount(0);
+});
+
+test("Esc closes the dialog and the focus goes back to Change status", async ({ page }) => {
+  await signIn(page, "/customers/ara");
+  await page.getByTestId("cs-change").click();
+  await page.getByTestId("cs-suspend").click();
+  await expect(dialog(page)).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dialog(page)).toHaveCount(0);
+  await expect(page.getByTestId("cs-change")).toBeFocused();
+});
+
 test("a non-admin still sees the badge and no checklist of a terminated customer", async ({ page }) => {
   await signIn(page, "/customers/iruda", "operator");
   await expect(page.getByTestId("customer-status-badge").first()).toHaveText("Terminated");
@@ -150,6 +169,7 @@ test.describe("offboarding checklist (iruda)", () => {
     await expect(page.getByTestId("ob-cleanup")).toContainText("Cleanup needed");
     await expect(page.getByTestId("ob-cleanup")).toContainText("Events still arriving from this customer: 4, last at 2026-11-09 02:40:00 KST");
     await expect(page.getByTestId("ob-progress")).toHaveText("2 of 5 done");
+    await expect(page.getByTestId("ob-detail")).toContainText("This account has no AlarmWriter role");
     await expect(page.getByTestId("ob-detail")).toContainText("CAPABILITY_DISABLED");
     await expect(page.getByTestId("ob-retention")).toContainText("deleted on 2026-12-06");
 

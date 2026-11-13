@@ -347,6 +347,8 @@ export interface Me {
   name: string;
   email: string;
   role: Role;
+  /** INTERNAL = MSP staff, CUSTOMER = portal user (GET /me, API-CONTRACT 8). Absent = staff. */
+  kind?: "INTERNAL" | "CUSTOMER";
 }
 
 /**

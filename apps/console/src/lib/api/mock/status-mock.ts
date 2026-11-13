@@ -47,6 +47,8 @@ interface Ctx {
   customers: FxCustomer[];
   incidents: () => IncidentListItem[];
   me: { id: string; role: Role };
+  /** a portal user: these routes do not exist for them (404) */
+  portal?: boolean;
   now: () => string;
   need: (role: Role) => void;
   err: (status: number, code: string, message: string, details?: Record<string, unknown>) => ApiError;
@@ -56,6 +58,7 @@ type StatusApi = Pick<ConsoleApi, "getCustomerStatus" | "patchCustomerStatus" | 
 
 export function createStatusApi(x: Ctx): StatusApi {
   const customer = (id: string) => {
+    if (x.portal) throw x.err(404, "NOT_FOUND", "Not found.");
     const c = x.customers.find((k) => k.id === id);
     if (!c) throw x.err(404, "NOT_FOUND", "Not found.");
     return c;

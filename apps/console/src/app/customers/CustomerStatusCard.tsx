@@ -1,6 +1,6 @@
 "use client";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Card, ConfirmDialog, CustomerStatusBadge } from "@alarmops/design-system";
 import type { CustomerStatusValue } from "@/lib/api/types";
 import { hasRole, roleReason, useShell } from "@/components/ShellContext";
@@ -17,11 +17,14 @@ const TO: Record<Kind, CustomerStatusValue> = { suspend: "SUSPENDED", resume: "A
  * the reason, like Edit responders. `version` is the If-Match of the change (null = not readable for this user).
  */
 export function CustomerStatusCard({ customerId, customerName, status, statusChangedAt, version }: {
-  customerId: string; customerName: string; status: CustomerStatusValue; statusChangedAt: string | null; version: number | null;
+  customerId: string; customerName: string; status: CustomerStatusValue | null; statusChangedAt: string | null; version: number | null;
 }) {
   const shell = useShell();
   const router = useRouter();
   const admin = hasRole(shell.user, "ADMIN");
+  const trigger = useRef<HTMLButtonElement>(null);
+  /** the dialog's opener is gone by the time it closes (the options row folds): focus goes back to Change status */
+  const refocus = () => { setTimeout(() => trigger.current?.focus(), 0); };
   const [open, setOpen] = useState(false);
   const [ask, setAsk] = useState<Kind | null>(null);
   const [reason, setReason] = useState("");
@@ -30,23 +33,25 @@ export function CustomerStatusCard({ customerId, customerName, status, statusCha
   const [err, setErr] = useState<{ text: string; code: string } | null>(null);
 
   const terminated = status === "TERMINATED";
+  const unknown = status === null;
   const why = !admin ? roleReason(shell.user, "ADMIN", "Changing a customer's status")
     : terminated ? "A terminated customer cannot change status. To use it again, connect it as a new customer."
-    : version === null ? "The status could not be read, so it cannot be changed. Reload the page." : "";
+    : unknown || version === null ? "The status of this customer is not available to you, so it cannot be changed here." : "";
 
   const begin = (k: Kind) => { setAsk(k); setReason(""); setTyped(""); setErr(null); setOpen(false); shell.clearToast(); };
-  const close = () => { if (!busy) setAsk(null); };
+  const close = () => { if (!busy) { setAsk(null); refocus(); } };
   const reasonOk = reason.trim().length > 0 && reason.trim().length <= 500;
   const nameOk = ask !== "terminate" || typed.trim() === customerName;
   const ready = reasonOk && nameOk;
 
   async function confirm() {
-    if (!ask || version === null || busy || !ready) return;
+    if (!ask || status === null || version === null || busy || !ready) return;
     setBusy(true); setErr(null);
     const r = await callAction(() => changeCustomerStatus(customerId, { status: TO[ask], reason: reason.trim(), ...(ask === "terminate" ? { confirmName: typed.trim() } : {}) }, version));
     setBusy(false);
     if (!r.ok) { setErr({ text: errorLine(r, { what: "Changing a customer's status", where: customerName }), code: r.code }); return; }
     setAsk(null);
+    refocus();
     shell.toast(ask === "suspend" ? `${customerName} suspended. Nobody is paged for its alarms.` : ask === "resume" ? `${customerName} resumed. Paging starts with the next alarm.`
       : r.data.commandsFailed?.length ? `${customerName} terminated. Deleting alarms failed for ${r.data.commandsFailed.length} account(s): finish it on the checklist.` : `${customerName} terminated. Offboarding has started.`);
     router.refresh();
@@ -56,19 +61,19 @@ export function CustomerStatusCard({ customerId, customerName, status, statusCha
   const title = ask === "suspend" ? `Suspend ${customerName}?` : ask === "resume" ? `Resume ${customerName}?` : `Terminate ${customerName}?`;
 
   return (
-    <Card title="Status" accent={status === "SUSPENDED" ? "amber" : undefined} actions={<CustomerStatusBadge status={status} />}>
+    <Card title="Status" accent={status === "SUSPENDED" ? "amber" : undefined} actions={status ? <CustomerStatusBadge status={status} /> : <span className="sm mut">Status unknown</span>}>
       <div data-testid="customer-status" data-status={status} data-version={version ?? undefined}>
         <p className="sm" style={{ marginTop: 0 }}>
-          {status === "ACTIVE" ? <>Alarms from <b>{customerName}</b> page the call order as usual.</>
+          {unknown ? <>The status of <b>{customerName}</b> is not available to your account, so it is not shown here.</> : status === "ACTIVE" ? <>Alarms from <b>{customerName}</b> page the call order as usual.</>
             : status === "SUSPENDED" ? <>Alarms from <b>{customerName}</b> are recorded, but <b>nobody is paged</b> (customer contacts and MSP staff). A business-hours summary is sent instead.</>
             : <>Paging for <b>{customerName}</b> has stopped and its offboarding is under way. This cannot be undone.</>}
         </p>
         <p className="sm mut" data-testid="status-changed-at">
-          {statusChangedAt ? <>Status changed {kstDateTime(statusChangedAt)}.</> : status === "ACTIVE" ? "The status has not been changed." : "When the status changed is not shown to your role."}
+          {unknown ? null : statusChangedAt ? <>Status changed {kstDateTime(statusChangedAt)}.</> : status === "ACTIVE" ? "The status has not been changed." : "When the status changed is not shown to your role."}
         </p>
 
         <div className="row cs-actions">
-          <button type="button" className="btn" data-testid="cs-change" aria-expanded={open} aria-controls="cs-options" disabled={Boolean(why)} aria-describedby={why ? "cs-why" : undefined}
+          <button type="button" ref={trigger} className="btn" data-testid="cs-change" aria-expanded={open} aria-controls="cs-options" disabled={Boolean(why)} aria-describedby={why ? "cs-why" : undefined}
             onClick={() => setOpen((o) => !o)}>Change status</button>
           {open && !why ? (
             <span className="row" id="cs-options" role="group" aria-label={`Change the status of ${customerName}`}>
@@ -124,7 +129,7 @@ export function CustomerStatusCard({ customerId, customerName, status, statusCha
             {err ? (
               <div className="co-err" role="alert" data-testid="cs-err">
                 <span>{err.text}</span>
-                {stale ? <button type="button" className="btn sm" data-testid="cs-reload" onClick={() => { setAsk(null); router.refresh(); }}>Reload</button> : null}
+                {stale ? <button type="button" className="btn sm" data-testid="cs-reload" onClick={() => { setAsk(null); refocus(); router.refresh(); }}>Reload</button> : null}
               </div>
             ) : null}
           </div>

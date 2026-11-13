@@ -67,7 +67,7 @@ export function errorText(f: Failure, ctx: ErrorContext = {}): string {
       const p = parseField(d.field);
       return p.step ? `Step ${p.step}: the person or rotation it calls was not found for this customer. Choose who it calls.` : "Not found.";
     }
-    case "COMMANDS_UNAVAILABLE": return "The queue that deletes the customer's alarms is not available, so the customer was not terminated. Nothing was changed: its status and paging are as they were. Try again in a few minutes, or ask the platform team to check the alarm-commands queue.";
+    case "COMMANDS_UNAVAILABLE": return "Alarm deletion can't be sent right now, so the customer was not terminated. Nothing was changed. Try again later or ask the platform team.";
     case "CUSTOMER_TERMINATED": return "A terminated customer cannot change status. To use it again, connect it as a new customer. Reload to see the current state.";
     case "STEP_NOT_MANUAL": return "This step is done by AlarmOps itself and is not waiting for a person. Reload to see where it stands.";
     case "NOT_FOUND": return "Not found. It may have been removed, or you may not have access to it.";

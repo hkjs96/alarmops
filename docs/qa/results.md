@@ -954,3 +954,5 @@ mock 모드(`MOCK_API=1 E2E_ALLOW_MOCK=1 next build` 후 `next start -p 3217`), 
 | 2026-11-13 | 키보드·초점 | cade37d | MSP 관리자 (1440) | Suspend… 열면 초점이 사유 입력칸으로 이동, role=dialog 있음. Esc로 닫히나 초점이 Change status가 아닌 body로 떨어짐 | P2 | (콘솔 출력만) |
 
 mock 모드(`MOCK_API=1 E2E_ALLOW_MOCK=1 next build` 후 `next start -p 3191`), Chromium /opt/pw-browsers/chromium. 스크립트는 저장소 밖(scratchpad)에 둠. 검증자 분리 서브에이전트는 쓸 수 없어 소스를 읽지 않고 화면·측정값만 보고 판정. 서버는 흐름 중 상태가 쌓이므로(종료는 되돌릴 수 없음) 일부 캡처는 앞서 종료·일시중지한 고객이 트리에 함께 보임. 판정: P0·P1 없음, P2 2건(포털 열람자에게 직원용 비활성 컨트롤·문구 노출, Esc 후 초점 소실).
+
+2026-11-13 후속: qa-ux 권고(포털 사용자에게 직원 컨트롤 숨김, /customers 문구, Esc 후 초점 복귀, 503 문구, CAPABILITY_DISABLED 설명, 확인 입력칸 44px, 활성 위험 버튼) 및 security 권고(상태 미상은 ACTIVE로 보이지 않음, 사유·메모 500자, 오류는 errorLine) 반영 — 이 커밋의 다음 커밋, mock e2e 전체 재실행.

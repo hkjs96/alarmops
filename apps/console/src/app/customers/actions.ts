@@ -36,7 +36,7 @@ export async function changeCustomerStatus(customerId: string, input: CustomerSt
     const id = assertId(customerId, "customer");
     const v = assertVersion(version);
     if (!input || typeof input !== "object" || !STATUSES.includes(input.status)) throw new InvalidInputError("Invalid status.");
-    if (typeof input.reason !== "string" || input.reason.length > 2000) throw new InvalidInputError("Invalid reason.");
+    if (typeof input.reason !== "string" || input.reason.trim().length > 500) throw new InvalidInputError("Invalid reason.");
     if (input.confirmName !== undefined && (typeof input.confirmName !== "string" || input.confirmName.length > 300)) throw new InvalidInputError("Invalid name.");
     const body: CustomerStatusInput = { status: input.status, reason: input.reason, ...(input.confirmName !== undefined ? { confirmName: input.confirmName } : {}) };
     return (await getApi()).patchCustomerStatus(id, body, v);
@@ -48,7 +48,7 @@ export async function markOffboardingStep(customerId: string, key: OffboardStepK
   return run(async () => {
     const id = assertId(customerId, "customer");
     if (!STEPS.includes(key)) throw new InvalidInputError("Invalid step.");
-    if (detail !== undefined && (typeof detail !== "string" || detail.length > 2000)) throw new InvalidInputError("Invalid note.");
+    if (detail !== undefined && (typeof detail !== "string" || detail.trim().length > 500)) throw new InvalidInputError("Invalid note.");
     const note = detail?.trim();
     return (await getApi()).markOffboardStep(id, { key, state: "DONE", ...(note ? { detail: note } : {}) });
   });

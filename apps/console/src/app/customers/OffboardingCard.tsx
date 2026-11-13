@@ -30,6 +30,12 @@ const STATE: Record<OffboardStepState, { label: string; shape: Shape; cls: strin
   MANUAL: { label: "Needs a person", shape: "tri", cls: "warn" },
 };
 const DAY = 86_400_000;
+/** what an engine code means for the person who has to act (the code itself stays below it) */
+function humanDetail(d: string): string | null {
+  if (d.includes("CAPABILITY_DISABLED")) return "This account has no AlarmWriter role. Delete the AlarmOps alarms by hand, then mark this step done.";
+  if (d.includes("COMMAND_PUBLISH_FAILED")) return "Alarm deletion could not be sent for this account. Delete the AlarmOps alarms by hand, then mark this step done.";
+  return null;
+}
 
 /**
  * The offboarding checklist of a terminated customer (D-43, D-45). Five steps, each DONE / PENDING / MANUAL. An ADMIN
@@ -45,6 +51,8 @@ export function OffboardingCard({ customerId, customerName, off }: { customerId:
   const [err, setErr] = useState<string | null>(null);
   const [stale, setStale] = useState(false);
 
+  /** back to the step's button when the dialog closes without a change; after a change the step has no button, so the checklist */
+  const refocus = (key: OffboardStepKey, done = false) => { setTimeout(() => { document.querySelector<HTMLElement>(done ? "[data-testid=offboarding]" : `[data-testid=ob-mark-${key}]`)?.focus(); }, 0); };
   const noteNeeded = ask?.key === "ALARMS_DELETED";
   const ready = !noteNeeded || note.trim().length > 0;
   const done = off.steps.filter((s) => s.state === "DONE").length;
@@ -58,13 +66,14 @@ export function OffboardingCard({ customerId, customerName, off }: { customerId:
     if (!r.ok) { setErr(errorLine(r, { what: "Marking a step done", where: customerName })); setStale(r.code === "STEP_NOT_MANUAL" || r.code === "NOT_FOUND"); return; }
     const label = LABEL[ask.key];
     setAsk(null);
+    refocus(ask.key, true);
     shell.toast(`Marked done: ${label}.`);
     router.refresh();
   }
 
   return (
     <Card title="Offboarding checklist" actions={<span className="mono xs" data-testid="ob-progress">{done} of {off.steps.length} done</span>}>
-      <div data-testid="offboarding" data-complete={off.completedAt ? "1" : undefined}>
+      <div data-testid="offboarding" tabIndex={-1} data-complete={off.completedAt ? "1" : undefined}>
         {off.residual.count > 0 ? (
           <Banner tone="amber">
             <span data-testid="ob-cleanup"><b>Cleanup needed.</b> Events still arriving from this customer: <b>{off.residual.count}</b>{off.residual.lastEventAt ? <>, last at {kstDateTime(off.residual.lastEventAt)}</> : null}. No incident is opened and nobody is paged. Finish the steps below: the alarms or the connection stack are still sending.</span>
@@ -83,7 +92,7 @@ export function OffboardingCard({ customerId, customerName, off }: { customerId:
                 <div className="ob-main">
                   <div className="b">{LABEL[s.key]}</div>
                   <div className="sm mut">{HELP[s.key]}</div>
-                  {s.detail ? <div className="sm ob-detail" data-testid="ob-detail">{s.detail}</div> : null}
+                  {s.detail ? <div className="sm ob-detail" data-testid="ob-detail">{humanDetail(s.detail) ? <div>{humanDetail(s.detail)}</div> : null}<div className={humanDetail(s.detail) ? "mono xs mut" : undefined}>{s.detail}</div></div> : null}
                   {s.state === "DONE" && s.at ? <div className="xs mut">Done {kstDateTime(s.at)}{s.byUserId ? " by a person" : ""}</div> : null}
                 </div>
                 {s.state === "MANUAL" ? (
@@ -103,7 +112,7 @@ export function OffboardingCard({ customerId, customerName, off }: { customerId:
       <ConfirmDialog
         open={ask !== null} title={ask ? `Mark done: ${LABEL[ask.key]}?` : ""} busy={busy} confirmDisabled={!ready} defaultFocus="field"
         confirmLabel={busy ? "Working…" : "Mark done"} cancelLabel="Not done yet"
-        onConfirm={() => { void mark(); }} onCancel={() => { if (!busy) setAsk(null); }}
+        onConfirm={() => { void mark(); }} onCancel={() => { if (!busy && ask) { const k = ask.key; setAsk(null); refocus(k); } }}
       >
         {ask ? (
           <div>

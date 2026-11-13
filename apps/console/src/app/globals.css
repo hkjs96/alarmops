@@ -561,3 +561,8 @@ div.co-refused { margin-top: 6px; }
   .cs-ta, .cs-in { font-size: 16px; }
   .cs-in { height: 44px; }
 }
+
+/* follow-ups of the qa-ux check: the name box is a 44 px target on a phone; an enabled danger confirm is solid, so it differs from the disabled one */
+.cs-form .inp.cs-in { min-height: 36px; }
+@media (max-width: 760px) { .cs-form .inp.cs-in { min-height: 44px; height: 44px; } }
+.cdlg .btn.danger:not([disabled]) { background: var(--red); border-color: var(--red); color: var(--on-red); font-weight: 600; }

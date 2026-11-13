@@ -4,6 +4,7 @@ import { Card, CustomerStatusBadge } from "@alarmops/design-system";
 import { getApi } from "@/lib/api";
 import { ApiError, isHidden } from "@/lib/api/client";
 import type { CustomerStatusResponse, Offboarding } from "@/lib/api/types";
+import { errorLine } from "@/lib/errors";
 import { SubNav } from "@/components/SubNav";
 import { CustomerStatusCard } from "../CustomerStatusCard";
 import { OffboardingCard } from "../OffboardingCard";
@@ -35,21 +36,23 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       error = e instanceof ApiError ? e : new ApiError(500, "UNKNOWN", "Could not load the customer status.", "");
     }
   }
-  const status = st?.status ?? c.status ?? "ACTIVE";
+  // never defaulted to ACTIVE: a status nobody told us is unknown, not active
+  const status = st?.status ?? c.status ?? null;
+  const portal = me.kind === "CUSTOMER";
 
   return (
     <div className="page">
       <div className="ph">
         <div>
           <h1 tabIndex={-1}>{c.name}</h1>
-          <div className="desc row" style={{ gap: 12 }}><span>Customer</span><CustomerStatusBadge status={status} /></div>
+          <div className="desc row" style={{ gap: 12 }}><span>Customer</span>{status ? <CustomerStatusBadge status={status} /> : <span className="sm mut" data-testid="status-unknown">Status unknown</span>}</div>
         </div>
       </div>
       <SubNav />
       <div className="stack">
-        {error ? (
+        {portal ? null : error ? (
           <Card accent="red" title="Could not load the status">
-            <p className="sm" style={{ marginTop: 0 }}>{error.message}</p>
+            <p className="sm" style={{ marginTop: 0 }}>{errorLine(error)}</p>
             <div className="row"><Link className="btn" href={`/customers/${c.slug}`}>Retry</Link>{error.requestId ? <span className="mono xs faint">requestId {error.requestId}</span> : null}</div>
           </Card>
         ) : (
