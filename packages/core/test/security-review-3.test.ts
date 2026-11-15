@@ -208,6 +208,7 @@ describe('R-20: sanitiser — JSON bodies, camelCase names, invisible characters
     for (const evil of ['a_'.repeat(200_000), '"key'.repeat(100_000), 'token '.repeat(100_000), '1 '.repeat(200_000), '​'.repeat(500_000), `${'key.'.repeat(80)}=`, 'at '.repeat(100_000)]) {
       const t0 = performance.now();
       expect(clean(evil).length).toBeLessThanOrEqual(300);
+      // genuine performance budget (ReDoS guard): a regression takes seconds, so 200 ms leaves a wide margin over a slow runner
       expect(performance.now() - t0).toBeLessThan(200);
     }
   });

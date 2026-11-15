@@ -115,13 +115,16 @@ describe('row locks', () => {
     let release!: () => void;
     const gate = new Promise<void>((r) => { release = r; });
     const holder = db.client.transaction(async (tx) => { await tx.query(`SELECT 1 FROM "NotificationJob" WHERE "id" = ANY($1::text[]) FOR UPDATE`, [held]); await gate; });
+    // The holder is released only AFTER the claim returns — except by this safety timer. If SKIP LOCKED were missing the claim
+    // would block on the held rows until the timer (or the store's lock_timeout) fires; so "the timer had not fired when the
+    // claim came back" proves the claim did not wait, with no threshold that depends on the speed of the runner.
     await new Promise((r) => setTimeout(r, 200));
-    const t0 = Date.now();
-    const got = await store.claimDueJobs(50, { kinds: ['SMS'] });
-    const took = Date.now() - t0;
-    release();
-    await holder;
-    expect(took).toBeLessThan(1_000);
+    let timerFired = false;
+    const safety = setTimeout(() => { timerFired = true; release(); }, 8_000);
+    let got: Awaited<ReturnType<SqlTickStore['claimDueJobs']>>;
+    let waited = false;
+    try { got = await store.claimDueJobs(50, { kinds: ['SMS'] }); waited = timerFired; } finally { clearTimeout(safety); release(); await holder; }
+    expect(waited).toBe(false);
     expect(got.map((j) => j.id).sort()).toEqual(ids.filter((i) => !held.includes(i)).sort());
     // the rows that were held are still due and are claimed next
     expect((await store.claimDueJobs(50, { kinds: ['SMS'] })).map((j) => j.id).sort()).toEqual([...held].sort());

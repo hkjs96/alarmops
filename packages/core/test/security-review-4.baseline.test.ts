@@ -24,6 +24,9 @@ beforeEach(() => { vi.useFakeTimers(); });
 afterEach(() => { vi.useRealTimers(); });
 
 const TICK = MIN;
+// Each case runs two whole simulated engines (up to 24 tenants × 20 pages); on a slow runner VOICE 12 × 2 passed the default 5 s once.
+// The cases check ordering and simulated delay, not speed — give the whole file a generous test timeout.
+vi.setConfig({ testTimeout: 60_000 });
 const LIMIT = 60_000;
 const table: string[] = ['scenario | 7b85c90 | now'];
 afterAll(() => { console.log(`\nMeasured with the real engines (minutes; "t" = whole ticks slipped)\n${table.join('\n')}\n`); });
