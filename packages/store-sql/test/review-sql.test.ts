@@ -73,13 +73,11 @@ describe('B-1: overlapping claimers never get an empty claim while pages are due
     // someone holds the SMS lane lock (as a claim in flight does)
     const holder = db.client.transaction(async (tx) => { await tx.query(`SELECT pg_advisory_xact_lock(hashtext('alarmops:outbox-claim'), hashtext('SMS'))`); await gate; });
     await new Promise((r) => setTimeout(r, 150));
-    const t0 = Date.now();
     expect(await new SqlTickStore(db.client).claimDueJobs(50, { kinds: ['VOICE'] })).toHaveLength(3);
-    expect(Date.now() - t0).toBeLessThan(1_000);
-    const t1 = Date.now();
+    // (no wall-clock bound: a VOICE claim that waited for the SMS lane lock would fail with 55P03 after lock_timeout, not return 3 rows)
     const err = await new SqlTickStore(db.client).claimDueJobs(50, { kinds: ['SMS'] }).then(() => null, (e: unknown) => e);
     expect(pgCode(err)).toBe('55P03');
-    expect(Date.now() - t1).toBeLessThan(STATEMENT_TIMEOUT_MS);
+    // (55P03 is lock_timeout itself; a claim that hung would end as 57014 or never — no runner-speed bound needed)
     release();
     await holder;
     expect(await new SqlTickStore(db.client).claimDueJobs(50, { kinds: ['SMS'] })).toHaveLength(3); // the lock went with the transaction
@@ -170,9 +168,8 @@ describe('R-3: every wait on the database has an upper bound', () => {
       expect((await c.query('SHOW lock_timeout'))[0]!.lock_timeout).toBe('3s');
       expect((await c.query('SHOW transaction_isolation'))[0]!.transaction_isolation).toBe('read committed');
       expect((await c.query('SHOW idle_in_transaction_session_timeout'))[0]!.idle_in_transaction_session_timeout).toBe('15s');
-      const t0 = Date.now();
+      // 57014 for an 8 s sleep means the 4.5 s limit cut it off (a statement that ran to the end would not error)
       expect(pgCode(await c.query('SELECT pg_sleep(8)').then(() => null, (e: unknown) => e))).toBe('57014');
-      expect(Date.now() - t0).toBeLessThan(5_000);
       // and afterwards the session is unchanged (SET LOCAL ended with the transaction), no transaction is left open
       expect(await raw('statement_timeout')).toBe(serverDefault);
       expect((await c.pool.query(`SELECT count(*)::int AS n FROM pg_stat_activity WHERE pid = pg_backend_pid() AND state = 'idle in transaction'`)).rows[0].n).toBe(0);
@@ -187,16 +184,18 @@ describe('R-3: every wait on the database has an upper bound', () => {
     expect(CONNECT_TIMEOUT_MS).toBeLessThanOrEqual(3_000);
     const c = pgClient({ connectionString: TEST_DATABASE_URL, max: 2, connectionTimeoutMs: 400 });
     try {
-      const busy = [c.query('SELECT pg_sleep(2)'), c.query('SELECT pg_sleep(2)')];
+      // the two busy statements are still running when the failures arrive: the callers did not queue behind them
+      // (ordering, not a wall-clock bound; the sleeps are long enough that a slow runner cannot finish them first)
+      let busyDone = false;
+      const busy = [c.query('SELECT pg_sleep(4)'), c.query('SELECT pg_sleep(4)')];
+      void Promise.all(busy).then(() => { busyDone = true; });
       await new Promise((r) => setTimeout(r, 100));
-      const t0 = Date.now();
       const err = await c.query('SELECT 1').then(() => null, (e: unknown) => e);
       expect(String((err as Error)?.message)).toMatch(/timeout/i);
-      expect(Date.now() - t0).toBeLessThan(1_500);
-      const t1 = Date.now();
+      expect(busyDone).toBe(false);
       const txErr = await c.transaction((tx) => tx.query('SELECT 1')).then(() => null, (e: unknown) => e);
       expect(String((txErr as Error)?.message)).toMatch(/timeout/i);
-      expect(Date.now() - t1).toBeLessThan(1_500);
+      expect(busyDone).toBe(false);
       await Promise.all(busy);
       expect((await c.query('SELECT 1 AS "ok"'))[0]!.ok).toBe(1);
     } finally { await c.close?.(); }
@@ -209,10 +208,10 @@ describe('R-3: every wait on the database has an upper bound', () => {
     try {
       for (const run of [() => c.query('SELECT pg_sleep(2)'), () => c.transaction((tx) => tx.query('SELECT pg_sleep(2)'))]) {
         const pidBefore = (await c.query('SELECT pg_backend_pid() AS "pid"'))[0]!.pid;
-        const t0 = Date.now();
         const err = await run().then(() => null, (e: unknown) => e);
+        // the CLIENT gave up (a 2 s statement under a 4 s server limit would otherwise have succeeded), not the server's statement_timeout
         expect(String((err as Error)?.message)).toMatch(/timeout/i);
-        expect(Date.now() - t0).toBeLessThan(1_500);
+        expect(String((err as Error)?.message)).not.toMatch(/statement timeout/i);
         // max 1: the next call needs a NEW connection (the old one was destroyed, not handed back mid-statement)
         const pidAfter = (await c.query('SELECT pg_backend_pid() AS "pid"'))[0]!.pid;
         expect(pidAfter).not.toBe(pidBefore);

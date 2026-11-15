@@ -443,6 +443,7 @@ describe('R-13: the provider-text sanitiser', () => {
       const t0 = performance.now();
       const out = sanitizeProviderError(raw);
       const ms = performance.now() - t0;
+      // genuine performance budget (ReDoS guard): the regression took 12.4 s; 50 ms is a margin for slow runners, not a target
       expect(ms, `${raw.slice(0, 8)}… took ${ms.toFixed(1)} ms`).toBeLessThan(50);
       expect(out.length).toBeLessThanOrEqual(300);
     }

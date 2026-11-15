@@ -348,6 +348,7 @@ describe('R-20 residual: sanitiser — escaped JSON, arrays, XML, middle dots', 
     const big = `{\\"api_key\\":\\"${K}\\"}`.repeat(400_000);
     const t1 = performance.now();
     expect(sanitizeProviderError(big)).not.toContain(K);
+    // genuine performance budget (ReDoS guard): the failure being guarded takes seconds, so 50 ms leaves a wide margin over a slow runner
     expect(performance.now() - t1).toBeLessThan(50);
   });
 
