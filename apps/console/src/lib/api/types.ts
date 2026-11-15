@@ -576,3 +576,30 @@ export interface Offboarding {
   /** events that still arrive from a terminated customer ("Cleanup needed") */
   residual: { lastEventAt?: string; count: number };
 }
+
+/* ------------------------------------------------------------------------------------------------------------------
+ * Retention (API-CONTRACT 8.4, D-45) and the business-hours digest (D-46)
+ * ---------------------------------------------------------------------------------------------------------------- */
+/** `legalHold` of PUT / DELETE /customers/{id}/legal-hold and of GET purge-log. `byUserId` is an id: the console does not resolve it to a name. */
+export interface LegalHold { active: boolean; at?: string; byUserId?: string; reason?: string }
+export type PurgeStage = "CONNECTIONS" | "RETURN_PERIOD" | "AUDIT_EXPIRY" | "SLA_EXPIRY" | "LEGAL_HOLD_SET" | "LEGAL_HOLD_RELEASED";
+export interface PurgeLogEntry { id: string; at: string; stage: PurgeStage; counts: Record<string, number>; /** 'system' (the daily job) or a user id */ actor: string }
+export interface RetentionSchedule { returnPeriodEndsAt: string; auditExpiresAt: string; slaExpiresAt: string; returnDays: number; auditDays: number; slaDays: number }
+/** GET /customers/{id}/purge-log */
+export interface PurgeLog {
+  customer: { id: string; name: string; status: CustomerStatusValue; statusChangedAt: string | null };
+  legalHold: LegalHold;
+  entries: PurgeLogEntry[];
+  schedule: RetentionSchedule | null;
+}
+export interface DigestSuspendedRow { customerId: string; customerName: string; incidents: number; firstAt: string; lastAt: string }
+export interface DigestResidualRow { customerId: string; customerName: string; sources: number; lastEventAt: string; totalEvents: number }
+/** GET /digests/latest (MSP staff, scoped to the customers the user may see) */
+export interface Digest {
+  businessDay: string; digestAt: string; from: string; to: string;
+  suspended: DigestSuspendedRow[]; terminatedResiduals: DigestResidualRow[];
+  totals: { suspendedIncidents: number; suspendedCustomers: number; residualCustomers: number };
+  empty: boolean;
+}
+/** The one number of "Business-hours summary: N": incidents of suspended customers plus terminated customers still sending events. */
+export const digestCount = (d: Digest): number => d.totals.suspendedIncidents + d.totals.residualCustomers;

@@ -49,6 +49,10 @@ async function gate(req: NextRequest, next: () => NextResponse): Promise<NextRes
   if (session) return next();
 
   // The REST API answers in its own format (401 UNAUTHENTICATED), not with a redirect to a page.
+  // The CSV export is fetched by the page: a redirect to /login would be followed and its HTML saved as a .csv file.
+  if (/^\/customers\/[^/]+\/export\.csv$/.test(pathname)) {
+    return NextResponse.json({ error: { code: "SESSION_ENDED", message: "Sign in again.", details: {}, requestId: "" } }, { status: 401, headers: { "Cache-Control": "no-store" } });
+  }
   if (pathname.startsWith("/api/")) {
     return NextResponse.json({ error: { code: "UNAUTHENTICATED", message: "Sign in to continue.", details: {}, requestId: "" } }, { status: 401, headers: { "Cache-Control": "no-store" } });
   }

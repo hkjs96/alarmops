@@ -6,7 +6,7 @@ import {
   OutsideLine, ScopeLine, ScopeSearch, ScopeSheet, ScopeTree, clampTreeWidth, cx, followsPressAttr, installSameSpotGuard, lastActionPress, normalizeSel, placeClearOfPress, readSession, resolveSel, sameSel, selKey, selLabel, writeSession,
   TREE_DEFAULT_WIDTH, type ScopeCustomerNode, type ScopeLevel, type ScopeSel,
 } from "@alarmops/design-system";
-import type { OutsideCounts } from "@/lib/api/types";
+import type { Digest, OutsideCounts } from "@/lib/api/types";
 import { clearLevel, isPanelPath, parseScopeParams, scopeQuery } from "@/lib/scope";
 import { ShellContext, type LeaveGuard, type LocalMark, type ShellApi, type ShellUser, type ToastAction } from "./ShellContext";
 import { claimStorageFor } from "@/lib/user-storage";
@@ -27,7 +27,7 @@ interface Toast {
 /** A toast's button does nothing this soon after the toast appeared: it may have come up under a second tap. */
 const TOAST_ARM_MS = 600;
 
-export function ScopeShell({ customers, user, openCount, children }: { customers: ScopeCustomerNode[]; user: ShellUser; openCount: number; children: ReactNode }) {
+export function ScopeShell({ customers, user, openCount, digest, children }: { customers: ScopeCustomerNode[]; user: ShellUser; openCount: number; digest?: Digest | null; children: ReactNode }) {
   const userName = user.name;
   const pathname = usePathname();
   const sp = useSearchParams();
@@ -225,7 +225,7 @@ export function ScopeShell({ customers, user, openCount, children }: { customers
   return (
     <ShellContext.Provider value={api}>
       <div ref={shellRef} className={cx("shell", mounted && "mounted", ready && "ready", settings && "no-tree")} data-panel={panelOpen ? "1" : "0"} data-rail={rail ? "1" : "0"}>
-        <TopNav openCount={openCount} userName={userName} role={user.role} scopeQuery={scopeQuery(sel)} onOpenFinder={settings ? undefined : () => { setToast(null); setFinder(true); }} />
+        <TopNav digest={digest} openCount={openCount} userName={userName} role={user.role} scopeQuery={scopeQuery(sel)} onOpenFinder={settings ? undefined : () => { setToast(null); setFinder(true); }} />
         {settings ? (
           <ScopeLine totalCustomers={customers.length} mineCustomers={mineCount} onClear={() => undefined} locked={<><b>MSP-wide settings</b> · all {customers.length} customers</>} />
         ) : (

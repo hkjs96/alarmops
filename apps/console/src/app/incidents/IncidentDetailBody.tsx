@@ -89,11 +89,24 @@ function Stopped({ text }: { text: string }) {
   return <div className="paging-stopped" role="status" data-testid="paging-stopped"><span className="st ack"><Mark shape="ring" /></span><b>{text}</b></div>;
 }
 
+/** D-43: the customer is not ACTIVE, so no step will be sent: the planned steps are not listed as if they would happen */
+export const pagingPausedText = (p: IncidentDetail["pagingSuppressed"]): string | null =>
+  p === "CUSTOMER_SUSPENDED" ? "Paging paused (customer suspended)" : p === "CUSTOMER_TERMINATED" ? "Paging paused (customer terminated)" : null;
+
 function Escalation({ inc, now }: { inc: IncidentDetail; now: number }) {
   const snap = inc.assignmentSnapshot;
   const esc = inc.escalation;
   const stopped = pagingStopped(inc);
   const plan = snapshotPlanLabel(snap);
+  const paused = pagingPausedText(inc.pagingSuppressed);
+  if (paused && inc.status !== "RESOLVED") {
+    return (
+      <Card title="Escalation">
+        <div className="sm b" data-testid="escalation-paused">{paused}</div>
+        <div className="sm mut">Nobody is paged for this incident, so no steps are scheduled.</div>
+      </Card>
+    );
+  }
   if (!snap || esc.state === "NEVER_ESCALATING") {
     return (
       <Card title="Escalation">
@@ -176,7 +189,8 @@ export function IncidentDetailBody({ inc, timeline, notifs, now }: { inc: Incide
               {paged.length || stopped || inc.org.customer ? (
                 <div className="paged" data-testid="paged-line">
                   <span className="ov">Paged</span>
-                  {paged.map((p, n) => (
+                  {pagingPausedText(inc.pagingSuppressed) && inc.status !== "RESOLVED" ? <span className="b" data-testid="paging-paused">{pagingPausedText(inc.pagingSuppressed)}</span> : null}
+                  {(pagingPausedText(inc.pagingSuppressed) && inc.status !== "RESOLVED" ? [] : paged).map((p, n) => (
                     <span key={n}>{n > 0 ? <span className="faint" aria-hidden="true">→ </span> : null}<span style={{ color: "var(--accent)" }}><span className={p.done ? "b" : undefined}>{p.label}</span> <span className="mono">{kstTime(p.at)}</span>{p.done ? " ✓" : ""}</span></span>
                   ))}
                   {stopped ? <span className="b" style={{ flexBasis: "100%" }}>{stopped}</span> : null}
@@ -189,7 +203,7 @@ export function IncidentDetailBody({ inc, timeline, notifs, now }: { inc: Incide
                 </div>
               ) : null}
             </div>
-            <HeroActions id={inc.id} title={inc.title} pathText={inc.org.customer ? orgChainParts(inc).join(" › ") : "an unmapped account"} status={inc.status} version={inc.version} canEscalate={inc.escalation.state === "PAGING" || inc.escalation.state === "UNREACHABLE"} escalateWhy={inc.escalation.state === "MUTED" ? "Muted by a maintenance window" : inc.escalation.state === "NEVER_ESCALATING" ? "No call order applies: there is nobody to escalate to" : inc.escalation.state === "STOPPED_EXHAUSTED" ? "Every step has been sent" : undefined} acknowledgedAt={inc.acknowledgedAt} />
+            <HeroActions id={inc.id} title={inc.title} pathText={inc.org.customer ? orgChainParts(inc).join(" › ") : "an unmapped account"} status={inc.status} version={inc.version} canEscalate={!inc.pagingSuppressed && (inc.escalation.state === "PAGING" || inc.escalation.state === "UNREACHABLE")} notPagedWhy={inc.pagingSuppressed ? (inc.pagingSuppressed === "CUSTOMER_SUSPENDED" ? "This customer is suspended: nobody will be paged, so there is nobody to escalate to." : "This customer is terminated: nobody will be paged, so there is nobody to escalate to.") : undefined} escalateWhy={inc.escalation.state === "MUTED" ? "Muted by a maintenance window" : inc.escalation.state === "NEVER_ESCALATING" ? "No call order applies: there is nobody to escalate to" : inc.escalation.state === "STOPPED_EXHAUSTED" ? "Every step has been sent" : undefined} acknowledgedAt={inc.acknowledgedAt} />
           </div>
         </div>
       </section>

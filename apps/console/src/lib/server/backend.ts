@@ -4,6 +4,10 @@ import { authFromPrincipal, createApi, loadApiConfig, type ApiRequest, type ApiR
 import { SqlApiStore, pgClient } from "@alarmops/store-sql";
 import { NotConfiguredError } from "../mode";
 import { databaseConfig } from "./db-config";
+import { commands, retention } from "./wiring";
+import { toResponse } from "./response";
+
+export { toResponse };
 
 /**
  * The backend inside the console app (D-09: one Vercel deployment + Postgres). packages/api answers every
@@ -26,7 +30,7 @@ export function backend(env: Record<string, string | undefined> = process.env): 
   const { config, warnings } = loadApiConfig(env);
   for (const w of warnings) console.warn(`[api config] ${w}`);
   const api = createApi({
-    repo, config,
+    repo, config, retention: retention(env), commands: commands(env),
     log: (level, msg, data) => console[level === "error" ? "error" : "warn"](`[api] ${msg}`, data ?? {}),
   });
   g.__aoBackend = { repo, api, close: () => client.close?.() ?? Promise.resolve() };
@@ -78,9 +82,4 @@ export function inProcessFetch(auth: () => Promise<AuthContext | null>): typeof 
     const res = await handleApi({ method, path: url.pathname, query: queryOf(url), headers, body }, await auth());
     return toResponse(res);
   }) as typeof fetch;
-}
-
-export function toResponse(res: ApiResponse): Response {
-  const noBody = res.status === 204 || res.status === 304 || res.body === undefined;
-  return new Response(noBody ? null : JSON.stringify(res.body), { status: res.status, headers: res.headers });
 }

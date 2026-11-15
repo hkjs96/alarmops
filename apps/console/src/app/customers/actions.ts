@@ -4,7 +4,7 @@ import { getApi } from "@/lib/api";
 import { requireSession } from "@/lib/auth";
 import { requireRole } from "@/lib/auth/role";
 import { assertId, assertVersion, InvalidInputError } from "@/lib/validate";
-import type { CustomerStatusChange, CustomerStatusInput, CustomerStatusValue, Offboarding, OffboardStepKey } from "@/lib/api/types";
+import type { CustomerStatusChange, CustomerStatusInput, CustomerStatusValue, LegalHold, Offboarding, OffboardStepKey } from "@/lib/api/types";
 import { fail, type ActionResult } from "@/lib/action-result";
 
 /**
@@ -40,6 +40,20 @@ export async function changeCustomerStatus(customerId: string, input: CustomerSt
     if (input.confirmName !== undefined && (typeof input.confirmName !== "string" || input.confirmName.length > 300)) throw new InvalidInputError("Invalid name.");
     const body: CustomerStatusInput = { status: input.status, reason: input.reason, ...(input.confirmName !== undefined ? { confirmName: input.confirmName } : {}) };
     return (await getApi()).patchCustomerStatus(id, body, v);
+  });
+}
+
+/**
+ * Legal hold (D-45): an ADMIN marks a customer so the daily retention job does not delete anything while a dispute
+ * lasts. Placing needs a reason (the API refuses an empty one); releasing may carry one. Both are audited by the API.
+ */
+export async function setLegalHold(customerId: string, on: boolean, reason: string): Promise<ActionResult<{ legalHold: LegalHold; changed: boolean }>> {
+  return run(async () => {
+    const id = assertId(customerId, "customer");
+    if (typeof on !== "boolean") throw new InvalidInputError("Invalid request.");
+    if (typeof reason !== "string" || reason.trim().length > 500) throw new InvalidInputError("Invalid reason.");
+    const api = await getApi();
+    return on ? api.putLegalHold(id, reason.trim()) : api.deleteLegalHold(id, reason.trim() || undefined);
   });
 }
 
