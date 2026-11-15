@@ -990,3 +990,18 @@ mock 모드(MOCK_API=1 E2E_ALLOW_MOCK=1 next build 후 next start -p 3191), Chro
 판정: P0·P1 없음. mock 모드(MOCK_API=1 E2E_ALLOW_MOCK=1 next build 후 next start -p 3191), Chromium /opt/pw-browsers/chromium, 소스를 읽지 않고 화면·측정값만 봄(검증자 분리 서브에이전트 사용 불가). 시험 중 mock 상태 변경: mirae 일시중지, bora 종료, mirae·iruda 보존 걸기/풀기(서버는 종료함). 권고: (1) By 칸 원시 id usr_haeun를 이름으로 (2) 휴대폰 배지 의미 불명 (3) 일시중지 이전 인시던트의 호출 단계 문구 모순 (4) 삭제 기록 증빙 출력 수단 없음 (5) 해제 문구 "cannot be undone". 참고: webhook tokens 단복수, 배지 숫자 기준, 보존 중에도 내보내기 기한 표시, 종료 고객에 resumed 문구, Operator는 보존 여부를 못 봄, 기한 경과 내보내기 비활성은 mock으로 검증 못 함.
 
 - Follow-ups of the 81e0c5a review (security 권고 1-4, qa-ux A-E and the cheap items) were made in the commit after 1ee2de6: session-ended export, server-built file name, names in By, phone badge label, paused paging steps, printable deletion record, release text, counters, kumho (return period over) in the mock.
+
+### 2026-11-15 재검증: D-43/D-45/D-46 후속 수정 (feat/console-d45-wiring @ af16c26, mock)
+
+| 날짜 | 시나리오 | 버전(커밋) | 페르소나 | 측정값 | 판정 | 캡처 |
+|---|---|---|---|---|---|---|
+| 2026-11-15 | A. By 칸 이름 | af16c26 | MSP 관리자 (1440, 390) | 보존 걸기/해제·삭제 기록 By = "Haeun Kim (usr_haeun)", 시스템 단계 = "System". 다른 사용자는 원시 id(이름 맵 없음, 이 mock에서는 재현 안 됨) | 통과 (참고) | `docs/qa/shots/2026-11-15-d45-recheck/admin-{1440,390}-{kumho,mirae}-held.png` |
+| 2026-11-15 | B. 휴대폰 배지 | af16c26 | 관리자·온콜 (360, 390, 1440) | 360 "Summary 2" 83x44, 로고 마크만(글자 숨김, aria-label "AlarmOps home"), 390 "Summary 2" 2줄 80x44 + AlarmOps 글자 보임, 가로 스크롤 없음. 패널이 "The number 2 in the top bar counts those 1 incidents and 1 customers." 로 기준 설명(단수 "1 incidents/1 customers" 문법 오류) | 통과 (참고 2) | `.../{admin,operator}-{360,390,1440}-{topbar,digest-open}.png` |
+| 2026-11-15 | C. 일시중지 고객 인시던트 | af16c26 | 관리자 (1440, 390) | mirae 일시중지 후 "PAGED: Paging paused (customer suspended)", 이전의 "call Yuna 03:22 → call everyone" 단계 사라짐, "no steps are scheduled", Escalate now 비활성+이유. 종료 고객 인시던트는 mock에 없어 미확인 | 통과 | `.../admin-{1440,390}-mirae-incident-susp.png` (전: `admin-1440-mirae-incident-before.png`) |
+| 2026-11-15 | D. 삭제 기록 인쇄 | af16c26 | 관리자 (print 미디어) | 인쇄 화면에 제목 "Deletion record: Kumho Clinic" + 표 + 보존 일정만, 내비·사이드바·버튼 없음, 글자 읽힘. A4 PDF 1쪽. 출력일·서명란은 없음 | 통과 (참고 1) | `.../print-kumho-viewport.png`, `print-kumho.pdf`, `print-kumho-pdf-1.png` |
+| 2026-11-15 | E. 해제 확인 문구 | af16c26 | 관리자 (1440, 390) | "Automatic deletion resumes on the schedule shown in the deletion record below. Anything already past its date is deleted by the next daily run." 사유 카운터 "0 of 500 characters" | 통과 | `.../admin-{1440,390}-{release-confirm,kumho-release-confirm,mirae-release-confirm}.png` |
+| 2026-11-15 | 내보내기 기한 경과(kumho) | af16c26 | 관리자 (1440, 390) | 버튼 비활성(aria-describedby), "The return period ended on 2026-10-01. The incident details were deleted and can no longer be exported." 보존 걸어도 "The legal hold does not extend this window." 표시, 여전히 비활성. 카운터 "30 of 500 characters". "1 webhook token" 단수 | 통과 | `.../admin-{1440,390}-kumho{,-held,-hold-form}.png` |
+| 2026-11-15 | 세션 종료 시 내보내기 | af16c26 | 관리자 (1440, 390) | 정상 시 CSV 다운로드. 쿠키 삭제 후 Export: 파일 저장 없음, "Your session ended — sign in again. Nothing was changed." 대화상자+Sign in. export.csv 401은 예상된 응답 | 통과 | `.../admin-{1440,390}-export-session-ended.png` |
+| 2026-11-15 | 포털·운영자 회귀 · CSP | af16c26 | 포털, 온콜 (1440, 390) | 포털: kumho/iruda/mirae에 보존·내보내기·삭제 기록·Change status·배지 0건. 온콜: DATA RETENTION 안내만, 조작 버튼 없음. 전 과정 CSP 위반 0건, 페이지 오류 0건 | 통과 | `.../portal-{1440,390}-iruda.png`, `operator-{1440,390}-kumho.png` |
+
+판정: P0·P1 없음. 참고: 타 사용자 By는 이름 맵 없으면 원시 id, 360에서 로고 글자 없이 마크만(접근 이름은 있음), 배지 패널 문구 단수/복수("1 incidents"), 인쇄본에 출력일·서명란 없음, 종료 고객 인시던트의 일시중지 문구는 mock에 데이터가 없어 미확인. mock 상태 변경: mirae 일시중지, kumho/mirae 보존 걸고 풀기.

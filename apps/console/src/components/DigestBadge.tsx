@@ -39,7 +39,7 @@ export function DigestBadge({ digest }: { digest: Digest }) {
           </p>
           {!digest.empty ? (
             <p className="b" data-testid="digest-meaning" style={{ margin: "0 0 8px" }}>
-              {digest.totals.suspendedCustomers + digest.totals.residualCustomers} customer{digest.totals.suspendedCustomers + digest.totals.residualCustomers === 1 ? "" : "s"} need attention: {digest.totals.suspendedIncidents} incident{digest.totals.suspendedIncidents === 1 ? "" : "s"} of suspended customers and {digest.totals.residualCustomers} terminated customer{digest.totals.residualCustomers === 1 ? "" : "s"} still sending events. The number {n} in the top bar counts those {digest.totals.suspendedIncidents} incidents and {digest.totals.residualCustomers} customers.
+              {digest.totals.suspendedCustomers + digest.totals.residualCustomers} customer{digest.totals.suspendedCustomers + digest.totals.residualCustomers === 1 ? "" : "s"} need attention: {digest.totals.suspendedIncidents} incident{digest.totals.suspendedIncidents === 1 ? "" : "s"} of suspended customers and {digest.totals.residualCustomers} terminated customer{digest.totals.residualCustomers === 1 ? "" : "s"} still sending events. The number {n} in the top bar counts those {digest.totals.suspendedIncidents} incident{digest.totals.suspendedIncidents === 1 ? "" : "s"} and {digest.totals.residualCustomers} customer{digest.totals.residualCustomers === 1 ? "" : "s"}.
             </p>
           ) : null}
           {digest.empty ? <p data-testid="digest-empty">Nothing to look at: no alarms from suspended customers and no cleanup needed.</p> : null}
