@@ -28,7 +28,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     if (me.role !== "ADMIN") return fail(403, "ROLE_REQUIRED", "Exporting the incident history needs the ADMIN role.", { role: "ADMIN" });
     const up = await api.exportCsv(c.id);
     const headers = new Headers({ "content-type": "text/csv; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" });
-    for (const h of ["content-disposition", "x-export-closes-at"]) { const v = up.headers.get(h); if (v) headers.set(h, v); }
+    // the file name is built here, never taken from upstream: id filtered to a safe set, the day of the export
+    const safe = c.id.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 80);
+    headers.set("content-disposition", `attachment; filename="incidents-${safe}-${new Date().toISOString().slice(0, 10)}.csv"`);
+    const closes = up.headers.get("x-export-closes-at");
+    if (closes && !Number.isNaN(Date.parse(closes))) headers.set("x-export-closes-at", closes);
     return new Response(up.body, { status: 200, headers });
   } catch (e) {
     if (e instanceof NotConfiguredError) return fail(503, "NOT_CONFIGURED", e.message);

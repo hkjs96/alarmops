@@ -44,6 +44,8 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   // never defaulted to ACTIVE: a status nobody told us is unknown, not active
   const status = st?.status ?? c.status ?? null;
   const portal = me.kind === "CUSTOMER";
+  // ids of the staff the console already knows (the signed-in user); an id nobody can resolve is shown as it is
+  const names: Record<string, string> = { [me.id]: me.name };
 
   return (
     <div className="page">
@@ -66,9 +68,9 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         {off ? <OffboardingCard customerId={c.id} customerName={c.name} off={off} /> : null}
         {portal ? null : purge ? (
           <>
-            <LegalHoldCard customerId={c.id} customerName={c.name} hold={purge.legalHold} terminated={purge.customer.status === "TERMINATED"} />
-            {purge.customer.status === "TERMINATED" ? <ExportCard customerSlug={c.slug} customerName={c.name} deadline={purge.schedule?.returnPeriodEndsAt ?? null} nowMs={nowMs()} /> : null}
-            <PurgeLogCard log={purge} />
+            <LegalHoldCard customerId={c.id} customerName={c.name} hold={purge.legalHold} terminated={purge.customer.status === "TERMINATED"} names={names} />
+            {purge.customer.status === "TERMINATED" ? <ExportCard customerSlug={c.slug} customerName={c.name} deadline={purge.schedule?.returnPeriodEndsAt ?? null} nowMs={nowMs()} onHold={purge.legalHold.active} /> : null}
+            <PurgeLogCard log={purge} names={names} />
           </>
         ) : purgeError ? (
           <Card accent="red" title="Could not load the retention data">

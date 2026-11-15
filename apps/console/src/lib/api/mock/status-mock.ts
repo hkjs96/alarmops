@@ -5,6 +5,7 @@
  * Fixed customers of the mock (the e2e specs rely on them):
  *   eden   SUSPENDED          (has a not-paged incident)
  *   iruda  TERMINATED         (checklist half done, events still arriving)
+ *   kumho  TERMINATED 2026-09-01 (return period over: no export, retention stage rows in the deletion record)
  *   dasol  terminating it answers 503 COMMANDS_UNAVAILABLE (the command queue is not configured), status unchanged
  *   all others ACTIVE.
  */
@@ -25,6 +26,8 @@ export function createStatusStore(): StatusStore {
     status: {
       cus_eden: { status: "SUSPENDED", changedAt: "2026-11-05T01:00:00Z", version: 1 },
       cus_iruda: { status: "TERMINATED", changedAt: "2026-11-06T02:30:00Z", version: 1 },
+      /** terminated long ago: the return period is over (the export is closed, 410) */
+      cus_kumho: { status: "TERMINATED", changedAt: "2026-09-01T02:30:00Z", version: 1 },
     },
     offboarding: {
       cus_iruda: {

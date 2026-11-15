@@ -53,7 +53,7 @@
 |---|---|
 | `ALARM_COMMANDS_QUEUE_URL` | `https://sqs.ap-northeast-2.amazonaws.com/<12-digit account>/<queue>`. Unset: no publisher, terminating a customer answers 503 `COMMANDS_UNAVAILABLE` (nothing changes). Malformed: the API refuses to start. |
 | `ALARM_COMMANDS_EXPECTED_ACCOUNT` | 12-digit account that must own the queue; required when the URL is set. |
-| `AWS_ROLE_ARN` | IAM role the console assumes with Vercel OIDC (`awsCredentialsProvider` from `@vercel/functions/oidc`, no access keys, D-49). Permission: `sqs:SendMessage` on that queue only. Queue URL set without it: the publisher stays off (fail closed, a warning is logged). The AWS SDK is imported on the first send only. |
+| `AWS_ROLE_ARN` | **Deployed Vercel runtime only: never set it in local dev, CI or an agent session** (the OIDC helper may fall back to the Vercel CLI / a developer login). IAM role the console assumes with Vercel OIDC (`awsCredentialsProvider` from `@vercel/functions/oidc`, no access keys, D-49). Permission: `sqs:SendMessage` on that queue only. Queue URL set without it: the publisher stays off (fail closed, a warning is logged). The AWS SDK is imported on the first send only. |
 | `RETENTION_RETURN_DAYS` / `RETENTION_AUDIT_DAYS` / `RETENTION_SLA_DAYS` | optional, defaults 30 / 730 / 1826; floors 7 / 90 / 365; bad values are ignored with a warning. One config object (`lib/server/wiring.ts`) is shared by the API (export window, schedule on the deletion record) and the tick's daily retention job. |
 
 - `/api/v1/*` and in-process calls write `ApiResponse.stream` as a streamed Response (`lib/server/response.ts`): headers first, an error midway aborts the stream.

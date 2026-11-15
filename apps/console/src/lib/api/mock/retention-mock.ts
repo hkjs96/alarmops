@@ -24,6 +24,10 @@ export function createRetentionStore(): RetentionStore {
   return {
     holds: {},
     purge: {
+      cus_kumho: [
+        { id: "pl_kumho_1", at: "2026-09-01T04:00:00Z", stage: "CONNECTIONS", counts: { cloudAccounts: 1, webhookTokens: 1, resources: 12, managedAlarms: 40 }, actor: "system" },
+        { id: "pl_kumho_2", at: "2026-10-01T04:00:00Z", stage: "RETURN_PERIOD", counts: { contacts: 5, portalUsers: 2, incidentsAnonymised: 31 }, actor: "system" },
+      ],
       cus_iruda: [{ id: "pl_iruda_1", at: "2026-11-06T04:00:00Z", stage: "CONNECTIONS", counts: { cloudAccounts: 2, webhookTokens: 1, resources: 37, managedAlarms: 112 }, actor: "system" }],
     },
     seq: 1,

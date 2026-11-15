@@ -988,3 +988,5 @@ mock 모드(MOCK_API=1 E2E_ALLOW_MOCK=1 next build 후 next start -p 3191), Chro
 | 2026-11-15 | CSP · 오류 · 가로 스크롤 | 81e0c5a | 전 역할 (1440, 390) | next build + start. 고객 상세, 인시던트 상세, 보존/내보내기/해제 조작, 배지 열기 전 과정 securitypolicyviolation 0건, 콘솔 CSP 0건, 페이지 오류·4xx/5xx 0건, 가로 스크롤 없음 | 통과 | (콘솔 출력) |
 
 판정: P0·P1 없음. mock 모드(MOCK_API=1 E2E_ALLOW_MOCK=1 next build 후 next start -p 3191), Chromium /opt/pw-browsers/chromium, 소스를 읽지 않고 화면·측정값만 봄(검증자 분리 서브에이전트 사용 불가). 시험 중 mock 상태 변경: mirae 일시중지, bora 종료, mirae·iruda 보존 걸기/풀기(서버는 종료함). 권고: (1) By 칸 원시 id usr_haeun를 이름으로 (2) 휴대폰 배지 의미 불명 (3) 일시중지 이전 인시던트의 호출 단계 문구 모순 (4) 삭제 기록 증빙 출력 수단 없음 (5) 해제 문구 "cannot be undone". 참고: webhook tokens 단복수, 배지 숫자 기준, 보존 중에도 내보내기 기한 표시, 종료 고객에 resumed 문구, Operator는 보존 여부를 못 봄, 기한 경과 내보내기 비활성은 mock으로 검증 못 함.
+
+- Follow-ups of the 81e0c5a review (security 권고 1-4, qa-ux A-E and the cheap items) were made in the commit after 1ee2de6: session-ended export, server-built file name, names in By, phone badge label, paused paging steps, printable deletion record, release text, counters, kumho (return period over) in the mock.

@@ -12,7 +12,7 @@ export function NotPaged({ reason, detail }: { reason: PagingSuppressed | undefi
     <span className="np" data-testid="not-paged" data-reason={reason}>
       <span className="st warn"><Mark shape="dash" /></span>
       <span>{notPagedText(reason)}</span>
-      {detail ? <span className="np-d">Alarms from this customer are recorded, but nobody is paged for them. Incidents opened during this period are not paged later, even if the customer is resumed.</span> : null}
+      {detail ? <span className="np-d">Alarms from this customer are recorded, but nobody is paged for them. {reason === "CUSTOMER_SUSPENDED" ? "Incidents opened during this period are not paged later, even if the customer is resumed." : "Nobody will be paged for this incident."}</span> : null}
     </span>
   );
 }

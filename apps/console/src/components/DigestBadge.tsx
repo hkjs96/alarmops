@@ -29,14 +29,19 @@ export function DigestBadge({ digest }: { digest: Digest }) {
     <div className="dg-wrap" ref={wrap}>
       <button ref={btn} type="button" className="dg-badge" data-testid="digest-badge" aria-expanded={open} aria-controls="digest-panel" aria-haspopup="true"
         aria-label={`Business-hours summary: ${n}`} title="Alarms of suspended customers and cleanup of terminated ones, from the latest 10:00 summary. Nobody was paged for these." onClick={() => setOpen((v) => !v)}>
-        <Mark shape={n > 0 ? "tri" : "ring"} />
-        <span aria-hidden="true"><span className="dg-long">Business-hours summary: </span>{n}</span>
+        <span className="dg-mark"><Mark shape={n > 0 ? "tri" : "ring"} /></span>
+        <span aria-hidden="true"><span className="dg-long">Business-hours summary: </span><span className="dg-short">Summary </span>{n}</span>
       </button>
       {open ? (
         <div className="dg-panel" id="digest-panel" role="region" aria-label="Business-hours summary" data-testid="digest-panel">
           <p className="sm mut" style={{ marginTop: 0 }}>
             Summary of {kstDateTime(digest.from).slice(0, 16)} to {kstDateTime(digest.to).slice(0, 16)} (KST): the 10:00 summary of the latest business day. Nobody was paged for these.
           </p>
+          {!digest.empty ? (
+            <p className="b" data-testid="digest-meaning" style={{ margin: "0 0 8px" }}>
+              {digest.totals.suspendedCustomers + digest.totals.residualCustomers} customer{digest.totals.suspendedCustomers + digest.totals.residualCustomers === 1 ? "" : "s"} need attention: {digest.totals.suspendedIncidents} incident{digest.totals.suspendedIncidents === 1 ? "" : "s"} of suspended customers and {digest.totals.residualCustomers} terminated customer{digest.totals.residualCustomers === 1 ? "" : "s"} still sending events. The number {n} in the top bar counts those {digest.totals.suspendedIncidents} incidents and {digest.totals.residualCustomers} customers.
+            </p>
+          ) : null}
           {digest.empty ? <p data-testid="digest-empty">Nothing to look at: no alarms from suspended customers and no cleanup needed.</p> : null}
           {digest.suspended.length ? (
             <>

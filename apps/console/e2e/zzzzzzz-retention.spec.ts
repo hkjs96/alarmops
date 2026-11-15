@@ -20,18 +20,20 @@ test("legal hold: place needs a reason, shows who/when/why, release asks first",
   await page.getByTestId("hold-place").click();
   await expect(confirmBtn(page), "a reason is required").toBeDisabled();
   await page.getByTestId("hold-reason").fill("Dispute over invoice 1042");
+  await expect(page.getByTestId("hold-count")).toHaveText("25 of 500 characters");
   await confirmBtn(page).click();
   await expect(dialog(page)).toHaveCount(0);
   await expect(card).toHaveAttribute("data-active", "1");
   await expect(page.getByTestId("hold-state")).toContainText("On hold");
   await expect(page.getByTestId("hold-detail")).toContainText("Dispute over invoice 1042");
-  await expect(page.getByTestId("hold-detail")).toContainText("usr_haeun");
+  await expect(page.getByTestId("hold-by")).toHaveText("Haeun Kim (usr_haeun)");
+  await expect(page.getByTestId("export-hold-note")).toContainText("does not extend");
   await expect(page.getByTestId("purge-schedule")).toContainText("Paused by the legal hold");
   await expect(page.locator('[data-testid="purge-row"][data-stage="LEGAL_HOLD_SET"]')).toHaveCount(1);
 
   await page.waitForTimeout(700);
   await page.getByTestId("hold-release").click();
-  await expect(page.getByTestId("hold-confirm-text")).toContainText("daily retention job will delete");
+  await expect(page.getByTestId("hold-confirm-text")).toContainText("Automatic deletion resumes on the schedule");
   await page.waitForTimeout(700);
   await confirmBtn(page).click();
   await expect(card).toHaveAttribute("data-active", "0");
@@ -60,9 +62,27 @@ test("deletion record: stage, counts, time and who, as cards on a phone", async 
   const row = page.locator('[data-testid="purge-row"][data-stage="CONNECTIONS"]');
   await expect(row).toContainText("Connection details deleted");
   await expect(row).toContainText("37 resources");
-  await expect(row).toContainText("System (daily job)");
+  await expect(row).toContainText("System");
+  await expect(row).toContainText("1 webhook token,");
   await expect(row.locator("td").first()).toHaveCSS("display", "block");
   await noHScroll(page);
+});
+
+test("export after the return period: disabled with the reason and the date; the deletion record shows the stages", async ({ page }) => {
+  await signIn(page, "/customers/kumho");
+  await expect(page.getByTestId("export-btn")).toBeDisabled();
+  await expect(page.getByTestId("export-why")).toContainText("return period ended on 2026-10-01");
+  await expect(page.locator('[data-testid="purge-row"][data-stage="RETURN_PERIOD"]')).toContainText("5 contacts");
+});
+
+test("deletion record prints on its own: a Print button, and the print layout shows only the record", async ({ page }) => {
+  await signIn(page, "/customers/iruda");
+  await expect(page.getByTestId("purge-print")).toBeVisible();
+  await page.emulateMedia({ media: "print" });
+  await expect(page.getByTestId("purge-print-head")).toContainText("Deletion record: Iruda Edu");
+  await expect(page.getByTestId("purge-table")).toBeVisible();
+  await expect(page.getByTestId("legal-hold")).toBeHidden();
+  await expect(page.getByTestId("purge-print")).toBeHidden();
 });
 
 test("non-admin sees the role reason instead of retention controls", async ({ page }) => {
@@ -75,15 +95,17 @@ test("digest badge: one number, opens the list, fits on a phone", async ({ page 
   await signIn(page, "/incidents");
   const badge = page.getByTestId("digest-badge");
   await expect(badge).toHaveAttribute("aria-label", "Business-hours summary: 2");
-  await expect(badge).toContainText("Business-hours summary: 2");
+  await expect(badge).toContainText("Business-hours summary:");
+  await expect(badge).toContainText("2");
   await badge.click();
   await expect(page.getByTestId("digest-suspended")).toContainText("Eden Mobility");
   await expect(page.getByTestId("digest-residuals")).toContainText("Iruda Edu");
+  await expect(page.getByTestId("digest-meaning")).toContainText("2 customers need attention");
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("digest-panel")).toHaveCount(0);
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(badge).toBeVisible();
-  await expect(badge).toContainText("2");
+  await expect(badge).toContainText("Summary 2");
   await noHScroll(page);
   expect((await badge.boundingBox())!.height).toBeGreaterThanOrEqual(44);
 });
@@ -111,6 +133,9 @@ test("Escalate now on an incident of a suspended customer is off and says nobody
     if (await page.getByRole("button", { name: "Escalate now" }).count()) {
       await expect(page.getByRole("button", { name: "Escalate now" }).first()).toBeDisabled();
       await expect(page.getByTestId("escalate-why")).toContainText("nobody will be paged");
+      await expect(page.getByTestId("paging-paused")).toContainText("Paging paused (customer suspended)");
+      await expect(page.getByTestId("escalation-paused")).toContainText("Paging paused");
+      await expect(page.getByText(/call everyone/i)).toHaveCount(0);
       found = true;
       break;
     }

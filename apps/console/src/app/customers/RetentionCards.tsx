@@ -6,16 +6,19 @@ import type { LegalHold, PurgeLog, PurgeStage } from "@/lib/api/types";
 import { hasRole, roleReason, useShell } from "@/components/ShellContext";
 import { errorLine } from "@/lib/errors";
 import { kstDateTime } from "@/lib/format";
-import { callAction } from "@/lib/session-ended";
+import { announceSessionEnded, callAction, SESSION_ENDED } from "@/lib/session-ended";
 import { setLegalHold } from "./actions";
 
 const date = (iso: string) => kstDateTime(iso).slice(0, 10);
+const REASON_MAX = 500;
+/** a staff member by name with the id secondary; an id nobody can resolve is shown as it is */
+const person = (id: string, names: Record<string, string>): string => (names[id] ? `${names[id]} (${id})` : id);
 
 /**
  * Legal hold (D-45). While it is on, the daily retention job deletes nothing of this customer. ADMIN places it (a
  * reason is required) and releases it; both ask first and are audited by the API.
  */
-export function LegalHoldCard({ customerId, customerName, hold, terminated }: { customerId: string; customerName: string; hold: LegalHold; terminated: boolean }) {
+export function LegalHoldCard({ customerId, customerName, hold, terminated, names = {} }: { customerId: string; customerName: string; hold: LegalHold; terminated: boolean; names?: Record<string, string> }) {
   const shell = useShell();
   const router = useRouter();
   const admin = hasRole(shell.user, "ADMIN");
@@ -53,7 +56,7 @@ export function LegalHoldCard({ customerId, customerName, hold, terminated }: { 
         {hold.active ? (
           <dl className="hold-dl" data-testid="hold-detail">
             <dt>Placed</dt><dd>{hold.at ? kstDateTime(hold.at) : "Unknown"}</dd>
-            <dt>By</dt><dd className="mono">{hold.byUserId ?? "Unknown"}</dd>
+            <dt>By</dt><dd data-testid="hold-by">{hold.byUserId ? person(hold.byUserId, names) : "Unknown"}</dd>
             <dt>Reason</dt><dd>{hold.reason || "None recorded"}</dd>
           </dl>
         ) : null}
@@ -79,10 +82,11 @@ export function LegalHoldCard({ customerId, customerName, hold, terminated }: { 
             <p style={{ marginTop: 0 }} data-testid="hold-confirm-text">
               {ask === "place"
                 ? "Automatic deletion of this customer's data stops until you release the hold. The change is recorded with your name and the reason."
-                : "The daily retention job will delete whatever is due for this customer, which may be everything past its retention period. This cannot be undone."}
+                : "Automatic deletion resumes on the schedule shown in the deletion record below. Anything already past its date is deleted by the next daily run."}
             </p>
             <label className="cs-f"><span className="b sm">{need ? "Reason (required)" : "Reason (optional)"}</span>
-              <textarea className="inp cs-ta" data-testid="hold-reason" rows={3} maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} />
+              <textarea className="inp cs-ta" data-testid="hold-reason" rows={3} maxLength={REASON_MAX} value={reason} onChange={(e) => setReason(e.target.value)} />
+              <span className="sm mut" data-testid="hold-count" aria-live="polite">{reason.length} of {REASON_MAX} characters{reason.length >= REASON_MAX ? ": the limit is reached" : ""}</span>
             </label>
             {err ? <div className="co-err cs-errbox" role="alert" tabIndex={-1} ref={errBox} data-testid="hold-err" style={{ marginTop: 8 }}><span>{err}</span></div> : null}
           </div>
@@ -98,7 +102,7 @@ export function LegalHoldCard({ customerId, customerName, hold, terminated }: { 
  * API would refuse. The file is fetched from the console's own route and given to the browser; 409, 410 and 413 are
  * answered before any byte is sent and are worded here.
  */
-export function ExportCard({ customerSlug, customerName, deadline, nowMs }: { customerSlug: string; customerName: string; deadline: string | null; nowMs: number }) {
+export function ExportCard({ customerSlug, customerName, deadline, nowMs, onHold = false }: { customerSlug: string; customerName: string; deadline: string | null; nowMs: number; onHold?: boolean }) {
   const shell = useShell();
   const admin = hasRole(shell.user, "ADMIN");
   const [busy, setBusy] = useState(false);
@@ -115,9 +119,17 @@ export function ExportCard({ customerSlug, customerName, deadline, nowMs }: { cu
     setBusy(true); setErr(null); shell.clearToast();
     try {
       const res = await fetch(`/customers/${encodeURIComponent(customerSlug)}/export.csv`, { credentials: "same-origin", cache: "no-store" });
+      // a redirect (to the login page) or anything that is not a CSV is never saved as a file
+      const type = res.headers.get("content-type") ?? "";
+      if (res.redirected || (res.ok && !type.startsWith("text/csv"))) {
+        announceSessionEnded();
+        setErr(errorLine({ code: SESSION_ENDED, message: "" }));
+        return;
+      }
       if (!res.ok) {
         let f = { code: "UNKNOWN", message: "Something went wrong.", requestId: "", details: {} as Record<string, unknown> };
         try { const j = (await res.json()) as { error?: Partial<typeof f> }; f = { ...f, ...(j.error ?? {}) }; } catch { /* not JSON */ }
+        if (res.status === 401 || f.code === SESSION_ENDED) announceSessionEnded();
         setErr(errorLine({ code: f.code, message: f.message, requestId: f.requestId, details: f.details }, { what: "Exporting the incident history", where: customerName }));
         return;
       }
@@ -142,6 +154,7 @@ export function ExportCard({ customerSlug, customerName, deadline, nowMs }: { cu
         <p className="sm mut" style={{ marginTop: 0 }}>
           Give {customerName} its incident history back as a CSV file: numbers, titles, severity, times and counts. No names or contact details.
           {deadline ? <> Available until <b data-testid="export-deadline">{date(deadline)}</b> (end of the return period).</> : null}
+          {onHold ? <> <span data-testid="export-hold-note">The legal hold does not extend this window.</span></> : null}
         </p>
         <div className="row">
           <button type="button" className="btn" data-testid="export-btn" disabled={busy || !!why} aria-describedby={why ? "export-why" : undefined} onClick={() => { void download(); }}>
@@ -164,17 +177,22 @@ const STAGE: Record<PurgeStage, string> = {
   LEGAL_HOLD_RELEASED: "Legal hold released",
 };
 const COUNT_LABEL = (k: string) => k.replace(/([A-Z])/g, " $1").toLowerCase();
-const who = (actor: string) => (actor === "system" ? "System (daily job)" : actor);
+const who = (actor: string, names: Record<string, string>) => (actor === "system" ? "System" : person(actor, names));
+const countText = (k: string, v: number) => { const l = COUNT_LABEL(k); return `${v} ${v === 1 ? l.replace(/s$/, "") : l}`; };
 
 /**
  * The deletion record (D-45): one row per retention stage and per hold change, counts only, never content. This is the
  * data of the deletion certificate a customer may ask for.
  */
-export function PurgeLogCard({ log }: { log: PurgeLog }) {
+export function PurgeLogCard({ log, names = {} }: { log: PurgeLog; names?: Record<string, string> }) {
   const s = log.schedule;
   return (
-    <Card title="Deletion record">
-      <div data-testid="purge-log">
+    <Card title="Deletion record" actions={<button type="button" className="btn sm" data-testid="purge-print" onClick={() => window.print()}>Print / Save as PDF</button>}>
+      <div data-testid="purge-log" id="purge-print">
+        <div className="pl-print-head" data-testid="purge-print-head">
+          <b>Deletion record: {log.customer.name}</b>
+          <div>Customer {log.customer.id} · status {log.customer.status}{log.customer.statusChangedAt ? ` since ${kstDateTime(log.customer.statusChangedAt)}` : ""}</div>
+        </div>
         <p className="sm mut" style={{ marginTop: 0 }}>
           What was deleted for {log.customer.name}, and when. This is the data of the deletion certificate: counts only, no content.
         </p>
@@ -187,9 +205,9 @@ export function PurgeLogCard({ log }: { log: PurgeLog }) {
               {log.entries.map((e) => (
                 <tr key={e.id} data-testid="purge-row" data-stage={e.stage}>
                   <td data-label="Stage"><b>{STAGE[e.stage] ?? e.stage}</b></td>
-                  <td data-label="Counts">{Object.keys(e.counts).length ? Object.entries(e.counts).map(([k, v]) => `${v} ${COUNT_LABEL(k)}`).join(", ") : "No data deleted"}</td>
+                  <td data-label="Counts">{Object.keys(e.counts).length ? Object.entries(e.counts).map(([k, v]) => countText(k, v)).join(", ") : "No data deleted"}</td>
                   <td data-label="Time">{kstDateTime(e.at)}</td>
-                  <td data-label="By" className={e.actor === "system" ? undefined : "mono"}>{who(e.actor)}</td>
+                  <td data-label="By">{who(e.actor, names)}</td>
                 </tr>
               ))}
             </tbody>

@@ -21,7 +21,7 @@ export function toResponse(res: ApiResponse, log: (msg: string) => void = (m) =>
           controller.error(new Error("stream aborted"));
         }
       },
-      async cancel() { await it.return?.(); },
+      async cancel() { try { await it.return?.(); } catch { /* the source failed while closing: nothing more to do */ } },
     });
     return new Response(body, { status: res.status, headers: res.headers });
   }

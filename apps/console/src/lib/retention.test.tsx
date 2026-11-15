@@ -110,6 +110,24 @@ describe("ExportCard", () => {
     expect(screen.getByTestId("export-btn")).toBeDisabled();
     expect(screen.getByTestId("export-why").textContent).toContain("needs the Admin role");
   });
+  it("a redirect to the login page, or a body that is not a CSV, is never saved as a file", async () => {
+    const create = vi.fn(() => "blob:x");
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: create, revokeObjectURL: vi.fn() }));
+    const html = new Response("<html>login</html>", { status: 200, headers: { "content-type": "text/html" } });
+    vi.stubGlobal("fetch", vi.fn(async () => html));
+    render(<ExportCard {...props} deadline="2026-12-06T02:30:00Z" nowMs={Date.parse("2026-11-08T00:00:00Z")} />);
+    fireEvent.click(screen.getByTestId("export-btn"));
+    expect((await screen.findByTestId("export-err")).textContent).toContain("Your session ended");
+    expect(create).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+  it("401 SESSION_ENDED from the route says the session ended", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: { code: "SESSION_ENDED", message: "Sign in again.", details: {}, requestId: "" } }, { status: 401 })));
+    render(<ExportCard {...props} deadline="2026-12-06T02:30:00Z" nowMs={Date.parse("2026-11-08T00:00:00Z")} />);
+    fireEvent.click(screen.getByTestId("export-btn"));
+    expect((await screen.findByTestId("export-err")).textContent).toContain("Your session ended");
+    vi.unstubAllGlobals();
+  });
   it.each([[409, "CUSTOMER_NOT_TERMINATED", "only for a terminated customer"], [410, "EXPORT_WINDOW_CLOSED", "return period is over"], [413, "EXPORT_TOO_LARGE", "too large"]])("answers %s in words", async (status, errCode, text) => {
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: { code: errCode, message: "m", details: {}, requestId: "r1" } }, { status })));
     render(<ExportCard {...props} deadline="2026-12-06T02:30:00Z" nowMs={Date.parse("2026-11-08T00:00:00Z")} />);
@@ -129,6 +147,11 @@ describe("digest", () => {
     fireEvent.click(b);
     expect(screen.getByTestId("digest-suspended").textContent).toContain("Eden Mobility");
     expect(screen.getByTestId("digest-residuals").textContent).toContain("Iruda Edu");
+  });
+  it("says what N counts", async () => {
+    render(<DigestBadge digest={await admin.getLatestDigest()} />);
+    fireEvent.click(screen.getByTestId("digest-badge"));
+    expect(screen.getByTestId("digest-meaning").textContent).toContain("2 customers need attention");
   });
   it("an empty digest says so", () => {
     const d: Digest = { businessDay: "2026-11-06", digestAt: "2026-11-06T01:00:00Z", from: "2026-11-05T01:00:00Z", to: "2026-11-06T01:00:00Z", suspended: [], terminatedResiduals: [], totals: { suspendedIncidents: 0, suspendedCustomers: 0, residualCustomers: 0 }, empty: true };
