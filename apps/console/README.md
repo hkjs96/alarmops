@@ -46,3 +46,16 @@
 
 `LIVE_DATABASE_URL` = admin URL of a LOCAL Postgres (≥ 15). `e2e-live/prepare.mjs` drops and creates `alarmops_live`, applies every migration and runs the db seed, then `next dev` starts on 3117 (`.next-live/`). Without `LIVE_DATABASE_URL` the tests are skipped with that reason. CI: job `e2e-live` on a `postgres:16` service. Locally without Docker, e.g. the Postgres binaries in `/opt/pglocal` (run as a non-root user):
 `initdb -D /tmp/pg/data -U postgres --auth=trust && pg_ctl -D /tmp/pg/data -o "-p 55432 -k /tmp/pg" start`, then `LIVE_DATABASE_URL=postgresql://postgres@localhost:55432/postgres`.
+
+## Deploy environment, retention, commands (D-45, D-46, D-49)
+
+| Variable | Meaning |
+|---|---|
+| `ALARM_COMMANDS_QUEUE_URL` | `https://sqs.ap-northeast-2.amazonaws.com/<12-digit account>/<queue>`. Unset: no publisher, terminating a customer answers 503 `COMMANDS_UNAVAILABLE` (nothing changes). Malformed: the API refuses to start. |
+| `ALARM_COMMANDS_EXPECTED_ACCOUNT` | 12-digit account that must own the queue; required when the URL is set. |
+| `AWS_ROLE_ARN` | IAM role the console assumes with Vercel OIDC (`awsCredentialsProvider` from `@vercel/functions/oidc`, no access keys, D-49). Permission: `sqs:SendMessage` on that queue only. Queue URL set without it: the publisher stays off (fail closed, a warning is logged). The AWS SDK is imported on the first send only. |
+| `RETENTION_RETURN_DAYS` / `RETENTION_AUDIT_DAYS` / `RETENTION_SLA_DAYS` | optional, defaults 30 / 730 / 1826; floors 7 / 90 / 365; bad values are ignored with a warning. One config object (`lib/server/wiring.ts`) is shared by the API (export window, schedule on the deletion record) and the tick's daily retention job. |
+
+- `/api/v1/*` and in-process calls write `ApiResponse.stream` as a streamed Response (`lib/server/response.ts`): headers first, an error midway aborts the stream.
+- Customer detail (ADMIN): Legal hold card, "Export incident history (CSV)" (TERMINATED, until the end of the return period; fetched from `/customers/<slug>/export.csv`, which also works in mock mode), Deletion record table. Top nav: "Business-hours summary: N" (suspended-customer incidents + terminated customers still sending events) from `GET /digests/latest`.
+- "Escalate now" is off for incidents marked `pagingSuppressed` (customer suspended or terminated, D-43) and says nobody will be paged.

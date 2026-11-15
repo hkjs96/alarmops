@@ -189,7 +189,7 @@ export function IncidentDetailBody({ inc, timeline, notifs, now }: { inc: Incide
                 </div>
               ) : null}
             </div>
-            <HeroActions id={inc.id} title={inc.title} pathText={inc.org.customer ? orgChainParts(inc).join(" › ") : "an unmapped account"} status={inc.status} version={inc.version} canEscalate={inc.escalation.state === "PAGING" || inc.escalation.state === "UNREACHABLE"} escalateWhy={inc.escalation.state === "MUTED" ? "Muted by a maintenance window" : inc.escalation.state === "NEVER_ESCALATING" ? "No call order applies: there is nobody to escalate to" : inc.escalation.state === "STOPPED_EXHAUSTED" ? "Every step has been sent" : undefined} acknowledgedAt={inc.acknowledgedAt} />
+            <HeroActions id={inc.id} title={inc.title} pathText={inc.org.customer ? orgChainParts(inc).join(" › ") : "an unmapped account"} status={inc.status} version={inc.version} canEscalate={!inc.pagingSuppressed && (inc.escalation.state === "PAGING" || inc.escalation.state === "UNREACHABLE")} notPagedWhy={inc.pagingSuppressed ? (inc.pagingSuppressed === "CUSTOMER_SUSPENDED" ? "This customer is suspended: nobody will be paged, so there is nobody to escalate to." : "This customer is terminated: nobody will be paged, so there is nobody to escalate to.") : undefined} escalateWhy={inc.escalation.state === "MUTED" ? "Muted by a maintenance window" : inc.escalation.state === "NEVER_ESCALATING" ? "No call order applies: there is nobody to escalate to" : inc.escalation.state === "STOPPED_EXHAUSTED" ? "Every step has been sent" : undefined} acknowledgedAt={inc.acknowledgedAt} />
           </div>
         </div>
       </section>

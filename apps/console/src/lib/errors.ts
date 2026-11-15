@@ -69,6 +69,9 @@ export function errorText(f: Failure, ctx: ErrorContext = {}): string {
     }
     case "COMMANDS_UNAVAILABLE": return "Alarm deletion can't be sent right now, so the customer was not terminated. Nothing was changed. Try again later or ask the platform team.";
     case "CUSTOMER_TERMINATED": return "A terminated customer cannot change status. To use it again, connect it as a new customer. Reload to see the current state.";
+    case "CUSTOMER_NOT_TERMINATED": return "The incident history can be exported only for a terminated customer. Reload to see the current state.";
+    case "EXPORT_WINDOW_CLOSED": return "The return period is over, so the incident history was deleted or is no longer available for export.";
+    case "EXPORT_TOO_LARGE": return "The history is too large to export here (over 50,000 incidents). Ask the platform team for a manual export.";
     case "STEP_NOT_MANUAL": return "This step is done by AlarmOps itself and is not waiting for a person. Reload to see where it stands.";
     case "NOT_FOUND": return "Not found. It may have been removed, or you may not have access to it.";
     case "ROLE_REQUIRED": case "FORBIDDEN": case "PORTAL_GRANT_REQUIRED": {

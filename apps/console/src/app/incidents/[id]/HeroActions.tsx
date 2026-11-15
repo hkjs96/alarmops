@@ -18,9 +18,11 @@ export const ACK_SETTLE_MS = 5000;
  * (QA P1-2, P2-A): Mute and Escalate keep their places (Escalate is switched off, not removed), and Undo is a link on
  * its own line below, at the other side from the primary spot. It is also in the toast and in the list row's "…".
  */
-export function HeroActions({ id, title, pathText, status, version, canEscalate, escalateWhy, acknowledgedAt }: {
+export function HeroActions({ id, title, pathText, status, version, canEscalate, escalateWhy, notPagedWhy, acknowledgedAt }: {
   /** why Escalate is not offered (muted, nobody to escalate to) */
   escalateWhy?: string;
+  /** D-43: the customer is suspended or terminated; Escalate now is off and this is said in words next to it */
+  notPagedWhy?: string;
   id: string; title: string;
   /** "Mirae Pay › Core › Payments API", or "an unmapped account" */
   pathText: string;
@@ -133,7 +135,7 @@ export function HeroActions({ id, title, pathText, status, version, canEscalate,
         <>
           <div className="row hero-actions">
             <Button disabled title="Maintenance windows are not built yet">Mute 1h</Button>
-            <Button data-list-action="incident.panel-escalate" onClick={(e) => { if (isSameSpot(e)) return; markSpot(e); void escalate(); }} disabled={pending || !canEscalate || acked || !may} title={noRole ?? (acked ? "Acknowledged: paging has stopped" : escalateWhy)}>Escalate now</Button>
+            <Button data-list-action="incident.panel-escalate" onClick={(e) => { if (isSameSpot(e)) return; markSpot(e); void escalate(); }} disabled={pending || !canEscalate || acked || !may} title={noRole ?? (acked ? "Acknowledged: paging has stopped" : notPagedWhy ?? escalateWhy)} aria-describedby={notPagedWhy ? "escalate-why" : undefined}>Escalate now</Button>
             {!acked ? (
               <Button ref={ackRef} variant="primary" size="lg" data-list-action="incident.panel-ack" onClick={(e) => { if (isSameSpot(e)) return; markSpot(e); void ack(); }} disabled={pending || !may} title={noRole}>Acknowledge</Button>
             ) : fresh ? (
@@ -144,6 +146,7 @@ export function HeroActions({ id, title, pathText, status, version, canEscalate,
               <Button ref={resolveRef} variant="primary" size="lg" onClick={() => { shell.clearToast(); setConfirm(true); }} disabled={pending || !may} title={noRole} aria-haspopup="dialog">Resolve…</Button>
             )}
           </div>
+          {notPagedWhy ? <p className="sm mut" id="escalate-why" data-testid="escalate-why" style={{ margin: "8px 0 0" }}>{notPagedWhy}</p> : null}
           {acked && token ? (
             <div className="hero-sub">
               <button type="button" className="lnk-btn" data-list-action="incident.panel-undo-ack" onClick={() => { void undo(token); }} disabled={pending} data-testid="panel-undo">Undo acknowledge</button>

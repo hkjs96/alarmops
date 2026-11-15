@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { TICK_JOBS, runTick, type TickJob } from "@alarmops/core";
 import { backend } from "@/lib/server/backend";
+import { retention } from "@/lib/server/wiring";
 import { tickAuth } from "@/lib/server/tick-auth";
 import { NotConfiguredError } from "@/lib/mode";
 import { errorTag } from "@/lib/server/error-tag";
@@ -31,7 +32,7 @@ export async function POST(req: NextRequest) {
   if (jobs === null) return err(400, "VALIDATION_FAILED", `jobs must be a list of ${TICK_JOBS.join(", ")}.`);
   try {
     const { repo } = backend();
-    const result = await runTick({ scheduledAt, jobs }, { repo, senders: {}, log: (level, msg, data) => console[level === "info" ? "log" : level](`[tick] ${msg}`, data ?? {}) });
+    const result = await runTick({ scheduledAt, jobs }, { repo, senders: {}, retention: retention(), log: (level, msg, data) => console[level === "info" ? "log" : level](`[tick] ${msg}`, data ?? {}) });
     return NextResponse.json(result, { headers: { "cache-control": "no-store" } });
   } catch (e) {
     if (e instanceof NotConfiguredError) return err(503, "NOT_CONFIGURED", e.message);

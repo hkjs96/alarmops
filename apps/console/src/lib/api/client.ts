@@ -4,6 +4,7 @@ import type {
   AddResponderInput, CallOrderListQuery, CallOrderListResponse, CustomerPersonRole, PagingConfig, PagingConfigInput, PagingHealth, PagingPath, PagingPathQuery,
   RespondersResponse, RotationSummary, StaffSummary, ResponderWriteOptions, RespondersWriteResult, UndoResult,
   CustomerStatusChange, CustomerStatusInput, CustomerStatusResponse, Offboarding, OffboardStepKey,
+  Digest, LegalHold, PurgeLog,
 } from "./types";
 
 export class ApiError extends Error {
@@ -83,6 +84,21 @@ export interface ConsoleApi {
   getOffboarding(customerId: string): Promise<Offboarding>;
   /** PATCH /customers/{id}/offboarding: a person marks a step DONE (no If-Match; ALARMS_DELETED needs `detail`, only when MANUAL) */
   markOffboardStep(customerId: string, body: { key: OffboardStepKey; state: "DONE"; detail?: string }): Promise<Offboarding>;
+
+  /* ---- Retention (D-45) and the digest (D-46) ---- */
+  /** PUT /customers/{id}/legal-hold { reason } (reason required). ADMIN. Same state as asked: 200, `changed:false`. */
+  putLegalHold(customerId: string, reason: string): Promise<{ legalHold: LegalHold; changed: boolean }>;
+  /** DELETE /customers/{id}/legal-hold { reason? } */
+  deleteLegalHold(customerId: string, reason?: string): Promise<{ legalHold: LegalHold; changed: boolean }>;
+  /** GET /customers/{id}/purge-log. ADMIN. */
+  getPurgeLog(customerId: string): Promise<PurgeLog>;
+  /**
+   * GET /customers/{id}/export.csv. ADMIN. Resolves with the streaming Response (CSV); 409 CUSTOMER_NOT_TERMINATED,
+   * 410 EXPORT_WINDOW_CLOSED, 413 EXPORT_TOO_LARGE throw an ApiError before any byte is sent.
+   */
+  exportCsv(customerId: string): Promise<Response>;
+  /** GET /digests/latest (MSP staff; a portal user gets 404) */
+  getLatestDigest(): Promise<Digest>;
 }
 
 /** Empty params are dropped (known-bugs 9-6). */
@@ -120,6 +136,13 @@ export function createHttpApi(opts: { baseUrl: string; fetch?: typeof fetch; hea
     return (await res.json()) as T;
   }
   const enc = encodeURIComponent;
+  async function raw(path: string): Promise<Response> {
+    const res = await f(base + path, { method: "GET", headers: { ...(opts.headers?.() ?? {}) }, cache: "no-store" });
+    if (res.ok) return res;
+    let err: ApiErrorBody["error"] = { code: "UNKNOWN", message: res.statusText, requestId: "" };
+    try { err = ((await res.json()) as ApiErrorBody).error ?? err; } catch { /* non-JSON error */ }
+    throw new ApiError(res.status, err.code, err.message, err.requestId, err.details ?? {});
+  }
   const unreachable = (o: ResponderWriteOptions) => toQuery({ confirmUnreachable: o.confirmUnreachable ? true : undefined });
 
   return {
@@ -153,5 +176,10 @@ export function createHttpApi(opts: { baseUrl: string; fetch?: typeof fetch; hea
     patchCustomerStatus: (id, body, version) => call("PATCH", `/customers/${enc(id)}/status`, body, { "If-Match": String(version) }),
     getOffboarding: (id) => call("GET", `/customers/${enc(id)}/offboarding`),
     markOffboardStep: (id, body) => call("PATCH", `/customers/${enc(id)}/offboarding`, body),
+    putLegalHold: (id, reason) => call("PUT", `/customers/${enc(id)}/legal-hold`, { reason }),
+    deleteLegalHold: (id, reason) => call("DELETE", `/customers/${enc(id)}/legal-hold`, reason ? { reason } : {}),
+    getPurgeLog: (id) => call("GET", `/customers/${enc(id)}/purge-log`),
+    exportCsv: (id) => raw(`/customers/${enc(id)}/export.csv`),
+    getLatestDigest: () => call("GET", "/digests/latest"),
   };
 }

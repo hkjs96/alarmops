@@ -7,6 +7,7 @@ import { customers14, customers34, type FxCustomer } from "./scope-fixtures";
 import { createPaging, type FxPaging } from "./paging-fixtures";
 import { createPagingApi, hasOwnSteps, healthOf } from "./paging-mock";
 import { createStatusApi, createStatusStore, type StatusStore } from "./status-mock";
+import { createRetentionApi, createRetentionStore, type RetentionStore } from "./retention-mock";
 
 interface Store {
   customers: FxCustomer[];
@@ -15,6 +16,7 @@ interface Store {
   undo: Map<string, { snapshot: IncidentListItem[]; after: Record<string, number>; by: string; exp: number }>;
   paging: FxPaging;
   customerStatus: StatusStore;
+  retention: RetentionStore;
 }
 
 export interface MockUser { id: string; contactId: string; name: string; email: string; role: Role; kind?: "INTERNAL" | "CUSTOMER" }
@@ -36,7 +38,7 @@ const RANK: Record<Role, number> = { VIEWER: 0, OPERATOR: 1, ADMIN: 2 };
 export function createStore(opts: { customers?: 14 | 34 } = {}): Store {
   const customers = opts.customers === 34 ? customers34 : customers14;
   return {
-    customers, paging: createPaging(customers), customerStatus: createStatusStore(),
+    customers, paging: createPaging(customers), customerStatus: createStatusStore(), retention: createRetentionStore(),
     incidents: structuredClone([...fx.openIncidents, ...fx.resolvedIncidents, ...fx.suppressedIncidents]),
     timelines: structuredClone(fx.timelines),
     undo: new Map(),
@@ -138,9 +140,15 @@ export function createMockApi(store: Store = createStore(), clock: () => number 
     err: (status, code, message, details) => new ApiError(status, code, message, `req_mock_${++reqSeq}`, details),
   });
 
+  const retentionApi = createRetentionApi({
+    store: store.retention, status: store.customerStatus, customers: store.customers, me: ME, now: nowIso, need, portal: ME.kind === "CUSTOMER",
+    err: (status, code, message, details) => new ApiError(status, code, message, `req_mock_${++reqSeq}`, details),
+  });
+
   return {
     ...pagingApi,
     ...statusApi,
+    ...retentionApi,
     async me() { return { id: ME.id, name: ME.name, email: ME.email, role: ME.role, ...(ME.kind ? { kind: ME.kind } : {}) }; },
     async listIncidents(q = {}) {
       const scope = scopeOf(q);

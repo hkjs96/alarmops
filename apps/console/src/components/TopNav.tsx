@@ -2,16 +2,17 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cx } from "@alarmops/design-system";
-import type { Role } from "@/lib/api/types";
+import type { Digest, Role } from "@/lib/api/types";
 import { NAV, sectionFor } from "@/lib/nav";
 import { ThemeToggle } from "./ThemeToggle";
 import { AccountMenu } from "./AccountMenu";
+import { DigestBadge } from "./DigestBadge";
 
 /**
  * Top menu. The Incidents badge is one number: open incidents in all customers (triggered or escalated, nobody
  * acknowledged). It does not change with the filter. Links carry the list filter so it follows the user across screens.
  */
-export function TopNav({ openCount, userName, role, scopeQuery, onOpenFinder }: { openCount: number; userName: string; role: Role; scopeQuery: string; onOpenFinder?: () => void }) {
+export function TopNav({ openCount, userName, role, scopeQuery, onOpenFinder, digest }: { openCount: number; userName: string; role: Role; scopeQuery: string; onOpenFinder?: () => void; digest?: Digest | null }) {
   const pathname = usePathname();
   const active = sectionFor(pathname)?.key;
   const item = (s: (typeof NAV)[number], short = false) => (
@@ -32,6 +33,7 @@ export function TopNav({ openCount, userName, role, scopeQuery, onOpenFinder }: 
         <nav className="nav hide-m" aria-label="Main">{NAV.map((s) => item(s))}</nav>
         <div className="top-r">
           <span className="health">PIPELINE OK · TICK 12s</span>
+          {digest ? <DigestBadge digest={digest} /> : null}
           {onOpenFinder ? (
             <button type="button" className="btn hide-m finder-btn" aria-haspopup="dialog" aria-keyshortcuts="Control+K Meta+K"
               title="Filter this screen to a customer, project or service. You stay on this screen." onClick={onOpenFinder}>

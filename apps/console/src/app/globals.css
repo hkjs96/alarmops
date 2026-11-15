@@ -566,5 +566,29 @@ div.co-refused { margin-top: 6px; }
 .cs-form .inp.cs-in { min-height: 36px; }
 @media (max-width: 760px) { .cs-form .inp.cs-in { min-height: 44px; height: 44px; } }
 .cdlg .btn.danger:not([disabled]) { background: var(--red); border-color: var(--red); color: var(--on-red); font-weight: 600; }
+/* D-45 retention cards: legal hold, deletion record (a table that becomes cards on a phone), D-46 digest */
+.hold-dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 12px; margin: 0 0 8px; font-size: 14px; }
+.hold-dl dt { color: var(--ink2); }
+.hold-dl dd { margin: 0; overflow-wrap: anywhere; }
+.pl-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.pl-table th { text-align: left; font-size: 13px; font-weight: 600; color: var(--ink2); padding: 6px 10px 6px 0; border-bottom: 1px solid var(--rule); }
+.pl-table td { padding: 10px 10px 10px 0; border-top: 1px solid var(--rule); vertical-align: top; overflow-wrap: anywhere; }
+.pl-sched { margin: 12px 0 0; padding-left: 18px; }
+.dg-wrap { position: relative; }
+.dg-badge { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 10px; font-size: 13px; font-weight: 600; background: none; border: 1px solid var(--rule); color: var(--ink); cursor: pointer; }
+.dg-panel { position: absolute; top: 100%; right: 8px; z-index: 40; width: min(420px, calc(100vw - 16px)); max-height: 70vh; overflow: auto; padding: 14px; background: var(--surface); border: 1px solid var(--rule); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18); font-size: 14px; }
+.dg-panel ul { margin: 6px 0 12px; padding-left: 18px; }
+@media (max-width: 760px) {
+  .dg-long { display: none; }
+  .top-r { gap: 4px; }
+  .dg-badge { padding: 0 6px; gap: 4px; min-width: 44px; justify-content: center; }
+  .pl-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .pl-table, .pl-table tbody, .pl-table tr, .pl-table td { display: block; width: 100%; }
+  .pl-table tr { padding: 10px 0; border-top: 1px solid var(--rule); }
+  .pl-table td { border: 0; padding: 2px 0; }
+  .pl-table td::before { content: attr(data-label) ": "; color: var(--ink2); font-size: 13px; }
+  .hold-dl { grid-template-columns: minmax(0, 1fr); }
+  .dg-panel { position: fixed; top: 56px; right: 8px; left: 8px; width: auto; }
+}
 .cs-errbox { scroll-margin-bottom: 16px; }
 .cs-errbox:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }
