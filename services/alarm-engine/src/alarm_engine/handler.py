@@ -224,6 +224,18 @@ def handle_batch(engine: Engine, event: dict, remaining_ms: Callable[[], int] | 
                 failures.append({"itemIdentifier": rec["messageId"]})
             continue
         try:
+            envelope = json.loads(rec["body"])
+        except (ValueError, RecursionError):
+            envelope = None
+        if events.is_cloudtrail_event(envelope):    # forwarded CloudTrail tag event (customer stack TagChangeRule)
+            try:
+                out = events.handle_tag_event(engine, envelope)
+                logger.info("tag event %s → %s", rec.get("messageId"), out.get("status"))
+            except Exception:  # noqa: BLE001
+                logger.exception("tag event %s failed", rec.get("messageId"))
+                failures.append({"itemIdentifier": rec["messageId"]})
+            continue
+        try:
             cmd = parse(rec["body"])
         except InvalidCommand as e:
             logger.error("dropping invalid command %s: %s", rec.get("messageId"), e)   # poison: do not retry
