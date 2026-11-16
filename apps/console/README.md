@@ -49,6 +49,8 @@
 
 ## Deploy environment, retention, commands (D-45, D-46, D-49)
 
+Production deploys only through `.github/workflows/deploy-console.yml` (D-53; setup in `docs/GO-LIVE.md` step 3). It checks the pulled Vercel production environment with `.github/scripts/check-console-deploy-env.mjs` (`CONSOLE_ORIGIN` and `TRUSTED_PROXY` must be Plain, not Sensitive, Vercel variables or the pull omits them), then smoke-checks `/login`, the nonce CSP and the unauthenticated tick (`.github/scripts/smoke-console.mjs`).
+
 | Variable | Meaning |
 |---|---|
 | `ALARM_COMMANDS_QUEUE_URL` | `https://sqs.ap-northeast-2.amazonaws.com/<12-digit account>/<queue>`. Unset: no publisher, terminating a customer answers 503 `COMMANDS_UNAVAILABLE` (nothing changes). Malformed: the API refuses to start. |

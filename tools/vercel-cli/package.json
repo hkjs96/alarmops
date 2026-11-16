@@ -1,0 +1,9 @@
+{
+  "name": "alarmops-vercel-cli",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pinned Vercel CLI for .github/workflows/deploy-console.yml (not part of the app workspaces)",
+  "dependencies": {
+    "vercel": "65.16.0"
+  }
+}
