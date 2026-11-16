@@ -54,6 +54,7 @@
 | D-48 | **확정(사용자 결정, 11/13, Q-API-15 닫힘).** `alarm-commands`는 **표준 SQS 큐**. 중복 전달은 엔진이 `commandId`로 한 번만 처리한다. SSE, DLQ(maxReceiveCount 5), DLQ 비어 있지 않음 알람. 발행기는 FIFO URL도 지원하지만 쓰지 않는다 | 해지 명령은 순서보다 한 번 처리가 중요하고 멱등이 이미 있다. FIFO는 한 고객이 막히면 그 고객 줄 전체가 멈춘다 | 11/13 (사용자 결정) |
 | D-49 | **확정(사용자 결정, 11/13, Q-API-03 닫힘).** Vercel 콘솔은 **Vercel OIDC로 IAM 역할을 맡아** AWS를 부른다. 장기 접근 키를 두지 않는다. 역할 신뢰는 OIDC `sub`/`aud`로 이 Vercel 프로젝트·production 환경에 고정하고, 권한은 `alarm-commands` 큐 ARN의 `sqs:SendMessage` 하나 | 유출될 장기 비밀이 없고 회전 부담이 없다(security 검토 sqs-command-publisher 권고) | 11/13 (사용자 결정) |
 | D-50 | **확정(사용자 결정, 11/16, "우선").** 번호 보기(D-35): 콘솔 권한이 **VIEWER인 사람은 그 고객의 Responder여도 번호를 열 수 없다**(403 `ROLE_REQUIRED`, 버튼 없음). NORMAL 열람은 OPERATOR·ADMIN인 Responder만. 직접 대응해야 하는 사람은 OPERATOR로 올린다. 구현은 `packages/api/src/revealApi.ts`의 상수 `VIEWER_RESPONDER_MAY_REVEAL = false` 하나로, 바꾸려면 이 결정을 고친다 | VIEWER는 보고를 받는 사람(팀장·영업 등)이 대부분이라 개인정보 최소 노출. 필요하면 상수 하나로 되돌릴 수 있다 | 11/16 (사용자 결정, 잠정) |
+| D-51 | **확정(사용자 결정, 11/16).** 번호 보기(D-35): **포털 사용자는 자기 고객 소속 사람(CUSTOMER 연락처)의 번호·이메일을 NORMAL로 열 수 있다.** MSP 직원(INTERNAL)이나 다른 고객의 연락처는 404, 포털은 EMERGENCY 불가. 열람마다 기록이 남고(`actor.kind = PORTAL`), 한도(1인 분당 30회)는 같다. 포털 읽기 전용(쓰기 거부)의 예외이며 API-CONTRACT §8.4 `P(contacts)`와 같다 | 같은 회사 동료의 번호라 고객 쪽에서 막을 이유가 적다. 범위·기록·한도는 서버가 강제한다(hkjs96/alarmops#42) | 11/16 (사용자 결정) |
 
 ## 이전을 쉽게 만드는 개발 원칙 (D-09에 딸림)
 1. Postgres 표준 기능만. Supabase Auth·Realtime·Storage·Edge Functions, `auth.uid()` 기반 권한 규칙 금지. 로그인은 앱에서 Google SSO.
