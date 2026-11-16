@@ -5,7 +5,7 @@
  */
 import { createHash } from 'node:crypto';
 import { incidentMute, type DigestData, type PurgeLogEntry, type Contact, type Leave, type Override, type Rotation, type AuditInput, type DeliveryLog, type IncidentEventInput, type IncidentRow, type MaintenanceWindow, type PagingConfig } from '@alarmops/core';
-import { nodeVisible, type ApiRepository, type AlertMemberRow, type IdempotentEntry, type IncidentFilter, type IncidentPage, type NodeFilter, type NotifiedPerson, type OpenCounts, type OrgTree, type ScopeFilter, type StatusCounts, type UndoRecord, type UserInfo, type Principal, type ResponderOp, type ResponderWriteOutcome, type RespondersState, type RotationsWorld, type ChangeStatusOutcome, type CustomerStatusState, type CustomerStatusValue, type ExportIncidentRow, type RetentionView, type MarkStepOutcome, type OffboardStep, type OffboardStepKey, type OffboardingState, OFFBOARD_STEP_KEYS } from '@alarmops/api';
+import { nodeVisible, type ApiRepository, type AlertMemberRow, type IdempotentEntry, type IncidentFilter, type IncidentPage, type NodeFilter, type NotifiedPerson, type OpenCounts, type OrgTree, type ScopeFilter, type StatusCounts, type UndoRecord, type UserInfo, type Principal, type ResponderOp, type ResponderWriteOutcome, type RespondersState, type RotationsWorld, type ChangeStatusOutcome, type CustomerStatusState, type CustomerStatusValue, type ExportIncidentRow, type RetentionView, type MarkStepOutcome, type OffboardStep, type OffboardStepKey, type OffboardingState, type RevealLogFilter, type RevealLogRow, type RevealWrite, type RevealWriteOutcome, OFFBOARD_STEP_KEYS } from '@alarmops/api';
 import { PG, pgCode, type SqlExecutor } from './client.js';
 import { purgeLogOf } from './retentionSql.js';
 import { CONTACT_COLS, toContact, Params, d, dReq, incidentCols, iso, js, newId, num, toEvent, toIncident, toLog } from './rows.js';
@@ -527,7 +527,69 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
     };
   }
 
-  // ───────────────────────────── idempotency ─────────────────────────────
+  // ───────────────────────────── contact reveal (D-35) ─────────────────────────────
+
+  async responderCustomerIdsOfContact(contactId: string): Promise<string[]> {
+    return (await this.sql.query(`SELECT DISTINCT "customerId" FROM "Responder" WHERE "contactId" = $1 ORDER BY 1`, [contactId])).map((r) => r.customerId as string);
+  }
+  async adminStaff(): Promise<Array<{ contactId: string; name: string }>> {
+    return (await this.sql.query(
+      `SELECT c."id", c."name" FROM "User" u JOIN "Contact" c ON c."userId" = u."id"
+        WHERE u."role" = 'ADMIN' AND u."status" = 'ACTIVE' AND u."customerId" IS NULL AND c."kind" = 'INTERNAL' AND c."active" ORDER BY c."name", c."id"`)).map((r) => ({ contactId: r.id as string, name: r.name as string }));
+  }
+  async recordReveal(w: RevealWrite): Promise<RevealWriteOutcome> {
+    return this.sql.transaction(async (tx) => {
+      // One writer per user at a time: the count below and the INSERT are one step, so two requests (or two
+      // instances) cannot both pass at 29 of 30. The limit is read from the rows themselves.
+      await tx.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`contact-reveal:${w.actorUserId}`]);
+      const now = this.sql.now();
+      // The row that, once it leaves the window, frees a slot: the `limit`-th newest inside it.
+      const wait = async (windowSec: number, limit: number, emergencyOnly: boolean): Promise<number> => {
+        const [r] = await tx.query(
+          `SELECT GREATEST(1, ceil(extract(epoch FROM ("at" + make_interval(secs => $2) - ${now}))))::int AS "retry" FROM "ContactRevealLog"
+            WHERE "actorUserId" = $1 AND "at" > ${now} - make_interval(secs => $2) AND ($4::boolean = false OR "mode" = 'EMERGENCY')
+            ORDER BY "at" DESC, "id" DESC OFFSET $3 LIMIT 1`, [w.actorUserId, windowSec, limit - 1, emergencyOnly]);
+        return (r?.retry as number | undefined) ?? 0;
+      };
+      const minute = await wait(60, w.limits.perMinute, false);
+      const hour = w.mode === 'EMERGENCY' ? await wait(3600, w.limits.emergencyPerHour, true) : 0;
+      if (minute || hour) return { ok: false as const, retryAfterSec: Math.max(minute, hour) };
+      const id = newId('crl');
+      const [row] = await tx.query(
+        `INSERT INTO "ContactRevealLog"("id", "at", "actorUserId", "actorRole", "contactId", "contactName", "customerId", "channel", "mode", "reason", "notifiedContactIds", "requestId")
+         VALUES ($1, ${now}, $2, $3, $4, $5, $6, $7::"RevealChannel", $8::"RevealMode", $9, $10::text[], $11) RETURNING "at"`,
+        [id, w.actorUserId, w.actorRole, w.contactId, w.contactName, w.customerId, w.channel, w.mode, w.reason, w.notifiedContactIds, w.requestId]);
+      const at = dReq(row!.at);
+      await insertAudit(tx, { at, customerId: w.customerId, actorType: 'USER', actorId: w.actorUserId, action: 'contact.reveal', targetType: 'Contact', targetId: w.contactId, after: { revealLogId: id, mode: w.mode }, requestId: w.requestId });
+      return { ok: true as const, id, at };
+    });
+  }
+  async revealLog(f: RevealLogFilter): Promise<{ rows: RevealLogRow[]; hasMore: boolean }> {
+    const p = new Params();
+    const where: string[] = [];
+    // The customer condition is part of the query: `null` = every customer (and rows without one), a list = only those.
+    if (f.customerIds !== null) where.push(`l."customerId" = ANY(${p.add([...f.customerIds])}::text[])`);
+    if (f.mode) where.push(`l."mode" = ${p.add(f.mode)}::"RevealMode"`);
+    if (f.actorUserId) where.push(`l."actorUserId" = ${p.add(f.actorUserId)}`);
+    if (f.contactId) where.push(`l."contactId" = ${p.add(f.contactId)}`);
+    if (f.from) where.push(`l."at" >= ${p.add(iso(f.from))}::timestamptz`);
+    if (f.to) where.push(`l."at" <= ${p.add(iso(f.to))}::timestamptz`);
+    if (f.after) { const t = p.add(f.after.t); const i = p.add(f.after.id); where.push(`(l."at" < ${t}::timestamptz OR (l."at" = ${t}::timestamptz AND l."id" < ${i}))`); }
+    const rows = await this.sql.query(
+      `SELECT l."id", l."at", l."mode", l."channel", l."reason", l."actorUserId", u."name" AS "actorName", l."contactId", l."contactName", l."notifiedContactIds",
+              cu."id" AS "cid", cu."name" AS "cname", cu."slug" AS "cslug",
+              COALESCE((SELECT jsonb_agg(jsonb_build_object('contactId', n."id", 'name', n."name") ORDER BY x.ord) FROM unnest(l."notifiedContactIds") WITH ORDINALITY AS x(id, ord) JOIN "Contact" n ON n."id" = x.id), '[]'::jsonb) AS "notified"
+         FROM "ContactRevealLog" l JOIN "User" u ON u."id" = l."actorUserId" LEFT JOIN "Customer" cu ON cu."id" = l."customerId"
+        ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY l."at" DESC, l."id" DESC LIMIT ${p.add(f.limit + 1)}`, p.values);
+    return {
+      hasMore: rows.length > f.limit,
+      rows: rows.slice(0, f.limit).map((r) => ({
+        id: r.id, at: dReq(r.at), mode: r.mode, actorUserId: r.actorUserId, actorName: r.actorName, contactId: r.contactId, contactName: r.contactName,
+        customer: r.cid ? { id: r.cid, name: r.cname, slug: r.cslug } : null, channel: r.channel, reason: r.reason ?? null,
+        notified: (typeof r.notified === 'string' ? JSON.parse(r.notified) : r.notified) as Array<{ contactId: string; name: string }>,
+      })),
+    };
+  }
 
   // ───────────────────────────── customer status / offboarding (D-43) ─────────────────────────────
 
@@ -609,6 +671,8 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
       await tx.query(`UPDATE "CustomerOffboarding" SET "steps" = $2::jsonb WHERE "customerId" = $1`, [customerId, js(steps)]);
     });
   }
+
+  // ───────────────────────────── idempotency ─────────────────────────────
 
   async getIdempotent(key: string, now: Date): Promise<IdempotentEntry | null> {
     const [r] = await this.sql.query(`SELECT "fingerprint", "response" FROM "IdempotencyKey" WHERE "key" = $1 AND "expiresAt" > $2::timestamptz`, [key, iso(now)]);

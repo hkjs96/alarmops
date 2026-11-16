@@ -5,10 +5,13 @@
 import { MemoryTickStore, incidentMute, type DigestData, type PurgeLogEntry, type RetentionStage, parseSnapshot, type AuditInput, type Contact, type IncidentRow, type PagingConfig } from '@alarmops/core';
 import { inScope, nodeVisible, seesCustomer, type Role, type ScopeFilter } from './auth.js';
 import type { UserInfo } from './audience.js';
-import type { ExportIncidentRow, RetentionView } from './repo.js';
+import type { ExportIncidentRow, RetentionView, RevealLogFilter, RevealLogRow, RevealWrite, RevealWriteOutcome } from './repo.js';
 import { OFFBOARD_STEP_KEYS, type ChangeStatusOutcome, type CustomerStatusState, type CustomerStatusValue, type MarkStepOutcome, type OffboardStepKey, type OffboardingState, type Principal, ResponderOp, ResponderWriteOutcome, RespondersState, RotationsWorld, AlertMemberRow, ApiRepository, IdempotentEntry, IncidentFilter, IncidentPage, NodeFilter, NotifiedPerson, OpenCounts, StatusCounts, UndoRecord } from './repo.js';
 
 export interface ContactScopeRow { contactId: string; customerId: string; scopeType: 'CUSTOMER' | 'PROJECT' | 'SERVICE'; scopeId: string; role: 'NOTIFY' | 'APPROVER' | 'PORTAL_USER' }
+
+/** A ContactRevealLog row as the memory store keeps it (never a contact value). */
+export interface RevealLogEntry extends RevealWrite { id: string; at: Date }
 
 export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
   users = new Map<string, { id: string; name: string; contactId: string | null; email?: string; role?: Role; customerId?: string | null; status?: 'ACTIVE' | 'PENDING' | 'DISABLED' }>();
@@ -17,6 +20,11 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
   responderSource = new Map<string, { source: 'DIRECT' | 'TEMPLATE'; templateId: string; templateName: string }>();
   customerTemplate = new Map<string, string>();
   private newContactSeq = 0;
+  /** ContactRevealLog (D-35), append only. */
+  revealLogs: RevealLogEntry[] = [];
+  /** Test switch: the next reveal-log writes fail (nothing is written, the call throws). */
+  failRevealWrites = false;
+  private revealSeq = 0;
   contactScopes: ContactScopeRow[] = [];
   resources = new Map<string, { id: string; name: string; customerId: string; serviceId: string | null }>();
   verifiedSlack = new Set<string>();
@@ -419,5 +427,49 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
   }
   async staffContacts(): Promise<Contact[]> {
     return [...this.contacts.values()].filter((c) => c.kind === 'INTERNAL' && c.active).sort((a, b) => a.name.localeCompare(b.name) || (a.id < b.id ? -1 : 1)).map((c) => structuredClone(c));
+  }
+
+  // ── contact reveal (D-35) ──
+  async responderCustomerIdsOfContact(contactId: string) { return [...new Set(this.responders.filter((r) => r.contactId === contactId).map((r) => r.customerId))].sort(); }
+  async adminStaff() {
+    return [...this.users.values()]
+      .filter((u) => u.role === 'ADMIN' && (u.status ?? 'ACTIVE') === 'ACTIVE' && !u.customerId && u.contactId)
+      .map((u) => this.contacts.get(u.contactId!)).filter((c): c is Contact => !!c && c.kind === 'INTERNAL' && c.active)
+      .sort((a, b) => a.name.localeCompare(b.name) || (a.id < b.id ? -1 : 1)).map((c) => ({ contactId: c.id, name: c.name }));
+  }
+  async recordReveal(w: RevealWrite): Promise<RevealWriteOutcome> {
+    if (this.failRevealWrites) throw new Error('reveal log write failed');
+    const at = this.clock();
+    const mine = this.revealLogs.filter((r) => r.actorUserId === w.actorUserId);
+    // The row that, once it leaves the window, frees a slot: the `limit`-th newest inside the window.
+    const wait = (windowMs: number, limit: number, rows: RevealLogEntry[]): number => {
+      const inWin = rows.filter((r) => r.at.getTime() > at.getTime() - windowMs).sort((a, b) => b.at.getTime() - a.at.getTime());
+      const edge = inWin[limit - 1];
+      return edge ? Math.max(1, Math.ceil((edge.at.getTime() + windowMs - at.getTime()) / 1000)) : 0;
+    };
+    const minute = wait(60_000, w.limits.perMinute, mine);
+    const hour = w.mode === 'EMERGENCY' ? wait(3_600_000, w.limits.emergencyPerHour, mine.filter((r) => r.mode === 'EMERGENCY')) : 0;
+    if (minute || hour) return { ok: false, retryAfterSec: Math.max(minute, hour) };
+    const id = `crl_${++this.revealSeq}`;
+    this.revealLogs.push({ ...structuredClone(w), id, at });
+    this.audits.push({ at, customerId: w.customerId, actorType: 'USER', actorId: w.actorUserId, action: 'contact.reveal', targetType: 'Contact', targetId: w.contactId, after: { revealLogId: id, mode: w.mode }, requestId: w.requestId });
+    return { ok: true, id, at };
+  }
+  async revealLog(f: RevealLogFilter): Promise<{ rows: RevealLogRow[]; hasMore: boolean }> {
+    const rows = this.revealLogs
+      .filter((r) => (f.customerIds === null || (r.customerId !== null && f.customerIds.includes(r.customerId)))
+        && (!f.mode || r.mode === f.mode) && (!f.actorUserId || r.actorUserId === f.actorUserId) && (!f.contactId || r.contactId === f.contactId)
+        && (!f.from || r.at >= f.from) && (!f.to || r.at <= f.to))
+      .sort((a, b) => b.at.getTime() - a.at.getTime() || (a.id < b.id ? 1 : -1))
+      .filter((r) => !f.after || r.at.toISOString() < f.after.t || (r.at.toISOString() === f.after.t && r.id < f.after.id));
+    const page = rows.slice(0, f.limit).map((r): RevealLogRow => {
+      const c = r.customerId ? this.customers.get(r.customerId) : undefined;
+      return {
+        id: r.id, at: r.at, mode: r.mode, actorUserId: r.actorUserId, actorName: this.users.get(r.actorUserId)?.name ?? r.actorUserId, contactId: r.contactId, contactName: r.contactName,
+        customer: c ? { id: c.id, name: c.name, slug: c.slug } : null, channel: r.channel, reason: r.reason,
+        notified: r.notifiedContactIds.map((id) => ({ contactId: id, name: this.contacts.get(id)?.name ?? id })),
+      };
+    });
+    return { rows: page, hasMore: rows.length > f.limit };
   }
 }
