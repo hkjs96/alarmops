@@ -1,0 +1,100 @@
+name: deploy-console
+
+# Deploys apps/console to Vercel (production) from GitHub Actions (D-53, issue #46). Vercel's own Git auto-deploy must be
+# OFF for the project (docs/GO-LIVE.md, step 3), otherwise this gate can be bypassed.
+#
+# Gates, in order: workflow_dispatch by a person -> main only -> `production` environment (required reviewer, branch
+# main only) -> the pulled production environment passes check-console-deploy-env.mjs -> deploy -> smoke check.
+# An agent never runs it.
+#
+# Secrets: VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID are `production` ENVIRONMENT secrets (Settings ->
+# Environments -> production -> Secrets), not repository secrets: only a job that passed the environment's rules can read
+# them. The token is given only to the steps that call Vercel (pull, deploy), never to build or smoke. Values are never
+# printed; the env file pulled from Vercel is deleted at the end of the job even on failure.
+#
+# Vercel CLI: `npx vercel@65.16.0` (exact version, verified on the npm registry 2026-11-16). It is not a devDependency
+# so that root package.json and the lockfile stay untouched; npx does not verify the tarball against a lockfile, so a
+# registry compromise of that exact version is the residual risk (bump deliberately, review the release).
+# TODO(security, 권고 5): pin every `uses:` below to a full commit SHA, as in the other workflows.
+#
+# Vercel project settings assumed: Root Directory `apps/console`, "Include source files outside of the Root Directory"
+# on (default), framework Next.js. The CLI is run from the repository root, where `vercel pull` writes `.vercel/`.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-console
+  cancel-in-progress: false
+
+env:
+  VERCEL_CLI_VERSION: "65.16.0"
+  NEXT_TELEMETRY_DISABLED: "1"
+  VERCEL_TELEMETRY_DISABLED: "1"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: production
+    # workflow_dispatch can start any branch's copy of this file; only main may deploy.
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      # package.json engines.node is ">=20" and there is no .nvmrc; CI uses 20, so does this.
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Check the Vercel settings are present
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          for v in VERCEL_TOKEN VERCEL_ORG_ID VERCEL_PROJECT_ID; do
+            if [ -z "${!v}" ]; then echo "::error::Secret $v is not set in the production environment"; exit 1; fi
+          done
+      - name: Pull the production environment from Vercel
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: npx --yes "vercel@${VERCEL_CLI_VERSION}" pull --yes --environment=production --token "$VERCEL_TOKEN"
+      # The file Vercel gives the build is the one checked (checked values = deployed values). Names and reasons only.
+      - name: Check the console deploy environment
+        run: node .github/scripts/check-console-deploy-env.mjs .vercel/.env.production.local
+      - name: Build (prebuilt output, production)
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: npx --yes "vercel@${VERCEL_CLI_VERSION}" build --prod
+      - name: Deploy the prebuilt output
+        id: deploy
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          # stdout of `vercel deploy` is the deployment URL (not a secret); progress goes to stderr.
+          url=$(npx --yes "vercel@${VERCEL_CLI_VERSION}" deploy --prebuilt --prod --token "$VERCEL_TOKEN")
+          case "$url" in
+            https://*.vercel.app) ;;
+            *) echo "::error::unexpected output from vercel deploy (not a deployment URL)"; exit 1;;
+          esac
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "Deployment: $url" >> "$GITHUB_STEP_SUMMARY"
+      # Smoke check runs against CONSOLE_ORIGIN (the production address from the checked environment): the per-deployment
+      # URL may sit behind Vercel deployment protection, which would answer 401 to everything and hide real problems.
+      - name: Smoke check
+        run: node .github/scripts/smoke-console.mjs --env-file .vercel/.env.production.local
+      # Always: the pulled file holds the production environment values.
+      - name: Delete the pulled environment
+        if: always()
+        run: rm -rf .vercel

@@ -554,5 +554,49 @@ class DeployWorkflow(unittest.TestCase):
                 self.assertIs(st["with"]["persist-credentials"], False)
 
 
+class DeployConsoleWorkflow(unittest.TestCase):
+    def setUp(self):
+        self.text = (WORKFLOWS / "deploy-console.yml").read_text(encoding="utf-8")
+        self.wf = yaml.safe_load(self.text)
+
+    def test_guards(self):
+        wf = self.wf
+        on = wf.get("on", wf.get(True))
+        self.assertEqual(list(on), ["workflow_dispatch"])
+        self.assertEqual(wf["permissions"], {"contents": "read"})
+        self.assertEqual(list(wf["jobs"]), ["deploy"])
+        job = wf["jobs"]["deploy"]
+        self.assertEqual(job["environment"], "production")
+        self.assertIn("github.ref == 'refs/heads/main'", job["if"])
+        self.assertNotIn("pull_request", self.text.replace("pull_request_target_never", ""))
+        # secrets only from the environment, never echoed
+        for name in ("VERCEL_TOKEN", "VERCEL_ORG_ID", "VERCEL_PROJECT_ID"):
+            self.assertIn("secrets." + name, self.text)
+        self.assertNotRegex(self.text, r"echo[^\n]*\$\{?VERCEL_TOKEN")
+
+    def test_step_order_and_cleanup(self):
+        steps = self.wf["jobs"]["deploy"]["steps"]
+        runs = [st.get("run", "") for st in steps]
+        def idx(s):
+            return next(i for i, r in enumerate(runs) if s in r)
+        self.assertLess(idx("npm ci --ignore-scripts"), idx("pull --yes --environment=production"))
+        self.assertLess(idx("pull --yes --environment=production"), idx("check-console-deploy-env.mjs .vercel/.env.production.local"))
+        self.assertLess(idx("check-console-deploy-env.mjs"), idx("build --prod"))
+        self.assertLess(idx("build --prod"), idx("deploy --prebuilt --prod"))
+        self.assertLess(idx("deploy --prebuilt --prod"), idx("smoke-console.mjs"))
+        last = steps[-1]
+        self.assertEqual(last.get("if"), "always()")
+        self.assertIn("rm -rf .vercel", last["run"])
+        for st in steps:
+            if str(st.get("uses", "")).startswith("actions/checkout"):
+                self.assertIs(st["with"]["persist-credentials"], False)
+
+    def test_vercel_cli_pinned_exactly(self):
+        import re
+        self.assertRegex(self.wf["env"]["VERCEL_CLI_VERSION"], r"^\d+\.\d+\.\d+$")
+        self.assertNotIn("vercel@latest", self.text)
+        self.assertEqual(len(re.findall(r"vercel@\$\{VERCEL_CLI_VERSION\}", self.text)), 3)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -37,11 +37,17 @@
 
 ## 3단계 — 콘솔 배포(Vercel) [사람 + 에이전트]
 
-[에이전트] 배포 워크플로(#46, D-53: GitHub Actions → Vercel): `check-console-deploy-env.mjs` 통과 후 배포, `next build`는 mock 없이.
+[에이전트] 완료(#46, D-53): `.github/workflows/deploy-console.yml`. `workflow_dispatch`만, `main`에서만, 환경 `production`(승인), 권한 `contents: read`. 순서: `npm ci --ignore-scripts` → `vercel pull --yes --environment=production`(Vercel CLI `65.16.0` 고정) → 받은 `.vercel/.env.production.local`을 `check-console-deploy-env.mjs`로 검사(값은 출력하지 않는다) → `vercel build --prod` → `vercel deploy --prebuilt --prod` → 스모크 검사(`.github/scripts/smoke-console.mjs`: `/login` 200·mock 표식 없음, CSP에 nonce가 있고 script-src에 `'unsafe-inline'` 없음, 인증 없는 `POST /api/internal/tick`이 401 — 503이면 `TICK_SECRET` 미설정이라 실패). 받은 환경 파일은 실패해도 지운다. `next build`는 mock 없이.
 
-[사람] Vercel 토큰을 만들어 GitHub 환경 시크릿에 등록(이름은 #46 워크플로가 정한다).
-
-[사람] Vercel 프로젝트 만들고 환경변수(Production) 입력:
+[사람] 한 번만(순서대로):
+1. [ ] **Vercel 프로젝트 만들기**: Vercel에서 이 저장소를 가져온다(Import). Framework Next.js, **Root Directory `apps/console`**, "Include source files outside of the Root Directory" 켬(기본). 첫 자동 배포가 시작되면 취소한다.
+2. [ ] **Git 자동 배포 끄기**(D-53, 우회 방지): Project → Settings → Git → **Ignored Build Step**을 `exit 0`(항상 건너뜀)으로 하거나 Git 연결을 해제한다. 확인: main에 푸시해도 Vercel에 새 배포가 생기지 않는다.
+3. [ ] **Vercel 토큰**: Account Settings → Tokens에서 이 팀 범위 토큰을 만든다(만료일을 둔다). 값은 GitHub 말고 어디에도 적지 않는다. **조직 ID·프로젝트 ID**: 프로젝트 Settings → General의 Project ID, 팀 Settings의 Team ID(또는 로컬에서 `vercel link` 후 `.vercel/project.json`의 `orgId`·`projectId`, 이 파일은 커밋하지 않는다).
+4. [ ] **GitHub `production` 환경**(Settings → Environments → New environment): **Required reviewers**에 본인, **Deployment branches** = `main`만. 승인 없이 실행되는 경로가 없는지 확인(관리자 우회 허용 끔 권장).
+5. [ ] **환경 시크릿**(같은 화면 → Environment secrets, 저장소 시크릿 아님): `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`.
+6. [ ] **Vercel 환경변수(Production)**: 아래 표. `CONSOLE_ORIGIN`과 `TRUSTED_PROXY`는 **일반(Plain) 변수**로 둔다. Vercel의 Sensitive 변수는 `vercel pull`로 내려오지 않아 배포 전 검사가 "없음"으로 실패한다. 비밀 값(`DATABASE_URL`, `SESSION_SECRET`, `TICK_SECRET`)은 Sensitive로 해도 된다(런타임은 Vercel에 저장된 값을 쓴다). 주소는 우선 `*.vercel.app`(D-54).
+7. [ ] **첫 배포**: Actions → `deploy-console` 실행 → `production` 승인 → 로그에서 환경 검사·스모크 통과 확인. 첫 배포 전에는 `CONSOLE_ORIGIN`에 쓸 `*.vercel.app` 주소를 프로젝트 Domains에서 먼저 확인한다(스모크 검사는 이 주소를 부른다).
+8. [ ] Vercel의 Deployment Protection이 production 주소를 막고 있으면(스모크가 401로 실패) Standard Protection으로 두어 production 도메인은 공개로 한다.
 
 | 변수 | 값 |
 |---|---|
@@ -49,7 +55,7 @@
 | `DATABASE_POOLER` | `transaction` |
 | `SESSION_SECRET` | 32자 이상 임의 값 |
 | `TICK_SECRET` | 32자 이상 임의 값(아래 pg_cron과 같은 값) |
-| `CONSOLE_ORIGIN` | `https://console.<도메인>` |
+| `CONSOLE_ORIGIN` | 우선 `https://<프로젝트>.vercel.app`(D-54), 파일럿 전에 `https://console.<도메인>` |
 | `TRUSTED_PROXY` | `1` |
 | `ALARM_COMMANDS_QUEUE_URL`, `ALARM_COMMANDS_EXPECTED_ACCOUNT` | 4단계 후 |
 | `AWS_ROLE_ARN` | 4단계 후(Vercel OIDC 역할, D-49) |
@@ -61,7 +67,7 @@
 
 ## 4단계 — AWS 중앙 계정(서울) [에이전트 템플릿 → 사람 배포]
 
-[에이전트] 중앙 배포 묶음(#47) 템플릿 완료: `infra/aws/central.yaml`(수집 Lambda 3개, `alert-events`·`alarm-commands` 큐, 알람 엔진, 중앙 역할, 중앙 버스 → `alarm-commands` 규칙, Vercel OIDC 역할, DB 비밀 2개), `.github/workflows/deploy-central.yml`. 설명은 `infra/aws/README.md`. **Lambda 진입점·패키징·`DATABASE_URL_SECRET_ARN` 읽기는 backend가 완료**(#47). 산출물 만들기(저장소 루트, 배포 전에 한 번): `npm ci --ignore-scripts && npm run build:lambda -w @alarmops/ingest && npm run build:engine-lambda`(수집 → `services/ingest/dist/{webhook,eventbridge,consumer}/index.mjs`, 엔진 → `services/alarm-engine/build/`; 엔진은 wheel을 받으므로 인터넷이 필요하고, 템플릿이 arm64라 기본이 aarch64 wheel이다). 자세한 내용은 `services/ingest/README.md`, `services/alarm-engine/README.md`의 Deploy. **남은 backend 몫**: 원격 조치의 두 단계 역할 맡기. **남은 infra 몫**: `deploy-central.yml`이 산출물 "존재 확인"만 하고 빌드는 하지 않는다(위 명령을 plan 앞 단계에 넣어야 한다).
+[에이전트] 중앙 배포 묶음(#47) 템플릿 완료: `infra/aws/central.yaml`(수집 Lambda 3개, `alert-events`·`alarm-commands` 큐, 알람 엔진, 중앙 역할, 중앙 버스 → `alarm-commands` 규칙, Vercel OIDC 역할, DB 비밀 2개), `.github/workflows/deploy-central.yml`. 설명은 `infra/aws/README.md`. **Lambda 진입점·패키징·`DATABASE_URL_SECRET_ARN` 읽기는 backend가 완료**(#47). 산출물 만들기(저장소 루트, 배포 전에 한 번): `npm ci --ignore-scripts && npm run build:lambda -w @alarmops/ingest && npm run build:engine-lambda`(수집 → `services/ingest/dist/{webhook,eventbridge,consumer}/index.mjs`, 엔진 → `services/alarm-engine/build/`; 엔진은 wheel을 받으므로 인터넷이 필요하고, 템플릿이 arm64라 기본이 aarch64 wheel이다). 자세한 내용은 `services/ingest/README.md`, `services/alarm-engine/README.md`의 Deploy. **남은 backend 몫**: 원격 조치의 두 단계 역할 맡기. `deploy-central.yml`의 `plan`이 위 빌드를 직접 하고(`prisma generate`는 수집 번들이 쓰지 않아 불필요), 산출물 매니페스트 체크섬으로 `apply`가 `plan`이 올린 코드와 같은 것만 실행하는지 확인한다(`infra/aws/README.md`).
 
 [사람] 한 번만(순서대로):
 1. [ ] **버스 스택**: 아직 없으면 `infra/aws/central-bus.yaml`을 스택 `alarmops-central-bus`로 올린다(`bus-allowlist` 워크플로가 이 스택을 갱신한다).
@@ -72,7 +78,7 @@
 6. [ ] **Service Quotas**: Lambda 동시 실행 한도를 올린다(새 계정 10이면 예약 동시성 설정이 실패한다. 기본 예약 합계가 40이므로 계정 한도 140 이상 확인).
    - **중앙 계정 운영 규칙**: 엔진 실행 역할이 곧 고객이 신뢰하는 중앙 역할이다(PoC 결정). 그래서 이 계정에는 다른 Lambda·워크로드를 두지 않고, `iam:PassRole`로 이 역할을 넘길 수 있는 주체를 배포 역할로 한정한다. 개발 계정에서 중앙 역할 신뢰의 `aws:SourceAccount` 조건이 Lambda 실행에 문제를 일으키지 않는지(함수가 역할을 맡아 시작되는지) 먼저 확인한다.
 7. [ ] **`central` 환경 변수**(Settings → Environments → central → Variables, 저장소 변수 아님. 비밀 아님): `CENTRAL_DEPLOY_ROLE_ARN`, `VERCEL_OIDC_PROVIDER_ARN`, `VERCEL_TEAM_SLUG`, `VERCEL_PROJECT_NAME`. 선택: `ALARM_TOPIC_ARN`, `CENTRAL_BUS_NAME`(기본 `alarmops-central`), 이메일을 쓸 때만 `SES_IDENTITY_ARN`·`SES_FROM_ADDRESS`(D-52, 서울 리전 SES에서 검증한 신원). 기존 `CENTRAL_BUS_DEPLOY_ROLE_ARN`이 3번 역할과 같으면 그대로 둔다.
-8. [ ] **실행**: backend 패키징 산출물이 생긴 뒤 Actions → `deploy-central` 실행 → `plan` 작업 승인 → 요약의 **IAM 변경 표**를 읽고 → `apply` 작업 승인. 완료 요약의 출력표를 확인.
+8. [ ] **실행**: Actions → `deploy-central` 실행 → `plan` 작업 승인 → 요약의 **IAM 변경 표**를 읽고 → `apply` 작업 승인. 완료 요약의 출력표를 확인.
 9. [ ] **DB 비밀 값 넣기**(값은 템플릿·Actions에 없다. 엔진용과 수집용은 서로 다른 DB 사용자): 본인 터미널에서 SSO·MFA로 출력의 `EngineDbSecretArn`, `IngestDbSecretArn` 비밀에 연결 문자열을 넣는다(**맨 문자열 그대로, 끝에 `?sslmode=require`를 붙인다**. Lambda는 `sslmode`가 `require`·`verify-ca`·`verify-full`이 아니면 시작을 거부한다. 트랜잭션 풀러(포트 6543)면 수집 쪽이 자동으로 풀러 모드로 접속한다. 인증서 검증에 DB의 CA가 필요하면 URL에 `sslrootcert=`로 번들 안 파일을 지정한다. 콘솔 입력, 또는 AWS CLI의 secretsmanager 비밀 값 입력에 `file://`로 파일을 줘서 셸 기록에 남기지 않는다).
 10. [ ] **출력값을 Vercel 환경변수(production)에**: `ALARM_COMMANDS_QUEUE_URL` = `AlarmCommandsQueueUrl`, `ALARM_COMMANDS_EXPECTED_ACCOUNT` = `CentralAccountId`, `AWS_ROLE_ARN` = `VercelConsoleRoleArn`. 고객 스택 파라미터: `CentralRoleArn` = 출력 `CentralRoleArn`, `CentralEventBusArn` = 출력 `CentralBusArn`, (Remediator를 켜는 고객만) `RemediatorCallerRoleArn` = 출력 `RemediatorCallerRoleArn`. 웹훅 주소는 출력 `WebhookUrl`.
 11. [ ] **DLQ 재처리(break-glass)**: `alarm-commands` DLQ는 중앙 역할만 읽는다(`StartMessageMoveTask`도 막힌다). 메시지를 되돌려야 하면 운영 역할 ARN을 환경 변수 `DLQ_OPS_ROLE_ARN`에 넣고 `deploy-central`로 반영 → 그 역할로 재처리 → 끝나면 변수를 지우고 다시 반영.

@@ -6,6 +6,18 @@ name: deploy-central
 #          job summary. The reviewer reads that before approving the second job.
 #   apply  executes exactly that change set (by id) and prints the stack outputs.
 #
+# Which code is deployed (build -> plan -> apply): `plan` builds the four Lambda bundles from the checked-out main
+# commit (ingest: esbuild, engine: pip wheels with pinned hashes, arm64). Its packaging step uploads them to the SAM
+# bucket and the change set points at those immutable S3 objects. `apply` never rebuilds and never packages again.
+# A rebuild-and-compare was rejected: pip's dist-info files and zip metadata are not byte-stable, so a hash mismatch
+# would not prove anything. Instead `plan` writes a manifest (sha256 of every file in each bundle), prints its checksum
+# to the job summary, passes it as a job output and uploads the manifest as a workflow artifact. `apply` downloads the
+# manifest, checks its checksum against the job output (the artifact store cannot swap it), then reads the PROCESSED
+# template of the change set, downloads every Lambda code zip it references from S3 and requires each zip's file
+# hashes to equal one manifest entry (and every manifest entry to be used). Any mismatch stops before the change set
+# is executed. The deploy role therefore also needs cloudformation:GetTemplate on the stack and s3:GetObject on the
+# SAM bucket (infra/aws/README.md).
+#
 # AWS access: GitHub OIDC only (no long-lived keys). The role in CENTRAL_DEPLOY_ROLE_ARN must have a trust policy that
 # requires
 #   token.actions.githubusercontent.com:aud = sts.amazonaws.com
@@ -43,28 +55,62 @@ jobs:
     outputs:
       changeset: ${{ steps.cs.outputs.changeset }}
       mode: ${{ steps.cs.outputs.mode }}
+      manifest_sha256: ${{ steps.manifest.outputs.manifest_sha256 }}
     steps:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: npm
+      # --ignore-scripts: no package install script runs in the job that later holds the deploy role.
+      - run: npm ci --ignore-scripts
+      # The ingest bundle (esbuild) does not import @prisma/client, so no `prisma generate` is needed. If a Lambda ever
+      # imports it, add `npx prisma generate --schema db/prisma/schema.prisma` here before the build.
+      - name: Build the ingest Lambda bundles
+        run: npm run build:lambda -w @alarmops/ingest
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      # Needs network: downloads the aarch64 wheels (template Architectures: arm64) and checks them against the
+      # sha256 pins (--require-hashes, --only-binary).
+      - name: Build the engine Lambda artifact (arm64)
+        run: npm run build:engine-lambda
       - run: pip install "cfn-lint==1.60.1"
       - name: cfn-lint
         run: cfn-lint infra/aws/central.yaml infra/aws/central-bus.yaml infra/customer-stack/template.yaml
       - name: Template structure tests
         run: python -m unittest discover -s infra/test -v
-      # The Lambda code is built by the backend packaging step (not part of this repository state yet). Fail early and
-      # clearly instead of letting `sam deploy` zip an empty or missing folder.
+      # Fail early and clearly instead of letting the packaging step zip an empty or missing folder.
       - name: Check the build output exists
         run: |
           missing=0
           for f in services/ingest/dist/webhook/index.mjs services/ingest/dist/eventbridge/index.mjs \
                    services/ingest/dist/consumer/index.mjs services/alarm-engine/build/alarm_engine/handler.py; do
-            if [ ! -f "$f" ]; then echo "::error::Missing build output: $f (backend packaging, see infra/aws/central.yaml header)"; missing=1; fi
+            if [ ! -f "$f" ]; then echo "::error::Missing build output: $f (the build steps above did not produce it)"; missing=1; fi
           done
           exit $missing
+      - name: Manifest of the built code
+        id: manifest
+        run: |
+          mkdir -p "$RUNNER_TEMP/manifest"
+          for pair in webhook=services/ingest/dist/webhook eventbridge=services/ingest/dist/eventbridge \
+                      consumer=services/ingest/dist/consumer engine=services/alarm-engine/build; do
+            name=${pair%%=*}; dir=${pair#*=}
+            (cd "$dir" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) > "$RUNNER_TEMP/manifest/$name.sha256"
+            if [ ! -s "$RUNNER_TEMP/manifest/$name.sha256" ]; then echo "::error::empty bundle: $name"; exit 1; fi
+          done
+          (cd "$RUNNER_TEMP/manifest" && sha256sum *.sha256 > MANIFEST.sha256)
+          sum=$(sha256sum "$RUNNER_TEMP/manifest/MANIFEST.sha256" | cut -d' ' -f1)
+          echo "manifest_sha256=$sum" >> "$GITHUB_OUTPUT"
+          { echo "## Built code"; echo; echo "commit \`$GITHUB_SHA\`, manifest sha256 \`$sum\`"; echo; echo '```'; cat "$RUNNER_TEMP/manifest/MANIFEST.sha256"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: central-code-manifest
+          path: ${{ runner.temp }}/manifest/
+          if-no-files-found: error
+          retention-days: 7
       - name: Check the required variables are set
         env:
           ROLE: ${{ vars.CENTRAL_DEPLOY_ROLE_ARN }}
@@ -166,6 +212,46 @@ jobs:
           role-to-assume: ${{ vars.CENTRAL_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: deploy-central-apply
+      - uses: actions/download-artifact@v4
+        with:
+          name: central-code-manifest
+          path: ${{ runner.temp }}/manifest
+      - name: Verify the change set carries exactly the code plan built
+        env:
+          CHANGESET: ${{ needs.plan.outputs.changeset }}
+          EXPECTED: ${{ needs.plan.outputs.manifest_sha256 }}
+        run: |
+          set -euo pipefail
+          m="$RUNNER_TEMP/manifest"
+          [ -n "$EXPECTED" ] || { echo "::error::plan did not output a manifest checksum"; exit 1; }
+          actual=$(sha256sum "$m/MANIFEST.sha256" | cut -d' ' -f1)
+          [ "$actual" = "$EXPECTED" ] || { echo "::error::manifest artifact does not match the plan job output"; exit 1; }
+          (cd "$m" && sha256sum -c MANIFEST.sha256 >/dev/null)
+          # The processed template is what CloudFormation will run; Lambda code is an S3 object per function.
+          aws cloudformation get-template --change-set-name "$CHANGESET" --template-stage Processed \
+            --query TemplateBody --output json > "$RUNNER_TEMP/processed.json"
+          jq -r '.Resources[] | select(.Type=="AWS::Lambda::Function") | "\(.Properties.Code.S3Bucket) \(.Properties.Code.S3Key)"' \
+            "$RUNNER_TEMP/processed.json" | sort -u > "$RUNNER_TEMP/code-refs.txt"
+          [ "$(wc -l < "$RUNNER_TEMP/code-refs.txt")" -eq 4 ] || { echo "::error::expected 4 distinct Lambda code objects"; cat "$RUNNER_TEMP/code-refs.txt"; exit 1; }
+          used=""
+          n=0
+          while read -r bucket key; do
+            n=$((n+1)); d="$RUNNER_TEMP/code-$n"; mkdir -p "$d/x"
+            aws s3api get-object --bucket "$bucket" --key "$key" "$d/code.zip" >/dev/null
+            unzip -q "$d/code.zip" -d "$d/x"
+            (cd "$d/x" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) > "$d/list"
+            hit=""
+            for f in "$m"/*.sha256; do
+              [ "$(basename "$f")" = MANIFEST.sha256 ] && continue
+              if cmp -s "$f" "$d/list"; then hit=$(basename "$f" .sha256); fi
+            done
+            [ -n "$hit" ] || { echo "::error::Lambda code object $n (s3://$bucket/$key) matches no bundle plan built"; exit 1; }
+            used="$used $hit"
+          done < "$RUNNER_TEMP/code-refs.txt"
+          for b in webhook eventbridge consumer engine; do
+            case " $used " in *" $b "*) ;; *) echo "::error::bundle $b is not in the change set"; exit 1;; esac
+          done
+          echo "Verified: change set code = plan build (manifest $EXPECTED)" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Execute the approved change set
         env:
           CHANGESET: ${{ needs.plan.outputs.changeset }}
