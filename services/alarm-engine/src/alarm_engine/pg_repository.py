@@ -72,6 +72,11 @@ class PgRepository:
             remediator_role_arn=r["remediatorRoleArn"], remediator_enabled=r["remediatorEnabled"],
         )
 
+    def find_active_account_by_aws_id(self, aws_account_id: str) -> CloudAccount | None:
+        r = self._one('''SELECT a.id FROM "CloudAccount" a JOIN "Customer" c ON c.id = a."customerId"
+                         WHERE a."awsAccountId" = %s AND c.status = 'ACTIVE' ''', aws_account_id)
+        return self.get_account(r["id"]) if r else None
+
     def update_account_status(self, cloud_account_id: str, statuses: dict[str, str]) -> None:
         cols = {"reader": "readerStatus", "alarmWriter": "alarmWriterStatus", "tagWriter": "tagWriterStatus",
                 "remediator": "remediatorStatus"}

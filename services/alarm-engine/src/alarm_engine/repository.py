@@ -182,6 +182,7 @@ def merge_offboard_result(steps: dict[str, Any], account_ids: list[str], cloud_a
 
 class Repository(Protocol):
     def get_account(self, cloud_account_id: str) -> CloudAccount: ...
+    def find_active_account_by_aws_id(self, aws_account_id: str) -> CloudAccount | None: ...
     def update_account_status(self, cloud_account_id: str, statuses: dict[str, str]) -> None: ...
     def list_resources(self, cloud_account_id: str) -> list[ResourceRow]: ...
     def get_resource(self, customer_id: str, resource_id: str) -> ResourceRow | None: ...
@@ -238,6 +239,13 @@ class InMemoryRepository:
     # accounts
     def get_account(self, cloud_account_id: str) -> CloudAccount:
         return self.accounts[cloud_account_id]
+
+    def find_active_account_by_aws_id(self, aws_account_id: str) -> CloudAccount | None:
+        """CloudTrail events carry only the AWS account id. Customers that are not ACTIVE are not synced (D-43)."""
+        for a in self.accounts.values():
+            if a.aws_account_id == aws_account_id and self.customer_status.get(a.customer_id, "ACTIVE") == "ACTIVE":
+                return a
+        return None
 
     def update_account_status(self, cloud_account_id: str, statuses: dict[str, str]) -> None:
         self.account_status.setdefault(cloud_account_id, {}).update(statuses)

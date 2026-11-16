@@ -4,20 +4,15 @@ from __future__ import annotations
 
 import os
 
+from alarm_engine.aws import SessionFactory
 from alarm_engine.engine import Engine
+from alarm_engine.repository import Repository
 
 
-class _DiscoveryNotWired:
-    """Collectors (29 types) are not ported in this PR — SYNC_ACCOUNT fails clearly instead of seeing 0 resources."""
-
-    def list_monitored(self, account, region):  # type: ignore[no-untyped-def]
-        raise NotImplementedError("resource discovery collectors are not wired yet")
-
-    def read_tags(self, account, row):  # type: ignore[no-untyped-def]
-        return None
-
-    def alive(self, account, region, resource_type, keys):  # type: ignore[no-untyped-def]
-        return {k: None for k in keys}
+def make_engine(repo: Repository, sessions: SessionFactory) -> Engine:
+    """Engine with the real collectors (Reader role). Tests pass fake sessions (Stubber clients)."""
+    from alarm_engine.collectors import AwsDiscovery
+    return Engine(repo, sessions, AwsDiscovery(sessions))
 
 
 def build_engine() -> Engine:  # pragma: no cover
@@ -28,4 +23,5 @@ def build_engine() -> Engine:  # pragma: no cover
 
     url = os.environ["DATABASE_URL"]
     sts = boto3.client("sts", region_name=os.environ.get("AWS_REGION", "ap-northeast-2"))
-    return Engine(PgRepository(url), StsSessionFactory(sts, boto3.client), _DiscoveryNotWired())
+    sessions = StsSessionFactory(sts, boto3.client)
+    return make_engine(PgRepository(url), sessions)

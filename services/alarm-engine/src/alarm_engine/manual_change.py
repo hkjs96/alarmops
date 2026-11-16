@@ -10,7 +10,7 @@ Ported rule, with D-16 / D-15 applied:
 - (new) CloudWatch `PutMetricAlarm` / `DeleteAlarms` on one of our alarms by a principal other than the engine's
   AlarmWriter role → re-sync the resource; the sync records EXTERNAL_CHANGE / MISSING.
 
-The event source (EventBridge forwarder → SQS) is not built here; `route()` takes the CloudTrail `detail` dict.
+`route()` is pure; `events.py` turns a forwarded CloudTrail tag event (EventBridge envelope) into a resource + reaction.
 """
 
 from __future__ import annotations
@@ -20,7 +20,10 @@ from typing import Literal
 
 from alarm_engine.resource_types.base import CREATE, DELETE, MODIFY, TAG_CHANGE, event_to_type
 
-REMOVE_TAG_EVENTS = frozenset({"DeleteTags", "RemoveTagsFromResource", "RemoveTags", "UntagQueue", "UntagResource"})
+REMOVE_TAG_EVENTS = frozenset({"DeleteTags", "RemoveTagsFromResource", "RemoveTags", "UntagQueue", "UntagResource",
+                               "UntagResources"})
+#: In the customer stack's TagChangeRule but not in the ported lifecycle lists: Resource Groups Tagging API.
+EXTRA_TAG_EVENTS = frozenset({"TagResources", "UntagResources"})
 ALARM_EVENTS = frozenset({"PutMetricAlarm", "DeleteAlarms"})
 
 Action = Literal["SYNC", "DELETE_RESOURCE", "NEEDS_REVIEW", "PROPOSE_REMEDIATION", "IGNORE"]
@@ -36,7 +39,9 @@ class Reaction:
 
 def _kinds() -> dict[str, str]:
     from alarm_engine.resource_types.base import monitored_api_events
-    return {ev: kind for kind, evs in monitored_api_events().items() for ev in evs}
+    out = {ev: kind for kind, evs in monitored_api_events().items() for ev in evs}
+    out.update({ev: TAG_CHANGE for ev in EXTRA_TAG_EVENTS})
+    return out
 
 
 def route(event_name: str, *, monitored: bool, tag_keys_changed: set[str] | None = None,

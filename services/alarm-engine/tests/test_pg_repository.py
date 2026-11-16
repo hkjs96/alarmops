@@ -121,3 +121,13 @@ def test_offboarding_result_is_merged_under_a_row_lock_and_scoped_by_customer(pg
     after = pg.get_offboarding("cus_1", "ob_1")
     assert after is not None and after.steps["ALARMS_DELETED"]["accounts"]["acc_1"]["deleted"] == 3
     assert after.completed_at is not None
+
+
+def test_find_active_account_by_aws_id_skips_non_active_customers(pg):
+    """CloudTrail events carry only the AWS account id; a SUSPENDED/TERMINATED customer is never synced (D-43)."""
+    pg._exec('''UPDATE "Customer" SET status = 'ACTIVE' WHERE id = 'cus_1' ''')
+    acc = pg.find_active_account_by_aws_id("111122223333")
+    assert acc is not None and acc.id == "acc_1" and acc.customer_id == "cus_1"
+    assert pg.find_active_account_by_aws_id("999999999999") is None
+    pg._exec('''UPDATE "Customer" SET status = 'SUSPENDED' WHERE id = 'cus_1' ''')
+    assert pg.find_active_account_by_aws_id("111122223333") is None
