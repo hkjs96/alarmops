@@ -72,6 +72,11 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     }
     return out;
   }
+  async staffNames(ids: string[]) {
+    const out = new Map<string, string>();
+    for (const id of ids) { const u = this.users.get(id); if (u && !u.customerId && u.name) out.set(id, u.name); }
+    return out;
+  }
   async slackChannelVerified(customerId: string) { return this.verifiedSlack.has(customerId); }
   async findResource(scope: ScopeFilter, id: string) {
     const r = this.resources.get(id);

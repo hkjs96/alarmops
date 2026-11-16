@@ -73,6 +73,9 @@ export function errorText(f: Failure, ctx: ErrorContext = {}): string {
     case "EXPORT_WINDOW_CLOSED": return "The return period is over, so the incident history was deleted or is no longer available for export.";
     case "EXPORT_TOO_LARGE": return "The history is too large to export here (over 50,000 incidents). Ask the platform team for a manual export.";
     case "STEP_NOT_MANUAL": return "This step is done by AlarmOps itself and is not waiting for a person. Reload to see where it stands.";
+    case "EMERGENCY_REASON_REQUIRED": return "You are not a responder for this customer. Type why you need this contact, then try again. Nothing was shown.";
+    case "NOT_A_RESPONDER": return `${ctx.what ?? "This"} is only for this customer’s responders${ctx.where ? ` (${ctx.where})` : ""}. Nothing was shown. Ask an admin if you need it.`;
+    case "READ_ONLY": return "This is a read-only view. Nothing was changed.";
     case "NOT_FOUND": return "Not found. It may have been removed, or you may not have access to it.";
     case "ROLE_REQUIRED": case "FORBIDDEN": case "PORTAL_GRANT_REQUIRED": {
       const role = typeof d.role === "string" ? ROLE_NAME[d.role] ?? d.role : null;

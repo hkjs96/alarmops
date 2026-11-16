@@ -8,7 +8,7 @@ import { displayStatus, orgChainParts } from "@/lib/incidents";
 import { age, groupDigits, kstTime } from "@/lib/format";
 import { RowMenu } from "@/components/RowMenu";
 import { NotPaged } from "./NotPaged";
-import { hasRole, roleReason, useShell } from "@/components/ShellContext";
+import { hasRole, isPortal, roleReason, useShell } from "@/components/ShellContext";
 import { errorText } from "@/lib/errors";
 import { SESSION_ENDED, callAction, sessionEndReason } from "@/lib/session-ended";
 import { ackIncident, undoBulk } from "./actions";
@@ -71,6 +71,7 @@ export function IncidentsTable({ items, nowMs, openId, emptyKind, listKey = "", 
   const [optim, setOptim] = useState<Record<string, number>>({}); // id → version acknowledged, until the list says so itself
   const tableRef = useRef<HTMLTableElement>(null);
   const focusLabel = useRef<string | null>(null);
+  const portal = isPortal(shell.user);
   const canAck = hasRole(shell.user, "OPERATOR");
   const noAck = canAck ? undefined : roleReason(shell.user, "OPERATOR", "Acknowledging");
 
@@ -328,7 +329,7 @@ export function IncidentsTable({ items, nowMs, openId, emptyKind, listKey = "", 
                       ) : working === "undo" ? (
                         <span className="act"><span key="l" className="act-l" role="status" tabIndex={-1} data-focus>Undoing…</span></span>
                       ) : status === "TRIGGERED" && !i.unmapped ? (
-                        <span className="act"><Button key="a" size="sm" data-list-action="incident.ack" disabled={!canAck} title={noAck} onClick={(e) => { void doAck(i, e); }} aria-label={`Acknowledge ${i.title}`}>Acknowledge</Button></span>
+                        <span className="act">{portal ? null : <Button key="a" size="sm" data-list-action="incident.ack" disabled={!canAck} title={noAck} onClick={(e) => { void doAck(i, e); }} aria-label={`Acknowledge ${i.title}`}>Acknowledge</Button>}</span>
                       ) : status === "ACKNOWLEDGED" && (token || inPlace) ? (
                         <span className="act">
                           {/* Undo is not where Acknowledge was (QA P2-A): it is behind "…", at the other end of the cell, and in the toast */}

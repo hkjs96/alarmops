@@ -16,7 +16,9 @@ source), D-15 (remediation proposal only, execution behind approval), D-07 (role
 | `engine.py` | discovery → D-16 states → orphans → sync → DB (API-CONTRACT §7) |
 | `handler.py` | SQS `alarm-commands` consumer (API-CONTRACT §6), partial batch failures |
 | `remediation.py` | D-15: `propose()` writes a request; `execute()` only for APPROVED + flag |
-| `manual_change.py` | CloudTrail routing rule (source not wired) |
+| `collectors/` | the 29 resource collectors (Reader role, tag-first, paginated, bounded throttle retry); `AwsDiscovery` |
+| `events.py` | CloudTrail tag-change event (EventBridge envelope, top-level `account` only) → resync of the resource |
+| `manual_change.py` | CloudTrail routing rule (pure) |
 | `migration.py` | D-08 legacy-name → new-name dry-run report |
 | `repository.py`, `pg_repository.py` | in-memory and psycopg repositories |
 
@@ -24,5 +26,69 @@ Run (from repo root): `npm run test:engine`, `npm run lint:engine` (needs `pip i
 Tests never call AWS (fakes, botocore Stubber, moto). Postgres tests run only with `ALARM_ENGINE_TEST_PG_URL`
 (see `tests/test_pg_repository.py`).
 
-Not in this package yet: the 29 resource collectors (discovery is an interface; `wiring.py` fails clearly), the
-CloudTrail event source, SAM template.
+## Collectors (`collectors/`)
+
+`wiring.build_engine()` uses `AwsDiscovery`. Per account and region every collector group runs; a group that fails is
+recorded in `counts.typeErrors` and the others continue (all failing = failed run, never "0 resources").
+Listing is tag-first: `tag:GetResources` (key `Monitoring`, any value, so D-16 sees `off`/removed too) gives ARN + tags;
+Describe/List calls add what dimensions need (Aurora writer/serverless, TG's LB, ECS cluster, MQ instances, SageMaker
+variant, API type). EC2/NAT/VPN use the server-side `tag-key` filter. CloudFront and Route53 are global: listed once per
+account against us-east-1 (row `region` = us-east-1). Throttling: up to 5 attempts, jittered backoff, then the group's
+error. `alive()` = existence probe per type (True/False/None); None changes nothing. Lambda has no Describe at all
+(`lambda:List*` is deliberately not in the Reader role), so it is found through `tag:GetResources` only.
+
+Reader permissions the collectors need beyond `infra/customer-stack/template.yaml` today:
+
+| Type | Needs | Without it |
+|---|---|---|
+| APIGW | `apigateway:GET` on Resource `arn:${Partition}:apigateway:*::/restapis` and `arn:${Partition}:apigateway:*::/apis` **exactly** (the list calls `get_rest_apis` / `get_apis`), plus an explicit Deny of `apigateway:GET` on `/apikeys*`, `/usageplans/*/keys*` and `/restapis/*/*` (API keys, stage variables, integrations) | type error each run |
+| MQ | `mq:ListBrokers` (summary: `BrokerState`, `DeploymentMode`). `DescribeBroker` is **not** requested: it returns user lists | type error each run |
+| SageMaker | `sagemaker:DescribeEndpoint` on `endpoint/*` | type error each run |
+| DX | `directconnect:DescribeConnections` | type error each run |
+
+The code makes no ACM, Backup, WAF or EFS Describe/List calls, so none is requested. For those types, Lambda, APIGW, MQ,
+DX and SageMaker, `alive()` is unknown (None): a deleted resource stays MONITORED (its alarms stay) until another
+signal. Stored `counts.typeErrors` hold only the AWS error code; the full message stays in the server log. All list
+loops are bounded (1000 pages, repeated token detection) and raise instead of returning a truncated list.
+
+Tag events: the same-account `TAG_RECONCILE` run is debounced (`TAG_EVENT_RECONCILE_DEBOUNCE_MINUTES`, default 10, by
+the newest AlarmSyncRun of the account), a repeated event for one resource within `TAG_EVENT_RESOURCE_DEDUPE_SECONDS`
+(default 60, by the resource row's `lastSeenAt`, so it holds across Lambda instances) is dropped, events with
+`detail.errorCode` or a `source` not starting with `aws.` are ignored, and disabled / purged accounts are not looked up.
+
+Other APIs used are already in the Reader role (`ec2:Describe*`, `rds:DescribeDB*`, `elasticloadbalancing:Describe*`,
+`elasticache:DescribeCacheClusters`, `ecs:List*/DescribeServices`, `es:DescribeDomain`, `kafka:ListClustersV2`,
+`dynamodb:DescribeTable`, `sqs:ListQueues`, `sns:ListTopics`, `s3:ListAllMyBuckets`, `cloudfront:ListDistributions`,
+`route53:ListHealthChecks`, `tag:GetResources`). Note `elasticloadbalancing:DescribeTargetGroups` is also needed for TG
+rows (present).
+
+Event input: besides `alarm-commands` JSON, `handler.handle_batch` accepts the forwarded CloudTrail envelope on the same
+queue (`events.py`). The central-bus rule that delivers it to the queue belongs to infra.
+
+## Deploy (Lambda)
+
+The SAM template is `infra/aws/central.yaml` (handler `alarm_engine.handler.lambda_handler`, python3.12, arm64, SQS
+`alarm-commands`, `ReportBatchItemFailures`).
+
+```
+npm run build:engine-lambda          # from the repo root; same as: python services/alarm-engine/scripts/build_lambda.py
+python services/alarm-engine/scripts/check_lambda.py   # layout + importable from build/ only
+```
+
+`build/` = `alarm_engine/` + vendored `requirements-lambda.txt` (exact pins; psycopg binary wheel and typing-extensions).
+boto3 comes with the Lambda runtime. Wheels are downloaded with `--only-binary=:all:` for the template's architecture:
+arm64 by default (`manylinux2014_aarch64`); `ALARMOPS_LAMBDA_ARCH=x86_64` if the template's `Architectures` is changed.
+`build/` is git-ignored; the build needs network access. `requirements-lambda.txt` pins every package with sha256 hashes
+(from the PyPI JSON API, aarch64 and x86_64 cp312 wheels) and the build runs `pip install --require-hashes --no-deps`.
+The dev requirements pin psycopg to the same 3.2.13, so `pytest` runs against the version that ships (CI installs
+`requirements-dev.txt`).
+
+Environment: `DATABASE_URL_SECRET_ARN` (Secrets Manager; read once per cold start, the value is never logged; the secret
+is the bare connection string, a JSON object with `url` is also accepted). `DATABASE_URL` is only the local/test fallback
+and is refused when `AWS_LAMBDA_FUNCTION_NAME` is set. In Lambda the connection string must carry `sslmode=require|verify-ca|verify-full`
+(`PgRepository` refuses otherwise). Logs carry the exception type and a short code (SQLSTATE / AWS error code) only; tracebacks
+are off unless `ALARMOPS_DEBUG_TRACEBACK=1` (local debugging). `ALARMOPS_TIME_MARGIN_MS` (default 30000): before starting each record the handler
+checks `context.get_remaining_time_in_millis()`; below the margin it stops and returns the unstarted records in
+`batchItemFailures` (SQS redelivers; commands are idempotent). A single command that itself runs longer than the margin
+can still hit the Lambda timeout and be retried as a whole. If the engine cannot be built (secret empty, DB down) the whole
+batch is reported as failed and the build is retried on the next invocation.

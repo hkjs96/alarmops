@@ -1,0 +1,359 @@
+name: deploy-central
+
+# Deploys infra/aws/central.yaml (SAM, Seoul) to the central AWS account. Started by a person with workflow_dispatch;
+# an agent never runs it. Four jobs; only `plan` and `apply` can reach AWS, and only they run in the `central`
+# environment (branch main only, required reviewer):
+#   build   no environment, contents: read only, NO id-token. Runs repository and package-registry code (npm, esbuild, pip):
+#           builds the four Lambda bundles and writes the sha256 manifest right after bundling. It cannot mint the
+#           AWS OIDC token, so a compromised dependency cannot become the central deploy role.
+#   checks  no environment, contents: read only. cfn-lint (installed from infra/requirements-ci.txt, --require-hashes)
+#           and the template tests.
+#   plan    id-token: write. Runs NO npm and NO pip. Downloads the build artifact BEFORE it asks for AWS credentials,
+#           verifies it (manifest checksum, per-file hashes, regular files only), puts the bundles where the template's
+#           CodeUri points, creates a CloudFormation change set WITHOUT executing it and prints every change (IAM
+#           first) to the job summary. The reviewer reads that before approving the second job.
+#   apply   id-token: write. Runs NO npm and NO pip. Downloads the manifest before credentials, verifies the code zips the
+#           change set points at (in S3, without extracting them) against it, then executes exactly that change set.
+#
+# Which code is deployed: plan's packaging step uploads the verified bundles to the SAM bucket and the change set points
+# at those immutable S3 objects. `apply` never rebuilds and never packages again. A rebuild-and-compare was rejected: pip's
+# dist-info files and zip metadata are not byte-stable. Instead `build` writes a manifest (sha256 of every file of each
+# bundle; .github/scripts/bundle_manifest.py), exposes its checksum as a job output and uploads bundles + manifest as the
+# artifact `central-code`. `plan` and `apply` compare against the job output (the artifact store cannot swap the files);
+# `apply` reads the PROCESSED template of the change set, downloads every Lambda code zip it references and requires each
+# zip's per-file sha256 list to equal exactly one manifest entry (all four used; symlinks and special files rejected).
+# The deploy role therefore also needs cloudformation:GetTemplate on the stack and s3:GetObject on the SAM bucket
+# (infra/aws/README.md). The manifest does not cover file modes.
+#
+# AWS access: GitHub OIDC only (no long-lived keys). The role in CENTRAL_DEPLOY_ROLE_ARN must have a trust policy that
+# requires
+#   token.actions.githubusercontent.com:aud = sts.amazonaws.com
+#   token.actions.githubusercontent.com:sub = repo:hkjs96/alarmops:environment:central
+# (the `sub` of a job that uses `environment: central`; no wildcard). Its permissions and boundary: infra/aws/README.md.
+# Variables are `central` ENVIRONMENT variables (Settings -> Environments -> central -> Variables), not repository
+# variables: only jobs that passed the environment's rules can read them. None of them is a secret. The DB connection
+# strings are never passed here; a person puts them into the Secrets Manager secrets this stack creates.
+# Actions are pinned to full commit SHAs (tag in the comment). Dependabot (.github/dependabot.yml) proposes updates.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-central
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-northeast-2
+  STACK_NAME: alarmops-central
+  BUS_STACK_NAME: alarmops-central-bus
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+    outputs:
+      manifest_sha256: ${{ steps.manifest.outputs.manifest_sha256 }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 20
+          cache: npm
+      # --ignore-scripts: no package install script runs.
+      - run: npm ci --ignore-scripts
+      # The ingest bundle (esbuild) does not import @prisma/client, so no `prisma generate` is needed. If a Lambda ever
+      # imports it, add `npx prisma generate --schema db/prisma/schema.prisma` here before the build.
+      - name: Build the ingest Lambda bundles
+        run: npm run build:lambda -w @alarmops/ingest
+      # Fingerprint right after bundling, before any other third-party code (setup-python, pip) runs.
+      - name: Stage and fingerprint the ingest bundles
+        run: |
+          set -euo pipefail
+          art="$RUNNER_TEMP/artifact"; mkdir -p "$art/bundle" "$art/manifest"
+          for name in webhook eventbridge consumer; do
+            [ -f "services/ingest/dist/$name/index.mjs" ] || { echo "::error::Missing build output: services/ingest/dist/$name/index.mjs"; exit 1; }
+            cp -R --no-dereference "services/ingest/dist/$name" "$art/bundle/$name"
+            python3 -I .github/scripts/bundle_manifest.py manifest "$art/bundle/$name" "$art/manifest/$name.sha256"
+          done
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      # Needs network: downloads the aarch64 wheels (template Architectures: arm64) and checks them against the
+      # sha256 pins (--require-hashes, --only-binary).
+      - name: Build the engine Lambda artifact (arm64)
+        run: npm run build:engine-lambda
+      - name: Stage and fingerprint the engine bundle
+        id: manifest
+        run: |
+          set -euo pipefail
+          art="$RUNNER_TEMP/artifact"
+          [ -f services/alarm-engine/build/alarm_engine/handler.py ] || { echo "::error::Missing build output: services/alarm-engine/build/alarm_engine/handler.py"; exit 1; }
+          cp -R --no-dereference services/alarm-engine/build "$art/bundle/engine"
+          python3 -I .github/scripts/bundle_manifest.py manifest "$art/bundle/engine" "$art/manifest/engine.sha256"
+          (cd "$art/manifest" && sha256sum webhook.sha256 eventbridge.sha256 consumer.sha256 engine.sha256 > MANIFEST.sha256)
+          sum=$(sha256sum "$art/manifest/MANIFEST.sha256" | cut -d' ' -f1)
+          echo "manifest_sha256=$sum" >> "$GITHUB_OUTPUT"
+          { echo "## Built code"; echo; echo "commit \`$GITHUB_SHA\`, manifest sha256 \`$sum\`"; echo; echo '```'; cat "$art/manifest/MANIFEST.sha256"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: central-code
+          path: ${{ runner.temp }}/artifact/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      # Every package, including transitive ones, with its sha256 (generated with uv pip compile --generate-hashes).
+      - run: pip install --require-hashes -r infra/requirements-ci.txt
+      - name: cfn-lint
+        run: cfn-lint infra/aws/central.yaml infra/aws/central-bus.yaml infra/customer-stack/template.yaml
+      - name: Template structure tests
+        run: python -m unittest discover -s infra/test -v
+
+  plan:
+    needs: [build, checks]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: central
+    # workflow_dispatch can start any branch's copy of this file; only main may touch the central account.
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      changeset: ${{ steps.cs.outputs.changeset }}
+      mode: ${{ steps.cs.outputs.mode }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      # Download and verify BEFORE any AWS credential exists in this job. No npm, no pip anywhere in this job.
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: central-code
+          path: ${{ runner.temp }}/artifact
+      - name: Verify the build artifact and put the bundles where the template expects them
+        env:
+          EXPECTED: ${{ needs.build.outputs.manifest_sha256 }}
+        run: |
+          set -euo pipefail
+          art="$RUNNER_TEMP/artifact"; v=.github/scripts/bundle_manifest.py
+          [ -n "$EXPECTED" ] || { echo "::error::build did not output a manifest checksum"; exit 1; }
+          [ "$(sha256sum "$art/manifest/MANIFEST.sha256" | cut -d' ' -f1)" = "$EXPECTED" ] || { echo "::error::manifest artifact does not match the build job output"; exit 1; }
+          (cd "$art/manifest" && sha256sum -c MANIFEST.sha256 >/dev/null)
+          for name in webhook eventbridge consumer engine; do
+            python3 -I "$v" check-dir "$art/bundle/$name" "$art/manifest/$name.sha256"
+          done
+          [ -z "$(find "$art" -mindepth 1 -not -type f -not -type d)" ] || { echo "::error::artifact contains non-regular files"; exit 1; }
+          mkdir -p services/ingest/dist
+          for name in webhook eventbridge consumer; do cp -R --no-dereference "$art/bundle/$name" "services/ingest/dist/$name"; done
+          cp -R --no-dereference "$art/bundle/engine" services/alarm-engine/build
+          # CodeUri paths (infra/aws/central.yaml) hold exactly the verified files.
+          for pair in webhook=services/ingest/dist/webhook eventbridge=services/ingest/dist/eventbridge consumer=services/ingest/dist/consumer engine=services/alarm-engine/build; do
+            python3 -I "$v" check-dir "${pair#*=}" "$art/manifest/${pair%%=*}.sha256"
+          done
+          echo "Verified artifact, manifest sha256 $EXPECTED" >> "$GITHUB_STEP_SUMMARY"
+      - name: Check the required variables are set
+        env:
+          ROLE: ${{ vars.CENTRAL_DEPLOY_ROLE_ARN }}
+          PROVIDER: ${{ vars.VERCEL_OIDC_PROVIDER_ARN }}
+          TEAM: ${{ vars.VERCEL_TEAM_SLUG }}
+          PROJECT: ${{ vars.VERCEL_PROJECT_NAME }}
+        run: |
+          for v in ROLE PROVIDER TEAM PROJECT; do
+            if [ -z "${!v}" ]; then echo "::error::Environment variable for $v is not set in the central environment"; exit 1; fi
+          done
+      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          role-to-assume: ${{ vars.CENTRAL_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: deploy-central-plan
+      - name: Check the central bus stack exists
+        run: aws cloudformation describe-stacks --stack-name "$BUS_STACK_NAME" --query 'Stacks[0].StackStatus' --output text
+      - name: sam validate
+        run: sam validate --lint --template-file infra/aws/central.yaml
+      # The change set made by the next step is the one that did not exist before it (sam names it samcli-deploy<time>).
+      - name: Remember the change sets that exist before
+        run: |
+          : > "$RUNNER_TEMP/cs-before.txt"
+          aws cloudformation list-change-sets --stack-name "$STACK_NAME" --query 'Summaries[].ChangeSetId' --output text 2>/dev/null \
+            | tr '\t' '\n' | sort > "$RUNNER_TEMP/cs-before.txt" || true
+      - name: Create the change set (not executed)
+        env:
+          VERCEL_OIDC_PROVIDER_ARN: ${{ vars.VERCEL_OIDC_PROVIDER_ARN }}
+          VERCEL_TEAM_SLUG: ${{ vars.VERCEL_TEAM_SLUG }}
+          VERCEL_PROJECT_NAME: ${{ vars.VERCEL_PROJECT_NAME }}
+          SES_IDENTITY_ARN: ${{ vars.SES_IDENTITY_ARN }}
+          SES_FROM_ADDRESS: ${{ vars.SES_FROM_ADDRESS }}
+          ALARM_TOPIC_ARN: ${{ vars.ALARM_TOPIC_ARN }}
+          CENTRAL_BUS_NAME: ${{ vars.CENTRAL_BUS_NAME }}
+          DLQ_OPS_ROLE_ARN: ${{ vars.DLQ_OPS_ROLE_ARN }}
+          REMEDIATION_EXECUTION: ${{ vars.REMEDIATION_EXECUTION }}
+        run: |
+          params=(
+            "VercelOidcProviderArn=${VERCEL_OIDC_PROVIDER_ARN}"
+            "VercelTeamSlug=${VERCEL_TEAM_SLUG}"
+            "VercelProjectName=${VERCEL_PROJECT_NAME}"
+          )
+          # Optional variables: only passed when set, so the template defaults apply otherwise.
+          [ -n "$SES_IDENTITY_ARN" ] && params+=("SesIdentityArn=${SES_IDENTITY_ARN}")
+          [ -n "$SES_FROM_ADDRESS" ] && params+=("SesFromAddress=${SES_FROM_ADDRESS}")
+          [ -n "$ALARM_TOPIC_ARN" ] && params+=("AlarmTopicArn=${ALARM_TOPIC_ARN}")
+          [ -n "$CENTRAL_BUS_NAME" ] && params+=("CentralBusName=${CENTRAL_BUS_NAME}")
+          [ -n "$DLQ_OPS_ROLE_ARN" ] && params+=("DlqOpsRoleArn=${DLQ_OPS_ROLE_ARN}")
+          [ -n "$REMEDIATION_EXECUTION" ] && params+=("RemediationExecution=${REMEDIATION_EXECUTION}")
+          sam deploy \
+            --template-file infra/aws/central.yaml \
+            --stack-name "$STACK_NAME" \
+            --region "$AWS_REGION" \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --resolve-s3 \
+            --no-execute-changeset \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides "${params[@]}"
+      - name: Change set to the job summary
+        id: cs
+        run: |
+          status=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo NONE)
+          if [ "$status" = "REVIEW_IN_PROGRESS" ]; then mode=create; else mode=update; fi
+          aws cloudformation list-change-sets --stack-name "$STACK_NAME" \
+            --query "Summaries[?Status=='CREATE_COMPLETE' && ExecutionStatus=='AVAILABLE'].ChangeSetId" --output text \
+            | tr '\t' '\n' | grep . | sort > "$RUNNER_TEMP/cs-after.txt" || true
+          new=$(comm -13 "$RUNNER_TEMP/cs-before.txt" "$RUNNER_TEMP/cs-after.txt")
+          count=$(printf '%s' "$new" | grep -c . || true)
+          if [ "$count" -gt 1 ]; then echo "::error::$count new change sets appeared; expected at most one"; exit 1; fi
+          id="$new"
+          if [ -z "$id" ]; then
+            echo "changeset=" >> "$GITHUB_OUTPUT"
+            { echo "## ${STACK_NAME}: no changes"; } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "changeset=$id" >> "$GITHUB_OUTPUT"
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          {
+            echo "## ${STACK_NAME}: change set to approve (${mode})"
+            echo
+            echo "### IAM changes (read these first)"
+            echo
+            echo "| Action | Logical id | Type | Replacement |"
+            echo "|---|---|---|---|"
+            aws cloudformation describe-change-set --change-set-name "$id" \
+              --query "Changes[?starts_with(ResourceChange.ResourceType, 'AWS::IAM')].[ResourceChange.Action,ResourceChange.LogicalResourceId,ResourceChange.ResourceType,ResourceChange.Replacement]" --output text |
+              awk -F'\t' '{ printf "| %s | %s | %s | %s |\n", $1, $2, $3, $4 }'
+            echo
+            echo "### All changes"
+            echo
+            echo "| Action | Logical id | Type | Replacement |"
+            echo "|---|---|---|---|"
+            aws cloudformation describe-change-set --change-set-name "$id" \
+              --query "Changes[].[ResourceChange.Action,ResourceChange.LogicalResourceId,ResourceChange.ResourceType,ResourceChange.Replacement]" --output text |
+              awk -F'\t' '{ printf "| %s | %s | %s | %s |\n", $1, $2, $3, $4 }'
+            echo
+            echo "Approve the \`apply\` job only after reading the IAM table. Role policy bodies: see the change set in the CloudFormation console."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  apply:
+    needs: [build, plan]
+    if: github.ref == 'refs/heads/main' && needs.plan.outputs.changeset != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    # Second approval: the reviewer has seen the plan summary.
+    environment: central
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      # Download and check the manifest BEFORE any AWS credential exists in this job. No npm, no pip in this job.
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: central-code
+          path: ${{ runner.temp }}/artifact
+      - name: Check the manifest is the one the build produced
+        env:
+          EXPECTED: ${{ needs.build.outputs.manifest_sha256 }}
+        run: |
+          set -euo pipefail
+          m="$RUNNER_TEMP/artifact/manifest"
+          [ -n "$EXPECTED" ] || { echo "::error::build did not output a manifest checksum"; exit 1; }
+          [ "$(sha256sum "$m/MANIFEST.sha256" | cut -d' ' -f1)" = "$EXPECTED" ] || { echo "::error::manifest artifact does not match the build job output"; exit 1; }
+          (cd "$m" && sha256sum -c MANIFEST.sha256 >/dev/null)
+      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          role-to-assume: ${{ vars.CENTRAL_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: deploy-central-apply
+      - name: Verify the change set carries exactly the code the build produced
+        env:
+          CHANGESET: ${{ needs.plan.outputs.changeset }}
+          EXPECTED: ${{ needs.build.outputs.manifest_sha256 }}
+        run: |
+          set -euo pipefail
+          m="$RUNNER_TEMP/artifact/manifest"
+          # The processed template is what CloudFormation will run; Lambda code is an S3 object per function.
+          aws cloudformation get-template --change-set-name "$CHANGESET" --template-stage Processed \
+            --query TemplateBody --output json > "$RUNNER_TEMP/processed.json"
+          jq -r '.Resources[] | select(.Type=="AWS::Lambda::Function") | "\(.Properties.Code.S3Bucket) \(.Properties.Code.S3Key)"' \
+            "$RUNNER_TEMP/processed.json" | sort -u > "$RUNNER_TEMP/code-refs.txt"
+          [ "$(wc -l < "$RUNNER_TEMP/code-refs.txt")" -eq 4 ] || { echo "::error::expected 4 distinct Lambda code objects"; cat "$RUNNER_TEMP/code-refs.txt"; exit 1; }
+          used=""
+          n=0
+          while read -r bucket key; do
+            n=$((n+1))
+            aws s3api get-object --bucket "$bucket" --key "$key" "$RUNNER_TEMP/code-$n.zip" >/dev/null
+            # Read the zip member by member; nothing is extracted or executed.
+            hit=$(python3 -I .github/scripts/bundle_manifest.py check-zip "$RUNNER_TEMP/code-$n.zip" "$m") || { echo "::error::Lambda code object $n (s3://$bucket/$key) does not match any bundle the build produced"; exit 1; }
+            used="$used $hit"
+          done < "$RUNNER_TEMP/code-refs.txt"
+          for b in webhook eventbridge consumer engine; do
+            case " $used " in *" $b "*) ;; *) echo "::error::bundle $b is not in the change set"; exit 1;; esac
+          done
+          echo "Verified: change set code = build output (manifest $EXPECTED)" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Execute the approved change set
+        env:
+          CHANGESET: ${{ needs.plan.outputs.changeset }}
+          MODE: ${{ needs.plan.outputs.mode }}
+        run: |
+          aws cloudformation execute-change-set --change-set-name "$CHANGESET"
+          if [ "$MODE" = "create" ]; then
+            aws cloudformation wait stack-create-complete --stack-name "$STACK_NAME"
+          else
+            aws cloudformation wait stack-update-complete --stack-name "$STACK_NAME"
+          fi
+      # Outputs hold ARNs, URLs and the account id: none is a secret. Secret values are never read here.
+      - name: Stack outputs to the job summary
+        if: success()
+        run: |
+          {
+            echo "## ${STACK_NAME} outputs"
+            echo
+            echo "| Output | Value |"
+            echo "|---|---|"
+            aws cloudformation describe-stacks --stack-name "$STACK_NAME" \
+              --query 'Stacks[0].Outputs[].[OutputKey,OutputValue]' --output text |
+              awk -F'\t' '{ printf "| %s | `%s` |\n", $1, $2 }'
+            echo
+            echo "Next: put the two DB connection strings (docs/GO-LIVE.md, step 4), then copy the values into Vercel."
+          } >> "$GITHUB_STEP_SUMMARY"

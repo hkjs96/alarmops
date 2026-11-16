@@ -12,7 +12,7 @@ import {
 import { announceDrafts, clearDraft, loadDraft, saveDraft, type CallOrderDraft } from "@/lib/call-order/draft-store";
 import { setBackGuard, setEditIntent, setFocusRow, takeBackGuard, takeEditIntent } from "@/lib/call-order/flags";
 import { scopeQuery } from "@/lib/scope";
-import { SIGN_OUT, hasRole, roleReason, useShell } from "@/components/ShellContext";
+import { SIGN_OUT, hasRole, isPortal, roleReason, useShell } from "@/components/ShellContext";
 import { errorLine } from "@/lib/errors";
 import type { PanelData } from "./CallOrderScreen";
 import { SESSION_ENDED, callAction } from "@/lib/session-ended";
@@ -85,6 +85,7 @@ export function CallOrderPanel({ data, listHref, listQuery }: { data: PanelData;
   const { scope, path, health, responders, rotations, staff } = view;
   const shell = useShell();
   const uid = shell.user.id;
+  const portal = isPortal(shell.user);
   const admin = hasRole(shell.user, "ADMIN");
   const noEdit = admin ? null : roleReason(shell.user, "ADMIN", "Changing the call order");
   /** nothing is configured anywhere up the chain: nobody is paged until steps are saved (the first save goes with If-Match 0) */
@@ -368,10 +369,10 @@ export function CallOrderPanel({ data, listHref, listQuery }: { data: PanelData;
               ? (reach.services.length > 1 ? `Read only. An edit here reaches ${plural(reach.services.length, "service")}.` : "Read only until you press Edit.")
               : `Read only. To change these steps for everything that follows them, open ${sourceLabel}.`}</span>
       <span className="sp" />
-      <button type="button" className="btn co-editbtn" data-testid="co-edit" aria-keyshortcuts="E" disabled={Boolean(noEdit) || respEditing}
+      {portal ? null : <button type="button" className="btn co-editbtn" data-testid="co-edit" aria-keyshortcuts="E" disabled={Boolean(noEdit) || respEditing}
         title={noEdit ?? (respEditing ? "Press Done in Responders first" : undefined)} onClick={() => enterEdit()}>
         <span className="co-save-t">{noOrder ? `Set up the call order for ${label}…` : path.own ? `Edit call order for ${label}` : `Create own steps for ${label}…`}</span><span className="kbd hide-m" aria-hidden="true">E</span>
-      </button>
+      </button>}
     </>
   );
 

@@ -2,6 +2,7 @@ import {
   assignGroup, decide, effectiveState, entersGroup, groupId, groupKey, nextAlertStatus, nextState,
   type DecisionResult, type FingerprintState, type NormalizedEvent,
 } from '@alarmops/core';
+import { safeError } from './safeError.js';
 import type { AlertEventsMessage, AlertRepository, AlertRow, QueueSender } from './ports.js';
 import { messageAttributes } from './sqs.js';
 
@@ -115,7 +116,7 @@ export function makeConsumerHandler(deps: ConsumerDeps) {
       try {
         await processMessage(JSON.parse(rec.body) as AlertEventsMessage, deps);
       } catch (err) {
-        deps.log?.('error', 'record_failed', { messageId: rec.messageId, error: String(err) });
+        deps.log?.('error', 'record_failed', { messageId: rec.messageId, error: safeError(err) });
         failures.push({ itemIdentifier: rec.messageId });
       }
     }
