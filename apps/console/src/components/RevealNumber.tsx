@@ -23,9 +23,11 @@ interface Shown { value: string; mode: "NORMAL" | "EMERGENCY"; until: number }
  *    URL, storage, a data attribute or the console log;
  *  - every press is logged by the API; the line under the value says so.
  */
-export function RevealNumber({ contactId, name, customerName, channel, canReveal, requiresReason, testId = "reveal" }: {
+export function RevealNumber({ contactId, name, customerName, channel, canReveal, requiresReason, hasPrimary = true, testId = "reveal" }: {
   contactId: string; name: string; customerName: string; channel: RevealChannel;
-  canReveal: boolean; requiresReason: boolean; testId?: string;
+  canReveal: boolean; requiresReason: boolean;
+  /** the customer has someone to notify about an emergency reveal (from the Responders list); false = say so instead of promising it */
+  hasPrimary?: boolean; testId?: string;
 }) {
   const [shown, setShown] = useState<Shown | null>(null);
   const [left, setLeft] = useState(0);
@@ -33,12 +35,14 @@ export function RevealNumber({ contactId, name, customerName, channel, canReveal
   const [asking, setAsking] = useState(false);
   const [reason, setReason] = useState("");
   const [err, setErr] = useState<string | null>(null);
+  /** what a screen reader is told: once when the value appears, once when it hides — never the countdown */
+  const [say, setSay] = useState("");
   const alive = useRef(true);
   const trigger = useRef<HTMLButtonElement>(null);
   const errBox = useRef<HTMLDivElement>(null);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
 
-  const hide = useCallback(() => { setShown(null); setReason(""); }, []);
+  const hide = useCallback(() => { setShown((s) => { if (s) setSay("Value hidden again."); return null; }); setReason(""); }, []);
   // re-mask on the timer; a hidden tab masks at once
   useEffect(() => {
     if (!shown) return;
@@ -64,8 +68,10 @@ export function RevealNumber({ contactId, name, customerName, channel, canReveal
       return;
     }
     setAsking(false); setReason("");
+    setSay(`${LABEL[channel]} of ${name} shown for 30 seconds. ${r.data.mode === "EMERGENCY" ? "Emergency reveal, logged." : "Logged."}`);
     setShown({ value: r.data.value, mode: r.data.mode, until: Date.now() + REVEAL_SHOW_MS });
-    setTimeout(() => trigger.current?.focus(), 0);
+    // the value may lie under the top or bottom bar on a phone: bring it into view, and keep the focus on Hide
+    setTimeout(() => { trigger.current?.focus({ preventScroll: true }); trigger.current?.scrollIntoView({ block: "center", behavior: "auto" }); }, 0);
   }
 
   const word = channel === "PHONE" ? "Show number" : channel === "EMAIL" ? "Show email" : "Show Slack handle";
@@ -73,20 +79,22 @@ export function RevealNumber({ contactId, name, customerName, channel, canReveal
 
   return (
     <span className="rv" data-testid={testId} data-revealed={shown ? "1" : "0"}>
+      <span className="sr-only" role="status" data-testid={`${testId}-live`}>{say}</span>
       {shown ? (
         <>
           <span className="xs mut">{LABEL[channel]}</span>
           <span className="mono rv-value" data-testid={`${testId}-value`}>{shown.value}</span>
           <button type="button" className="btn sm rv-btn" data-testid={`${testId}-hide`} ref={trigger} onClick={hide}>Hide</button>
-          <span className="xs mut rv-note" data-testid={`${testId}-note`} role="status">
-            {shown.mode === "EMERGENCY" ? <>Emergency reveal · logged · {customerName}’s primary responder notified</> : <>Shown to you · logged</>}
-            {" · "}hides in {left} s
+          {/* said once, when the value appears (and once more when it hides); the countdown is for the eyes only */}
+          <span className="xs mut rv-note" data-testid={`${testId}-note`}>
+            {shown.mode === "EMERGENCY" ? <>Emergency reveal · logged · {hasPrimary ? <>{customerName}’s primary responder notified</> : "no primary responder is set"}</> : <>Shown to you · logged</>}
+            <span aria-hidden="true">{" · "}hides in {left} s</span>
           </span>
         </>
       ) : (
         <>
           {canReveal ? (
-            <button type="button" className="btn sm rv-btn" data-testid={`${testId}-show`} ref={trigger} disabled={busy} aria-label={`${word} for ${name}`}
+            <button type="button" className="btn sm rv-btn" data-testid={`${testId}-show`} ref={trigger} disabled={busy} aria-label={requiresReason ? `${word} for ${name} (emergency, logged)` : `${word} for ${name} (logged)`}
               aria-haspopup={requiresReason ? "dialog" : undefined}
               onClick={() => { if (requiresReason) { setErr(null); setReason(""); setAsking(true); } else void go(); }}>
               {busy ? "Opening…" : requiresReason ? `${word} (emergency)…` : word}
@@ -104,7 +112,7 @@ export function RevealNumber({ contactId, name, customerName, channel, canReveal
         <label className="cs-f"><span className="b sm">Reason (required)</span>
           <textarea className="inp cs-ta" data-testid="reveal-reason" rows={3} maxLength={REASON_MAX} value={reason} onChange={(e) => setReason(e.target.value)} aria-describedby="reveal-reason-n" />
         </label>
-        <span className="xs mut" id="reveal-reason-n">{customerName}’s primary responder will be notified. The reveal is logged with your name and this reason. Up to {REASON_MAX} characters.</span>
+        <span className="xs mut" id="reveal-reason-n">{hasPrimary ? `${customerName}’s primary responder will be notified.` : "No primary responder is set; other admins will be notified."} The reveal is logged with your name and this reason. Up to {REASON_MAX} characters.</span>
         {err ? <div className="co-err cs-errbox" role="alert" data-testid="reveal-dialog-err"><span>{err}</span></div> : null}
       </ConfirmDialog>
     </span>

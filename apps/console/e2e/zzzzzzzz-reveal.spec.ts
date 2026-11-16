@@ -165,3 +165,42 @@ test.describe("review list", () => {
     await expect(page.getByText("Not found")).toBeVisible();
   });
 });
+
+test.describe("review list filters, QA fixes", () => {
+  test("Apply filters with All customers works (no empty customer= in the address), with mode and dates", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await signIn(page, "/settings/audit-log");
+    await page.getByTestId("rr-mode").selectOption("ALL");
+    await page.getByTestId("rr-from").fill("2026-11-07");
+    await page.getByTestId("rr-to").fill("2026-11-07");
+    await page.getByTestId("rr-apply").click();
+    await expect(page).toHaveURL(/mode=ALL/);
+    expect(page.url()).not.toMatch(/customer=(&|$)/);
+    await expect(page.getByTestId("reveal-row").first()).toBeVisible();
+    await expect(page.getByText("Not found")).toHaveCount(0);
+    await page.getByTestId("rr-mode").selectOption("EMERGENCY");
+    await page.getByTestId("rr-apply").click();
+    await expect(page.getByTestId("reveal-row").first()).toHaveAttribute("data-mode", "EMERGENCY");
+    // a hand-typed empty customer is "all customers", not Not found
+    await page.goto("/settings/audit-log?mode=EMERGENCY&customer=");
+    await expect(page.getByTestId("reveal-row").first()).toBeVisible();
+    await expect(page.getByTestId("reveal-table").locator("abbr")).toHaveAttribute("title", /dash means nobody/);
+  });
+
+  test("emergency button names itself; the countdown is not read out; at 390 the value is in view", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await signIn(page, "/c/hanbit/call-order");
+    const eunbi = person(page, "Eunbi Song");
+    await expect(eunbi.getByTestId("reveal-phone-show")).toHaveAttribute("aria-label", "Show number for Eunbi Song (emergency, logged)");
+    await eunbi.getByTestId("reveal-phone-show").click();
+    await page.getByTestId("reveal-reason").fill("E2E: phone check at 390");
+    await page.locator('[data-testid="confirm-dialog"] button[data-role="confirm"]').click();
+    const value = eunbi.getByTestId("reveal-phone-value");
+    await expect(value).toBeVisible();
+    await expect(value).toBeInViewport();
+    await expect(eunbi.getByTestId("reveal-phone-live")).toContainText("shown for 30 seconds");
+    await expect(eunbi.getByTestId("reveal-phone-note").locator('[aria-hidden="true"]')).toContainText("hides in");
+    await expect(eunbi.getByTestId("reveal-phone-note")).not.toHaveAttribute("role", "status");
+    await noHScroll(page);
+  });
+});

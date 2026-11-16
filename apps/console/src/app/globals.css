@@ -587,6 +587,7 @@ div.co-refused { margin-top: 6px; }
   #purge-print .pl-table tr { display: table-row; padding: 0; }
   #purge-print .pl-table td { display: table-cell; padding: 6px 8px 6px 0; border-top: 1px solid #000; }
   #purge-print .pl-table td::before { content: none; }
+  #purge-print .pl-table td:last-child { min-width: 64px; overflow-wrap: normal; }
 }
 .dg-wrap { position: relative; }
 .dg-short { display: none; }
@@ -625,6 +626,7 @@ div.co-refused { margin-top: 6px; }
 .rv-value { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; user-select: all; }
 .rv-note { flex-basis: 100%; font-size: 13px; }
 .rv-err { flex-basis: 100%; }
+.rv-staff { font-size: 13px; }
 .rr-filters { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: end; margin: 0 0 12px; }
 .rr-filters label { display: grid; gap: 2px; font-size: 13px; }
 .rr-filters .inp, .rr-filters select { min-height: 44px; max-width: 100%; }

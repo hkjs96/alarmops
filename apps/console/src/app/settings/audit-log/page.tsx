@@ -4,6 +4,7 @@ import { Card, EmptyState } from "@alarmops/design-system";
 import { getApi } from "@/lib/api";
 import { ApiError, isHidden } from "@/lib/api/client";
 import type { ContactRevealEntry, ContactRevealQuery } from "@/lib/api/types";
+import { RevealFilters } from "./RevealFilters";
 import { SubNav } from "@/components/SubNav";
 import { kstDateTime } from "@/lib/format";
 import { isSlug } from "@/lib/validate";
@@ -69,7 +70,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
       <div className="ph"><div><h1 tabIndex={-1}>Audit log</h1><div className="desc">Who opened whose contact details, and why. The values themselves are never kept.</div></div></div>
       <SubNav />
       <Card title={mode === "EMERGENCY" ? "Emergency reveals" : mode === "NORMAL" ? "Normal reveals" : "All reveals"}>
-        <form method="get" className="rr-filters" data-testid="reveal-filters" aria-label="Filter reveals">
+        <RevealFilters>
           <label><span>Show</span>
             <select className="inp" name="mode" defaultValue={mode} data-testid="rr-mode">
               <option value="EMERGENCY">Emergency reveals only</option>
@@ -87,14 +88,14 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
           <label><span>To (KST)</span><input className="inp" type="date" name="to" defaultValue={to ?? ""} data-testid="rr-to" /></label>
           <button type="submit" className="btn pri" data-testid="rr-apply">Apply filters</button>
           {filtered ? <Link className="btn" href="/settings/audit-log" data-testid="rr-clear">Clear filters</Link> : null}
-        </form>
+        </RevealFilters>
         {error ? <div className="co-err" role="alert" data-testid="rr-error">{error}</div> : items.length === 0 ? (
           <EmptyState title={mode === "EMERGENCY" && !filtered ? "No emergency reveals" : "No reveals match"} detail={filtered ? "Change or clear the filters to see more." : "Nobody has opened a contact outside their own customers."} />
         ) : (
           <>
-            <p className="sm mut" data-testid="rr-count">{items.length} {items.length === 1 ? "reveal" : "reveals"}{next ? " on this page" : ""}, newest first.</p>
+            <p className="sm mut" data-testid="rr-count">{items.length} {items.length === 1 ? "reveal" : "reveals"}{next ? " on this page" : ""}, newest first. “Told” is who was notified; a dash means nobody (a normal reveal).</p>
             <table className="rr-table" data-testid="reveal-table">
-              <thead><tr><th scope="col">When</th><th scope="col">Type</th><th scope="col">Who</th><th scope="col">Contact</th><th scope="col">Customer</th><th scope="col">Reason</th><th scope="col">Told</th></tr></thead>
+              <thead><tr><th scope="col">When</th><th scope="col">Type</th><th scope="col">Who</th><th scope="col">Contact</th><th scope="col">Customer</th><th scope="col">Reason</th><th scope="col"><abbr title="Who was told. A dash means nobody was notified (a normal reveal).">Told</abbr></th></tr></thead>
               <tbody>
                 {items.map((e) => (
                   <tr key={e.id} data-testid="reveal-row" data-mode={e.mode}>
@@ -104,7 +105,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
                     <td data-label="Contact">{e.contact.name} · {CHANNEL[e.channel]}</td>
                     <td data-label="Customer">{e.org.customer?.name ?? "—"}</td>
                     <td data-label="Reason">{e.reason ?? "—"}</td>
-                    <td data-label="Told">{e.notified.length ? e.notified.map((n) => n.name).join(", ") : "—"}</td>
+                    <td data-label="Told" title={e.notified.length ? undefined : "Nobody notified (normal reveal)"}>{e.notified.length ? e.notified.map((n) => n.name).join(", ") : "—"}</td>
                   </tr>
                 ))}
               </tbody>

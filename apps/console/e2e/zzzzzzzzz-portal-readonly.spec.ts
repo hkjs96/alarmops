@@ -57,6 +57,14 @@ test("the portal user's reveal is for their own customer's people only (the API 
   await expect(staffShow).toHaveCount(0);
 });
 
+test("a portal user gets no unmapped-account banner or account number; staff still do", async ({ page }) => {
+  await signIn(page, "/incidents");
+  await expect(page.getByText("unmapped AWS account")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: /Map account/ })).toHaveCount(0);
+  await signIn(page, "/incidents", "admin");
+  await expect(page.getByText("unmapped AWS account").first()).toBeVisible();
+});
+
 test("deletion record print view: printed-at (KST) and a signature block appear on paper only", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await signIn(page, "/customers/iruda", "admin");

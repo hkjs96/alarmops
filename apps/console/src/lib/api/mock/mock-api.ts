@@ -169,7 +169,7 @@ export function createMockApi(store: Store = createStore(), clock: () => number 
       const limit = Math.min(q.limit ?? 50, 200);
       const start = q.cursor ? Number(q.cursor) : 0;
       const page = items.slice(start, start + limit);
-      const unmapped = q.customerId || q.customer ? [] : fx.unmappedAccounts;
+      const unmapped = q.customerId || q.customer || ME.kind === "CUSTOMER" ? [] : fx.unmappedAccounts;
       const outside = scope.active ? outsideCounts(store.incidents, scope.inView) : null;
       return { items: structuredClone(page), nextCursor: start + limit < items.length ? String(start + limit) : null, counts, unmapped, outside };
     },
