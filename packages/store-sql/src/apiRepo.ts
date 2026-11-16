@@ -90,6 +90,14 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
     for (const r of rows) out.set(r.id, { name: r.name, kind: r.kind === 'CUSTOMER' ? 'CUSTOMER' : 'INTERNAL', customerId: r.kind === 'CUSTOMER' ? r.customerId : null });
     return out;
   }
+  async staffNames(userIds: string[]): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    if (!userIds.length) return out;
+    const rows = await this.sql.query(
+      `SELECT "id", "name" FROM "User" WHERE "id" = ANY($1::text[]) AND "customerId" IS NULL AND "email"::text NOT LIKE 'purged-%@invalid.invalid'`, [userIds]);
+    for (const r of rows) out.set(r.id, r.name);
+    return out;
+  }
   async slackChannelVerified(customerId: string): Promise<boolean> {
     return (await this.sql.query(
       `SELECT 1 FROM "NotificationChannel" WHERE "customerId" = $1 AND "scopeType" = 'CUSTOMER' AND "scopeId" = $1 AND "kind" IN ('SLACK_BOT', 'SLACK_WEBHOOK') AND "enabled" AND "verifiedAt" IS NOT NULL LIMIT 1`,

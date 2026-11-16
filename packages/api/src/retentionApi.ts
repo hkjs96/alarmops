@@ -24,7 +24,8 @@ const REASON_MAX = 500;
 export const MAX_EXPORT_ROWS = 50_000;
 const EXPORT_PAGE = 500;
 const iso = (d: Date | null): string | null => (d ? d.toISOString() : null);
-const holdView = (h: LegalHoldState) => ({ active: h.active, ...(h.active ? { at: iso(h.at), byUserId: h.byUserId, reason: h.reason } : {}) });
+/** `byUserName` / `actorName`: the staff member's display name, null for 'system', portal users, deleted or scrubbed users. */
+const holdView = (h: LegalHoldState, names: Map<string, string>) => ({ active: h.active, ...(h.active ? { at: iso(h.at), byUserId: h.byUserId, byUserName: (h.byUserId && names.get(h.byUserId)) || null, reason: h.reason } : {}) });
 
 async function holdRequest(req: ApiRequest, deps: Deps, customerId: string, set: boolean): Promise<ApiResponse> {
   const { auth, customer } = await adminCustomer(req, deps, customerId, true);
@@ -46,7 +47,8 @@ async function holdRequest(req: ApiRequest, deps: Deps, customerId: string, set:
   const after = await deps.repo.retentionView(customer.id);
   if (!after) throw notFound();
   // Same state as asked: 200 and nothing written (idempotent; no audit row, no purge-log row).
-  return ok({ legalHold: holdView(after.legalHold), changed: r === 'OK' });
+  const names = await deps.repo.staffNames(after.legalHold.byUserId ? [after.legalHold.byUserId] : []);
+  return ok({ legalHold: holdView(after.legalHold, names), changed: r === 'OK' });
 }
 export const putLegalHold = (req: ApiRequest, deps: Deps, customerId: string): Promise<ApiResponse> => holdRequest(req, deps, customerId, true);
 export const deleteLegalHold = (req: ApiRequest, deps: Deps, customerId: string): Promise<ApiResponse> => holdRequest(req, deps, customerId, false);
@@ -55,13 +57,14 @@ export async function getPurgeLog(req: ApiRequest, deps: Deps, customerId: strin
   const { customer } = await adminCustomer(req, deps, customerId, true);
   const [view, entries] = await Promise.all([deps.repo.retentionView(customer.id), deps.repo.purgeLog(customer.id)]);
   if (!view) throw notFound();
+  const names = await deps.repo.staffNames([...new Set([view.legalHold.byUserId, ...entries.map((e) => e.actor)].filter((x): x is string => !!x && x !== 'system'))]);
   const cfg = deps.retention ?? DEFAULT_RETENTION;
   const sched = view.status === 'TERMINATED' && view.statusChangedAt ? retentionSchedule(view.statusChangedAt, cfg) : null;
   return ok({
     customer: { id: customer.id, name: view.name, status: view.status, statusChangedAt: iso(view.statusChangedAt) },
-    legalHold: holdView(view.legalHold),
+    legalHold: holdView(view.legalHold, names),
     // Counts only, never content. `actor` is 'system' (the daily job) or the ADMIN's user id (legal-hold changes).
-    entries: entries.map((e) => ({ id: e.id, at: e.at.toISOString(), stage: e.stage, counts: e.counts, actor: e.actor })),
+    entries: entries.map((e) => ({ id: e.id, at: e.at.toISOString(), stage: e.stage, counts: e.counts, actor: e.actor, actorName: names.get(e.actor) ?? null })),
     schedule: sched ? { returnPeriodEndsAt: sched.returnPeriodEndsAt.toISOString(), auditExpiresAt: sched.auditExpiresAt.toISOString(), slaExpiresAt: sched.slaExpiresAt.toISOString(), returnDays: cfg.returnDays, auditDays: cfg.auditDays, slaDays: cfg.slaDays } : null,
   });
 }
