@@ -69,7 +69,7 @@ def test_per_type_failure_is_recorded_and_other_types_still_sync(env):
     counts = eng.sync_account(acct.id, "DAILY")
     run = next(iter(repo.runs.values()))
     assert run.status == "PARTIAL" and counts["errors"] == 1
-    assert list(counts["typeErrors"]) == [f"{R}/SQS"] and "AccessDeniedException" in counts["typeErrors"][f"{R}/SQS"]
+    assert list(counts["typeErrors"]) == [f"{R}/SQS"] and counts["typeErrors"][f"{R}/SQS"] == "AccessDeniedException"
     assert {r.resource_type for r in repo.resources.values()} == {"EC2"} and counts["created"] > 0
 
 
@@ -139,6 +139,16 @@ def event(name: str, params: dict, account: str = A, **detail) -> dict:
 def ec2_tags(items: list[tuple[str, str | None]]) -> dict:
     return {"resourcesSet": {"items": [{"resourceId": "i-0abc"}]},
             "tagSet": {"items": [({"key": k, "value": v} if v is not None else {"key": k}) for k, v in items]}}
+
+
+@pytest.fixture(autouse=True)
+def _no_event_windows(monkeypatch):
+    """Dedupe / debounce are tested explicitly below; elsewhere events are processed back to back."""
+    from datetime import timedelta
+
+    from alarm_engine import events
+    monkeypatch.setattr(events, "RESOURCE_DEDUPE", timedelta(0))
+    monkeypatch.setattr(events, "RECONCILE_DEBOUNCE", timedelta(0))
 
 
 @pytest.fixture
@@ -259,3 +269,72 @@ def test_handler_routes_forwarded_events_and_retries_failures(synced):
     eng.repo.find_active_account_by_aws_id = boom        # type: ignore[method-assign]
     res = handler.handle_batch(eng, {"Records": [{"messageId": "m2", "body": body}]})
     assert res == {"batchItemFailures": [{"itemIdentifier": "m2"}]}      # transient failure → SQS retry
+
+
+def test_repeated_event_for_one_resource_is_deduped_within_the_window(synced, monkeypatch):
+    from datetime import timedelta
+
+    from alarm_engine import events
+    repo, sessions, disc, eng, acct = synced
+    monkeypatch.setattr(events, "RESOURCE_DEDUPE", timedelta(seconds=60))
+    disc.tags_map["i-0abc"] = {"Name": "web-1"}
+    out = events.handle_tag_event(eng, event("DeleteTags", ec2_tags([("Monitoring", None)])))
+    assert out["actions"][0]["state"] == "DEDUPED" and _state(repo) == "MONITORED"   # row was just read by the sync
+
+
+def test_tag_reconcile_is_debounced_per_account(world, monkeypatch):
+    from datetime import timedelta
+
+    from alarm_engine import events
+    repo, sessions, disc, eng, acct = world
+    monkeypatch.setattr(events, "RECONCILE_DEBOUNCE", timedelta(minutes=10))
+    disc.resources = [ec2("i-0new")]
+    e = event("CreateTags", {"resourcesSet": {"items": [{"resourceId": "i-0new"}]},
+                             "tagSet": {"items": [{"key": "Monitoring", "value": "on"}]}})
+    assert events.handle_tag_event(eng, e)["status"] == "OK"
+    e2 = event("CreateTags", {"resourcesSet": {"items": [{"resourceId": "i-0other"}]},
+                              "tagSet": {"items": [{"key": "Monitoring", "value": "on"}]}})
+    again = events.handle_tag_event(eng, e2)
+    assert again["status"] == "IGNORED" and len(repo.runs) == 1          # a run started within the last 10 minutes
+
+
+def test_failed_api_calls_and_non_aws_sources_are_ignored(synced):
+    from alarm_engine import events
+    repo, sessions, disc, eng, acct = synced
+    disc.tags_map["i-0abc"] = {"Name": "web-1"}
+    failed = event("DeleteTags", ec2_tags([("Monitoring", None)]), errorCode="UnauthorizedOperation")
+    assert events.handle_tag_event(eng, failed)["reason"] == "failed API call"
+    spoof = event("DeleteTags", ec2_tags([("Monitoring", None)]))
+    spoof["source"] = "custom.app"
+    assert events.handle_tag_event(eng, spoof)["reason"] == "bad source"
+    del spoof["source"]
+    assert events.handle_tag_event(eng, spoof)["reason"] == "bad source"
+    assert _state(repo) == "MONITORED"
+
+
+def test_deeply_nested_bodies_are_poison_not_a_crash(synced):
+    from alarm_engine import events
+    repo, sessions, disc, eng, acct = synced
+    deep = "[" * 100000 + "]" * 100000
+    res = handler.handle_batch(eng, {"Records": [{"messageId": "m1", "body": deep}]})
+    assert res == {"batchItemFailures": []}                       # dropped as invalid, not retried
+    nested: dict = {}
+    cur = nested
+    for _ in range(5000):
+        cur["x"] = {}
+        cur = cur["x"]
+    refs, keys, mon = events.extract("CreateTags", {"resourcesSet": nested, "tagSet": {"items": []}})
+    assert refs == set()                                           # iterative, depth-limited walk
+    body = json.dumps(event("DeleteTags", {"a": nested}))
+    assert handler.handle_batch(eng, {"Records": [{"messageId": "m2", "body": body}]}) == {"batchItemFailures": []}
+
+
+def test_disabled_or_purged_accounts_get_no_event_sync(synced):
+    from alarm_engine import events
+    repo, sessions, disc, eng, acct = synced
+    disc.tags_map["i-0abc"] = {"Name": "web-1"}
+    for flag in (repo.disabled_accounts, repo.purged_accounts):
+        flag.add(acct.id)
+        out = events.handle_tag_event(eng, event("DeleteTags", ec2_tags([("Monitoring", None)])))
+        assert out["status"] == "IGNORED" and _state(repo) == "MONITORED"
+        flag.clear()

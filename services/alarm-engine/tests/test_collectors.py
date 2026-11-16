@@ -92,8 +92,10 @@ CASES: dict[str, tuple[list[tuple], str, str, dict[str, str]]] = {
     "ACM": (_simple("ACM", f"arn:aws:acm:{R}:{A}:certificate/uuid-1"), f"arn:aws:acm:{R}:{A}:certificate/uuid-1", R, {}),
     "Backup": (_simple("Backup", f"arn:aws:backup:{R}:{A}:backup-vault:vault-1"), "vault-1", R, {}),
     "MQ": ([rgt(R, ["mq:broker"], [(f"arn:aws:mq:{R}:{A}:broker:orders:b-1234", T)]),
-            ("mq", R, "describe_broker", {"BrokerState": "RUNNING", "DeploymentMode": "ACTIVE_STANDBY_MULTI_AZ"},
-             {"BrokerId": "b-1234"})], "orders-1", R, {}),
+            ("mq", R, "list_brokers", {"BrokerSummaries": [
+                {"BrokerId": "b-1234", "EngineType": "ACTIVEMQ", "BrokerState": "RUNNING", "DeploymentMode": "ACTIVE_STANDBY_MULTI_AZ"},
+                {"BrokerId": "b-other", "EngineType": "ACTIVEMQ", "BrokerState": "RUNNING", "DeploymentMode": "SINGLE_INSTANCE"}]},
+             None)], "orders-1", R, {}),
     "OpenSearch": (_simple("OpenSearch", f"arn:aws:es:{R}:{A}:domain/search-1"), "search-1", R, {"_client_id": A}),
     "SQS": (_simple("SQS", f"arn:aws:sqs:{R}:{A}:jobs"), "jobs", R, {}),
     "ECS": ([("ecs", R, "list_clusters", {"clusterArns": [ECS_C]}, None),
@@ -260,7 +262,7 @@ def test_a_failing_type_does_not_stop_the_others():
     out = disc.list_monitored(make_account(), R)
     assert [(r.resource_type, r.resource_key) for r in out] == [("Lambda", "fn")]
     errs = disc.take_errors()
-    assert set(errs) == {(R, "EC2"), (R, "APIGW")} and "UnauthorizedOperation" in errs[(R, "EC2")]
+    assert set(errs) == {(R, "EC2"), (R, "APIGW")} and errs[(R, "EC2")] == "UnauthorizedOperation"
     assert disc.take_errors() == {}       # taken once
 
 
@@ -386,3 +388,53 @@ def test_keys_are_the_dimension_values_alarms_will_use():
     dims = build_dimensions(d, tg.resource_key, "TG", tg.tags, R)
     assert dims == [{"Name": "TargetGroup", "Value": "targetgroup/my-tg/73e2d6bc24d8a067"},
                     {"Name": "LoadBalancer", "Value": "net/my-nlb/2a3b4c5d6e7f8091"}]
+
+
+# ── bounded pagination (never truncate) ──────────────────────────────────────────────────────────────────────────
+
+def test_repeated_pagination_token_raises_instead_of_truncating():
+    f = ["sqs"]
+    steps = [rgt(R, f, [(f"arn:aws:sqs:{R}:{A}:q1", T)], token="same"),
+             rgt(R, f, [(f"arn:aws:sqs:{R}:{A}:q2", T)], token="same", params_token="same")]
+    sess = StubSessions()
+    for s in steps:
+        sess.add(s)
+    disc = AwsDiscovery(sess, (GROUP_OF["SQS"],))
+    with pytest.raises(DiscoveryError):                   # the only group failed -> failed run, no partial list
+        disc.list_monitored(make_account(), R)
+    assert disc.take_errors() == {(R, "SQS"): "PaginationError"}
+
+
+def test_page_limit_raises(monkeypatch):
+    monkeypatch.setattr(core, "MAX_PAGES", 3)
+    calls = []
+
+    def fn(**kw):
+        calls.append(kw)
+        return {"Items": [1], "NextToken": f"t{len(calls)}"}
+    with pytest.raises(core.PaginationError):
+        core.pages(fn, "Items")
+    assert len(calls) == 3
+
+
+def test_cloudfront_and_route53_marker_loops_are_bounded():
+    for rtype, svc, op, resp in (
+            ("CloudFront", "cloudfront", "list_distributions", {"DistributionList": {"Marker": "", "MaxItems": 1,
+                                                                                    "IsTruncated": True, "Quantity": 0,
+                                                                                    "NextMarker": "m"}}),
+            ("Route53", "route53", "list_health_checks", {"HealthChecks": [], "Marker": "", "IsTruncated": True,
+                                                         "NextMarker": "m", "MaxItems": "1"})):
+        sess = StubSessions()
+        sess.add((svc, GLOBAL, op, resp))
+        sess.add((svc, GLOBAL, op, resp, {"Marker": "m"}))
+        # repeated NextMarker "m": the probe must not loop; unknown (None), never a truncated "gone"
+        assert AwsDiscovery(sess).alive(make_account(), GLOBAL, rtype, ["x"]) == {"x": None}
+
+
+def test_stored_type_errors_contain_codes_only():
+    sess = StubSessions()
+    sess.add(("ec2", R, "describe_instances", "UnauthorizedOperation"))
+    sess.add(rgt(R, ["sqs"], []))
+    disc = AwsDiscovery(sess, (GROUP_OF["EC2"], GROUP_OF["SQS"]))
+    disc.list_monitored(make_account(), R)
+    assert disc.take_errors() == {(R, "EC2"): "UnauthorizedOperation"}

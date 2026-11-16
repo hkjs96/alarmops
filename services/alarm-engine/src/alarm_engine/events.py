@@ -14,12 +14,14 @@ Input is the EventBridge envelope as forwarded by the customer account. Trust mo
 from __future__ import annotations
 
 import logging
+import os
 import re
+from datetime import timedelta
 from typing import Any
 
 from alarm_engine.engine import Engine
 from alarm_engine.manual_change import REMOVE_TAG_EVENTS, route
-from alarm_engine.repository import ResourceRow
+from alarm_engine.repository import ResourceRow, now
 from alarm_engine.resource_types.base import all_specs
 
 logger = logging.getLogger(__name__)
@@ -28,6 +30,8 @@ TAG_EVENTS = frozenset({
     "CreateTags", "DeleteTags", "AddTagsToResource", "RemoveTagsFromResource", "AddTags", "RemoveTags", "TagResource",
     "UntagResource", "TagResources", "UntagResources", "TagQueue", "UntagQueue",
 })
+RECONCILE_DEBOUNCE = timedelta(minutes=int(os.environ.get("TAG_EVENT_RECONCILE_DEBOUNCE_MINUTES", "10")))
+RESOURCE_DEDUPE = timedelta(seconds=int(os.environ.get("TAG_EVENT_RESOURCE_DEDUPE_SECONDS", "60")))
 DETAIL_TYPE = "AWS API Call via CloudTrail"
 _AWS_ID = re.compile(r"^\d{12}$")
 _ID_PREFIXES = ("i-", "nat-", "vpn-")
@@ -38,14 +42,23 @@ def is_cloudtrail_event(obj: Any) -> bool:
     return isinstance(obj, dict) and obj.get("detail-type") == DETAIL_TYPE
 
 
+MAX_WALK_DEPTH = 12
+MAX_WALK_NODES = 5000
+
+
 def _walk(v: Any) -> list[Any]:
-    out = [v]
-    if isinstance(v, dict):
-        for x in v.values():
-            out += _walk(x)
-    elif isinstance(v, list):
-        for x in v:
-            out += _walk(x)
+    """Iterative (no recursion limit trouble on hostile nesting), depth- and size-limited."""
+    out: list[Any] = []
+    stack: list[tuple[Any, int]] = [(v, 0)]
+    while stack and len(out) < MAX_WALK_NODES:
+        x, d = stack.pop()
+        out.append(x)
+        if d >= MAX_WALK_DEPTH:
+            continue
+        if isinstance(x, dict):
+            stack.extend((y, d + 1) for y in x.values())
+        elif isinstance(x, list):
+            stack.extend((y, d + 1) for y in x)
     return out
 
 
@@ -127,6 +140,10 @@ def handle_tag_event(engine: Engine, event: dict) -> dict:
     detail = event.get("detail")
     detail = detail if isinstance(detail, dict) else {}
     name = detail.get("eventName")
+    if not isinstance(event.get("source"), str) or not event["source"].startswith("aws."):
+        return {"status": "IGNORED", "reason": "bad source"}
+    if detail.get("errorCode"):
+        return {"status": "IGNORED", "reason": "failed API call"}    # the tag did not change
     if not isinstance(aws_account, str) or not _AWS_ID.match(aws_account):
         return {"status": "IGNORED", "reason": "bad account"}
     if name not in TAG_EVENTS:
@@ -145,10 +162,17 @@ def handle_tag_event(engine: Engine, event: dict) -> dict:
         reaction = route(name, monitored=row.monitoring_state in ("MONITORED", "NEEDS_REVIEW"),
                          tag_keys_changed=keys, monitoring_after=monitoring)
         if reaction.action in ("SYNC", "NEEDS_REVIEW"):
+            # Cross-instance dedupe: the row (DB) says when this resource's tags were last read. A repeated event inside
+            # the window is dropped; the hourly TAG_RECONCILE run covers anything it would have changed.
+            if now() - row.last_seen_at < RESOURCE_DEDUPE:
+                actions.append({"resourceId": row.id, "state": "DEDUPED"})
+                continue
             state = engine.sync_after_tag_event(account, row)
             actions.append({"resourceId": row.id, "state": state})
     if not rows and keys & {"Monitoring"} \
             and route(name, monitored=False, tag_keys_changed=keys, monitoring_after=monitoring).action == "SYNC":
+        if engine.repo.sync_run_started_since(account.id, RECONCILE_DEBOUNCE):
+            return {"status": "IGNORED", "reason": "account sync ran recently"}   # event flood guard
         counts = engine.sync_account(account.id, "TAG_RECONCILE")
         return {"status": "OK", "accountSync": counts}
     return {"status": "OK" if actions else "IGNORED", "actions": actions}

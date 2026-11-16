@@ -12,13 +12,22 @@ from __future__ import annotations
 
 import logging
 
+from botocore.exceptions import ClientError
+
 from alarm_engine.aws import CloudAccount, SessionFactory
-from alarm_engine.collectors.core import Ctx, call
+from alarm_engine.collectors.core import Ctx, call, error_code
 from alarm_engine.collectors.groups import GROUP_OF, GROUPS, Group
 from alarm_engine.engine import DiscoveredResource, DiscoveryError
 from alarm_engine.repository import ResourceRow
 
 logger = logging.getLogger(__name__)
+
+
+def _code(e: Exception) -> str:
+    """AWS error code (or exception class) only: no messages, ARNs or account ids in stored sync-run counts."""
+    if isinstance(e, ClientError):
+        return error_code(e) or "ClientError"
+    return type(e).__name__
 
 
 class AwsDiscovery:
@@ -48,9 +57,9 @@ class AwsDiscovery:
                 out += g.collect(ctx)
             except Exception as e:  # noqa: BLE001 — per-type failure must not abort the account
                 failed += 1
-                msg = f"{type(e).__name__}: {e}"[:300]
+                msg = _code(e)          # counts keep only the code; full text (may hold ARNs) stays in the log
                 first_error = first_error or msg
-                logger.warning("collector %s failed in %s: %s", g.name, r, msg)
+                logger.warning("collector %s failed in %s: %s: %s", g.name, r, type(e).__name__, e)
                 for t in g.types:
                     self._errors[(r, t)] = msg
         if ran and failed == ran:

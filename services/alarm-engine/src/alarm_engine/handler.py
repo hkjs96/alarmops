@@ -67,7 +67,7 @@ def _check_type(name: str, v: Any, types: tuple[type, ...]) -> None:
 def parse(body: str) -> dict[str, Any]:
     try:
         cmd = json.loads(body)
-    except ValueError as e:
+    except (ValueError, RecursionError) as e:
         raise InvalidCommand("body is not JSON") from e
     if not isinstance(cmd, dict) or cmd.get("schemaVersion") != 1:
         raise InvalidCommand("schemaVersion must be 1")
@@ -177,7 +177,7 @@ def handle_batch(engine: Engine, event: dict) -> dict:
     for rec in event.get("Records", []):
         try:
             envelope = json.loads(rec["body"])
-        except ValueError:
+        except (ValueError, RecursionError):
             envelope = None
         if events.is_cloudtrail_event(envelope):    # forwarded CloudTrail tag event (customer stack TagChangeRule)
             try:

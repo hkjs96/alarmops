@@ -23,6 +23,7 @@ from alarm_engine.collectors.core import (
     chunks,
     error_code,
     found,
+    marker_pages,
     pages,
     tag_dict,
 )
@@ -301,27 +302,19 @@ def _s3_exists(ctx: Ctx, keys: list[str]) -> dict[str, bool | None]:
 
 def _cloudfront_exists(ctx: Ctx, keys: list[str]) -> dict[str, bool | None]:
     def names() -> set[str]:
-        out: set[str] = set()
-        marker = None
-        while True:
-            dl = call(ctx.client("cloudfront").list_distributions, **({"Marker": marker} if marker else {})).get("DistributionList", {})
-            out |= {d["Id"] for d in dl.get("Items", [])}
-            marker = dl.get("NextMarker")
-            if not marker:
-                return out
+        items = marker_pages(ctx.client("cloudfront").list_distributions,
+                             lambda r: (r.get("DistributionList", {}).get("Items", []),
+                                        r.get("DistributionList", {}).get("NextMarker")), "Marker")
+        return {d["Id"] for d in items}
     return _in_set(keys, names)
 
 
 def _route53_exists(ctx: Ctx, keys: list[str]) -> dict[str, bool | None]:
     def names() -> set[str]:
-        out: set[str] = set()
-        marker = None
-        while True:
-            r = call(ctx.client("route53").list_health_checks, **({"Marker": marker} if marker else {}))
-            out |= {h["Id"] for h in r.get("HealthChecks", [])}
-            marker = r.get("NextMarker") if r.get("IsTruncated") else None
-            if not marker:
-                return out
+        items = marker_pages(ctx.client("route53").list_health_checks,
+                             lambda r: (r.get("HealthChecks", []), r.get("NextMarker") if r.get("IsTruncated") else None),
+                             "Marker")
+        return {h["Id"] for h in items}
     return _in_set(keys, names)
 
 
@@ -359,17 +352,19 @@ def _apigw(ctx: Ctx) -> list[DiscoveredResource]:
 
 
 def _mq(ctx: Ctx) -> list[DiscoveredResource]:
+    tagged = {a.split(":")[7] if a.count(":") >= 7 else "": (a, t) for a, t in ctx.rgt(("mq:broker",))}
+    if not tagged:
+        return []
     out = []
-    for arn, tags in ctx.rgt(("mq:broker",)):
-        parts = arn.split(":")                              # arn:aws:mq:region:acct:broker:NAME:b-id
-        if len(parts) < 8:
+    # ListBrokers summaries carry BrokerState and DeploymentMode; DescribeBroker (user lists) is never called.
+    for b in pages(ctx.client("mq").list_brokers, "BrokerSummaries", "NextToken"):
+        hit = tagged.get(b.get("BrokerId", ""))
+        if hit is None or b.get("BrokerState") == "DELETION_IN_PROGRESS":
             continue
-        name, bid = parts[6], parts[7]
-        b = call(ctx.client("mq").describe_broker, BrokerId=bid)
-        if b.get("BrokerState") == "DELETION_IN_PROGRESS":
-            continue
+        arn, tg = hit
+        name = arn.split(":")[6]
         n = 1 if b.get("DeploymentMode") == "SINGLE_INSTANCE" else 2
-        out += [found("MQ", f"{name}-{i}", arn, ctx.region, tags) for i in range(1, n + 1)]
+        out += [found("MQ", f"{name}-{i}", arn, ctx.region, tg) for i in range(1, n + 1)]
     return out
 
 

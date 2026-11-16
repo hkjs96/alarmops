@@ -183,6 +183,7 @@ def merge_offboard_result(steps: dict[str, Any], account_ids: list[str], cloud_a
 class Repository(Protocol):
     def get_account(self, cloud_account_id: str) -> CloudAccount: ...
     def find_active_account_by_aws_id(self, aws_account_id: str) -> CloudAccount | None: ...
+    def sync_run_started_since(self, cloud_account_id: str, within: timedelta) -> bool: ...
     def update_account_status(self, cloud_account_id: str, statuses: dict[str, str]) -> None: ...
     def list_resources(self, cloud_account_id: str) -> list[ResourceRow]: ...
     def get_resource(self, customer_id: str, resource_id: str) -> ResourceRow | None: ...
@@ -235,6 +236,8 @@ class InMemoryRepository:
         self.remediations: dict[str, RemediationRequestRow] = {}
         self.offboardings: dict[str, OffboardingRow] = {}
         self.customer_status: dict[str, str] = {}      # absent = ACTIVE
+        self.disabled_accounts: set[str] = set()       # CloudAccount.disabled
+        self.purged_accounts: set[str] = set()         # CloudAccount.connectionPurgedAt is set
 
     # accounts
     def get_account(self, cloud_account_id: str) -> CloudAccount:
@@ -243,9 +246,13 @@ class InMemoryRepository:
     def find_active_account_by_aws_id(self, aws_account_id: str) -> CloudAccount | None:
         """CloudTrail events carry only the AWS account id. Customers that are not ACTIVE are not synced (D-43)."""
         for a in self.accounts.values():
-            if a.aws_account_id == aws_account_id and self.customer_status.get(a.customer_id, "ACTIVE") == "ACTIVE":
+            if a.aws_account_id == aws_account_id and self.customer_status.get(a.customer_id, "ACTIVE") == "ACTIVE" \
+                    and a.id not in self.disabled_accounts and a.id not in self.purged_accounts:
                 return a
         return None
+
+    def sync_run_started_since(self, cloud_account_id: str, within: timedelta) -> bool:
+        return any(r.cloud_account_id == cloud_account_id and r.started_at > now() - within for r in self.runs.values())
 
     def update_account_status(self, cloud_account_id: str, statuses: dict[str, str]) -> None:
         self.account_status.setdefault(cloud_account_id, {}).update(statuses)

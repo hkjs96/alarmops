@@ -131,3 +131,22 @@ def test_find_active_account_by_aws_id_skips_non_active_customers(pg):
     assert pg.find_active_account_by_aws_id("999999999999") is None
     pg._exec('''UPDATE "Customer" SET status = 'SUSPENDED' WHERE id = 'cus_1' ''')
     assert pg.find_active_account_by_aws_id("111122223333") is None
+
+
+def test_find_active_account_requires_enabled_and_not_purged(pg):
+    pg._exec('''UPDATE "Customer" SET status = 'ACTIVE' WHERE id = 'cus_1' ''')
+    assert pg.find_active_account_by_aws_id("111122223333") is not None
+    pg._exec('''UPDATE "CloudAccount" SET disabled = true WHERE id = 'acc_1' ''')
+    assert pg.find_active_account_by_aws_id("111122223333") is None
+    pg._exec('''UPDATE "CloudAccount" SET disabled = false, "connectionPurgedAt" = now() WHERE id = 'acc_1' ''')
+    assert pg.find_active_account_by_aws_id("111122223333") is None
+    pg._exec('''UPDATE "CloudAccount" SET "connectionPurgedAt" = NULL WHERE id = 'acc_1' ''')
+    assert pg.find_active_account_by_aws_id("111122223333") is not None
+
+
+def test_sync_run_started_since_is_account_scoped_and_windowed(pg):
+    from datetime import timedelta
+    assert not pg.sync_run_started_since("acc_other", timedelta(minutes=10))
+    pg.start_sync_run("cus_1", "acc_1", "TAG_RECONCILE")
+    assert pg.sync_run_started_since("acc_1", timedelta(minutes=10))
+    assert not pg.sync_run_started_since("acc_1", timedelta(seconds=-1))

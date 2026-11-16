@@ -41,11 +41,20 @@ Reader permissions the collectors need beyond `infra/customer-stack/template.yam
 
 | Type | Needs | Without it |
 |---|---|---|
-| APIGW | `apigateway:GET` (REST `get_rest_apis` and v2 `get_apis`) | type error each run |
-| MQ | `mq:DescribeBroker` | type error each run |
-| SageMaker | `sagemaker:DescribeEndpoint` | type error each run |
+| APIGW | `apigateway:GET` on Resource `arn:${Partition}:apigateway:*::/restapis` and `arn:${Partition}:apigateway:*::/apis` **exactly** (the list calls `get_rest_apis` / `get_apis`), plus an explicit Deny of `apigateway:GET` on `/apikeys*`, `/usageplans/*/keys*` and `/restapis/*/*` (API keys, stage variables, integrations) | type error each run |
+| MQ | `mq:ListBrokers` (summary: `BrokerState`, `DeploymentMode`). `DescribeBroker` is **not** requested: it returns user lists | type error each run |
+| SageMaker | `sagemaker:DescribeEndpoint` on `endpoint/*` | type error each run |
 | DX | `directconnect:DescribeConnections` | type error each run |
-| deletion detection (`alive`) for ACM, Backup, WAF, EFS, MQ, DX, SageMaker, APIGW, Lambda | `acm:ListCertificates`, `backup:ListBackupVaults`, `wafv2:ListWebACLs`, `elasticfilesystem:DescribeFileSystems` (+ the rows above); none for Lambda | `alive()` is unknown: a deleted resource stays MONITORED (its alarms stay) until another signal |
+
+The code makes no ACM, Backup, WAF or EFS Describe/List calls, so none is requested. For those types, Lambda, APIGW, MQ,
+DX and SageMaker, `alive()` is unknown (None): a deleted resource stays MONITORED (its alarms stay) until another
+signal. Stored `counts.typeErrors` hold only the AWS error code; the full message stays in the server log. All list
+loops are bounded (1000 pages, repeated token detection) and raise instead of returning a truncated list.
+
+Tag events: the same-account `TAG_RECONCILE` run is debounced (`TAG_EVENT_RECONCILE_DEBOUNCE_MINUTES`, default 10, by
+the newest AlarmSyncRun of the account), a repeated event for one resource within `TAG_EVENT_RESOURCE_DEDUPE_SECONDS`
+(default 60, by the resource row's `lastSeenAt`, so it holds across Lambda instances) is dropped, events with
+`detail.errorCode` or a `source` not starting with `aws.` are ignored, and disabled / purged accounts are not looked up.
 
 Other APIs used are already in the Reader role (`ec2:Describe*`, `rds:DescribeDB*`, `elasticloadbalancing:Describe*`,
 `elasticache:DescribeCacheClusters`, `ecs:List*/DescribeServices`, `es:DescribeDomain`, `kafka:ListClustersV2`,

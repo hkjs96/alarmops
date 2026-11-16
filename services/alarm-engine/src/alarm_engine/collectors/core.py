@@ -49,17 +49,36 @@ def call(fn: Callable[..., Any], **kw: Any) -> Any:
     raise AssertionError("unreachable")  # pragma: no cover
 
 
-def pages(fn: Callable[..., Any], key: str, req: str = "NextToken", resp: str | None = None, **kw: Any) -> list[Any]:
-    """Every item of `key` across all pages. Token request/response names differ per service."""
-    resp = resp or req
+class PaginationError(Exception):
+    """A list call did not terminate (token repeats or too many pages). Raised, never truncated: a partial list would
+    look like "resources gone" to the engine."""
+
+
+MAX_PAGES = 1000
+
+
+def marker_pages(fn: Callable[..., Any], extract: Callable[[dict], tuple[list[Any], Any]], req: str, **kw: Any
+                 ) -> list[Any]:
+    """Generic paging loop. `extract(response)` → (items, next token or falsy). Bounded and repeat-safe."""
     out: list[Any] = []
     token: Any = None
-    while True:
+    seen: set[str] = set()
+    for _ in range(MAX_PAGES):
         r = call(fn, **kw, **({req: token} if token else {}))
-        out.extend(r.get(key) or [])
-        token = r.get(resp)
+        items, token = extract(r)
+        out.extend(items)
         if not token:
             return out
+        if str(token) in seen:
+            raise PaginationError(f"pagination token repeated for {getattr(fn, '__name__', fn)}")
+        seen.add(str(token))
+    raise PaginationError(f"more than {MAX_PAGES} pages for {getattr(fn, '__name__', fn)}")
+
+
+def pages(fn: Callable[..., Any], key: str, req: str = "NextToken", resp: str | None = None, **kw: Any) -> list[Any]:
+    """Every item of `key` across all pages. Token request/response names differ per service."""
+    rk = resp or req
+    return marker_pages(fn, lambda r: (r.get(key) or [], r.get(rk)), req, **kw)
 
 
 def chunks(items: list[Any], n: int) -> Iterator[list[Any]]:
