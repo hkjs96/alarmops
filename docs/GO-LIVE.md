@@ -61,7 +61,7 @@
 
 ## 4단계 — AWS 중앙 계정(서울) [에이전트 템플릿 → 사람 배포]
 
-[에이전트] 중앙 배포 묶음(#47) 템플릿 완료: `infra/aws/central.yaml`(수집 Lambda 3개, `alert-events`·`alarm-commands` 큐, 알람 엔진, 중앙 역할, 중앙 버스 → `alarm-commands` 규칙, Vercel OIDC 역할, DB 비밀 2개), `.github/workflows/deploy-central.yml`. 설명은 `infra/aws/README.md`. **남은 backend 몫**: Lambda 진입점·패키징(`CodeUri` 산출물 위치는 템플릿 머리말), `DATABASE_URL_SECRET_ARN`을 읽는 DB 접속, 원격 조치의 두 단계 역할 맡기.
+[에이전트] 중앙 배포 묶음(#47) 템플릿 완료: `infra/aws/central.yaml`(수집 Lambda 3개, `alert-events`·`alarm-commands` 큐, 알람 엔진, 중앙 역할, 중앙 버스 → `alarm-commands` 규칙, Vercel OIDC 역할, DB 비밀 2개), `.github/workflows/deploy-central.yml`. 설명은 `infra/aws/README.md`. **Lambda 진입점·패키징·`DATABASE_URL_SECRET_ARN` 읽기는 backend가 완료**(#47). 산출물 만들기(저장소 루트, 배포 전에 한 번): `npm ci --ignore-scripts && npm run build:lambda -w @alarmops/ingest && npm run build:engine-lambda`(수집 → `services/ingest/dist/{webhook,eventbridge,consumer}/index.mjs`, 엔진 → `services/alarm-engine/build/`; 엔진은 wheel을 받으므로 인터넷이 필요하고, 템플릿이 arm64라 기본이 aarch64 wheel이다). 자세한 내용은 `services/ingest/README.md`, `services/alarm-engine/README.md`의 Deploy. **남은 backend 몫**: 원격 조치의 두 단계 역할 맡기. **남은 infra 몫**: `deploy-central.yml`이 산출물 "존재 확인"만 하고 빌드는 하지 않는다(위 명령을 plan 앞 단계에 넣어야 한다).
 
 [사람] 한 번만(순서대로):
 1. [ ] **버스 스택**: 아직 없으면 `infra/aws/central-bus.yaml`을 스택 `alarmops-central-bus`로 올린다(`bus-allowlist` 워크플로가 이 스택을 갱신한다).
@@ -73,7 +73,7 @@
    - **중앙 계정 운영 규칙**: 엔진 실행 역할이 곧 고객이 신뢰하는 중앙 역할이다(PoC 결정). 그래서 이 계정에는 다른 Lambda·워크로드를 두지 않고, `iam:PassRole`로 이 역할을 넘길 수 있는 주체를 배포 역할로 한정한다. 개발 계정에서 중앙 역할 신뢰의 `aws:SourceAccount` 조건이 Lambda 실행에 문제를 일으키지 않는지(함수가 역할을 맡아 시작되는지) 먼저 확인한다.
 7. [ ] **`central` 환경 변수**(Settings → Environments → central → Variables, 저장소 변수 아님. 비밀 아님): `CENTRAL_DEPLOY_ROLE_ARN`, `VERCEL_OIDC_PROVIDER_ARN`, `VERCEL_TEAM_SLUG`, `VERCEL_PROJECT_NAME`. 선택: `ALARM_TOPIC_ARN`, `CENTRAL_BUS_NAME`(기본 `alarmops-central`), 이메일을 쓸 때만 `SES_IDENTITY_ARN`·`SES_FROM_ADDRESS`(D-52, 서울 리전 SES에서 검증한 신원). 기존 `CENTRAL_BUS_DEPLOY_ROLE_ARN`이 3번 역할과 같으면 그대로 둔다.
 8. [ ] **실행**: backend 패키징 산출물이 생긴 뒤 Actions → `deploy-central` 실행 → `plan` 작업 승인 → 요약의 **IAM 변경 표**를 읽고 → `apply` 작업 승인. 완료 요약의 출력표를 확인.
-9. [ ] **DB 비밀 값 넣기**(값은 템플릿·Actions에 없다. 엔진용과 수집용은 서로 다른 DB 사용자): 본인 터미널에서 SSO·MFA로 출력의 `EngineDbSecretArn`, `IngestDbSecretArn` 비밀에 연결 문자열을 넣는다(콘솔 입력, 또는 AWS CLI의 secretsmanager 비밀 값 입력에 `file://`로 파일을 줘서 셸 기록에 남기지 않는다).
+9. [ ] **DB 비밀 값 넣기**(값은 템플릿·Actions에 없다. 엔진용과 수집용은 서로 다른 DB 사용자): 본인 터미널에서 SSO·MFA로 출력의 `EngineDbSecretArn`, `IngestDbSecretArn` 비밀에 연결 문자열을 넣는다(**맨 문자열 그대로, 끝에 `?sslmode=require`를 붙인다**. Lambda는 `sslmode`가 `require`·`verify-ca`·`verify-full`이 아니면 시작을 거부한다. 트랜잭션 풀러(포트 6543)면 수집 쪽이 자동으로 풀러 모드로 접속한다. 인증서 검증에 DB의 CA가 필요하면 URL에 `sslrootcert=`로 번들 안 파일을 지정한다. 콘솔 입력, 또는 AWS CLI의 secretsmanager 비밀 값 입력에 `file://`로 파일을 줘서 셸 기록에 남기지 않는다).
 10. [ ] **출력값을 Vercel 환경변수(production)에**: `ALARM_COMMANDS_QUEUE_URL` = `AlarmCommandsQueueUrl`, `ALARM_COMMANDS_EXPECTED_ACCOUNT` = `CentralAccountId`, `AWS_ROLE_ARN` = `VercelConsoleRoleArn`. 고객 스택 파라미터: `CentralRoleArn` = 출력 `CentralRoleArn`, `CentralEventBusArn` = 출력 `CentralBusArn`, (Remediator를 켜는 고객만) `RemediatorCallerRoleArn` = 출력 `RemediatorCallerRoleArn`. 웹훅 주소는 출력 `WebhookUrl`.
 11. [ ] **DLQ 재처리(break-glass)**: `alarm-commands` DLQ는 중앙 역할만 읽는다(`StartMessageMoveTask`도 막힌다). 메시지를 되돌려야 하면 운영 역할 ARN을 환경 변수 `DLQ_OPS_ROLE_ARN`에 넣고 `deploy-central`로 반영 → 그 역할로 재처리 → 끝나면 변수를 지우고 다시 반영.
 12. [ ] (선택, D-52) SES를 쓰면 `ses:Recipients` 조건을 추가해 수신자 범위를 좁히는 것을 검토한다(지금은 From 주소와 신원만 고정).

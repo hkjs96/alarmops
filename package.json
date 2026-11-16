@@ -10,6 +10,7 @@
   "scripts": {
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
+    "build:engine-lambda": "python services/alarm-engine/scripts/build_lambda.py",
     "test:engine": "cd services/alarm-engine && python -m pytest",
     "lint:engine": "cd services/alarm-engine && python -m ruff check . && python -m mypy"
   },

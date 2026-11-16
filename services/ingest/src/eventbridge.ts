@@ -1,6 +1,7 @@
 import { normalizeCloudWatch, type CloudWatchEventBridgeEvent } from '@alarmops/core';
 import type { AccountCustomerCache } from './accountCache.js';
 import type { QueueSender, SourceRepository } from './ports.js';
+import { safeError } from './safeError.js';
 import { messageAttributes } from './sqs.js';
 
 const HANDLED = new Set(['CloudWatch Alarm State Change', 'CloudWatch Alarm Configuration Change']);
@@ -33,7 +34,7 @@ export function makeEventBridgeHandler(deps: { accounts: AccountCustomerCache; q
           terminated = (await deps.sources.customerStatus(customerId)) === 'TERMINATED';
           if (terminated) terminatedUntil.set(customerId, t + TERMINATED_TTL_MS);
         } catch (err) {
-          deps.log?.('warn', 'customer_status_lookup_failed', { customerId, error: String(err) });
+          deps.log?.('warn', 'customer_status_lookup_failed', { customerId, error: safeError(err) });
           deps.metric?.('IngestStatusLookupFailed', { source: 'CLOUDWATCH' });
         }
       }

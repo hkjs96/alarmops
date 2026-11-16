@@ -13,3 +13,4 @@ export { extractToken, hashToken, digestEquals, redactToken } from './token.js';
 export { SourceRateLimiter, DEFAULT_SOURCE_LIMIT_PER_MIN } from './rateLimit.js';
 export { requireEnv, NotConfiguredError, assertBudget } from './config.js';
 export type * from './ports.js';
+export { safeError } from './safeError.js';
