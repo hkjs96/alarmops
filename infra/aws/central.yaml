@@ -1,0 +1,673 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >-
+  AlarmOps central account bundle (hkjs96/alarmops#47, Seoul): ingest Lambdas (webhook, EventBridge, alert consumer),
+  alert-events and alarm-commands queues (each with a DLQ, SSE), the alarm-engine Lambda, the central role that
+  customer stacks trust, the Vercel OIDC role (D-49), the central-bus rule that delivers CloudTrail tag events to
+  alarm-commands, and the DB connection secrets (values are put by a person). The event bus itself is
+  central-bus.yaml (deployed first; its allow list is changed only by the bus-allowlist workflow).
+
+# Expected build output (made by a later backend packaging step; nothing is built from this folder). Paths are
+# relative to this template. A missing folder makes `sam deploy` fail, and deploy-central.yml checks them first.
+#   ../../services/ingest/dist/webhook/index.mjs        exports `handler` (makeWebhookHandler wired to repo + SQS)
+#   ../../services/ingest/dist/eventbridge/index.mjs    exports `handler` (makeEventBridgeHandler)
+#   ../../services/ingest/dist/consumer/index.mjs       exports `handler` (makeConsumerHandler, alert-events)
+#   ../../services/alarm-engine/build/                  alarm_engine/ package + its dependencies at the top level
+#                                                       (handler alarm_engine.handler.lambda_handler)
+
+Parameters:
+  ResourcePrefix:
+    Type: String
+    Default: alarmops
+    AllowedPattern: '^[a-z][a-z0-9-]{1,20}$'
+  CentralBusName:
+    Type: String
+    Default: alarmops-central
+    AllowedPattern: '^[A-Za-z0-9._-]{1,64}$'
+    Description: Name of the bus created by central-bus.yaml (stack output BusName). Must exist before this stack.
+  VercelOidcProviderArn:
+    Type: String
+    AllowedPattern: '^arn:aws:iam::[0-9]{12}:oidc-provider/oidc\.vercel\.com$'
+    Description: IAM OIDC provider registered by a person for issuer https://oidc.vercel.com (Vercel "Global" issuer mode).
+  VercelTeamSlug:
+    Type: String
+    AllowedPattern: '^[A-Za-z0-9_-]{1,64}$'
+  VercelProjectName:
+    Type: String
+    AllowedPattern: '^[A-Za-z0-9._-]{1,100}$'
+  SesIdentityArn:
+    Type: String
+    Default: ""
+    AllowedPattern: '^$|^arn:aws:ses:ap-northeast-2:[0-9]{12}:identity/[A-Za-z0-9.@_-]+$'
+    Description: Optional (D-52). A verified SES identity; when set the Vercel role may ses:SendEmail through it only.
+  SesFromAddress:
+    Type: String
+    Default: ""
+    AllowedPattern: '^$|^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+$'
+    Description: Required with SesIdentityArn. The only From address the Vercel role may use.
+  EngineDbSecretName:
+    Type: String
+    Default: alarmops/central/engine-database-url
+    AllowedPattern: '^[A-Za-z0-9/_+=.@-]{1,200}$'
+  IngestDbSecretName:
+    Type: String
+    Default: alarmops/central/ingest-database-url
+    AllowedPattern: '^[A-Za-z0-9/_+=.@-]{1,200}$'
+  AlarmTopicArn:
+    Type: String
+    Default: ""
+    Description: Optional SNS topic notified when a DLQ is not empty.
+  LogRetentionDays:
+    Type: Number
+    Default: 30
+    AllowedValues: [7, 14, 30, 60, 90, 180, 365]
+  EngineTimeoutSeconds:
+    Type: Number
+    Default: 120
+    MinValue: 10
+    MaxValue: 120
+    Description: Engine Lambda timeout. alarm-commands visibility timeout is fixed at 720 s (6 times the maximum).
+  EngineReservedConcurrency:
+    Type: Number
+    Default: 10
+    MinValue: 1
+  EngineMaxConcurrency:
+    Type: Number
+    Default: 5
+    MinValue: 2
+    MaxValue: 1000
+    Description: SQS event source MaximumConcurrency for the engine. Keep at or below EngineReservedConcurrency.
+  ConsumerReservedConcurrency:
+    Type: Number
+    Default: 10
+    MinValue: 1
+  ConsumerMaxConcurrency:
+    Type: Number
+    Default: 5
+    MinValue: 2
+    MaxValue: 1000
+  WebhookReservedConcurrency:
+    Type: Number
+    Default: 10
+    MinValue: 1
+  EventBridgeIngestReservedConcurrency:
+    Type: Number
+    Default: 10
+    MinValue: 1
+  WebhookRatePerSecond:
+    Type: Number
+    Default: 20
+    MinValue: 1
+  WebhookBurst:
+    Type: Number
+    Default: 40
+    MinValue: 1
+  RemediationExecution:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: ALARMOPS_REMEDIATION_EXECUTION for the engine (D-15). Stays false until the Slack approval path is live.
+
+Rules:
+  SesNeedsFromAddress:
+    RuleCondition: !Not [!Equals [!Ref SesIdentityArn, ""]]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref SesFromAddress, ""]]
+        AssertDescription: SesFromAddress is required when SesIdentityArn is set.
+
+Conditions:
+  HasAlarmTopic: !Not [!Equals [!Ref AlarmTopicArn, ""]]
+  HasSes: !Not [!Equals [!Ref SesIdentityArn, ""]]
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 256
+    Tracing: PassThrough
+
+Resources:
+  # ================================================================ secrets (value put by a person)
+  # No SecretString here: CloudFormation never sees the connection string. A person runs put-secret-value once
+  # (docs/GO-LIVE.md step 4). Two secrets so the engine and ingest use different database users (API-CONTRACT B10).
+  EngineDbSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Ref EngineDbSecretName
+      Description: Postgres connection string for the alarm engine (dedicated DB user). Value set by a person.
+
+  IngestDbSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Ref IngestDbSecretName
+      Description: Postgres connection string for the ingest Lambdas (dedicated DB user). Value set by a person.
+
+  # ================================================================ queues
+  CommandsDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${ResourcePrefix}-alarm-commands-dlq"
+      SqsManagedSseEnabled: true
+      MessageRetentionPeriod: 1209600
+
+  # Standard queue (D-48); the engine is idempotent per commandId. Visibility 720 = 6 x the maximum engine timeout.
+  CommandsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${ResourcePrefix}-alarm-commands"
+      SqsManagedSseEnabled: true
+      VisibilityTimeout: 720
+      MessageRetentionPeriod: 345600
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt CommandsDlq.Arn
+        maxReceiveCount: 5
+
+  # Delivery of CloudTrail tag events from the bus rule. Own DLQ: the rule's DLQ needs a policy for events.amazonaws.com
+  # that must not leak to the redrive DLQ of the queue.
+  TagEventsRuleDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${ResourcePrefix}-tag-events-rule-dlq"
+      SqsManagedSseEnabled: true
+      MessageRetentionPeriod: 1209600
+
+  AlertEventsDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${ResourcePrefix}-alert-events-dlq"
+      SqsManagedSseEnabled: true
+      MessageRetentionPeriod: 1209600
+
+  # Visibility 180 = 6 x the consumer timeout (30 s; assertBudget in services/ingest keeps the budget below it).
+  AlertEventsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${ResourcePrefix}-alert-events"
+      SqsManagedSseEnabled: true
+      VisibilityTimeout: 180
+      MessageRetentionPeriod: 345600
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt AlertEventsDlq.Arn
+        maxReceiveCount: 5
+
+  # Security review (hkjs96/alarmops#47, engine-collectors #10):
+  #  - the only Allow for events.amazonaws.com is bound to ONE rule ARN (ArnEquals aws:SourceArn). No Principal "*" in
+  #    any Allow, no aws:SourceAccount-only condition.
+  #  - DenySendFromOthers: both ArnNotEquals must hold (AND) for the Deny to apply, so the console role and that one
+  #    rule are the only senders.
+  CommandsQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues: [!Ref CommandsQueue]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: ConsoleSendOnly
+            Effect: Allow
+            Principal: { AWS: !GetAtt VercelConsoleRole.Arn }
+            Action: sqs:SendMessage
+            Resource: !GetAtt CommandsQueue.Arn
+          - Sid: TagEventRuleSend
+            Effect: Allow
+            Principal: { Service: events.amazonaws.com }
+            Action: sqs:SendMessage
+            Resource: !GetAtt CommandsQueue.Arn
+            Condition:
+              ArnEquals: { "aws:SourceArn": !GetAtt TagEventRule.Arn }
+          - Sid: EngineReceiveDelete
+            Effect: Allow
+            Principal: { AWS: !GetAtt CentralRole.Arn }
+            Action: [sqs:ReceiveMessage, sqs:DeleteMessage, sqs:GetQueueAttributes, sqs:ChangeMessageVisibility]
+            Resource: !GetAtt CommandsQueue.Arn
+          - Sid: DenySendFromOthers
+            Effect: Deny
+            Principal: "*"
+            Action: sqs:SendMessage
+            Resource: !GetAtt CommandsQueue.Arn
+            Condition:
+              ArnNotEquals:
+                "aws:PrincipalArn": !GetAtt VercelConsoleRole.Arn
+                "aws:SourceArn": !GetAtt TagEventRule.Arn
+          - Sid: DenyReceiveFromOthers
+            Effect: Deny
+            Principal: "*"
+            Action: [sqs:ReceiveMessage, sqs:DeleteMessage, sqs:ChangeMessageVisibility]
+            Resource: !GetAtt CommandsQueue.Arn
+            Condition:
+              ArnNotEquals: { "aws:PrincipalArn": !GetAtt CentralRole.Arn }
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: sqs:*
+            Resource: !GetAtt CommandsQueue.Arn
+            Condition:
+              Bool: { "aws:SecureTransport": "false" }
+
+  TagEventsRuleDlqPolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues: [!Ref TagEventsRuleDlq]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: TagEventRuleDeadLetters
+            Effect: Allow
+            Principal: { Service: events.amazonaws.com }
+            Action: sqs:SendMessage
+            Resource: !GetAtt TagEventsRuleDlq.Arn
+            Condition:
+              ArnEquals: { "aws:SourceArn": !GetAtt TagEventRule.Arn }
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: sqs:*
+            Resource: !GetAtt TagEventsRuleDlq.Arn
+            Condition:
+              Bool: { "aws:SecureTransport": "false" }
+
+  AlertEventsQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues: [!Ref AlertEventsQueue]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: sqs:*
+            Resource: !GetAtt AlertEventsQueue.Arn
+            Condition:
+              Bool: { "aws:SecureTransport": "false" }
+
+  # ================================================================ central bus rule -> alarm-commands
+  # Events arrive from allow-listed customer accounts (central-bus.yaml). The envelope's top-level `account` is set
+  # by EventBridge; the engine trusts only that field (services/alarm-engine events.py).
+  TagEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${ResourcePrefix}-tag-events-to-commands"
+      Description: CloudTrail tag add/remove events from customer accounts to the alarm-commands queue (D-16).
+      EventBusName: !Ref CentralBusName
+      State: ENABLED
+      EventPattern:
+        source:
+          - prefix: "aws."
+        detail-type:
+          - AWS API Call via CloudTrail
+      Targets:
+        - Id: alarm-commands
+          Arn: !GetAtt CommandsQueue.Arn
+          DeadLetterConfig:
+            Arn: !GetAtt TagEventsRuleDlq.Arn
+          RetryPolicy:
+            MaximumRetryAttempts: 10
+            MaximumEventAgeInSeconds: 3600
+
+  # ================================================================ roles
+  # CentralRole: the ONE role customer stacks trust (their CentralRoleArn parameter). It is also the alarm-engine
+  # Lambda's execution role, so the identity that assumes customer roles is the code that holds the DB secret and
+  # the queue (decision: single role; see infra/aws/README.md).
+  #  - sts:AssumeRole only on AlarmOps-* roles in any account; the customer side requires sts:ExternalId.
+  #  - Explicit Deny on AlarmOps-Remediator: stopping/deleting goes only through RemediatorCallerRole (D-15).
+  CentralRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: AlarmOpsCentral-Engine
+      Description: Alarm engine; the role customers trust. Assumes customer AlarmOps-* roles with ExternalId.
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals: { "aws:SourceAccount": !Ref "AWS::AccountId" }
+      Policies:
+        - PolicyName: engine
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: AssumeCustomerRoles
+                Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Sub "arn:${AWS::Partition}:iam::*:role/AlarmOps-*"
+              - Sid: NeverAssumeCustomerRemediator
+                Effect: Deny
+                Action: sts:AssumeRole
+                Resource: !Sub "arn:${AWS::Partition}:iam::*:role/AlarmOps-Remediator"
+              - Sid: AssumeRemediatorCaller
+                Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/AlarmOpsCentral-RemediatorCaller"
+              - Sid: ConsumeAlarmCommands
+                Effect: Allow
+                Action: [sqs:ReceiveMessage, sqs:DeleteMessage, sqs:GetQueueAttributes, sqs:ChangeMessageVisibility]
+                Resource: !GetAtt CommandsQueue.Arn
+              - Sid: ReadEngineDbSecret
+                Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref EngineDbSecret
+              - Sid: Logs
+                Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub "${EngineLogGroup.Arn}:*"
+
+  # Second central identity, only for approved remediations (customer RemediatorCallerRoleArn). Reachable only from
+  # CentralRole; carries no queue, secret or discovery rights. Customers' AlarmOps-Remediator still requires ExternalId.
+  RemediatorCallerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: AlarmOpsCentral-RemediatorCaller
+      Description: Assumed by the engine only to run a Slack-approved remediation in a customer account.
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { AWS: !GetAtt CentralRole.Arn }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: assume-customer-remediator
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Sub "arn:${AWS::Partition}:iam::*:role/AlarmOps-Remediator"
+
+  # Vercel console (D-49): web identity from the Vercel OIDC provider, pinned to this team's aud and to the
+  # production environment of this one project. Permission: sqs:SendMessage on alarm-commands (+ optional SES, D-52).
+  VercelConsoleRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: AlarmOpsCentral-VercelConsole
+      Description: Vercel console (production) sends alarm commands. Nothing else.
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Federated: !Ref VercelOidcProviderArn }
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                "oidc.vercel.com:aud": !Sub "https://vercel.com/${VercelTeamSlug}"
+                "oidc.vercel.com:sub": !Sub "owner:${VercelTeamSlug}:project:${VercelProjectName}:environment:production"
+      Policies:
+        - PolicyName: console
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: SendAlarmCommands
+                Effect: Allow
+                Action: sqs:SendMessage
+                Resource: !GetAtt CommandsQueue.Arn
+              - !If
+                - HasSes
+                - Sid: SendEmailFromVerifiedIdentity
+                  Effect: Allow
+                  Action: ses:SendEmail
+                  Resource: !Ref SesIdentityArn
+                  Condition:
+                    StringEquals: { "ses:FromAddress": !Ref SesFromAddress }
+                - !Ref AWS::NoValue
+
+  # ================================================================ log groups
+  EngineLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${ResourcePrefix}-alarm-engine"
+      RetentionInDays: !Ref LogRetentionDays
+
+  WebhookLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${ResourcePrefix}-ingest-webhook"
+      RetentionInDays: !Ref LogRetentionDays
+
+  EventBridgeIngestLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${ResourcePrefix}-ingest-eventbridge"
+      RetentionInDays: !Ref LogRetentionDays
+
+  ConsumerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${ResourcePrefix}-alert-consumer"
+      RetentionInDays: !Ref LogRetentionDays
+
+  # ================================================================ alarm engine
+  AlarmEngineFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ResourcePrefix}-alarm-engine"
+      CodeUri: ../../services/alarm-engine/build/
+      Handler: alarm_engine.handler.lambda_handler
+      Runtime: python3.12
+      Architectures: [arm64]
+      Timeout: !Ref EngineTimeoutSeconds
+      MemorySize: 512
+      ReservedConcurrentExecutions: !Ref EngineReservedConcurrency
+      Role: !GetAtt CentralRole.Arn
+      LoggingConfig:
+        LogGroup: !Ref EngineLogGroup
+      Environment:
+        Variables:
+          # The value is read from Secrets Manager at cold start (never placed in the template or the console).
+          DATABASE_URL_SECRET_ARN: !Ref EngineDbSecret
+          ALARMOPS_REMEDIATION_EXECUTION: !Ref RemediationExecution
+          REMEDIATOR_CALLER_ROLE_ARN: !GetAtt RemediatorCallerRole.Arn
+      Events:
+        Commands:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt CommandsQueue.Arn
+            BatchSize: 5
+            FunctionResponseTypes: [ReportBatchItemFailures]
+            ScalingConfig:
+              MaximumConcurrency: !Ref EngineMaxConcurrency
+
+  # ================================================================ ingest
+  # Function roles (SAM-generated) get exactly: send to alert-events, read the ingest DB secret, logs.
+  IngestWebhookFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ResourcePrefix}-ingest-webhook"
+      CodeUri: ../../services/ingest/dist/webhook/
+      Handler: index.handler
+      Runtime: nodejs22.x
+      Architectures: [arm64]
+      ReservedConcurrentExecutions: !Ref WebhookReservedConcurrency
+      LoggingConfig:
+        LogGroup: !Ref WebhookLogGroup
+      Environment:
+        Variables:
+          ALERT_EVENTS_QUEUE_URL: !Ref AlertEventsQueue
+          DATABASE_URL_SECRET_ARN: !Ref IngestDbSecret
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: sqs:SendMessage
+              Resource: !GetAtt AlertEventsQueue.Arn
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Ref IngestDbSecret
+      Events:
+        Webhook:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref IngestHttpApi
+            Method: POST
+            Path: /ingest/v1/{source}
+
+  # No access log: the customer token may arrive in the query string and must not be written anywhere.
+  IngestHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      DefaultRouteSettings:
+        ThrottlingRateLimit: !Ref WebhookRatePerSecond
+        ThrottlingBurstLimit: !Ref WebhookBurst
+
+  IngestEventBridgeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ResourcePrefix}-ingest-eventbridge"
+      CodeUri: ../../services/ingest/dist/eventbridge/
+      Handler: index.handler
+      Runtime: nodejs22.x
+      Architectures: [arm64]
+      ReservedConcurrentExecutions: !Ref EventBridgeIngestReservedConcurrency
+      LoggingConfig:
+        LogGroup: !Ref EventBridgeIngestLogGroup
+      Environment:
+        Variables:
+          ALERT_EVENTS_QUEUE_URL: !Ref AlertEventsQueue
+          DATABASE_URL_SECRET_ARN: !Ref IngestDbSecret
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: sqs:SendMessage
+              Resource: !GetAtt AlertEventsQueue.Arn
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Ref IngestDbSecret
+      Events:
+        AlarmStateChange:
+          Type: EventBridgeRule
+          Properties:
+            EventBusName: !Ref CentralBusName
+            Pattern:
+              source:
+                - aws.cloudwatch
+              detail-type:
+                - CloudWatch Alarm State Change
+                - CloudWatch Alarm Configuration Change
+            DeadLetterConfig:
+              Type: SQS
+            RetryPolicy:
+              MaximumRetryAttempts: 10
+              MaximumEventAgeInSeconds: 3600
+
+  AlertConsumerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ResourcePrefix}-alert-consumer"
+      CodeUri: ../../services/ingest/dist/consumer/
+      Handler: index.handler
+      Runtime: nodejs22.x
+      Architectures: [arm64]
+      Timeout: 30
+      ReservedConcurrentExecutions: !Ref ConsumerReservedConcurrency
+      LoggingConfig:
+        LogGroup: !Ref ConsumerLogGroup
+      Environment:
+        Variables:
+          ALERT_EVENTS_QUEUE_URL: !Ref AlertEventsQueue
+          DATABASE_URL_SECRET_ARN: !Ref IngestDbSecret
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: sqs:SendMessage
+              Resource: !GetAtt AlertEventsQueue.Arn
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Ref IngestDbSecret
+      Events:
+        AlertEvents:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt AlertEventsQueue.Arn
+            BatchSize: 10
+            FunctionResponseTypes: [ReportBatchItemFailures]
+            ScalingConfig:
+              MaximumConcurrency: !Ref ConsumerMaxConcurrency
+
+  # ================================================================ DLQ alarms
+  CommandsDlqNotEmptyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ResourcePrefix}-alarm-commands-dlq-not-empty"
+      AlarmDescription: Commands the engine could not process. An offboarding command may be among them.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt CommandsDlq.QueueName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmTopicArn], !Ref "AWS::NoValue"]
+
+  AlertEventsDlqNotEmptyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ResourcePrefix}-alert-events-dlq-not-empty"
+      AlarmDescription: Alert events the consumer could not process (alerts may be lost).
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt AlertEventsDlq.QueueName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmTopicArn], !Ref "AWS::NoValue"]
+
+  TagEventsRuleDlqNotEmptyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ResourcePrefix}-tag-events-rule-dlq-not-empty"
+      AlarmDescription: Tag events the bus rule could not deliver to alarm-commands.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt TagEventsRuleDlq.QueueName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmTopicArn], !Ref "AWS::NoValue"]
+
+Outputs:
+  AlarmCommandsQueueUrl:
+    Value: !Ref CommandsQueue
+    Description: Vercel env ALARM_COMMANDS_QUEUE_URL.
+  AlarmCommandsQueueArn:
+    Value: !GetAtt CommandsQueue.Arn
+  AlertEventsQueueUrl:
+    Value: !Ref AlertEventsQueue
+  AlertEventsQueueArn:
+    Value: !GetAtt AlertEventsQueue.Arn
+  CentralRoleArn:
+    Value: !GetAtt CentralRole.Arn
+    Description: Customer stack parameter CentralRoleArn.
+  RemediatorCallerRoleArn:
+    Value: !GetAtt RemediatorCallerRole.Arn
+    Description: Customer stack parameter RemediatorCallerRoleArn (only when EnableRemediator).
+  VercelConsoleRoleArn:
+    Value: !GetAtt VercelConsoleRole.Arn
+    Description: Vercel env AWS_ROLE_ARN.
+  CentralBusArn:
+    Value: !Sub "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:event-bus/${CentralBusName}"
+    Description: Customer stack parameter CentralEventBusArn.
+  CentralAccountId:
+    Value: !Ref "AWS::AccountId"
+    Description: Vercel env ALARM_COMMANDS_EXPECTED_ACCOUNT.
+  WebhookUrl:
+    Value: !Sub "https://${IngestHttpApi}.execute-api.${AWS::Region}.amazonaws.com/ingest/v1/{source}"
+  EngineDbSecretArn:
+    Value: !Ref EngineDbSecret
+    Description: Put the connection string here (docs/GO-LIVE.md). The ARN is not a secret.
+  IngestDbSecretArn:
+    Value: !Ref IngestDbSecret

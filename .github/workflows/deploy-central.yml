@@ -1,0 +1,111 @@
+name: deploy-central
+
+# Deploys infra/aws/central.yaml (SAM, Seoul) to the central AWS account. Started by a person with workflow_dispatch;
+# an agent never runs it. The `central` environment (branch main only, required reviewer) is the approval gate.
+#
+# AWS access: GitHub OIDC only (no long-lived keys). The role in the CENTRAL_DEPLOY_ROLE_ARN variable must have a trust
+# policy that requires
+#   token.actions.githubusercontent.com:aud = sts.amazonaws.com
+#   token.actions.githubusercontent.com:sub = repo:hkjs96/alarmops:environment:central
+# (the `sub` of a job that uses `environment: central`; no wildcard). Its permissions are listed in infra/aws/README.md.
+# Parameters come from repository/environment variables (not secrets: none of them is a secret). The DB connection
+# strings are never passed here; a person puts them into the Secrets Manager secrets this stack creates.
+# TODO(security, 권고 5): pin every `uses:` below to a full commit SHA. The repository has no pinned SHAs to copy yet
+# and none are invented here; a person (or Dependabot) copies them from each action's release page.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-central
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-northeast-2
+  STACK_NAME: alarmops-central
+  BUS_STACK_NAME: alarmops-central-bus
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: central
+    # workflow_dispatch can start any branch's copy of this file; only main may touch the central account.
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install "cfn-lint==1.60.1"
+      - name: cfn-lint
+        run: cfn-lint infra/aws/central.yaml infra/aws/central-bus.yaml infra/customer-stack/template.yaml
+      - name: Template structure tests
+        run: python -m unittest discover -s infra/test -v
+      # The Lambda code is built by the backend packaging step (not part of this repository state yet). Fail early and
+      # clearly instead of letting `sam deploy` zip an empty or missing folder.
+      - name: Check the build output exists
+        run: |
+          missing=0
+          for f in services/ingest/dist/webhook/index.mjs services/ingest/dist/eventbridge/index.mjs \
+                   services/ingest/dist/consumer/index.mjs services/alarm-engine/build/alarm_engine/handler.py; do
+            if [ ! -f "$f" ]; then echo "::error::Missing build output: $f (backend packaging, see infra/aws/central.yaml header)"; missing=1; fi
+          done
+          exit $missing
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.CENTRAL_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: deploy-central
+      - name: Check the central bus stack exists
+        run: aws cloudformation describe-stacks --stack-name "$BUS_STACK_NAME" --query 'Stacks[0].StackStatus' --output text
+      - name: sam validate
+        run: sam validate --lint --template-file infra/aws/central.yaml
+      - name: sam deploy
+        env:
+          VERCEL_OIDC_PROVIDER_ARN: ${{ vars.VERCEL_OIDC_PROVIDER_ARN }}
+          VERCEL_TEAM_SLUG: ${{ vars.VERCEL_TEAM_SLUG }}
+          VERCEL_PROJECT_NAME: ${{ vars.VERCEL_PROJECT_NAME }}
+          SES_IDENTITY_ARN: ${{ vars.SES_IDENTITY_ARN }}
+          SES_FROM_ADDRESS: ${{ vars.SES_FROM_ADDRESS }}
+          ALARM_TOPIC_ARN: ${{ vars.ALARM_TOPIC_ARN }}
+          CENTRAL_BUS_NAME: ${{ vars.CENTRAL_BUS_NAME }}
+        run: |
+          params=(
+            "VercelOidcProviderArn=${VERCEL_OIDC_PROVIDER_ARN}"
+            "VercelTeamSlug=${VERCEL_TEAM_SLUG}"
+            "VercelProjectName=${VERCEL_PROJECT_NAME}"
+          )
+          # Optional variables: only passed when set, so the template defaults apply otherwise.
+          [ -n "$SES_IDENTITY_ARN" ] && params+=("SesIdentityArn=${SES_IDENTITY_ARN}")
+          [ -n "$SES_FROM_ADDRESS" ] && params+=("SesFromAddress=${SES_FROM_ADDRESS}")
+          [ -n "$ALARM_TOPIC_ARN" ] && params+=("AlarmTopicArn=${ALARM_TOPIC_ARN}")
+          [ -n "$CENTRAL_BUS_NAME" ] && params+=("CentralBusName=${CENTRAL_BUS_NAME}")
+          sam deploy \
+            --template-file infra/aws/central.yaml \
+            --stack-name "$STACK_NAME" \
+            --region "$AWS_REGION" \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --resolve-s3 \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides "${params[@]}"
+      # Outputs hold ARNs, URLs and the account id: none is a secret. Secret values are never read here.
+      - name: Stack outputs to the job summary
+        if: success()
+        run: |
+          {
+            echo "## ${STACK_NAME} outputs"
+            echo
+            echo "| Output | Value |"
+            echo "|---|---|"
+            aws cloudformation describe-stacks --stack-name "$STACK_NAME" \
+              --query 'Stacks[0].Outputs[].[OutputKey,OutputValue]' --output text |
+              awk -F'\t' '{ printf "| %s | `%s` |\n", $1, $2 }'
+            echo
+            echo "Next: put the two DB connection strings (docs/GO-LIVE.md, step 4), then copy the values into Vercel."
+          } >> "$GITHUB_STEP_SUMMARY"

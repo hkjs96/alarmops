@@ -59,13 +59,20 @@
 
 ## 4단계 — AWS 중앙 계정(서울) [에이전트 템플릿 → 사람 배포]
 
-[에이전트] 중앙 배포 묶음(#47): 수집 Lambda(웹훅·EventBridge), `alert-events` 큐, 알람 엔진 Lambda(`alarm-commands` 소비), 엔진이 고객 역할을 맡는 **중앙 역할**, 중앙 버스 → 수집 규칙, Vercel OIDC 역할(SendMessage만). GitHub Actions 배포(`central` 환경 승인).
+[에이전트] 중앙 배포 묶음(#47) 템플릿 완료: `infra/aws/central.yaml`(수집 Lambda 3개, `alert-events`·`alarm-commands` 큐, 알람 엔진, 중앙 역할, 중앙 버스 → `alarm-commands` 규칙, Vercel OIDC 역할, DB 비밀 2개), `.github/workflows/deploy-central.yml`. 설명은 `infra/aws/README.md`. **남은 backend 몫**: Lambda 진입점·패키징(`CodeUri` 산출물 위치는 템플릿 머리말), `DATABASE_URL_SECRET_ARN`을 읽는 DB 접속, 원격 조치의 두 단계 역할 맡기.
 
-[사람] 한 번만:
-- [ ] AWS에 GitHub OIDC 공급자와 배포 역할 만들기 → GitHub `central` 환경(main만, 승인자 본인) + 변수 `CENTRAL_BUS_DEPLOY_ROLE_ARN`
-- [ ] Vercel OIDC 공급자 등록(D-49)
-- [ ] 배포 워크플로 실행·승인 → 출력값(큐 URL, 역할 ARN)을 Vercel 환경변수에 입력
-- [ ] **권한 실측**(#38): 시험 계정에 고객 스택 설치 → 알람 생성(Tags 포함)·삭제가 되는지, `ManagedBy` 없는 알람은 거부되는지
+[사람] 한 번만(순서대로):
+1. [ ] **버스 스택**: 아직 없으면 `infra/aws/central-bus.yaml`을 스택 `alarmops-central-bus`로 올린다(`bus-allowlist` 워크플로가 이 스택을 갱신한다).
+2. [ ] **AWS에 GitHub OIDC 공급자**(IAM → 자격 증명 공급자 → OpenID Connect): URL `https://token.actions.githubusercontent.com`, 대상 `sts.amazonaws.com`.
+3. [ ] **배포 역할**(웹 ID 역할): 신뢰 조건 `token.actions.githubusercontent.com:aud = sts.amazonaws.com`, `token.actions.githubusercontent.com:sub = repo:hkjs96/alarmops:environment:central`(와일드카드 금지). 권한은 `infra/aws/README.md`의 "실행과 사람이 하는 일" 범위. 이 역할로 `bus-allowlist`도 돌리므로 버스 스택 권한도 포함.
+4. [ ] **GitHub `central` 환경**(Settings → Environments): 배포 브랜치 `main`만, 필수 승인자 본인.
+5. [ ] **Vercel OIDC 공급자 등록(D-49)**: Vercel 프로젝트 Settings → Security → Secure backend access with OIDC federation에서 발급자 모드를 **Global**로 두고(팀 발급자 모드는 이 템플릿의 신뢰 키와 맞지 않는다), AWS에 OpenID Connect 공급자를 추가한다. URL `https://oidc.vercel.com`, 대상 `https://vercel.com/<팀 슬러그>`. 만든 공급자 ARN을 아래 변수에 넣는다.
+6. [ ] **Service Quotas**: Lambda 동시 실행 한도를 올린다(새 계정 10이면 예약 동시성 설정이 실패한다).
+7. [ ] **저장소 변수**(Settings → Variables, 비밀 아님): `CENTRAL_DEPLOY_ROLE_ARN`, `VERCEL_OIDC_PROVIDER_ARN`, `VERCEL_TEAM_SLUG`, `VERCEL_PROJECT_NAME`. 선택: `ALARM_TOPIC_ARN`, `CENTRAL_BUS_NAME`(기본 `alarmops-central`), 이메일을 쓸 때만 `SES_IDENTITY_ARN`·`SES_FROM_ADDRESS`(D-52, 서울 리전 SES에서 검증한 신원). 기존 `CENTRAL_BUS_DEPLOY_ROLE_ARN`이 3번 역할과 같으면 그대로 둔다.
+8. [ ] **실행**: backend 패키징 산출물이 생긴 뒤 Actions → `deploy-central` 실행 → `central` 승인. 작업 요약의 출력표를 확인.
+9. [ ] **DB 비밀 값 넣기**(값은 템플릿·Actions에 없다. 엔진용과 수집용은 서로 다른 DB 사용자): 본인 터미널에서 SSO·MFA로 출력의 `EngineDbSecretArn`, `IngestDbSecretArn` 비밀에 연결 문자열을 넣는다(콘솔 입력, 또는 AWS CLI의 secretsmanager 비밀 값 입력에 `file://`로 파일을 줘서 셸 기록에 남기지 않는다).
+10. [ ] **출력값을 Vercel 환경변수(production)에**: `ALARM_COMMANDS_QUEUE_URL` = `AlarmCommandsQueueUrl`, `ALARM_COMMANDS_EXPECTED_ACCOUNT` = `CentralAccountId`, `AWS_ROLE_ARN` = `VercelConsoleRoleArn`. 고객 스택 파라미터: `CentralRoleArn` = 출력 `CentralRoleArn`, `CentralEventBusArn` = 출력 `CentralBusArn`, (Remediator를 켜는 고객만) `RemediatorCallerRoleArn` = 출력 `RemediatorCallerRoleArn`. 웹훅 주소는 출력 `WebhookUrl`.
+11. [ ] **권한 실측**(#38): 시험 계정에 고객 스택 설치 → 알람 생성(Tags 포함)·삭제가 되는지, `ManagedBy` 없는 알람은 거부되는지. 추가로 시험 계정에서 태그를 바꾸면 `alarm-commands`로 이벤트가 들어와 엔진이 처리하는지, 허용 목록에 없는 계정이 보낸 이벤트는 닿지 않는지.
 
 ## 5단계 — 알림 발송 [에이전트, 1단계 결정 후]
 

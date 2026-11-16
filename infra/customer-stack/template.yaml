@@ -145,7 +145,32 @@ Resources:
                   - s3:ListAllMyBuckets
                   - s3:GetBucketTagging
                   - s3:GetBucketLocation
+                  - mq:ListBrokers
+                  - directconnect:DescribeConnections
                 Resource: "*"
+              # Collector additions (hkjs96/alarmops#47/#48), exactly what services/alarm-engine/README.md requests.
+              # SageMaker: DescribeEndpoint on endpoints only. mq:ListBrokers returns summaries; DescribeBroker
+              # (user lists) is deliberately absent.
+              - Sid: SageMakerEndpoints
+                Effect: Allow
+                Action: sagemaker:DescribeEndpoint
+                Resource: !Sub "arn:${AWS::Partition}:sagemaker:*:${AWS::AccountId}:endpoint/*"
+              # API Gateway: the two list calls (get_rest_apis, get_apis) only. apigateway:GET reads everything under the
+              # resource path, so the Deny below keeps API keys, usage plan keys and per-API detail (stage variables,
+              # integrations, authorizers) out of reach even if a wider Allow is ever added.
+              - Sid: ApiGatewayList
+                Effect: Allow
+                Action: apigateway:GET
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:apigateway:*::/restapis"
+                  - !Sub "arn:${AWS::Partition}:apigateway:*::/apis"
+              - Sid: DenyApiGatewayKeysAndDetail
+                Effect: Deny
+                Action: apigateway:GET
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:apigateway:*::/apikeys*"
+                  - !Sub "arn:${AWS::Partition}:apigateway:*::/usageplans/*/keys*"
+                  - !Sub "arn:${AWS::Partition}:apigateway:*::/restapis/*/*"
               # Explicit Deny: no other policy attached to this role can re-grant these.
               - Sid: DenySecretsAndData
                 Effect: Deny

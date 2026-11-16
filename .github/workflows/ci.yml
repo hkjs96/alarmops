@@ -100,9 +100,8 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install "cfn-lint==1.60.1"
-      - name: cfn-lint (customer stack, central bus)
-        run: cfn-lint infra/customer-stack/template.yaml infra/aws/central-bus.yaml infra/aws/alarm-commands-queue.yaml
-      - name: Template structure tests (roles, trust, Deny rules)
+      - name: cfn-lint (customer stack, central bus, central SAM bundle)
+        run: cfn-lint infra/customer-stack/template.yaml infra/aws/central-bus.yaml infra/aws/central.yaml      - name: Template structure tests (roles, trust, Deny rules)
         run: python -m unittest discover -s infra/test -v
       - name: Workflow script tests (console deploy environment check, bus allow list)
         run: node --test .github/scripts/check-console-deploy-env.test.mjs .github/scripts/bus-allowlist.test.mjs

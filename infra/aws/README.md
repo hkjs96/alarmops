@@ -36,13 +36,52 @@ OIDC 신뢰 정책(AWS 쪽 역할): `token.actions.githubusercontent.com:aud = s
 
 버스 정책은 `events:source`가 `aws.*`이고 `events:detail-type`이 `CloudWatch Alarm State Change` 또는 `AWS API Call via CloudTrail`인 호출만 허용한다. 고객 계정은 이 정책을 통과해도 `detail` 안의 내용을 마음대로 쓸 수 있다. **ingest는 이벤트 최상위 `account` 필드(EventBridge가 호출자 기준으로 채움)만 믿고**, `detail` 안의 계정 ID나 알람 ARN의 계정은 최상위 `account`와 같을 때만 쓴다.
 
-## 알람 명령 큐 (B9)
+## 중앙 배포 묶음 `central.yaml` (SAM, #47, D-48, D-49)
 
-`alarm-commands-queue.yaml`: 표준 SQS 큐(Q-API-15 사용자 결정 전의 추천안; 엔진이 `commandId`로 멱등 처리하므로 최소 한 번 전달로 충분) + DLQ(`MaxReceiveCount` 기본 5) + SSE(SQS 관리형). 큐 정책: `ConsoleSenderRoleArn`만 `SendMessage`, `EngineRoleArn`만 `ReceiveMessage`/`DeleteMessage`; 그 밖의 주체는 `aws:PrincipalArn` 조건으로 명시적 Deny; `aws:SecureTransport=false`는 전부 Deny. DLQ에 메시지가 있으면 CloudWatch 알람(`...-dlq-not-empty`)이 울린다(선택: `AlarmTopicArn`). 가시성 제한 시간은 엔진 Lambda 제한 시간의 6배 이상으로 맞춘다.
+순서: (1) `central-bus.yaml`(버스, 스택 `alarmops-central-bus`) → (2) `central.yaml`(스택 `alarmops-central`, 워크플로 `deploy-central`). `central.yaml`은 버스를 이름(`CentralBusName`)으로 참조하므로 버스가 먼저 있어야 한다. 옛 `alarm-commands-queue.yaml`은 `central.yaml`로 합치고 삭제했다(큐 정책이 역할·규칙 ARN을 서로 참조해서 스택을 나누면 순환한다). 아직 배포된 적이 없다는 전제이며, 이미 배포했다면 큐 이름 `alarmops-alarm-commands`가 충돌하니 먼저 알린다.
+
+| 구성 | 내용 |
+|---|---|
+| 수집 Lambda 3개 | `ingest-webhook`(HTTP API `POST /ingest/v1/{source}`, 속도 제한, 접근 로그 없음: 토큰이 쿼리에 올 수 있다), `ingest-eventbridge`(중앙 버스 규칙: `aws.cloudwatch`의 알람 상태·구성 변경), `alert-consumer`(`alert-events` 소비, 부분 실패 보고). 각 함수 권한은 `alert-events` SendMessage + 수집 DB 비밀 읽기뿐 |
+| 큐 | `alarmops-alert-events`(+DLQ), `alarmops-alarm-commands`(+DLQ). 표준·SSE·`maxReceiveCount` 5, DLQ 비어 있지 않음 알람(`AlarmTopicArn` 선택), `aws:SecureTransport` Deny. 가시성: 명령 큐 720초(엔진 제한 시간 최대 120초의 6배), 이벤트 큐 180초(소비자 30초의 6배) |
+| 알람 엔진 | Python 3.12, `alarm-commands` 소비(`ReportBatchItemFailures`), 예약 동시성 + 이벤트 소스 `MaximumConcurrency`(파라미터, 기본 10 / 5) |
+| 중앙 역할 `AlarmOpsCentral-Engine` | 고객 스택 `CentralRoleArn`이 가리키는 역할이자 **엔진 Lambda 실행 역할**(결정: 하나로 합침. 고객이 신뢰하는 신원이 곧 DB 비밀과 큐를 가진 코드이고, 현재 `StsSessionFactory`가 Lambda 자격증명으로 바로 `AssumeRole` 한다). `sts:AssumeRole`은 `arn:aws:iam::*:role/AlarmOps-*`만, 고객 쪽이 `sts:ExternalId`를 요구한다. `AlarmOps-Remediator`는 명시적 Deny. 그 밖: 명령 큐 Receive/Delete, 엔진 DB 비밀 읽기, 자기 로그 그룹 |
+| `AlarmOpsCentral-RemediatorCaller` | 고객 스택 `RemediatorCallerRoleArn`. 중앙 역할만 맡을 수 있고 고객 `AlarmOps-Remediator` 맡기만 허용(ExternalId는 고객 쪽이 요구). 큐·비밀·조회 권한 없음. **엔진이 `EXECUTE_REMEDIATION` 때 중앙 역할 → 이 역할 → 고객 역할 두 단계로 맡도록 backend 변경 필요**(환경 변수 `REMEDIATOR_CALLER_ROLE_ARN`). 그때까지 `ALARMOPS_REMEDIATION_EXECUTION=false` |
+| Vercel 역할 `AlarmOpsCentral-VercelConsole` (D-49) | 신뢰: 공급자 `oidc.vercel.com`(Global 발급자), `aud = https://vercel.com/<팀>`, `sub = owner:<팀>:project:<프로젝트>:environment:production`, 모두 정확히 일치(와일드카드 없음). 권한: `alarm-commands`의 `sqs:SendMessage` 하나. `SesIdentityArn`(검증된 SES 신원)과 `SesFromAddress`를 주면 그 신원·그 From 주소로만 `ses:SendEmail`이 추가된다(D-52, 기본 꺼짐) |
+| DB 비밀 2개 | `EngineDbSecret`, `IngestDbSecret`(Secrets Manager, 이름은 파라미터). 템플릿에는 값이 없고 사람이 넣는다. 엔진과 수집이 서로 다른 DB 사용자를 쓴다(B10) |
+
+중앙 쪽 역할 이름은 모두 `AlarmOpsCentral-` 접두사다. 중앙 역할이 맡을 수 있는 `AlarmOps-*`에 중앙 계정 자신의 역할이 걸리지 않게 하기 위해서다.
+
+### 버스 규칙 → `alarm-commands` (CloudTrail 태그 이벤트)
+
+규칙 `alarmops-tag-events-to-commands`(중앙 버스): 패턴 `source` 접두사 `aws.` + `detail-type` `AWS API Call via CloudTrail`, 대상은 `alarm-commands`, 규칙 DLQ `alarmops-tag-events-rule-dlq`(재시도 10회·1시간). 이벤트가 어느 고객 계정에서 왔는지는 봉투 최상위 `account`만 믿는다(엔진 `events.py`). 큐 정책(보안 검토 반영):
+
+- Allow `events.amazonaws.com` `sqs:SendMessage`, 조건은 `ArnEquals aws:SourceArn` = **이 규칙의 ARN** 하나. 어떤 Allow에도 `Principal "*"`나 `aws:SourceAccount`만 거는 조건은 없다.
+- `DenySendFromOthers`: `ArnNotEquals aws:PrincipalArn` = Vercel 역할 **그리고** `ArnNotEquals aws:SourceArn` = 규칙 ARN(한 `Condition` 안의 두 키는 AND). 보낼 수 있는 쪽은 Vercel 역할과 그 규칙뿐이다.
+- 수신·삭제는 중앙 역할만(그 밖은 Deny).
+- 규칙 DLQ 정책도 같은 규칙 ARN 하나에만 `SendMessage`를 허용한다.
+
+### 코드 위치(후속 backend 패키징 단계가 만들 산출물, 여기서는 빌드하지 않는다)
+
+| `CodeUri` (템플릿 기준) | 내용 |
+|---|---|
+| `../../services/ingest/dist/webhook/` | `index.mjs`가 `handler`를 내보냄(`makeWebhookHandler`를 저장소·SQS에 연결) |
+| `../../services/ingest/dist/eventbridge/` | `index.mjs` `handler`(`makeEventBridgeHandler`) |
+| `../../services/ingest/dist/consumer/` | `index.mjs` `handler`(`makeConsumerHandler`) |
+| `../../services/alarm-engine/build/` | `alarm_engine/` 패키지와 의존성(psycopg 포함)을 최상위에. 핸들러 `alarm_engine.handler.lambda_handler` |
+
+backend와 맞춰야 하는 환경 변수(현재 엔진 코드는 `DATABASE_URL`을 직접 읽는다): DB에 접속하는 모든 Lambda는 `DATABASE_URL_SECRET_ARN`(Secrets Manager ARN, 값은 콜드 스타트에 읽는다. 연결 문자열을 Lambda 환경 변수에 두지 않는다), 수집은 `ALERT_EVENTS_QUEUE_URL`, 엔진은 `ALARMOPS_REMEDIATION_EXECUTION`, `REMEDIATOR_CALLER_ROLE_ARN`.
+
+### 실행과 사람이 하는 일
+
+- 워크플로 `.github/workflows/deploy-central.yml`: `workflow_dispatch`, `main`에서만(`if: github.ref == 'refs/heads/main'`), 환경 `central`(승인), OIDC. cfn-lint → 구조 테스트 → 빌드 산출물 존재 확인 → `sam validate --lint` → `sam deploy` → 스택 출력을 작업 요약에 표로 남긴다(출력은 ARN·URL·계정 ID뿐, 비밀 없음). 저장소 변수(비밀 아님): `CENTRAL_DEPLOY_ROLE_ARN`, `VERCEL_OIDC_PROVIDER_ARN`, `VERCEL_TEAM_SLUG`, `VERCEL_PROJECT_NAME`, 선택 `SES_IDENTITY_ARN`, `SES_FROM_ADDRESS`, `ALARM_TOPIC_ARN`, `CENTRAL_BUS_NAME`.
+- 배포 역할(`CENTRAL_DEPLOY_ROLE_ARN`)의 신뢰: `token.actions.githubusercontent.com:aud = sts.amazonaws.com`, `...:sub = repo:hkjs96/alarmops:environment:central`. 권한은 이 스택으로 한정: CloudFormation(스택 `alarmops-central`, SAM 관리 스택, 변환 `AWS::Serverless-2016-10-31`), SAM 관리 S3 버킷(`--resolve-s3`) 객체 쓰기, 이 스택이 만드는 리소스(Lambda, SQS, Events, Logs, Secrets Manager, CloudWatch 알람, API Gateway v2) 생성·변경, `AlarmOpsCentral-*` 역할의 생성·변경과 `iam:PassRole`(권한 상한으로 그 밖의 역할은 못 건드리게), 버스 스택 `DescribeStacks`. 정확한 정책은 사람이 만들고 검토한다(저장소에 두지 않는다).
+- Lambda 동시성 한도: 새 계정은 계정 한도가 10이라 예약 동시성을 둘 수 없다(예약하지 않은 몫이 최소 100 남아야 한다). 먼저 Service Quotas에서 올린다. 기본 예약 합계는 40.
+- 오프라인 검증: `cfn-lint infra/aws/central.yaml infra/aws/central-bus.yaml infra/customer-stack/template.yaml`, `python -m unittest discover -s infra/test -v`, `sam validate --lint --template-file infra/aws/central.yaml`(SAM CLI 필요. CI는 cfn-lint의 SAM 변환으로 같은 템플릿을 검사하고 `sam validate`는 워크플로가 돌린다).
 
 ## 콘솔 배포 전 환경 검사
 
-배포 워크플로는 아직 없다. 만들 때 **배포 단계보다 앞서** 다음 단계를 넣어야 한다(실패하면 배포하지 않는다).
+콘솔 배포 워크플로는 아직 없다(`deploy-central`은 AWS 중앙 스택용이다). 콘솔 배포를 만들 때 **배포 단계보다 앞서** 다음 단계를 넣어야 한다(실패하면 배포하지 않는다).
 
 ```yaml
       - uses: actions/checkout@v5
