@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from collections.abc import Callable
 from typing import Any
 
@@ -172,9 +173,27 @@ def dispatch(engine: Engine, cmd: dict, liveness_sink: Callable[[str, str, dict]
     raise InvalidCommand(t)
 
 
-def handle_batch(engine: Engine, event: dict) -> dict:
-    failures = []
-    for rec in event.get("Records", []):
+DEFAULT_TIME_MARGIN_MS = 30_000
+
+
+def _margin_ms() -> int:
+    try:
+        return max(0, int(os.environ.get("ALARMOPS_TIME_MARGIN_MS", DEFAULT_TIME_MARGIN_MS)))
+    except ValueError:
+        return DEFAULT_TIME_MARGIN_MS
+
+
+def handle_batch(engine: Engine, event: dict, remaining_ms: Callable[[], int] | None = None,
+                 margin_ms: int = DEFAULT_TIME_MARGIN_MS) -> dict:
+    """Process the SQS records in order. With `remaining_ms` (Lambda context), a record is only started while at least
+    `margin_ms` is left; the rest are returned in `batchItemFailures` (SQS redelivers them; commands are idempotent)."""
+    failures: list[dict[str, str]] = []
+    records = event.get("Records", [])
+    for i, rec in enumerate(records):
+        if remaining_ms is not None and remaining_ms() < margin_ms:
+            logger.warning("time budget reached: %d of %d records not started", len(records) - i, len(records))
+            failures.extend({"itemIdentifier": r["messageId"]} for r in records[i:])
+            break
         try:
             envelope = json.loads(rec["body"])
         except (ValueError, RecursionError):
@@ -207,9 +226,17 @@ def handle_batch(engine: Engine, event: dict) -> dict:
 _ENGINE: Engine | None = None
 
 
-def lambda_handler(event: dict, context: Any) -> dict:  # pragma: no cover - wiring only
+def lambda_handler(event: dict, context: Any) -> dict:
+    """SQS entry (template: Handler alarm_engine.handler.lambda_handler). The engine (DB URL from Secrets Manager)
+    is built once per container; a failed build is not cached and fails the whole batch so SQS redelivers it."""
     global _ENGINE
     if _ENGINE is None:
         from alarm_engine.wiring import build_engine
-        _ENGINE = build_engine()
-    return handle_batch(_ENGINE, event)
+        try:
+            _ENGINE = build_engine()
+        except Exception as e:  # noqa: BLE001
+            # Only the exception type: a driver error can carry the connection string.
+            logger.error("engine init failed: %s", type(e).__name__)
+            return {"batchItemFailures": [{"itemIdentifier": r["messageId"]} for r in event.get("Records", [])]}
+    remaining = getattr(context, "get_remaining_time_in_millis", None)
+    return handle_batch(_ENGINE, event, remaining, _margin_ms())

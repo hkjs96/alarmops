@@ -59,7 +59,7 @@
 
 ## 4단계 — AWS 중앙 계정(서울) [에이전트 템플릿 → 사람 배포]
 
-[에이전트] 중앙 배포 묶음(#47) 템플릿 완료: `infra/aws/central.yaml`(수집 Lambda 3개, `alert-events`·`alarm-commands` 큐, 알람 엔진, 중앙 역할, 중앙 버스 → `alarm-commands` 규칙, Vercel OIDC 역할, DB 비밀 2개), `.github/workflows/deploy-central.yml`. 설명은 `infra/aws/README.md`. **남은 backend 몫**: Lambda 진입점·패키징(`CodeUri` 산출물 위치는 템플릿 머리말), `DATABASE_URL_SECRET_ARN`을 읽는 DB 접속, 원격 조치의 두 단계 역할 맡기.
+[에이전트] 중앙 배포 묶음(#47) 템플릿 완료: `infra/aws/central.yaml`(수집 Lambda 3개, `alert-events`·`alarm-commands` 큐, 알람 엔진, 중앙 역할, 중앙 버스 → `alarm-commands` 규칙, Vercel OIDC 역할, DB 비밀 2개), `.github/workflows/deploy-central.yml`. 설명은 `infra/aws/README.md`. **Lambda 진입점·패키징·`DATABASE_URL_SECRET_ARN` 읽기는 backend가 완료**(#47). 산출물 만들기(저장소 루트, 배포 전에 한 번): `npm ci --ignore-scripts && npm run build:lambda -w @alarmops/ingest && npm run build:engine-lambda`(수집 → `services/ingest/dist/{webhook,eventbridge,consumer}/index.mjs`, 엔진 → `services/alarm-engine/build/`; 엔진은 wheel을 받으므로 인터넷이 필요하고, 템플릿이 arm64라 기본이 aarch64 wheel이다). 자세한 내용은 `services/ingest/README.md`, `services/alarm-engine/README.md`의 Deploy. **남은 backend 몫**: 원격 조치의 두 단계 역할 맡기. **남은 infra 몫**: `deploy-central.yml`이 산출물 "존재 확인"만 하고 빌드는 하지 않는다(위 명령을 plan 앞 단계에 넣어야 한다).
 
 [사람] 한 번만(순서대로):
 1. [ ] **버스 스택**: 아직 없으면 `infra/aws/central-bus.yaml`을 스택 `alarmops-central-bus`로 올린다(`bus-allowlist` 워크플로가 이 스택을 갱신한다).

@@ -1,0 +1,6 @@
+# Runtime dependencies vendored into build/ (scripts/build_lambda.py). boto3/botocore come with the python3.12 Lambda
+# runtime and are NOT vendored. Exact pins: the artifact must not change between two builds of the same commit.
+# psycopg-binary ships the libpq it needs (manylinux wheel), so no system library is required in the Lambda image.
+psycopg[binary]==3.2.13
+# psycopg needs it on Python < 3.13; pip evaluates that marker for the host Python, not the target, so it is listed here.
+typing-extensions==4.12.2
