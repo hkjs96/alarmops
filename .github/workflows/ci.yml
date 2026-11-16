@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v5
         with:
           node-version: 20
@@ -65,7 +65,7 @@ jobs:
       # are skipped (offboarding queries, D-43).
       ALARM_ENGINE_TEST_PG_URL: postgresql://postgres:postgres@localhost:5432/postgres
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -92,7 +92,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v5
         with:
           node-version: 20
@@ -114,7 +114,7 @@ jobs:
       # The run starts its own server with the mock API (playwright.config.ts) and fails if the port is taken.
       PW_NO_REUSE: "1"
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v5
         with:
           node-version: 20
@@ -186,7 +186,7 @@ jobs:
       # Throwaway server inside this job only. Not a secret.
       LIVE_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v5
         with:
           node-version: 20
@@ -223,7 +223,7 @@ jobs:
       # Second database on the same server: `migrate diff` replays the migrations there and wipes it.
       SHADOW_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/alarmops_shadow
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v5
         with:
           node-version: 20
