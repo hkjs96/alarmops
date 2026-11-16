@@ -40,6 +40,9 @@ def resolve_database_url(env: Mapping[str, str] | None = None, client_factory: C
         if not raw:
             raise RuntimeError("DATABASE_URL_SECRET_ARN: the secret has no usable connection string")
         return raw
+    if env.get("AWS_LAMBDA_FUNCTION_NAME"):
+        # In Lambda the connection string only comes from Secrets Manager, never from a plain environment variable.
+        raise RuntimeError("DATABASE_URL_SECRET_ARN is required in Lambda (DATABASE_URL is not accepted)")
     url = env.get("DATABASE_URL")
     if not url:
         raise RuntimeError("DATABASE_URL_SECRET_ARN (or DATABASE_URL for local runs) is not set")

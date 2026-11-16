@@ -25,6 +25,11 @@ shipped). `dist/` is git-ignored. `test/artifacts.test.ts` runs the build and im
 - `ALERT_EVENTS_QUEUE_URL`: `alert-events` queue (SendMessageBatch; also GROUP_CLOSE delayed messages from the consumer).
 - `DATABASE_URL_SECRET_ARN`: Secrets Manager secret with the Postgres connection string of the ingest DB user. Read once
   per container (a failed read is retried on the next invocation). The value is never logged; errors are logged by name only.
+- TLS: in Lambda the connection string must carry `sslmode=require|verify-ca|verify-full` (otherwise start is refused, the URL is
+  not echoed); certificates are verified (`rejectUnauthorized: true`). If the database CA is not in the Node trust store, add
+  `sslrootcert=<file shipped in the bundle>` to the URL. Port 6543 or `DATABASE_POOLER=transaction` selects the transaction pooler
+  mode of the pg client (no startup `options`, each statement in its own short transaction).
+- Logs for failed records/lookups carry `{name, code}` only (`safeError`), never the error message.
 - Webhook: unset config -> 503 `NOT_CONFIGURED`; any other failure -> 500 `INTERNAL` without detail (the provider retries).
   Customer comes only from the token (`IntegrationSource`); the body is not trusted. The per-source rate limit is per
   container (best effort); the HTTP API throttle in the template is the hard limit.

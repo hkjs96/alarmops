@@ -78,11 +78,16 @@ python services/alarm-engine/scripts/check_lambda.py   # layout + importable fro
 `build/` = `alarm_engine/` + vendored `requirements-lambda.txt` (exact pins; psycopg binary wheel and typing-extensions).
 boto3 comes with the Lambda runtime. Wheels are downloaded with `--only-binary=:all:` for the template's architecture:
 arm64 by default (`manylinux2014_aarch64`); `ALARMOPS_LAMBDA_ARCH=x86_64` if the template's `Architectures` is changed.
-`build/` is git-ignored; the build needs network access.
+`build/` is git-ignored; the build needs network access. `requirements-lambda.txt` pins every package with sha256 hashes
+(from the PyPI JSON API, aarch64 and x86_64 cp312 wheels) and the build runs `pip install --require-hashes --no-deps`.
+The dev requirements pin psycopg to the same 3.2.13, so `pytest` runs against the version that ships (CI installs
+`requirements-dev.txt`).
 
 Environment: `DATABASE_URL_SECRET_ARN` (Secrets Manager; read once per cold start, the value is never logged; the secret
 is the bare connection string, a JSON object with `url` is also accepted). `DATABASE_URL` is only the local/test fallback
-and is ignored when the ARN is set. `ALARMOPS_TIME_MARGIN_MS` (default 30000): before starting each record the handler
+and is refused when `AWS_LAMBDA_FUNCTION_NAME` is set. In Lambda the connection string must carry `sslmode=require|verify-ca|verify-full`
+(`PgRepository` refuses otherwise). Logs carry the exception type and a short code (SQLSTATE / AWS error code) only; tracebacks
+are off unless `ALARMOPS_DEBUG_TRACEBACK=1` (local debugging). `ALARMOPS_TIME_MARGIN_MS` (default 30000): before starting each record the handler
 checks `context.get_remaining_time_in_millis()`; below the margin it stops and returns the unstarted records in
 `batchItemFailures` (SQS redelivers; commands are idempotent). A single command that itself runs longer than the margin
 can still hit the Lambda timeout and be retried as a whole. If the engine cannot be built (secret empty, DB down) the whole

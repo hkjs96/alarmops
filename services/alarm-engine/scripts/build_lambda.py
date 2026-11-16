@@ -5,7 +5,7 @@ Layout: `alarm_engine/` (this package) next to its vendored dependencies at the 
 
 The template runs the function on arm64, so by default binary wheels are fetched for manylinux2014_aarch64.
 `ALARMOPS_LAMBDA_ARCH=x86_64` builds for x86_64 instead (must match `Architectures` in the template).
-Only wheels are accepted (`--only-binary=:all:`): nothing is compiled or executed from a downloaded package.
+Only wheels with a pinned sha256 are accepted (`--only-binary=:all:`, `--require-hashes`, `--no-deps`): nothing is compiled or executed from a downloaded package.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ def build(arch: str | None = None) -> Path:
         raise SystemExit(f"ALARMOPS_LAMBDA_ARCH must be one of {sorted(PLATFORMS)}")
     shutil.rmtree(BUILD, ignore_errors=True)
     BUILD.mkdir(parents=True)
-    cmd = [sys.executable, "-m", "pip", "install", "--quiet", "--disable-pip-version-check", "--no-compile",
+    cmd = [sys.executable, "-m", "pip", "install", "--quiet", "--disable-pip-version-check", "--no-compile", "--require-hashes", "--no-deps",
            "--target", str(BUILD), "--python-version", "3.12", "--implementation", "cp", "--only-binary=:all:",
            "-r", str(ROOT / "requirements-lambda.txt")]
     for p in PLATFORMS[arch]:

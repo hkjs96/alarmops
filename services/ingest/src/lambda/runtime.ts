@@ -5,6 +5,7 @@ import { AccountCustomerCache } from '../accountCache.js';
 import { requireEnv } from '../config.js';
 import type { QueueSender } from '../ports.js';
 import { SqsQueueSender } from '../sqs.js';
+import { dbConnOptions, type DbConnOptions } from './dbOptions.js';
 import { onceAsync, readDatabaseUrl, type SecretsClient } from './secret.js';
 
 export type Logger = (level: 'info' | 'warn' | 'error', msg: string, data?: Record<string, unknown>) => void;
@@ -33,12 +34,12 @@ export interface RuntimeParts { secrets: SecretsClient; sqs: ConstructorParamete
 
 /** Builds the dependencies once per container: DB URL from Secrets Manager, pg pool, SQS sender. Exported for tests. */
 export function createRuntimeLoader(env: Record<string, string | undefined> = process.env, parts?: Partial<RuntimeParts>,
-  makeStore: (url: string) => SqlIngestStore = (url) => new SqlIngestStore(pgClient({ connectionString: url, max: 2 }))) {
+  makeStore: (url: string, opts: DbConnOptions) => SqlIngestStore = (url, opts) => new SqlIngestStore(pgClient({ connectionString: url, max: 2, ...opts }))) {
   return onceAsync(async (): Promise<IngestRuntime> => {
     const region = env.AWS_REGION ?? 'ap-northeast-2';
     const queueUrl = requireEnv('ALERT_EVENTS_QUEUE_URL', env);
     const url = await readDatabaseUrl(parts?.secrets ?? new SecretsManagerClient({ region }), env);
-    const store = makeStore(url);
+    const store = makeStore(url, dbConnOptions(url, env)); // refuses a non-TLS URL in Lambda before any connection
     const queue = new SqsQueueSender(parts?.sqs ?? new SQSClient({ region }), queueUrl);
     return { store, queue, accounts: new AccountCustomerCache((id) => store.customerForAccount(id)) };
   });

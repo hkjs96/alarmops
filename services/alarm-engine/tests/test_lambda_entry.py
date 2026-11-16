@@ -7,7 +7,7 @@ import logging
 
 import pytest
 
-from alarm_engine import handler, wiring
+from alarm_engine import handler, pg_repository, wiring
 
 URL = "postgresql://engine:s3cr3t-pw@db.example.test:5432/postgres"
 ARN = "arn:aws:secretsmanager:ap-northeast-2:111111111111:secret:alarmops-engine-db-AbCdEf"
@@ -116,3 +116,37 @@ def test_engine_init_failure_fails_whole_batch_without_leaking(monkeypatch, capl
     assert [f["itemIdentifier"] for f in out["batchItemFailures"]] == ["m1", "m2"]
     assert "s3cr3t" not in caplog.text
     assert handler._ENGINE is None  # retried on the next invocation
+
+
+def test_lambda_refuses_plain_database_url():
+    with pytest.raises(RuntimeError) as e:
+        wiring.resolve_database_url({"AWS_LAMBDA_FUNCTION_NAME": "alarmops-alarm-engine", "DATABASE_URL": URL})
+    assert "s3cr3t" not in str(e.value)
+
+
+def test_tls_required_in_lambda_only():
+    lam = {"AWS_LAMBDA_FUNCTION_NAME": "alarmops-alarm-engine"}
+    for mode in ("require", "verify-ca", "verify-full"):
+        pg_repository.require_tls_in_lambda(f"{URL}?sslmode={mode}", lam)
+    for q in ("", "?sslmode=disable", "?sslmode=allow", "?sslmode=prefer"):
+        with pytest.raises(RuntimeError) as e:
+            pg_repository.require_tls_in_lambda(URL + q, lam)
+        assert "s3cr3t" not in str(e.value)
+    pg_repository.require_tls_in_lambda(URL, {})  # local runs are not enforced
+
+
+class DbError(Exception):
+    sqlstate = "08006"
+
+
+def test_logs_carry_type_and_code_only(monkeypatch, caplog):
+    def dispatch(eng, cmd, *a, **k):
+        raise DbError(f"connection to {URL} failed")
+
+    monkeypatch.setattr(handler, "dispatch", dispatch)
+    with caplog.at_level(logging.ERROR):
+        out = handler.handle_batch(object(), {"Records": [rec(1)]})
+    assert out["batchItemFailures"] == [{"itemIdentifier": "m1"}]
+    assert "DbError code=08006" in caplog.text
+    assert "s3cr3t" not in caplog.text and "db.example.test" not in caplog.text
+    assert "Traceback" not in caplog.text

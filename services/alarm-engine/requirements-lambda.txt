@@ -1,6 +1,16 @@
-# Runtime dependencies vendored into build/ (scripts/build_lambda.py). boto3/botocore come with the python3.12 Lambda
-# runtime and are NOT vendored. Exact pins: the artifact must not change between two builds of the same commit.
-# psycopg-binary ships the libpq it needs (manylinux wheel), so no system library is required in the Lambda image.
-psycopg[binary]==3.2.13
+# Runtime dependencies vendored into build/ (scripts/build_lambda.py, `pip install --require-hashes --no-deps`).
+# boto3/botocore come with the python3.12 Lambda runtime and are NOT vendored. Every entry is an exact pin with the
+# sha256 of the wheel(s) we accept, copied from the PyPI JSON API (https://pypi.org/pypi/<name>/<version>/json); nothing
+# else is installable. The list is complete (--no-deps), so a new transitive dependency fails the build instead of
+# being pulled in silently. To bump a version: take the new hashes from the same JSON and review the diff.
+#
+# psycopg-binary is the same version as psycopg and ships its own libpq (cp312 manylinux wheels: aarch64 for the
+# template's arm64, x86_64 for ALARMOPS_LAMBDA_ARCH=x86_64; pip picks the one matching the target platform).
+psycopg==3.2.13 \
+    --hash=sha256:a481374514f2da627157f767a9336705ebefe93ea7a0522a6cbacba165da179a
+psycopg-binary==3.2.13 \
+    --hash=sha256:082579f2ae41bdabe20c82810810f3e290ac2206cccf0cb41cf36b3218f53b3c \
+    --hash=sha256:8f1189dc78553ef4b2e55d9e116fc74870191bc6a9a5f4442412a703c4cc6c3b
 # psycopg needs it on Python < 3.13; pip evaluates that marker for the host Python, not the target, so it is listed here.
-typing-extensions==4.12.2
+typing-extensions==4.12.2 \
+    --hash=sha256:04e5ca0351e0f3f85c6853954072df659d0d13fac324d0072316b67d7794700d

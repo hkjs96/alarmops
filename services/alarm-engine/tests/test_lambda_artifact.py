@@ -23,7 +23,10 @@ def test_build_script_targets_the_template_arch():
     b = load("build_lambda")
     assert "manylinux2014_aarch64" in b.PLATFORMS["arm64"] and "manylinux2014_x86_64" in b.PLATFORMS["x86_64"]
     req = (SCRIPTS.parent / "requirements-lambda.txt").read_text()
-    assert "psycopg[binary]==" in req and "typing-extensions==" in req  # exact pins
+    for pkg in ("psycopg==", "psycopg-binary==", "typing-extensions=="):
+        assert pkg in req  # exact pins
+    assert req.count("--hash=sha256:") >= 4  # every pin carries a hash (pip --require-hashes)
+    assert "--require-hashes" in (SCRIPTS / "build_lambda.py").read_text()
 
 
 def test_built_artifact_layout():

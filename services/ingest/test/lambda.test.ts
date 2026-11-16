@@ -4,6 +4,8 @@ import { SendMessageBatchCommand } from '@aws-sdk/client-sqs';
 import { NotConfiguredError } from '../src/config.js';
 import type { SqlIngestStore } from '@alarmops/store-sql';
 import { createRuntimeLoader, type IngestRuntime } from '../src/lambda/runtime.js';
+import { dbConnOptions } from '../src/lambda/dbOptions.js';
+import { safeError } from '../src/safeError.js';
 import { onceAsync, readDatabaseUrl } from '../src/lambda/secret.js';
 import { makeWebhookEntry } from '../src/lambda/webhookEntry.js';
 import { makeEventBridgeEntry } from '../src/lambda/eventbridgeEntry.js';
@@ -148,5 +150,50 @@ describe('consumer entry (SQS partial batch)', () => {
     const ev = { Records: [rec('a', '{}'), rec('b', '{}')] };
     expect((await h(ev)).batchItemFailures).toEqual([{ itemIdentifier: 'a' }, { itemIdentifier: 'b' }]);
     expect((await h({ Records: [rec('c', JSON.stringify({ type: 'GROUP_CLOSE', schemaVersion: 1, groupId: 'g', groupKey: 'k' }))] })).batchItemFailures).toEqual([]);
+  });
+});
+
+describe('DB connection hardening (security review lambda-packaging)', () => {
+  const lam = { AWS_LAMBDA_FUNCTION_NAME: 'alarmops-ingest-webhook' };
+  it('in Lambda: TLS modes only, certificates verified; otherwise refuses without echoing the URL', () => {
+    for (const m of ['require', 'verify-ca', 'verify-full']) {
+      expect(dbConnOptions(`postgresql://u:s3cr3t-pw@h:5432/db?sslmode=${m}`, lam).ssl).toEqual({ rejectUnauthorized: true });
+    }
+    for (const q of ['', '?sslmode=disable', '?sslmode=allow', '?sslmode=prefer']) {
+      const e = (() => { try { dbConnOptions(`postgresql://u:s3cr3t-pw@h:5432/db${q}`, lam); } catch (x) { return x as Error; } })();
+      expect(e).toBeInstanceOf(NotConfiguredError);
+      expect(e!.message).not.toContain('s3cr3t');
+    }
+    expect(() => dbConnOptions('not a url', lam)).toThrow(NotConfiguredError);
+  });
+  it('outside Lambda nothing is enforced; port 6543 or DATABASE_POOLER selects the transaction pooler', () => {
+    expect(dbConnOptions('postgresql://u:p@h:5432/db', {})).toEqual({});
+    expect(dbConnOptions('postgresql://u:p@h:6543/db?sslmode=require', lam)).toEqual({ ssl: { rejectUnauthorized: true }, pooler: 'transaction' });
+    expect(dbConnOptions('postgresql://u:p@h:5432/db', { DATABASE_POOLER: 'transaction' }).pooler).toBe('transaction');
+  });
+  it('the loader refuses a non-TLS URL in Lambda before building the store', async () => {
+    const makeStore = vi.fn(() => memStore() as unknown as SqlIngestStore);
+    const load = createRuntimeLoader({ ...env, ...lam }, { secrets: secretsStub(URL_SECRET) }, makeStore);
+    await expect(load()).rejects.toBeInstanceOf(NotConfiguredError);
+    expect(makeStore).not.toHaveBeenCalled();
+    const ok = createRuntimeLoader({ ...env, ...lam }, { secrets: secretsStub(`${URL_SECRET}?sslmode=require`), sqs: { send: vi.fn() as never } }, makeStore);
+    await ok();
+    expect(makeStore).toHaveBeenCalledWith(`${URL_SECRET}?sslmode=require`, { ssl: { rejectUnauthorized: true } });
+  });
+  it('safeError keeps only name and a short code', () => {
+    const e = Object.assign(new Error(`connect to ${URL_SECRET} failed`), { code: '28P01' });
+    expect(safeError(e)).toEqual({ name: 'Error', code: '28P01' });
+    expect(JSON.stringify(safeError(Object.assign(new Error('x'), { code: 'host db.internal user x' })))).not.toContain('db.internal');
+    expect(safeError('plain')).toEqual({ name: 'Error' });
+  });
+  it('the consumer logs the safe error only', async () => {
+    const logs: string[] = [];
+    const rt = { ...runtimeOf(), store: { findAlert: async () => { throw Object.assign(new Error(`bad ${URL_SECRET}`), { code: '08006' }); } } as never };
+    const h = makeConsumerEntry(async () => rt, (...a) => { logs.push(JSON.stringify(a)); });
+    const ev = { schemaVersion: 1, fingerprint: 'f', customerId: null, eventType: 'STATE_CHANGE', state: 'FIRING', occurredAt: '2026-11-09T03:06:00Z' };
+    const res = await h({ Records: [{ messageId: 'm', body: JSON.stringify(ev) }] });
+    expect(res.batchItemFailures).toHaveLength(1);
+    expect(logs.join('')).toContain('08006');
+    expect(logs.join('')).not.toContain('s3cr3t');
   });
 });

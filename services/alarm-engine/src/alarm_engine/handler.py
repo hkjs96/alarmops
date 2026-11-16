@@ -176,6 +176,23 @@ def dispatch(engine: Engine, cmd: dict, liveness_sink: Callable[[str, str, dict]
 DEFAULT_TIME_MARGIN_MS = 30_000
 
 
+def safe_error(e: BaseException) -> str:
+    """Log-safe description: exception type plus a short code (SQLSTATE / AWS error code). Never the message or
+    traceback: a driver error can carry the DB host, user or connection string (security review lambda-packaging 1)."""
+    code = getattr(e, "sqlstate", None)
+    if code is None:
+        resp = getattr(e, "response", None)
+        if isinstance(resp, dict):
+            code = (resp.get("Error") or {}).get("Code")
+    code_s = str(code) if isinstance(code, str) and code.replace("_", "").isalnum() and len(code) <= 64 else None
+    return f"{type(e).__name__}" + (f" code={code_s}" if code_s else "")
+
+
+def _debug_tb() -> bool:
+    """Local debugging only: tracebacks are off unless ALARMOPS_DEBUG_TRACEBACK=1."""
+    return os.environ.get("ALARMOPS_DEBUG_TRACEBACK") == "1"
+
+
 def _margin_ms() -> int:
     try:
         return max(0, int(os.environ.get("ALARMOPS_TIME_MARGIN_MS", DEFAULT_TIME_MARGIN_MS)))
@@ -202,8 +219,8 @@ def handle_batch(engine: Engine, event: dict, remaining_ms: Callable[[], int] | 
             try:
                 out = events.handle_tag_event(engine, envelope)
                 logger.info("tag event %s → %s", rec.get("messageId"), out.get("status"))
-            except Exception:  # noqa: BLE001
-                logger.exception("tag event %s failed", rec.get("messageId"))
+            except Exception as e:  # noqa: BLE001
+                logger.error("tag event %s failed: %s", rec.get("messageId"), safe_error(e), exc_info=_debug_tb())
                 failures.append({"itemIdentifier": rec["messageId"]})
             continue
         try:
@@ -217,8 +234,9 @@ def handle_batch(engine: Engine, event: dict, remaining_ms: Callable[[], int] | 
                         out.get("status"))
         except InvalidCommand as e:
             logger.error("invalid command %s customer=%s: %s", cmd["commandId"], cmd["customerId"], e)
-        except Exception:  # noqa: BLE001
-            logger.exception("command %s customer=%s failed", cmd["commandId"], cmd["customerId"])
+        except Exception as e:  # noqa: BLE001
+            logger.error("command %s customer=%s failed: %s", cmd["commandId"], cmd["customerId"], safe_error(e),
+                         exc_info=_debug_tb())
             failures.append({"itemIdentifier": rec["messageId"]})
     return {"batchItemFailures": failures}
 
