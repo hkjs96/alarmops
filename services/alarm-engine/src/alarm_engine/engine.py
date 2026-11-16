@@ -242,6 +242,9 @@ class Engine:
         run = self.repo.start_sync_run(account.customer_id, account.id, mode)
         counts: dict[str, Any] = {"created": 0, "updated": 0, "refreshed": 0, "deleted": 0, "needsReview": 0, "externalChange": 0,
                   "errors": 0, "readOnly": False}
+        take_errors = getattr(self.discovery, "take_errors", None)
+        if take_errors:
+            take_errors()             # drop leftovers of an aborted earlier pass
         try:
             discovered: list[DiscoveredResource] = []
             for region in account.regions:
@@ -249,6 +252,12 @@ class Engine:
         except Exception as e:  # noqa: BLE001 — failure ≠ zero resources (4-9)
             self.repo.finish_sync_run(account.customer_id, run, "FAILED", counts, f"discovery failed: {e}")
             return counts
+        # Per-type collector failures (one type failing must not abort the account): recorded in the run counts; rows
+        # of a failed (region, type) are left alone below — "could not list" is not "gone / tag removed".
+        type_errors: dict[tuple[str, str], str] = take_errors() if take_errors else {}
+        if type_errors:
+            counts["typeErrors"] = {f"{r}/{t}": m for (r, t), m in sorted(type_errors.items())}
+            counts["errors"] += len(type_errors)
 
         known = {(r.region, r.resource_type, r.resource_key): r for r in self.repo.list_resources(account.id)}
         seen: set[tuple[str, str, str]] = set()
@@ -267,7 +276,8 @@ class Engine:
         # Known rows not listed as Monitoring=on: gone? tag removed? unreadable?
         by_group: dict[tuple[str, str], list[ResourceRow]] = {}
         for k, row in known.items():
-            if k not in seen and row.monitoring_state in ("MONITORED", "NEEDS_REVIEW"):
+            if k not in seen and row.monitoring_state in ("MONITORED", "NEEDS_REVIEW") \
+                    and (row.region, row.resource_type) not in type_errors:
                 by_group.setdefault((row.region, row.resource_type), []).append(row)
         for (region, rtype), rows in by_group.items():
             alive = self.discovery.alive(account, region, rtype, [r.resource_key for r in rows])
@@ -325,6 +335,17 @@ class Engine:
                                     if rr.monitoring_state == "NEEDS_REVIEW")
         self.repo.finish_sync_run(account.customer_id, run, "PARTIAL" if counts["errors"] else "SUCCEEDED", counts)
         return counts
+
+    def sync_after_tag_event(self, account: CloudAccount, row: ResourceRow) -> str:
+        """A CloudTrail tag event named this resource: re-read its tags, apply D-16 state, sync only if MONITORED.
+        Returns the resulting monitoring state ("UNCHANGED" if the tags could not be read)."""
+        tags = self.discovery.read_tags(account, row)
+        if tags is None:
+            return "UNCHANGED"
+        row = self.repo.upsert_resource(self._apply_tags(row, tags, None))
+        if row.monitoring_state == "MONITORED":
+            self.sync_resource(account, row)
+        return row.monitoring_state
 
     def _apply_tags(self, row: ResourceRow, tags: dict[str, str] | None, run_id: str | None) -> ResourceRow:
         if tags is None:          # unreadable: state unchanged

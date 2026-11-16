@@ -267,6 +267,8 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 - 역할이 없거나 꺼져 있으면 실행하지 않고 결과를 `CAPABILITY_DISABLED`로 기록.
 - 리소스 태그 `Threshold_*`가 있으면 콘솔 값을 적용하지 않고 `SKIPPED_TAG_WINS`(D-08, D-19).
 - 엔진 테스트는 AWS 호출을 모두 목으로(backend 지침).
+- **`SYNC_ACCOUNT` 결과(수집기 29종, #48).** 타입별 수집 실패는 계정 전체를 멈추지 않는다: AlarmSyncRun `counts.typeErrors = { "<region>/<type>": "<오류>" }`, `counts.errors`에 합산, 상태 `PARTIAL`. 실패한 (리전, 타입)의 기존 행·알람은 **건드리지 않는다**("못 나열함" ≠ 태그 제거·삭제). 모든 수집기가 실패하면(예: AssumeRole 거부) 런이 `FAILED`이고 행은 그대로(4-9). `mode`(DAILY/TAG_RECONCILE/ON_DEMAND)는 AlarmSyncRun에 기록되며 엔진 동작은 같다(메트릭 점검·알림·히스토리는 엔진 밖).
+- **CloudTrail 태그 이벤트(#48).** 고객 스택 `TagChangeRule`이 중앙 버스로 보낸 EventBridge 봉투(`detail-type: "AWS API Call via CloudTrail"`)가 `alarm-commands` 큐로 들어오면 엔진이 명령과 같은 큐에서 처리한다(별도 큐 없음). 고객은 **봉투 최상위 `account`로만** 정한다(`detail.*`·요청 안 ARN 불신). 이벤트는 "어느 리소스·어느 태그 키"만 알려 주고 상태는 Reader로 태그를 다시 읽어 정한다: `Monitoring` 제거 → `NEEDS_REVIEW`(알람 불변, D-16), `Monitoring=on` → `MONITORED`+동기화, `Threshold_*` 변경 → 동기화. 행이 없는 리소스에 `Monitoring=on`이 붙으면 `TAG_RECONCILE` 계정 동기화 한 번. 정지·해지 고객은 무시(D-43). **인프라 의존:** 중앙 버스 규칙이 이 이벤트를 `alarm-commands` 큐로 전달해야 한다(infra 이슈).
 
 ## 7. 알람 엔진 ↔ DB 계약 (B10)
 

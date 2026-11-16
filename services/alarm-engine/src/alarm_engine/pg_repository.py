@@ -72,6 +72,16 @@ class PgRepository:
             remediator_role_arn=r["remediatorRoleArn"], remediator_enabled=r["remediatorEnabled"],
         )
 
+    def find_active_account_by_aws_id(self, aws_account_id: str) -> CloudAccount | None:
+        r = self._one('''SELECT a.id FROM "CloudAccount" a JOIN "Customer" c ON c.id = a."customerId"
+                         WHERE a."awsAccountId" = %s AND c.status = 'ACTIVE'
+                           AND NOT a.disabled AND a."connectionPurgedAt" IS NULL ''', aws_account_id)
+        return self.get_account(r["id"]) if r else None
+
+    def sync_run_started_since(self, cloud_account_id: str, within: timedelta) -> bool:
+        return self._one('''SELECT 1 AS x FROM "AlarmSyncRun" WHERE "cloudAccountId" = %s
+                            AND "startedAt" > now() - %s LIMIT 1''', cloud_account_id, within) is not None
+
     def update_account_status(self, cloud_account_id: str, statuses: dict[str, str]) -> None:
         cols = {"reader": "readerStatus", "alarmWriter": "alarmWriterStatus", "tagWriter": "tagWriterStatus",
                 "remediator": "remediatorStatus"}

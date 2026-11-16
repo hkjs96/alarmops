@@ -12,7 +12,7 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-from alarm_engine import offboard, remediation
+from alarm_engine import events, offboard, remediation
 from alarm_engine.aws import CapabilityDisabled
 from alarm_engine.engine import Engine, classify_liveness
 
@@ -67,7 +67,7 @@ def _check_type(name: str, v: Any, types: tuple[type, ...]) -> None:
 def parse(body: str) -> dict[str, Any]:
     try:
         cmd = json.loads(body)
-    except ValueError as e:
+    except (ValueError, RecursionError) as e:
         raise InvalidCommand("body is not JSON") from e
     if not isinstance(cmd, dict) or cmd.get("schemaVersion") != 1:
         raise InvalidCommand("schemaVersion must be 1")
@@ -175,6 +175,18 @@ def dispatch(engine: Engine, cmd: dict, liveness_sink: Callable[[str, str, dict]
 def handle_batch(engine: Engine, event: dict) -> dict:
     failures = []
     for rec in event.get("Records", []):
+        try:
+            envelope = json.loads(rec["body"])
+        except (ValueError, RecursionError):
+            envelope = None
+        if events.is_cloudtrail_event(envelope):    # forwarded CloudTrail tag event (customer stack TagChangeRule)
+            try:
+                out = events.handle_tag_event(engine, envelope)
+                logger.info("tag event %s → %s", rec.get("messageId"), out.get("status"))
+            except Exception:  # noqa: BLE001
+                logger.exception("tag event %s failed", rec.get("messageId"))
+                failures.append({"itemIdentifier": rec["messageId"]})
+            continue
         try:
             cmd = parse(rec["body"])
         except InvalidCommand as e:
