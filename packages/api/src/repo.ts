@@ -166,6 +166,11 @@ export interface ApiRepository {
   contactIdForUser(userId: string): Promise<string | null>;
   /** Name and kind of session users (INTERNAL staff or a customer's portal user) — the serializers decide what leaves. */
   userDirectory(userIds: string[]): Promise<Map<string, UserInfo>>;
+  /**
+   * Display names of MSP staff (User.customerId IS NULL) only, for 'who did it' fields (legal hold, purge log, offboarding).
+   * Never email or phone. Absent from the map: unknown, a portal user, or scrubbed by D-45 retention (callers answer null).
+   */
+  staffNames(userIds: string[]): Promise<Map<string, string>>;
   /** Slack channel for the customer is set and verified (paging health input). */
   slackChannelVerified(customerId: string): Promise<boolean>;
   /** Resource → org position, inside the scope. */

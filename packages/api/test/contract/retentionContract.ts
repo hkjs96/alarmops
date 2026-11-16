@@ -165,6 +165,26 @@ export function retentionContract(make: MakeApiFixture): void {
       expect((await w.fx.audits()).filter((x) => x.customerId === 'cus_hanbit' && x.targetType === 'CustomerLegalHold')).toEqual([]);
     });
 
+    it('names of who did it: staff display name next to the id; null for system, deleted and portal users; never email', async () => {
+      await open();
+      await w.call(USERS.minjae, 'PUT', '/customers/cus_mirae/legal-hold', { body: { reason: 'dispute' } });
+      const l = body(await w.call(USERS.minjae, 'GET', '/customers/cus_mirae/purge-log'));
+      expect(l.legalHold).toMatchObject({ active: true, byUserId: 'usr_minjae', byUserName: 'Minjae Lee' });
+      expect(l.entries).toMatchObject([{ stage: 'LEGAL_HOLD_SET', actor: 'usr_minjae', actorName: 'Minjae Lee' }]);
+      await terminate();
+      await completeOffboarding();
+      const off = body(await w.call(USERS.minjae, 'GET', '/customers/cus_mirae/offboarding'));
+      expect(off.steps.find((s: any) => s.key === 'CUSTOMER_STACK_REMOVED')).toMatchObject({ byUserId: 'usr_minjae', byUserName: 'Minjae Lee' });
+      expect(off.steps.find((s: any) => s.key === 'PAGING_STOPPED')).toMatchObject({ byUserId: 'usr_minjae', byUserName: 'Minjae Lee' });
+      expect(JSON.stringify([l, off])).not.toMatch(/@|email|phone/i);
+      // The daily job writes 'system' rows: no name. A user that no longer exists: no name.
+      await w.call(USERS.minjae, 'DELETE', '/customers/cus_mirae/legal-hold');
+      await retain(day(1));
+      await retain(day(2));
+      const sys = (await log()).entries.find((e: any) => e.actor === 'system');
+      expect(sys).toMatchObject({ actorName: null });
+    });
+
     it('purge-log: ADMIN only, scoped to the customer, with the schedule once TERMINATED', async () => {
       await open();
       expect((await w.call(USERS.haeun, 'GET', '/customers/cus_mirae/purge-log')).status).toBe(403);
