@@ -102,6 +102,13 @@ Parameters:
     Type: Number
     Default: 40
     MinValue: 1
+  DlqOpsRoleArn:
+    Type: String
+    Default: ""
+    AllowedPattern: '^$|^arn:aws:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$'
+    Description: >-
+      Optional break-glass role that may receive/delete messages in the alarm-commands DLQ (redrive, inspection).
+      Without it nobody but the central role can read the DLQ (the Deny also blocks StartMessageMoveTask).
   RemediationExecution:
     Type: String
     Default: "false"
@@ -118,6 +125,8 @@ Rules:
 Conditions:
   HasAlarmTopic: !Not [!Equals [!Ref AlarmTopicArn, ""]]
   HasSes: !Not [!Equals [!Ref SesIdentityArn, ""]]
+  HasDlqOpsRole: !Not [!Equals [!Ref DlqOpsRoleArn, ""]]
+  RemediationEnabled: !Equals [!Ref RemediationExecution, "true"]
 
 Globals:
   Function:
@@ -148,6 +157,77 @@ Resources:
       QueueName: !Sub "${ResourcePrefix}-alarm-commands-dlq"
       SqsManagedSseEnabled: true
       MessageRetentionPeriod: 1209600
+
+  CommandsDlqPolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues: [!Ref CommandsDlq]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          # The redrive from CommandsQueue is done by the SQS service and is not affected by these Denies.
+          - Sid: DenyReadFromOthers
+            Effect: Deny
+            Principal: "*"
+            Action: [sqs:ReceiveMessage, sqs:DeleteMessage, sqs:ChangeMessageVisibility]
+            Resource: !GetAtt CommandsDlq.Arn
+            Condition:
+              ArnNotEquals:
+                "aws:PrincipalArn": !If
+                  - HasDlqOpsRole
+                  - [!GetAtt CentralRole.Arn, !Ref DlqOpsRoleArn]
+                  - [!GetAtt CentralRole.Arn]
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: sqs:*
+            Resource: !GetAtt CommandsDlq.Arn
+            Condition:
+              Bool: { "aws:SecureTransport": "false" }
+
+  AlertEventsDlqPolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues: [!Ref AlertEventsDlq]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: sqs:*
+            Resource: !GetAtt AlertEventsDlq.Arn
+            Condition:
+              Bool: { "aws:SecureTransport": "false" }
+
+  IngestEventsRuleDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${ResourcePrefix}-ingest-events-rule-dlq"
+      SqsManagedSseEnabled: true
+      MessageRetentionPeriod: 1209600
+
+  IngestEventsRuleDlqPolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues: [!Ref IngestEventsRuleDlq]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: IngestRuleDeadLetters
+            Effect: Allow
+            Principal: { Service: events.amazonaws.com }
+            Action: sqs:SendMessage
+            Resource: !GetAtt IngestEventsRuleDlq.Arn
+            Condition:
+              ArnEquals: { "aws:SourceArn": !GetAtt IngestAlarmEventsRule.Arn }
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: sqs:*
+            Resource: !GetAtt IngestEventsRuleDlq.Arn
+            Condition:
+              Bool: { "aws:SecureTransport": "false" }
 
   # Standard queue (D-48); the engine is idempotent per commandId. Visibility 720 = 6 x the maximum engine timeout.
   CommandsQueue:
@@ -271,6 +351,38 @@ Resources:
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
+          - Sid: ProducersSend
+            Effect: Allow
+            Principal:
+              AWS:
+                - !GetAtt IngestWebhookFunctionRole.Arn
+                - !GetAtt IngestEventBridgeFunctionRole.Arn
+                - !GetAtt AlertConsumerFunctionRole.Arn
+            Action: sqs:SendMessage
+            Resource: !GetAtt AlertEventsQueue.Arn
+          - Sid: ConsumerReceiveDelete
+            Effect: Allow
+            Principal: { AWS: !GetAtt AlertConsumerFunctionRole.Arn }
+            Action: [sqs:ReceiveMessage, sqs:DeleteMessage, sqs:GetQueueAttributes, sqs:ChangeMessageVisibility]
+            Resource: !GetAtt AlertEventsQueue.Arn
+          - Sid: DenySendFromOthers
+            Effect: Deny
+            Principal: "*"
+            Action: sqs:SendMessage
+            Resource: !GetAtt AlertEventsQueue.Arn
+            Condition:
+              ArnNotEquals:
+                "aws:PrincipalArn":
+                  - !GetAtt IngestWebhookFunctionRole.Arn
+                  - !GetAtt IngestEventBridgeFunctionRole.Arn
+                  - !GetAtt AlertConsumerFunctionRole.Arn
+          - Sid: DenyReceiveFromOthers
+            Effect: Deny
+            Principal: "*"
+            Action: [sqs:ReceiveMessage, sqs:DeleteMessage, sqs:ChangeMessageVisibility]
+            Resource: !GetAtt AlertEventsQueue.Arn
+            Condition:
+              ArnNotEquals: { "aws:PrincipalArn": !GetAtt AlertConsumerFunctionRole.Arn }
           - Sid: DenyInsecureTransport
             Effect: Deny
             Principal: "*"
@@ -294,6 +406,26 @@ Resources:
           - prefix: "aws."
         detail-type:
           - AWS API Call via CloudTrail
+        detail:
+          # Exactly the tag APIs services/alarm-engine handles (events.py TAG_EVENTS, the same list as the customer
+          # TagChangeRule). A failed call (errorCode present) changed nothing and is dropped here.
+          eventSource:
+            - suffix: ".amazonaws.com"
+          eventName:
+            - CreateTags
+            - DeleteTags
+            - AddTagsToResource
+            - RemoveTagsFromResource
+            - AddTags
+            - RemoveTags
+            - TagResource
+            - UntagResource
+            - TagResources
+            - UntagResources
+            - TagQueue
+            - UntagQueue
+          errorCode:
+            - exists: false
       Targets:
         - Id: alarm-commands
           Arn: !GetAtt CommandsQueue.Arn
@@ -332,14 +464,22 @@ Resources:
                 Effect: Allow
                 Action: sts:AssumeRole
                 Resource: !Sub "arn:${AWS::Partition}:iam::*:role/AlarmOps-*"
+                # Never assume without an ExternalId (D-07); the customer side additionally checks its value.
+                Condition:
+                  "Null": { "sts:ExternalId": "false" }
               - Sid: NeverAssumeCustomerRemediator
                 Effect: Deny
                 Action: sts:AssumeRole
                 Resource: !Sub "arn:${AWS::Partition}:iam::*:role/AlarmOps-Remediator"
-              - Sid: AssumeRemediatorCaller
-                Effect: Allow
-                Action: sts:AssumeRole
-                Resource: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/AlarmOpsCentral-RemediatorCaller"
+              # D-15: only exists while RemediationExecution is "true", so the default (false) is enforced by IAM.
+              # The Deny above is a guardrail; the Slack approval itself is enforced in the backend code.
+              - !If
+                - RemediationEnabled
+                - Sid: AssumeRemediatorCaller
+                  Effect: Allow
+                  Action: sts:AssumeRole
+                  Resource: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/AlarmOpsCentral-RemediatorCaller"
+                - !Ref AWS::NoValue
               - Sid: ConsumeAlarmCommands
                 Effect: Allow
                 Action: [sqs:ReceiveMessage, sqs:DeleteMessage, sqs:GetQueueAttributes, sqs:ChangeMessageVisibility]
@@ -375,6 +515,8 @@ Resources:
               - Effect: Allow
                 Action: sts:AssumeRole
                 Resource: !Sub "arn:${AWS::Partition}:iam::*:role/AlarmOps-Remediator"
+                Condition:
+                  "Null": { "sts:ExternalId": "false" }
 
   # Vercel console (D-49): web identity from the Vercel OIDC provider, pinned to this team's aud and to the
   # production environment of this one project. Permission: sqs:SendMessage on alarm-commands (+ optional SES, D-52).
@@ -458,7 +600,7 @@ Resources:
           # The value is read from Secrets Manager at cold start (never placed in the template or the console).
           DATABASE_URL_SECRET_ARN: !Ref EngineDbSecret
           ALARMOPS_REMEDIATION_EXECUTION: !Ref RemediationExecution
-          REMEDIATOR_CALLER_ROLE_ARN: !GetAtt RemediatorCallerRole.Arn
+          REMEDIATOR_CALLER_ROLE_ARN: !If [RemediationEnabled, !GetAtt RemediatorCallerRole.Arn, !Ref "AWS::NoValue"]
       Events:
         Commands:
           Type: SQS
@@ -533,22 +675,34 @@ Resources:
             - Effect: Allow
               Action: secretsmanager:GetSecretValue
               Resource: !Ref IngestDbSecret
-      Events:
-        AlarmStateChange:
-          Type: EventBridgeRule
-          Properties:
-            EventBusName: !Ref CentralBusName
-            Pattern:
-              source:
-                - aws.cloudwatch
-              detail-type:
-                - CloudWatch Alarm State Change
-                - CloudWatch Alarm Configuration Change
-            DeadLetterConfig:
-              Type: SQS
-            RetryPolicy:
-              MaximumRetryAttempts: 10
-              MaximumEventAgeInSeconds: 3600
+
+  # Explicit rule (not the SAM EventBridgeRule event) so the DLQ is ours: SSE, TLS-only, one-rule send policy.
+  IngestAlarmEventsRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${ResourcePrefix}-alarm-events-to-ingest"
+      Description: CloudWatch alarm state and configuration changes from customer accounts to the ingest Lambda.
+      EventBusName: !Ref CentralBusName
+      State: ENABLED
+      EventPattern:
+        source: [aws.cloudwatch]
+        detail-type: [CloudWatch Alarm State Change, CloudWatch Alarm Configuration Change]
+      Targets:
+        - Id: ingest-eventbridge
+          Arn: !GetAtt IngestEventBridgeFunction.Arn
+          DeadLetterConfig:
+            Arn: !GetAtt IngestEventsRuleDlq.Arn
+          RetryPolicy:
+            MaximumRetryAttempts: 10
+            MaximumEventAgeInSeconds: 3600
+
+  IngestAlarmEventsInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref IngestEventBridgeFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt IngestAlarmEventsRule.Arn
 
   AlertConsumerFunction:
     Type: AWS::Serverless::Function
@@ -613,6 +767,24 @@ Resources:
       Dimensions:
         - Name: QueueName
           Value: !GetAtt AlertEventsDlq.QueueName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmTopicArn], !Ref "AWS::NoValue"]
+
+  IngestEventsRuleDlqNotEmptyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ResourcePrefix}-ingest-events-rule-dlq-not-empty"
+      AlarmDescription: Alarm events the bus rule could not deliver to the ingest Lambda.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt IngestEventsRuleDlq.QueueName
       Statistic: Maximum
       Period: 300
       EvaluationPeriods: 1

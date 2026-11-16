@@ -369,8 +369,8 @@ class CentralTemplate(unittest.TestCase):
 
     def test_tag_event_rule_pattern_and_dlq(self):
         r = CR["TagEventRule"]["Properties"]
-        self.assertEqual(r["EventPattern"], {"source": [{"prefix": "aws."}],
-                                             "detail-type": ["AWS API Call via CloudTrail"]})
+        self.assertEqual(r["EventPattern"]["source"], [{"prefix": "aws."}])
+        self.assertEqual(r["EventPattern"]["detail-type"], ["AWS API Call via CloudTrail"])
         self.assertEqual(r["EventBusName"], {"Ref": "CentralBusName"})
         (t,) = r["Targets"]
         self.assertEqual(t["Arn"], {"Fn::GetAtt": "CommandsQueue.Arn"})
@@ -412,10 +412,80 @@ class CentralTemplate(unittest.TestCase):
         c = CR["AlertConsumerFunction"]["Properties"]["Events"]["AlertEvents"]["Properties"]
         self.assertEqual(c["FunctionResponseTypes"], ["ReportBatchItemFailures"])
         self.assertIn("MaximumConcurrency", c["ScalingConfig"])
-        ev = CR["IngestEventBridgeFunction"]["Properties"]["Events"]["AlarmStateChange"]["Properties"]
-        self.assertEqual(ev["EventBusName"], {"Ref": "CentralBusName"})
-        self.assertEqual(ev["Pattern"]["source"], ["aws.cloudwatch"])
-        self.assertEqual(ev["DeadLetterConfig"], {"Type": "SQS"})
+        self.assertNotIn("Events", CR["IngestEventBridgeFunction"]["Properties"])   # explicit rule, own DLQ
+
+    def test_ingest_rule_has_own_sse_dlq_with_one_rule_policy(self):
+        r = CR["IngestAlarmEventsRule"]["Properties"]
+        self.assertEqual(r["EventBusName"], {"Ref": "CentralBusName"})
+        self.assertEqual(r["EventPattern"]["source"], ["aws.cloudwatch"])
+        (t,) = r["Targets"]
+        self.assertEqual(t["DeadLetterConfig"], {"Arn": {"Fn::GetAtt": "IngestEventsRuleDlq.Arn"}})
+        self.assertTrue(CR["IngestEventsRuleDlq"]["Properties"]["SqsManagedSseEnabled"])
+        sts = queue_statements("IngestEventsRuleDlqPolicy")
+        self.assertEqual(sts["IngestRuleDeadLetters"]["Condition"],
+                         {"ArnEquals": {"aws:SourceArn": {"Fn::GetAtt": "IngestAlarmEventsRule.Arn"}}})
+        self.assertEqual(sts["DenyInsecureTransport"]["Effect"], "Deny")
+        perm = CR["IngestAlarmEventsInvokePermission"]["Properties"]
+        self.assertEqual(perm["SourceArn"], {"Fn::GetAtt": "IngestAlarmEventsRule.Arn"})
+        self.assertEqual(perm["Principal"], "events.amazonaws.com")
+
+    def test_external_id_required_on_every_assume_of_a_customer_role(self):
+        want = {"Null": {"sts:ExternalId": "false"}}
+        (a,) = [s for s in c_statements("CentralRole") if s.get("Sid") == "AssumeCustomerRoles"]
+        self.assertEqual(a["Condition"], want)
+        (r,) = c_statements("RemediatorCallerRole")
+        self.assertEqual(r["Condition"], want)
+
+    def test_remediation_switch_is_enforced_by_iam_and_env(self):
+        self.assertEqual(C["Parameters"]["RemediationExecution"]["Default"], "false")
+        self.assertEqual(C["Conditions"]["RemediationEnabled"], {"Fn::Equals": [{"Ref": "RemediationExecution"}, "true"]})
+        conds = [x["Fn::If"] for p in CR["CentralRole"]["Properties"]["Policies"]
+                 for x in p["PolicyDocument"]["Statement"] if "Fn::If" in x]
+        (cond,) = conds
+        self.assertEqual(cond[0], "RemediationEnabled")
+        self.assertEqual(cond[1]["Sid"], "AssumeRemediatorCaller")
+        self.assertEqual(cond[2], {"Ref": "AWS::NoValue"})
+        env = CR["AlarmEngineFunction"]["Properties"]["Environment"]["Variables"]["REMEDIATOR_CALLER_ROLE_ARN"]
+        self.assertEqual(env["Fn::If"][0], "RemediationEnabled")
+        self.assertEqual(env["Fn::If"][2], {"Ref": "AWS::NoValue"})
+
+    def test_tag_rule_matches_only_engine_tag_apis_and_successful_calls(self):
+        d = CR["TagEventRule"]["Properties"]["EventPattern"]["detail"]
+        self.assertEqual(d["errorCode"], [{"exists": False}])
+        self.assertEqual(d["eventSource"], [{"suffix": ".amazonaws.com"}])
+        self.assertEqual(sorted(d["eventName"]), sorted([
+            "CreateTags", "DeleteTags", "AddTagsToResource", "RemoveTagsFromResource", "AddTags", "RemoveTags",
+            "TagResource", "UntagResource", "TagResources", "UntagResources", "TagQueue", "UntagQueue"]))
+        # same list as the customer stack's forwarding rule
+        self.assertEqual(sorted(d["eventName"]), sorted(RES["TagChangeRule"]["Properties"]["EventPattern"]["detail"]["eventName"]))
+
+    def test_dlq_policies(self):
+        for pol in ("CommandsDlqPolicy", "AlertEventsDlqPolicy"):
+            self.assertEqual(queue_statements(pol)["DenyInsecureTransport"]["Condition"],
+                             {"Bool": {"aws:SecureTransport": "false"}})
+        deny = queue_statements("CommandsDlqPolicy")["DenyReadFromOthers"]
+        self.assertEqual(deny["Effect"], "Deny")
+        self.assertEqual(sorted(deny["Action"]),
+                         ["sqs:ChangeMessageVisibility", "sqs:DeleteMessage", "sqs:ReceiveMessage"])
+        allowed = deny["Condition"]["ArnNotEquals"]["aws:PrincipalArn"]["Fn::If"]
+        self.assertEqual(allowed[0], "HasDlqOpsRole")
+        self.assertEqual(allowed[1], [{"Fn::GetAtt": "CentralRole.Arn"}, {"Ref": "DlqOpsRoleArn"}])
+        self.assertEqual(allowed[2], [{"Fn::GetAtt": "CentralRole.Arn"}])
+        self.assertEqual(C["Parameters"]["DlqOpsRoleArn"]["Default"], "")
+
+    def test_alert_events_policy_producers_and_consumer_only(self):
+        sts = queue_statements("AlertEventsQueuePolicy")
+        roles = [{"Fn::GetAtt": f"{f}Role.Arn"} for f in
+                 ("IngestWebhookFunction", "IngestEventBridgeFunction", "AlertConsumerFunction")]
+        consumer = {"Fn::GetAtt": "AlertConsumerFunctionRole.Arn"}
+        self.assertEqual(sts["ProducersSend"]["Principal"], {"AWS": roles})
+        self.assertEqual(sts["ProducersSend"]["Action"], "sqs:SendMessage")
+        self.assertEqual(sts["ConsumerReceiveDelete"]["Principal"], {"AWS": consumer})
+        self.assertEqual(sts["DenySendFromOthers"]["Condition"], {"ArnNotEquals": {"aws:PrincipalArn": roles}})
+        self.assertEqual(sts["DenyReceiveFromOthers"]["Condition"], {"ArnNotEquals": {"aws:PrincipalArn": consumer}})
+        for st in sts.values():
+            if st["Effect"] == "Allow":
+                self.assertNotIn("*", str(st["Principal"]))
 
     def test_webhook_http_api_throttled_without_access_log(self):
         api = CR["IngestHttpApi"]["Properties"]
@@ -436,19 +506,52 @@ class CentralTemplate(unittest.TestCase):
                 self.assertTrue(r["Properties"]["RoleName"].startswith("AlarmOpsCentral-"), n)
 
 
+WORKFLOWS = ROOT.parent / ".github" / "workflows"
+
+
+class Workflows(unittest.TestCase):
+    def test_every_workflow_parses_as_yaml_with_jobs(self):
+        files = sorted(WORKFLOWS.glob("*.yml")) + sorted(WORKFLOWS.glob("*.yaml"))
+        self.assertTrue(files)
+        for f in files:
+            wf = yaml.safe_load(f.read_text(encoding="utf-8"))
+            self.assertIsInstance(wf, dict, f.name)
+            self.assertTrue(wf.get("jobs"), f.name)
+
+
 class DeployWorkflow(unittest.TestCase):
-    def test_deploy_central_guards(self):
-        text = (ROOT.parent / ".github" / "workflows" / "deploy-central.yml").read_text(encoding="utf-8")
-        wf = yaml.safe_load(text)
+    def setUp(self):
+        self.text = (WORKFLOWS / "deploy-central.yml").read_text(encoding="utf-8")
+        self.wf = yaml.safe_load(self.text)
+
+    def test_guards(self):
+        wf = self.wf
         on = wf.get("on", wf.get(True))
         self.assertEqual(list(on), ["workflow_dispatch"])
-        (job,) = wf["jobs"].values()
-        self.assertEqual(job["environment"], "central")
-        self.assertEqual(job["if"], "github.ref == 'refs/heads/main'")
         self.assertEqual(wf["permissions"], {"contents": "read", "id-token": "write"})
-        self.assertIn("vars.CENTRAL_DEPLOY_ROLE_ARN", text)
-        self.assertNotIn("secrets.", text)
-        self.assertNotIn("AWS_ACCESS_KEY_ID", text)
+        self.assertIn("vars.CENTRAL_DEPLOY_ROLE_ARN", self.text)
+        self.assertNotIn("secrets.", self.text)
+        self.assertNotIn("AWS_ACCESS_KEY_ID", self.text)
+        for name, job in wf["jobs"].items():
+            self.assertEqual(job["environment"], "central", name)
+            self.assertIn("github.ref == 'refs/heads/main'", job["if"], name)
+
+    def test_two_phase_plan_then_approved_apply(self):
+        jobs = self.wf["jobs"]
+        self.assertEqual(sorted(jobs), ["apply", "plan"])
+        self.assertEqual(jobs["apply"]["needs"], "plan")
+        plan_cmds = " ".join(st.get("run", "") for st in jobs["plan"]["steps"])
+        apply_cmds = " ".join(st.get("run", "") for st in jobs["apply"]["steps"])
+        self.assertIn("--no-execute-changeset", plan_cmds)
+        self.assertNotIn("execute-change-set", plan_cmds)
+        self.assertIn("starts_with(ResourceChange.ResourceType, 'AWS::IAM')", plan_cmds)
+        self.assertIn("execute-change-set", apply_cmds)
+        self.assertNotIn("sam deploy", apply_cmds)
+
+    def test_checkout_does_not_persist_credentials(self):
+        for st in self.wf["jobs"]["plan"]["steps"]:
+            if str(st.get("uses", "")).startswith("actions/checkout"):
+                self.assertIs(st["with"]["persist-credentials"], False)
 
 
 if __name__ == "__main__":
