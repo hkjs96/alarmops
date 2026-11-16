@@ -1021,3 +1021,17 @@ mock 모드(MOCK_API=1 E2E_ALLOW_MOCK=1 next build 후 next start -p 3191), Chro
 판정: P1 1건(감사 로그 Apply 시 customer= 빈 값으로 404). 권고: (1) 포털에서 Map account 배너·링크와 미매핑 계정 번호 숨김, (2) 390에서 Show number가 응답자 카드 맨 아래·하단 바에 가려짐(스크롤 필요) + 상태 줄의 매초 갱신, (3) 긴급 버튼의 접근성 이름에 "emergency" 포함, 응답자 0명 고객에서 "primary responder notified" 문구 정정, 비응답자 관리자의 MSP 직원 번호 확인 경로 안내. 참고: Told "—" 의미 설명 없음, 포털에 타 고객 트리 노출(mock 한계), 인쇄 By 칸 줄바꿈과 출력 시각. mock 상태 변경: Kumho 긴급 공개 2건이 감사 로그에 추가됨(서버 종료함).
 
 수정(console, 후속 커밋): 감사 로그 Apply의 빈 customer= 404 해소(빈 값 생략 + 빈 값은 전체), 포털 미매핑 배너·데이터 제거, 비상 열람 버튼 이름·주 Responder 없음 문구, 카운트다운 스크린리더 소음 제거, 인쇄 By 열 최소 폭, Told 범례.
+
+### 2026-11-16 재검증: 번호 공개 · 포털 후속 수정 (feat/console-reveal-portal @ bc2dcc6, mock)
+
+| 날짜 | 시나리오 | 버전(커밋) | 페르소나 | 측정값 | 판정 | 캡처 |
+|---|---|---|---|---|---|---|
+| 2026-11-16 | 감사 로그 Apply (전체 고객) | bc2dcc6 | MSP 관리자 (1440, 390) | 기본 Apply → `?mode=EMERGENCY` 2건(404 해소). "All customers"+All reveals+11-01~11-30 → 4건. 직접 URL `mode=EMERGENCY&customer=` 2건, `customer=daon&mode=ALL` 1건. 390에서 컨트롤 전부 44px, 1440 Apply 32px. Told 범례 "“Told” is who was notified; a dash means nobody (a normal reveal)." 표시. 단 Kumho 긴급 공개(응답자 없음)는 Told가 "—"인데 범례는 "dash = normal reveal"이라 긴급인데 "—"인 경우를 설명하지 못함 | 통과 (참고 1) | `docs/qa/shots/2026-11-16-d35-recheck/admin-{1440,390}-auditlog-{apply,all}.png` |
+| 2026-11-16 | 포털 미매핑 배너 | bc2dcc6 | 포털 (1440, 390) | "Map account →" 링크·상단 배너 0건(관리자에는 여전히 있음). 그러나 인시던트 목록에 "UNMAPPED ACCOUNT · Not assigned to a customer · nobody is paged · 3 alarms from unmapped account 481220935017" 행이 포털에 그대로 보임(계정 번호 노출). 390 상세 화면에서는 이 행이 안 보임 | 부분 (권고 1) | `portal-{1440,390}-{incidents,incident}.png`, `portal-1440-incidents-unmapped-row.png` |
+| 2026-11-16 | 긴급 공개 명확성 | bc2dcc6 | 관리자 하은 (1440 라이트, 390 다크) | 접근성 이름 "Show number for Jieun Kang (emergency, logged)". Kumho 대화상자: "You are not a responder… Tell us why… No primary responder is set; other admins will be notified." 공개 후 "Emergency reveal · logged · no primary responder is set · hides in 30 s". 사유 공백 시 확인 비활성, Esc 닫힘, 포커스 사유 칸. 비응답자 관리자(Eden 직원 행): 버튼 0개, 카드 하단에 "Numbers of MSP staff are opened only by staff who are Responders of the same customer; an admin who is not gets no button there." 한 줄 | 통과 (참고 2) | `admin-{1440-light,390-dark}-{kumho-masked,emergency-dialog,emergency-dialog-filled,emergency-revealed}.png`, `admin-{1440,390}-eden-staff.png` |
+| 2026-11-16 | 390 카운트다운·공지·스크롤 | bc2dcc6 | 온콜 (390 라이트·다크, 1440) | "hides in 27 s"는 aria-hidden. 공개 때 라이브 영역 공지 1회("Number of Haeun Kim shown for 30 seconds. Logged."), 3.5초간 추가 공지 없음, 가리면 1회("Value hidden again."). 값 위치 y=434~455(뷰포트 844), 하단 바 시작 668 위 | 통과 | `operator-{390,1440}-{light,dark}-{revealed,hidden}.png` |
+| 2026-11-16 | 인쇄 By 열 | bc2dcc6 | 관리자 (print, A4) | By 열 98px, "System" 한 줄(줄바꿈 해소). 출력 시각은 여전히 실제 시계 | 통과 | `print-kumho-pdf-1.png`, `print-kumho.pdf`, `print-mirae.pdf` |
+| 2026-11-16 | 회귀: 온콜 공개, 포털 읽기 전용, CSP | bc2dcc6 | 온콜, 포털 | 온콜 Show number/Hide 정상. 포털 incidents/incident/call order/customer에서 조작 버튼 0건(필터 칩만), 배지 "Read-only view"/"Read-only". CSP 위반 0, 페이지 오류 0, 가로 스크롤 없음 | 통과 | `portal-{1440,390}-*`, (콘솔 출력) |
+
+판정: P0·P1 없음, 이전 P1(Apply 404) 해소. 새 권고: 포털 인시던트 목록에 미매핑 계정 행·계정 번호가 남음(실제 백엔드 범위 필터로 걸러지는지 security 확인 필요). 참고: Told "—" 범례가 응답자 없는 긴급 공개를 설명하지 못함, 직원 행에 Show email 버튼도 없는 것은 안내문이 "numbers"만 언급.
+- 허브 확인(11/16): 포털 인시던트 목록의 미매핑 계정 행은 mock 한계다. 실제 API는 포털 scope가 `unmapped: false`라 `customerId == null` 인시던트를 주지 않는다(packages/api/src/auth.ts:43-46, 63).
