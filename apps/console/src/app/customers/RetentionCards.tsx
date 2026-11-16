@@ -186,12 +186,22 @@ const countText = (k: string, v: number) => { const l = COUNT_LABEL(k); return `
  */
 export function PurgeLogCard({ log, names = {} }: { log: PurgeLog; names?: Record<string, string> }) {
   const s = log.schedule;
+  // The printed-at line is for the paper only (print stylesheet). It is set when the page is loaded and set again
+  // right before the browser prints, so a page left open for hours still prints the time of the print.
+  const [printedAt, setPrintedAt] = useState("");
+  useEffect(() => {
+    const stamp = () => setPrintedAt(kstDateTime(new Date().toISOString()));
+    stamp();
+    window.addEventListener("beforeprint", stamp);
+    return () => window.removeEventListener("beforeprint", stamp);
+  }, []);
   return (
-    <Card title="Deletion record" actions={<button type="button" className="btn sm" data-testid="purge-print" onClick={() => window.print()}>Print / Save as PDF</button>}>
+    <Card title="Deletion record" actions={<button type="button" className="btn sm" data-testid="purge-print" onClick={() => { setPrintedAt(kstDateTime(new Date().toISOString())); window.print(); }}>Print / Save as PDF</button>}>
       <div data-testid="purge-log" id="purge-print">
         <div className="pl-print-head" data-testid="purge-print-head">
           <b>Deletion record: {log.customer.name}</b>
           <div>Customer {log.customer.id} · status {log.customer.status}{log.customer.statusChangedAt ? ` since ${kstDateTime(log.customer.statusChangedAt)}` : ""}</div>
+          <div data-testid="purge-printed-at">Printed at {printedAt || "…"}</div>
         </div>
         <p className="sm mut" style={{ marginTop: 0 }}>
           What was deleted for {log.customer.name}, and when. This is the data of the deletion certificate: counts only, no content.
@@ -221,6 +231,10 @@ export function PurgeLogCard({ log, names = {} }: { log: PurgeLog; names?: Recor
             {log.legalHold.active ? <li><b>Paused by the legal hold:</b> none of these dates apply until it is released.</li> : null}
           </ul>
         ) : null}
+        <div className="pl-sign" data-testid="purge-sign" aria-hidden="true">
+          <span>Checked by ______________________</span>
+          <span>Date ______________</span>
+        </div>
       </div>
     </Card>
   );

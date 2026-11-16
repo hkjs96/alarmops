@@ -19,7 +19,7 @@ export function slugify(name: string): string {
 
 type Getter = { get(name: string): string | null } | Record<string, string | string[] | undefined>;
 function read(src: Getter, k: string): string | undefined {
-  if (typeof (src as { get?: unknown }).get === "function") return (src as { get(n: string): string | null }).get(k) ?? undefined;
+  if (typeof (src as { get?: unknown }).get === "function") return (src as { get(n: string): string | null }).get(k) || undefined; // an empty value is no value: "?customer=" means all customers
   const v = (src as Record<string, string | string[] | undefined>)[k];
   return (Array.isArray(v) ? v[0] : v) || undefined;
 }

@@ -487,6 +487,9 @@ export interface ResponderDisplay {
   channels: Partial<Record<ContactChannelKey, ChannelState>>;
   emailMasked?: string;
   phoneMasked?: string;
+  /** D-35: whether the caller may open the full value (POST /contacts/{id}/reveal) and whether that needs a typed reason (ADMIN emergency) */
+  canReveal?: boolean;
+  revealRequiresReason?: boolean;
 }
 export interface StaffResponder extends ResponderDisplay { contactId: string; source: "TEMPLATE" | "DIRECT"; templateId?: string; templateName?: string }
 export type CustomerPersonRole = "PAGEABLE" | "NOTIFY_ONLY";
@@ -504,6 +507,22 @@ export interface CustomerPersonResponder extends ResponderDisplay {
  * which is what a SLACK_CHANNEL step needs.
  */
 export interface RespondersResponse { staff: StaffResponder[]; people: CustomerPersonResponder[]; templateId: string | null; version: number; slackChannel?: ChannelState }
+/** POST /contacts/{id}/reveal (D-35). The value is shown for a moment and never kept. */
+export type RevealChannel = "PHONE" | "EMAIL" | "SLACK";
+export interface RevealResult { channel: RevealChannel; value: string; mode: "NORMAL" | "EMERGENCY"; revealedAt: string; auditId: string }
+/** GET /contact-reveals item (D-35 review list). Never a contact value. */
+export interface ContactRevealEntry {
+  id: string;
+  at: string;
+  mode: "NORMAL" | "EMERGENCY";
+  actor: { id: string; name: string };
+  contact: { id: string; name: string };
+  org: { customer: { id: string; name: string; slug: string } | null };
+  channel: RevealChannel;
+  reason: string | null;
+  notified: { contactId: string; name: string }[];
+}
+export interface ContactRevealQuery { mode?: "NORMAL" | "EMERGENCY"; customer?: string; actorUserId?: string; contactId?: string; from?: string; to?: string; cursor?: string }
 /** Answer of the Responders writes: the new version of the list (§8.3) */
 export interface RespondersWriteResult { contactId: string; version: number }
 /**

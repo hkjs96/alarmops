@@ -4,7 +4,7 @@ import type {
   AddResponderInput, CallOrderListQuery, CallOrderListResponse, CustomerPersonRole, PagingConfig, PagingConfigInput, PagingHealth, PagingPath, PagingPathQuery,
   RespondersResponse, RotationSummary, StaffSummary, ResponderWriteOptions, RespondersWriteResult, UndoResult,
   CustomerStatusChange, CustomerStatusInput, CustomerStatusResponse, Offboarding, OffboardStepKey,
-  Digest, LegalHold, PurgeLog,
+  Digest, LegalHold, PurgeLog, RevealChannel, RevealResult, ContactRevealEntry, ContactRevealQuery,
 } from "./types";
 
 export class ApiError extends Error {
@@ -97,6 +97,10 @@ export interface ConsoleApi {
    * 410 EXPORT_WINDOW_CLOSED, 413 EXPORT_TOO_LARGE throw an ApiError before any byte is sent.
    */
   exportCsv(customerId: string): Promise<Response>;
+  /** POST /contacts/{id}/reveal (D-35). Mode is decided by the server. 422 EMERGENCY_REASON_REQUIRED, 403 NOT_A_RESPONDER, 404, 429. */
+  revealContact(contactId: string, body: { channel: RevealChannel; reason?: string }): Promise<RevealResult>;
+  /** GET /contact-reveals (D-35 review list), newest first */
+  listContactReveals(q?: ContactRevealQuery): Promise<Paginated<ContactRevealEntry>>;
   /** GET /digests/latest (MSP staff; a portal user gets 404) */
   getLatestDigest(): Promise<Digest>;
 }
@@ -180,6 +184,8 @@ export function createHttpApi(opts: { baseUrl: string; fetch?: typeof fetch; hea
     deleteLegalHold: (id, reason) => call("DELETE", `/customers/${enc(id)}/legal-hold`, reason ? { reason } : {}),
     getPurgeLog: (id) => call("GET", `/customers/${enc(id)}/purge-log`),
     exportCsv: (id) => raw(`/customers/${enc(id)}/export.csv`),
+    revealContact: (id, body) => call("POST", `/contacts/${enc(id)}/reveal`, body),
+    listContactReveals: (q = {}) => call("GET", "/contact-reveals" + toQuery({ ...q })),
     getLatestDigest: () => call("GET", "/digests/latest"),
   };
 }
