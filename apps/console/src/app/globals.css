@@ -574,12 +574,13 @@ div.co-refused { margin-top: 6px; }
 .pl-table th { text-align: left; font-size: 13px; font-weight: 600; color: var(--ink2); padding: 6px 10px 6px 0; border-bottom: 1px solid var(--rule); }
 .pl-table td { padding: 10px 10px 10px 0; border-top: 1px solid var(--rule); vertical-align: top; overflow-wrap: anywhere; }
 .pl-sched { margin: 12px 0 0; padding-left: 18px; }
-.pl-print-head { display: none; }
+.pl-print-head, .pl-sign { display: none; }
 @media print {
   body * { visibility: hidden !important; }
   #purge-print, #purge-print * { visibility: visible !important; }
   #purge-print { position: absolute; left: 0; top: 0; width: 100%; color: #000; background: #fff; }
   #purge-print .pl-print-head { display: block; margin-bottom: 12px; }
+  #purge-print .pl-sign { display: flex; justify-content: space-between; gap: 24px; margin-top: 48px; font-size: 14px; }
   #purge-print .pl-table { display: table; width: 100%; }
   #purge-print .pl-table thead { position: static; width: auto; height: auto; clip: auto; display: table-header-group; }
   #purge-print .pl-table tbody { display: table-row-group; }
@@ -610,3 +611,31 @@ div.co-refused { margin-top: 6px; }
 @media (max-width: 380px) { .top .logo { font-size: 0; } .top .logo i { margin: 0; } }
 .cs-errbox { scroll-margin-bottom: 16px; }
 .cs-errbox:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }
+
+/* Read-only view (portal user): a small, always-visible marker with text and a shape, not colour alone */
+.ro-badge { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 10px; font-size: 13px; font-weight: 600; border: 1px solid var(--ink2); color: var(--ink); background: var(--surface); white-space: nowrap; }
+.ro-ic { font-size: 12px; line-height: 1; }
+.show-m-inline { display: none; }
+@media (max-width: 760px) { .show-m-inline { display: inline; } .ro-badge { padding: 0 6px; } .ro-ic { display: none; } .top-r { gap: 2px; } }
+
+/* Reveal (D-35): Show number / Show email under the masked text */
+.rv-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; margin-top: 4px; }
+.rv { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-width: 0; }
+.rv-btn { min-height: 44px; min-width: 44px; }
+.rv-value { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; user-select: all; }
+.rv-note { flex-basis: 100%; font-size: 13px; }
+.rv-err { flex-basis: 100%; }
+.rr-filters { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: end; margin: 0 0 12px; }
+.rr-filters label { display: grid; gap: 2px; font-size: 13px; }
+.rr-filters .inp, .rr-filters select { min-height: 44px; max-width: 100%; }
+.rr-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.rr-table th { text-align: left; font-size: 13px; font-weight: 600; color: var(--ink2); padding: 6px 10px 6px 0; border-bottom: 1px solid var(--rule); }
+.rr-table td { padding: 10px 10px 10px 0; border-top: 1px solid var(--rule); vertical-align: top; overflow-wrap: anywhere; }
+.rr-mode { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 13px; }
+@media (max-width: 760px) {
+  .rr-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .rr-table, .rr-table tbody, .rr-table tr, .rr-table td { display: block; width: 100%; }
+  .rr-table tr { padding: 10px 0; border-top: 1px solid var(--rule); }
+  .rr-table td { border: 0; padding: 2px 0; }
+  .rr-table td::before { content: attr(data-label) ": "; color: var(--ink2); font-size: 13px; }
+}

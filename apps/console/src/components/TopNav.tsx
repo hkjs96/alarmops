@@ -12,7 +12,7 @@ import { DigestBadge } from "./DigestBadge";
  * Top menu. The Incidents badge is one number: open incidents in all customers (triggered or escalated, nobody
  * acknowledged). It does not change with the filter. Links carry the list filter so it follows the user across screens.
  */
-export function TopNav({ openCount, userName, role, scopeQuery, onOpenFinder, digest }: { openCount: number; userName: string; role: Role; scopeQuery: string; onOpenFinder?: () => void; digest?: Digest | null }) {
+export function TopNav({ openCount, userName, role, readOnly = false, scopeQuery, onOpenFinder, digest }: { openCount: number; userName: string; role: Role; readOnly?: boolean; scopeQuery: string; onOpenFinder?: () => void; digest?: Digest | null }) {
   const pathname = usePathname();
   const active = sectionFor(pathname)?.key;
   const item = (s: (typeof NAV)[number], short = false) => (
@@ -32,6 +32,7 @@ export function TopNav({ openCount, userName, role, scopeQuery, onOpenFinder, di
         <Link href={"/incidents" + scopeQuery} className="logo" aria-label="AlarmOps home"><i />AlarmOps</Link>
         <nav className="nav hide-m" aria-label="Main">{NAV.map((s) => item(s))}</nav>
         <div className="top-r">
+          {readOnly ? <span className="ro-badge" data-testid="read-only-badge" title="You are signed in as a customer user. You can look at everything for your customer, but nothing can be changed here."><span aria-hidden="true" className="ro-ic">◇</span><span className="hide-m">Read-only view</span><span className="show-m-inline">Read-only</span></span> : null}
           <span className="health">PIPELINE OK · TICK 12s</span>
           {digest ? <DigestBadge digest={digest} /> : null}
           {onOpenFinder ? (

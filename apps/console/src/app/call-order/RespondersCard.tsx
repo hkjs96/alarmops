@@ -8,8 +8,9 @@ import type {
 } from "@/lib/api/types";
 import { computeHealth, plural, type Directory } from "@/lib/call-order/model";
 import { errorLine, type Failure } from "@/lib/errors";
-import { hasRole, roleReason, useShell } from "@/components/ShellContext";
+import { hasRole, isPortal, roleReason, useShell } from "@/components/ShellContext";
 import { callAction } from "@/lib/session-ended";
+import { RevealNumber } from "@/components/RevealNumber";
 import { addResponder, removeResponder, setResponderRole } from "./actions";
 
 const CH_NAME: Record<ContactChannelKey, string> = { SLACK: "Slack DM", EMAIL: "Email", SMS: "SMS", VOICE: "Call" };
@@ -24,6 +25,17 @@ function Channels({ p }: { p: ResponderDisplay }) {
 const Masked = ({ p }: { p: ResponderDisplay }) => (
   <span className="mono xs co-mask" data-testid="co-masked">{[p.emailMasked, p.phoneMasked].filter(Boolean).join(" · ") || "no contact on file"}</span>
 );
+
+/** D-35: Show number / Show email under the masked text, only where the API says the caller may (`canReveal`) */
+function RevealLine({ p, contactId, customerName }: { p: ResponderDisplay; contactId: string; customerName: string }) {
+  if (!p.canReveal || (!p.phoneMasked && !p.emailMasked)) return null;
+  return (
+    <div className="rv-line" data-testid="co-reveal-line">
+      {p.phoneMasked ? <RevealNumber contactId={contactId} name={p.name} customerName={customerName} channel="PHONE" canReveal requiresReason={!!p.revealRequiresReason} testId="reveal-phone" /> : null}
+      {p.emailMasked ? <RevealNumber contactId={contactId} name={p.name} customerName={customerName} channel="EMAIL" canReveal requiresReason={!!p.revealRequiresReason} testId="reveal-email" /> : null}
+    </div>
+  );
+}
 
 type StaffRow = StaffResponder & { id: string; status: string };
 type PersonRow = CustomerPersonResponder & { id: string; status: string };
@@ -42,8 +54,8 @@ interface Outlook { unreachable: boolean; worse: string[] }
 
 /**
  * Responders of the customer: MSP staff and the customer's own people (D-30). A customer person can be Pageable
- * (called, texted, part of "everyone") or Notify only. Contact details are masked here; showing a full value is the
- * Reveal flow of D-35, which this screen does not have yet.
+ * (called, texted, part of "everyone") or Notify only. Contact details are masked here; a full value is
+ * the Reveal flow of D-35 (RevealNumber): only where the API says `canReveal`, for a moment, logged.
  *
  * The list follows the console's one rule for lists (design-system list/): a change never moves a row under the
  * pointer. A removed person stays where they were as "Removed · Undo" until Done or leaving the panel; a person who
@@ -77,6 +89,7 @@ export function RespondersCard({ customer, customerName, services, responders, s
 }) {
   const shell = useShell();
   const router = useRouter();
+  const portal = isPortal(shell.user);
   const admin = hasRole(shell.user, "ADMIN");
   const why = !admin ? roleReason(shell.user, "ADMIN", "Changing Responders") : blocked;
   const [editing, setEditing] = useState(false);
@@ -316,13 +329,13 @@ export function RespondersCard({ customer, customerName, services, responders, s
         <span className="ov" id="co-resp-h">Responders · {customerName}</span>
         <span className="sp" />
         {on ? <a href="#co-resp-ed" className="btn sm co-jump" data-testid="co-resp-jump" onClick={jumpToAdd}>Add staff / Add person ↓</a> : null}
-        <button type="button" className="btn sm" data-testid="co-resp-edit" aria-pressed={on} disabled={Boolean(why)} aria-describedby={why ? "co-resp-why" : undefined}
+        {portal ? null : <button type="button" className="btn sm" data-testid="co-resp-edit" aria-pressed={on} disabled={Boolean(why)} aria-describedby={why ? "co-resp-why" : undefined}
           onClick={() => { if (editing) finish(); else { setEditing(true); setErr(null); } }}>
           {on ? "Done" : `Edit responders for ${customerName}`}
-        </button>
+        </button>}
       </div>
       <div className="co-resp-b" ref={listRef}>
-        {why ? <p className="sm mut co-resp-n" id="co-resp-why" data-testid="co-resp-why">{why}</p> : null}
+        {why && !portal ? <p className="sm mut co-resp-n" id="co-resp-why" data-testid="co-resp-why">{why}</p> : null}
         <p className="sm mut co-resp-n">“Everyone in Responders” is {pageable === 1 ? "this 1 person" : `these ${pageable} people`}: all MSP staff here plus the Pageable people of {customerName}. Responders belong to the whole customer, whatever level this panel shows.</p>
 
         <div className="ov co-resp-g">MSP staff ({responders.staff.length})</div>
@@ -336,6 +349,7 @@ export function RespondersCard({ customer, customerName, services, responders, s
                     <div className="co-person">
                       <div><b>{p.name}</b>{p.title ? <span className="sm mut"> · {p.title}</span> : null}{stepOf(p.contactId) >= 0 ? <span className="pill co-pl">step {stepOf(p.contactId) + 1}</span> : null}</div>
                       <div className="sm mut">{p.source === "TEMPLATE" ? `from ${p.templateName ?? "a template"}` : "added directly"} · <Masked p={p} /></div>
+                      <RevealLine p={p} contactId={p.contactId} customerName={customerName} />
                       <Channels p={p} />
                     </div>
                     {/* P3-K: until Edit, an invisible stand-in of the same size (no input, no button) holds the room, so the row has its edit-mode height from the start */}
@@ -371,6 +385,7 @@ export function RespondersCard({ customer, customerName, services, responders, s
                         {stepOf(p.contactId) >= 0 ? <span className="pill co-pl">step {stepOf(p.contactId) + 1}</span> : null}
                       </div>
                       <div className="sm mut">Notified for {p.scope.level === "CUSTOMER" ? `all of ${customerName}` : p.scope.name} · <Masked p={p} /></div>
+                      <RevealLine p={p} contactId={p.contactId} customerName={customerName} />
                       <Channels p={p} />
                     </div>
                     {!on ? <span className="co-pctl co-ctl off" aria-hidden="true"><span className="inp co-ghost">Pageable (calls, SMS)</span><span className="btn sm danger co-ghost">Remove…</span></span> : (
@@ -461,7 +476,7 @@ export function RespondersCard({ customer, customerName, services, responders, s
             </Banner>
           ) : null}
         </div>
-        <p className="sm mut co-resp-n" data-testid="co-mask-note">Contact details are masked. Showing a full address or number (Reveal, logged) is not available on this screen yet.</p>
+        <p className="sm mut co-resp-n" data-testid="co-mask-note">Contact details are masked. “Show number” and “Show email” open a full value for a moment; every one is logged.</p>
       </div>
 
       <ConfirmDialog

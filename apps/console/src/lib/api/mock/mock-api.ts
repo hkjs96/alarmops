@@ -5,8 +5,9 @@ import { isSlug } from "../../validate";
 import * as fx from "./fixtures";
 import { customers14, customers34, type FxCustomer } from "./scope-fixtures";
 import { createPaging, type FxPaging } from "./paging-fixtures";
-import { createPagingApi, hasOwnSteps, healthOf } from "./paging-mock";
+import { createPagingApi, directoryOf, hasOwnSteps, healthOf } from "./paging-mock";
 import { createStatusApi, createStatusStore, type StatusStore } from "./status-mock";
+import { createRevealApi, createRevealStore, type RevealStore } from "./reveal-mock";
 import { createRetentionApi, createRetentionStore, type RetentionStore } from "./retention-mock";
 
 interface Store {
@@ -16,6 +17,7 @@ interface Store {
   undo: Map<string, { snapshot: IncidentListItem[]; after: Record<string, number>; by: string; exp: number }>;
   paging: FxPaging;
   customerStatus: StatusStore;
+  reveals: RevealStore;
   retention: RetentionStore;
 }
 
@@ -38,7 +40,7 @@ const RANK: Record<Role, number> = { VIEWER: 0, OPERATOR: 1, ADMIN: 2 };
 export function createStore(opts: { customers?: 14 | 34 } = {}): Store {
   const customers = opts.customers === 34 ? customers34 : customers14;
   return {
-    customers, paging: createPaging(customers), customerStatus: createStatusStore(), retention: createRetentionStore(),
+    customers, paging: createPaging(customers), customerStatus: createStatusStore(), reveals: createRevealStore(customers), retention: createRetentionStore(),
     incidents: structuredClone([...fx.openIncidents, ...fx.resolvedIncidents, ...fx.suppressedIncidents]),
     timelines: structuredClone(fx.timelines),
     undo: new Map(),
@@ -145,8 +147,15 @@ export function createMockApi(store: Store = createStore(), clock: () => number 
     err: (status, code, message, details) => new ApiError(status, code, message, `req_mock_${++reqSeq}`, details),
   });
 
+  const revealApi = createRevealApi({
+    paging: store.paging, customers: store.customers, me: ME, store: store.reveals, now: nowIso,
+    directory: (c) => directoryOf(store.paging, c),
+    err: (status, code, message, details) => new ApiError(status, code, message, `req_mock_${++reqSeq}`, details),
+  });
+
   return {
     ...pagingApi,
+    ...revealApi,
     ...statusApi,
     ...retentionApi,
     async me() { return { id: ME.id, name: ME.name, email: ME.email, role: ME.role, ...(ME.kind ? { kind: ME.kind } : {}) }; },

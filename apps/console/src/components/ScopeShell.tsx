@@ -225,7 +225,7 @@ export function ScopeShell({ customers, user, openCount, digest, children }: { c
   return (
     <ShellContext.Provider value={api}>
       <div ref={shellRef} className={cx("shell", mounted && "mounted", ready && "ready", settings && "no-tree")} data-panel={panelOpen ? "1" : "0"} data-rail={rail ? "1" : "0"}>
-        <TopNav digest={digest} openCount={openCount} userName={userName} role={user.role} scopeQuery={scopeQuery(sel)} onOpenFinder={settings ? undefined : () => { setToast(null); setFinder(true); }} />
+        <TopNav digest={digest} openCount={openCount} userName={userName} role={user.role} readOnly={user.kind === "CUSTOMER"} scopeQuery={scopeQuery(sel)} onOpenFinder={settings ? undefined : () => { setToast(null); setFinder(true); }} />
         {settings ? (
           <ScopeLine totalCustomers={customers.length} mineCustomers={mineCount} onClear={() => undefined} locked={<><b>MSP-wide settings</b> · all {customers.length} customers</>} />
         ) : (
