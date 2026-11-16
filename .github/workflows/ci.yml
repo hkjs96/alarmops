@@ -66,7 +66,7 @@ jobs:
       ALARM_ENGINE_TEST_PG_URL: postgresql://postgres:postgres@localhost:5432/postgres
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -96,7 +96,7 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 20
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - run: pip install "cfn-lint==1.60.1"
