@@ -37,7 +37,7 @@
 
 ## 3단계 — 콘솔 배포(Vercel) [사람 + 에이전트]
 
-[에이전트] 완료(#46, D-53): `.github/workflows/deploy-console.yml`. `workflow_dispatch`만, `main`에서만, 환경 `production`(승인), 권한 `contents: read`. 순서: `npm ci --ignore-scripts` → `vercel pull --yes --environment=production`(Vercel CLI `65.16.0` 고정) → 받은 `.vercel/.env.production.local`을 `check-console-deploy-env.mjs`로 검사(값은 출력하지 않는다) → `vercel build --prod` → `vercel deploy --prebuilt --prod` → 스모크 검사(`.github/scripts/smoke-console.mjs`: `/login` 200·mock 표식 없음, CSP에 nonce가 있고 script-src에 `'unsafe-inline'` 없음, 인증 없는 `POST /api/internal/tick`이 401 — 503이면 `TICK_SECRET` 미설정이라 실패). 받은 환경 파일은 실패해도 지운다. `next build`는 mock 없이.
+[에이전트] 완료(#46, D-53): `.github/workflows/deploy-console.yml`. `workflow_dispatch`만, `main`에서만, 환경 `production`(승인), 권한 `contents: read`. 순서: `npm ci --ignore-scripts` → 고정된 Vercel CLI 설치(`tools/vercel-cli`, 정확한 버전 + 락파일, `npm ci --ignore-scripts`, 토큰 없이) → `vercel pull --yes --environment=production`(토큰은 환경변수 `VERCEL_TOKEN`으로만, pull·deploy 단계에만) → 받은 `.vercel/.env.production.local`을 `check-console-deploy-env.mjs`로 검사(값은 출력하지 않는다) → **비밀 제거**(`strip-deploy-env.mjs`: `CONSOLE_ORIGIN`·`TRUSTED_PROXY`·`NEXT_PUBLIC_*`만 남김) → `vercel build --prod`(토큰 없음) → `vercel deploy --prebuilt --prod` → 스모크 검사(`.github/scripts/smoke-console.mjs`: `/login` 200·mock 표식 없음, CSP에 nonce가 있고 script-src에 `'unsafe-inline'` 없음, 인증 없는 `POST /api/internal/tick`이 401 — 503이면 `TICK_SECRET` 미설정이라 실패). 받은 환경 파일은 실패해도 지운다. `next build`는 mock 없이.
 
 [사람] 한 번만(순서대로):
 1. [ ] **Vercel 프로젝트 만들기**: Vercel에서 이 저장소를 가져온다(Import). Framework Next.js, **Root Directory `apps/console`**, "Include source files outside of the Root Directory" 켬(기본). 첫 자동 배포가 시작되면 취소한다.
@@ -46,8 +46,10 @@
 4. [ ] **GitHub `production` 환경**(Settings → Environments → New environment): **Required reviewers**에 본인, **Deployment branches** = `main`만. 승인 없이 실행되는 경로가 없는지 확인(관리자 우회 허용 끔 권장).
 5. [ ] **환경 시크릿**(같은 화면 → Environment secrets, 저장소 시크릿 아님): `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`.
 6. [ ] **Vercel 환경변수(Production)**: 아래 표. `CONSOLE_ORIGIN`과 `TRUSTED_PROXY`는 **일반(Plain) 변수**로 둔다. Vercel의 Sensitive 변수는 `vercel pull`로 내려오지 않아 배포 전 검사가 "없음"으로 실패한다. 비밀 값(`DATABASE_URL`, `SESSION_SECRET`, `TICK_SECRET`)은 Sensitive로 해도 된다(런타임은 Vercel에 저장된 값을 쓴다). 주소는 우선 `*.vercel.app`(D-54).
+   - 남는 위험(R4): 받은 환경 파일에는 `DATABASE_URL`·`SESSION_SECRET`·`TICK_SECRET`·`VERCEL_OIDC_TOKEN`이 들어 있고, 받은 직후 검사·비밀 제거 두 단계(저장소의 검증된 스크립트만)가 돈 뒤에야 빌드(저장소·npm 코드)가 돈다. 빌드에는 비밀이 없다. 그래도 `npm ci`·CLI 설치는 pull **앞**이라 토큰을 보지 못하지만, 같은 러너에서 pull~제거 사이에 도는 코드는 우리 스크립트뿐이어야 한다(단계를 추가할 때 지킨다). 운영 비밀 회전 주기를 두고, 의심되면 `SESSION_SECRET`·`TICK_SECRET`·토큰을 바꾼다. 배포 승인자는 워크플로 변경 PR을 같은 기준으로 본다.
 7. [ ] **첫 배포**: Actions → `deploy-console` 실행 → `production` 승인 → 로그에서 환경 검사·스모크 통과 확인. 첫 배포 전에는 `CONSOLE_ORIGIN`에 쓸 `*.vercel.app` 주소를 프로젝트 Domains에서 먼저 확인한다(스모크 검사는 이 주소를 부른다).
 8. [ ] Vercel의 Deployment Protection이 production 주소를 막고 있으면(스모크가 401로 실패) Standard Protection으로 두어 production 도메인은 공개로 한다.
+9. [ ] **스모크 검사가 실패했을 때(되돌리기, N4)**: 배포는 이미 production에 올라가 있다. 바로 되돌린다. 본인 터미널에서 `vercel rollback`(직전 production 배포로) 또는 Vercel 대시보드 → Deployments에서 직전의 정상 배포 → **Promote to Production**(Instant Rollback). 확인: `curl -s -o /dev/null -w "%{http_code}" https://<콘솔>/login` = 200, `POST /api/internal/tick`(인증 없이) = 401. 그다음 실패 원인(대개 `TICK_SECRET` 미설정 503, 배포 보호 401, mock 표식, CSP)을 고치고 다시 실행한다. 되돌린 동안 1분 틱이 멈출 수 있으니(pg_cron은 같은 주소를 부른다) 틱 표시를 확인한다.
 
 | 변수 | 값 |
 |---|---|

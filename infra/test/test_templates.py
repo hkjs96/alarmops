@@ -6,6 +6,7 @@ Needs only PyYAML (installed with cfn-lint).
 
 from __future__ import annotations
 
+import json
 import unittest
 from pathlib import Path
 
@@ -519,39 +520,106 @@ class Workflows(unittest.TestCase):
             self.assertTrue(wf.get("jobs"), f.name)
 
 
+import re
+
+SHA_USES = re.compile(r"^[\w.-]+/[\w.-]+(/[\w./-]+)?@[0-9a-f]{40}$")
+
+
+def all_steps(wf):
+    for name, job in wf["jobs"].items():
+        for st in job["steps"]:
+            yield name, st
+
+
+class PinnedActions(unittest.TestCase):
+    def test_deploy_workflows_pin_actions_to_full_shas(self):
+        for fn in ("deploy-central.yml", "deploy-console.yml"):
+            wf = yaml.safe_load((WORKFLOWS / fn).read_text(encoding="utf-8"))
+            for job, st in all_steps(wf):
+                if "uses" in st:
+                    self.assertRegex(st["uses"], SHA_USES, f"{fn}:{job}")
+
+
 class DeployWorkflow(unittest.TestCase):
     def setUp(self):
         self.text = (WORKFLOWS / "deploy-central.yml").read_text(encoding="utf-8")
         self.wf = yaml.safe_load(self.text)
+        self.jobs = self.wf["jobs"]
 
-    def test_guards(self):
+    def runs(self, job):
+        return " ".join(st.get("run", "") for st in self.jobs[job]["steps"])
+
+    def test_triggers_and_workflow_permissions(self):
         wf = self.wf
         on = wf.get("on", wf.get(True))
         self.assertEqual(list(on), ["workflow_dispatch"])
-        self.assertEqual(wf["permissions"], {"contents": "read", "id-token": "write"})
+        self.assertEqual(wf["permissions"], {"contents": "read"})
         self.assertIn("vars.CENTRAL_DEPLOY_ROLE_ARN", self.text)
         self.assertNotIn("secrets.", self.text)
         self.assertNotIn("AWS_ACCESS_KEY_ID", self.text)
-        for name, job in wf["jobs"].items():
-            self.assertEqual(job["environment"], "central", name)
+        for name, job in self.jobs.items():
             self.assertIn("github.ref == 'refs/heads/main'", job["if"], name)
 
+    def test_job_split_and_permissions_per_job(self):
+        self.assertEqual(sorted(self.jobs), ["apply", "build", "checks", "plan"])
+        for name in ("build", "checks"):
+            self.assertEqual(self.jobs[name]["permissions"], {"contents": "read"}, name)
+            self.assertNotIn("environment", self.jobs[name], name)
+        for name in ("plan", "apply"):
+            self.assertEqual(self.jobs[name]["permissions"], {"contents": "read", "id-token": "write"}, name)
+            self.assertEqual(self.jobs[name]["environment"], "central", name)
+        self.assertEqual(sorted(self.jobs["plan"]["needs"]), ["build", "checks"])
+        self.assertEqual(sorted(self.jobs["apply"]["needs"]), ["build", "plan"])
+
+    def test_only_build_and_checks_run_package_managers(self):
+        for name in ("plan", "apply"):
+            r = self.runs(name)
+            for bad in ("npm ", "npx ", "pip ", "pip3", "setup-python", "setup-node"):
+                self.assertNotIn(bad, r, name)
+            for st in self.jobs[name]["steps"]:
+                self.assertNotRegex(str(st.get("uses", "")), r"setup-(node|python)", name)
+        self.assertIn("npm ci --ignore-scripts", self.runs("build"))
+        self.assertIn("--require-hashes -r infra/requirements-ci.txt", self.runs("checks"))
+        self.assertNotIn("pip install \"cfn-lint", self.text)
+
+    def test_download_and_verify_before_aws_credentials(self):
+        for name in ("plan", "apply"):
+            steps = self.jobs[name]["steps"]
+            uses = [str(st.get("uses", "")) for st in steps]
+            dl = next(i for i, u in enumerate(uses) if u.startswith("actions/download-artifact"))
+            cred = next(i for i, u in enumerate(uses) if u.startswith("aws-actions/configure-aws-credentials"))
+            self.assertLess(dl, cred, name)
+            # a checksum comparison step sits between the download and the credentials
+            between = " ".join(st.get("run", "") for st in steps[dl + 1:cred])
+            self.assertIn("MANIFEST.sha256", between, name)
+            self.assertIn("needs.build.outputs.manifest_sha256", self.text)
+
+    def test_build_fingerprints_right_after_bundling(self):
+        steps = self.jobs["build"]["steps"]
+        runs = [st.get("run", "") for st in steps]
+        i_build = next(i for i, r in enumerate(runs) if "build:lambda" in r)
+        i_stage = next(i for i, r in enumerate(runs) if "bundle_manifest.py manifest" in r)
+        self.assertEqual(i_stage, i_build + 1)
+        i_eng = next(i for i, r in enumerate(runs) if "build:engine-lambda" in r)
+        self.assertIn("bundle_manifest.py manifest", runs[i_eng + 1])
+        self.assertTrue(any(str(st.get("uses", "")).startswith("actions/upload-artifact") for st in steps))
+
     def test_two_phase_plan_then_approved_apply(self):
-        jobs = self.wf["jobs"]
-        self.assertEqual(sorted(jobs), ["apply", "plan"])
-        self.assertEqual(jobs["apply"]["needs"], "plan")
-        plan_cmds = " ".join(st.get("run", "") for st in jobs["plan"]["steps"])
-        apply_cmds = " ".join(st.get("run", "") for st in jobs["apply"]["steps"])
+        plan_cmds, apply_cmds = self.runs("plan"), self.runs("apply")
         self.assertIn("--no-execute-changeset", plan_cmds)
         self.assertNotIn("execute-change-set", plan_cmds)
         self.assertIn("starts_with(ResourceChange.ResourceType, 'AWS::IAM')", plan_cmds)
         self.assertIn("execute-change-set", apply_cmds)
         self.assertNotIn("sam deploy", apply_cmds)
+        self.assertIn("check-zip", apply_cmds)
+        # change set picked by "did not exist before", not by "latest available"
+        self.assertIn("comm -13", plan_cmds)
+        self.assertNotIn("[-1]", plan_cmds)
 
     def test_checkout_does_not_persist_credentials(self):
-        for st in self.wf["jobs"]["plan"]["steps"]:
+        for name, st in all_steps(self.wf):
             if str(st.get("uses", "")).startswith("actions/checkout"):
-                self.assertIs(st["with"]["persist-credentials"], False)
+                self.assertIs(st["with"]["persist-credentials"], False, name)
 
 
 class DeployConsoleWorkflow(unittest.TestCase):
@@ -566,36 +634,46 @@ class DeployConsoleWorkflow(unittest.TestCase):
         self.assertEqual(wf["permissions"], {"contents": "read"})
         self.assertEqual(list(wf["jobs"]), ["deploy"])
         job = wf["jobs"]["deploy"]
+        self.assertEqual(job["permissions"], {"contents": "read"})
         self.assertEqual(job["environment"], "production")
         self.assertIn("github.ref == 'refs/heads/main'", job["if"])
-        self.assertNotIn("pull_request", self.text.replace("pull_request_target_never", ""))
-        # secrets only from the environment, never echoed
         for name in ("VERCEL_TOKEN", "VERCEL_ORG_ID", "VERCEL_PROJECT_ID"):
             self.assertIn("secrets." + name, self.text)
+        self.assertNotIn("--token", self.text.replace("# ", ""))  # token only as environment variable
         self.assertNotRegex(self.text, r"echo[^\n]*\$\{?VERCEL_TOKEN")
+
+    def test_token_only_on_pull_and_deploy_steps(self):
+        for st in self.wf["jobs"]["deploy"]["steps"]:
+            has = "VERCEL_TOKEN" in (st.get("env") or {})
+            run = st.get("run", "")
+            if "pull" in run or "deploy --prebuilt" in run or "settings are present" in st.get("name", ""):
+                continue
+            self.assertFalse(has, st.get("name", st.get("uses")))
 
     def test_step_order_and_cleanup(self):
         steps = self.wf["jobs"]["deploy"]["steps"]
         runs = [st.get("run", "") for st in steps]
+
         def idx(s):
             return next(i for i, r in enumerate(runs) if s in r)
-        self.assertLess(idx("npm ci --ignore-scripts"), idx("pull --yes --environment=production"))
-        self.assertLess(idx("pull --yes --environment=production"), idx("check-console-deploy-env.mjs .vercel/.env.production.local"))
-        self.assertLess(idx("check-console-deploy-env.mjs"), idx("build --prod"))
+
+        self.assertLess(idx("npm ci --ignore-scripts"), idx("--prefix tools/vercel-cli"))
+        self.assertLess(idx("--prefix tools/vercel-cli"), idx("pull --yes --environment=production"))
+        self.assertLess(idx("pull --yes"), idx("check-console-deploy-env.mjs .vercel/.env.production.local"))
+        self.assertLess(idx("check-console-deploy-env.mjs"), idx("strip-deploy-env.mjs"))
+        self.assertLess(idx("strip-deploy-env.mjs"), idx("build --prod"))
         self.assertLess(idx("build --prod"), idx("deploy --prebuilt --prod"))
         self.assertLess(idx("deploy --prebuilt --prod"), idx("smoke-console.mjs"))
         last = steps[-1]
         self.assertEqual(last.get("if"), "always()")
         self.assertIn("rm -rf .vercel", last["run"])
-        for st in steps:
-            if str(st.get("uses", "")).startswith("actions/checkout"):
-                self.assertIs(st["with"]["persist-credentials"], False)
+        self.assertIn("vercel\\.app$", self.text)
 
-    def test_vercel_cli_pinned_exactly(self):
-        import re
-        self.assertRegex(self.wf["env"]["VERCEL_CLI_VERSION"], r"^\d+\.\d+\.\d+$")
-        self.assertNotIn("vercel@latest", self.text)
-        self.assertEqual(len(re.findall(r"vercel@\$\{VERCEL_CLI_VERSION\}", self.text)), 3)
+    def test_vercel_cli_from_locked_install(self):
+        self.assertNotIn("npx", self.text.replace("# ", "").replace("npx does", ""))
+        pkg = json.loads((ROOT.parent / "tools" / "vercel-cli" / "package.json").read_text(encoding="utf-8"))
+        self.assertRegex(pkg["dependencies"]["vercel"], r"^\d+\.\d+\.\d+$")
+        self.assertTrue((ROOT.parent / "tools" / "vercel-cli" / "package-lock.json").is_file())
 
 
 if __name__ == "__main__":

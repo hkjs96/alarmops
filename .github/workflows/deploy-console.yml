@@ -9,13 +9,16 @@ name: deploy-console
 #
 # Secrets: VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID are `production` ENVIRONMENT secrets (Settings ->
 # Environments -> production -> Secrets), not repository secrets: only a job that passed the environment's rules can read
-# them. The token is given only to the steps that call Vercel (pull, deploy), never to build or smoke. Values are never
-# printed; the env file pulled from Vercel is deleted at the end of the job even on failure.
+# them. The token is given ONLY to the two steps that talk to Vercel (pull, deploy), as the VERCEL_TOKEN environment
+# variable (never as a command-line argument). Everything that runs third-party or repository code (npm ci, the CLI
+# install, vercel build) runs without it, and `vercel build` also runs without any secret from the project's environment:
+# right after the env check, strip-deploy-env.mjs cuts the pulled file down to CONSOLE_ORIGIN, TRUSTED_PROXY and
+# NEXT_PUBLIC_* (the console builds without the rest: CI runs `next build` with none of them). The runtime gets its real
+# variables from the Vercel project. The file is deleted at the end of the job even on failure. Values are never printed.
 #
-# Vercel CLI: `npx vercel@65.16.0` (exact version, verified on the npm registry 2026-11-16). It is not a devDependency
-# so that root package.json and the lockfile stay untouched; npx does not verify the tarball against a lockfile, so a
-# registry compromise of that exact version is the residual risk (bump deliberately, review the release).
-# TODO(security, 권고 5): pin every `uses:` below to a full commit SHA, as in the other workflows.
+# Vercel CLI: tools/vercel-cli/package.json (exact version) + package-lock.json (integrity hashes), installed with
+# `npm ci --ignore-scripts` and run from tools/vercel-cli/node_modules/.bin. Not an app dependency.
+# Actions are pinned to full commit SHAs (tag in the comment); .github/dependabot.yml proposes updates.
 #
 # Vercel project settings assumed: Root Directory `apps/console`, "Include source files outside of the Root Directory"
 # on (default), framework Next.js. The CLI is run from the repository root, where `vercel pull` writes `.vercel/`.
@@ -31,9 +34,9 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  VERCEL_CLI_VERSION: "65.16.0"
   NEXT_TELEMETRY_DISABLED: "1"
   VERCEL_TELEMETRY_DISABLED: "1"
+  VERCEL_BIN: tools/vercel-cli/node_modules/.bin/vercel
 
 jobs:
   deploy:
@@ -42,16 +45,21 @@ jobs:
     environment: production
     # workflow_dispatch can start any branch's copy of this file; only main may deploy.
     if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
       # package.json engines.node is ">=20" and there is no .nvmrc; CI uses 20, so does this.
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: 20
           cache: npm
       - run: npm ci --ignore-scripts
+      # No token in this step (nor in the one above): installing packages is third-party code.
+      - name: Install the pinned Vercel CLI
+        run: npm ci --ignore-scripts --prefix tools/vercel-cli
       - name: Check the Vercel settings are present
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -66,15 +74,18 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-        run: npx --yes "vercel@${VERCEL_CLI_VERSION}" pull --yes --environment=production --token "$VERCEL_TOKEN"
+        run: $VERCEL_BIN pull --yes --environment=production
       # The file Vercel gives the build is the one checked (checked values = deployed values). Names and reasons only.
       - name: Check the console deploy environment
         run: node .github/scripts/check-console-deploy-env.mjs .vercel/.env.production.local
-      - name: Build (prebuilt output, production)
+      # Only repository scripts run between pull and here. Now remove every secret before the build runs repo code.
+      - name: Strip secrets from the pulled environment
+        run: node .github/scripts/strip-deploy-env.mjs .vercel/.env.production.local
+      - name: Build (prebuilt output, production), without the token
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-        run: npx --yes "vercel@${VERCEL_CLI_VERSION}" build --prod
+        run: $VERCEL_BIN build --prod
       - name: Deploy the prebuilt output
         id: deploy
         env:
@@ -83,18 +94,18 @@ jobs:
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
         run: |
           # stdout of `vercel deploy` is the deployment URL (not a secret); progress goes to stderr.
-          url=$(npx --yes "vercel@${VERCEL_CLI_VERSION}" deploy --prebuilt --prod --token "$VERCEL_TOKEN")
-          case "$url" in
-            https://*.vercel.app) ;;
-            *) echo "::error::unexpected output from vercel deploy (not a deployment URL)"; exit 1;;
-          esac
+          url=$($VERCEL_BIN deploy --prebuilt --prod)
+          if ! [[ "$url" =~ ^https://[A-Za-z0-9.-]+\.vercel\.app$ ]]; then
+            echo "::error::unexpected output from vercel deploy (not a *.vercel.app deployment URL)"; exit 1
+          fi
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "Deployment: $url" >> "$GITHUB_STEP_SUMMARY"
       # Smoke check runs against CONSOLE_ORIGIN (the production address from the checked environment): the per-deployment
       # URL may sit behind Vercel deployment protection, which would answer 401 to everything and hide real problems.
+      # If it fails, the new deployment is already live: roll back (docs/GO-LIVE.md, step 3, "Rollback").
       - name: Smoke check
         run: node .github/scripts/smoke-console.mjs --env-file .vercel/.env.production.local
-      # Always: the pulled file holds the production environment values.
+      # Always: the pulled file holds production environment values (secrets are already stripped; this is the second layer).
       - name: Delete the pulled environment
         if: always()
         run: rm -rf .vercel
