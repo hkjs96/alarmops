@@ -465,7 +465,7 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     const page = rows.slice(0, f.limit).map((r): RevealLogRow => {
       const c = r.customerId ? this.customers.get(r.customerId) : undefined;
       return {
-        id: r.id, at: r.at, mode: r.mode, actorUserId: r.actorUserId, actorName: this.users.get(r.actorUserId)?.name ?? r.actorUserId, contactId: r.contactId, contactName: r.contactName,
+        id: r.id, at: r.at, mode: r.mode, actorUserId: r.actorUserId, actorName: this.users.get(r.actorUserId)?.name ?? r.actorUserId, actorRole: r.actorRole, contactId: r.contactId, contactName: r.contactName,
         customer: c ? { id: c.id, name: c.name, slug: c.slug } : null, channel: r.channel, reason: r.reason,
         notified: r.notifiedContactIds.map((id) => ({ contactId: id, name: this.contacts.get(id)?.name ?? id })),
       };

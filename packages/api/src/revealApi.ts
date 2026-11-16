@@ -16,7 +16,7 @@ import { ApiError, decodeCursor, encodeCursor, invalid, isCleanId, isIsoInstant,
 import type { ApiRepository, RevealChannelValue, RevealLimits, RevealModeValue } from './repo.js';
 import { SLUG_PATTERN } from './slug.js';
 
-interface Deps { repo: ApiRepository; now: () => Date }
+interface Deps { repo: ApiRepository; now: () => Date; log?: (level: 'warn' | 'error', msg: string, data?: Record<string, unknown>) => void }
 
 /** API-CONTRACT §8.4 / Q-API-14: 30 reveals a minute, 10 emergency reveals an hour, per user. */
 export const REVEAL_LIMITS: RevealLimits = { perMinute: 30, emergencyPerHour: 10 };
@@ -40,6 +40,8 @@ export type RevealStanding = { mode: RevealModeValue } | { denied: 'NOT_A_RESPON
  * `isResponder` = Responder of the customer the contact belongs to (for an INTERNAL contact: of a customer both are Responder of).
  */
 export function revealStanding(auth: AuthContext, isResponder: boolean, target: 'CUSTOMER' | 'INTERNAL'): RevealStanding {
+  // Fail closed: requireAuth only lets INTERNAL | CUSTOMER through; anything else (a future kind) is refused here too.
+  if ((auth.kind as string) !== 'INTERNAL' && (auth.kind as string) !== 'CUSTOMER') return { denied: 'NOT_A_RESPONDER' };
   if (auth.kind === 'CUSTOMER') return { mode: 'NORMAL' };
   const role = effectiveRole(auth) ?? 'VIEWER';
   if (isResponder) return role === 'VIEWER' && !VIEWER_RESPONDER_MAY_REVEAL ? { denied: 'ROLE_REQUIRED' } : { mode: 'NORMAL' };
@@ -53,6 +55,14 @@ export function revealFlags(auth: AuthContext, isResponder: boolean, target: 'CU
   return 'denied' in s ? { canReveal: false, revealRequiresReason: false } : { canReveal: true, revealRequiresReason: s.mode === 'EMERGENCY' };
 }
 
+/** `actorRole` of a portal user's reveal: not a console role, so a portal reveal is never shown as a staff VIEWER. */
+export const PORTAL_ACTOR = 'PORTAL';
+
+/** A refused attempt leaves a trace (who, which contact, which code) — never the value, never the reason text. */
+function refused(deps: Deps, req: ApiRequest, auth: AuthContext, contactId: string, status: number, code: string): void {
+  deps.log?.('warn', 'contact.reveal.refused', { requestId: req.requestId, userId: auth.userId, contactId, status, code });
+}
+
 const CHANNELS: readonly RevealChannelValue[] = ['PHONE', 'EMAIL', 'SLACK'];
 const valueOf = (c: Contact, ch: RevealChannelValue): string | null => {
   const v = ch === 'PHONE' ? c.phone : ch === 'EMAIL' ? c.email : c.slackUserId;
@@ -60,14 +70,22 @@ const valueOf = (c: Contact, ch: RevealChannelValue): string | null => {
 };
 
 /**
- * Q-API-14 (current handling): the "primary Responder" is the first target of step 1 of the customer's own call order
- * (a rotation: whoever is on shift now). Without one — or when that is the caller — every OTHER active ADMIN is told.
+ * Q-API-14 (current handling). Who is told about an EMERGENCY reveal — INTERNAL, active contacts only, never the revealed
+ * contact itself and never the caller, never a customer's person:
+ *   1. the first such target of step 1 of the customer's own call order (a rotation: whoever is on shift now);
+ *   2. else every other active ADMIN staff;
+ *   3. else nobody: `[]`, which the list shows as `notifyStatus: 'NO_RECIPIENT'` (not to be read as "fine").
+ * Recording only: nothing is delivered yet (hkjs96/alarmops#39).
  */
-async function emergencyRecipients(deps: Deps, customerId: string, actorContactId: string | null): Promise<string[]> {
+async function emergencyRecipients(deps: Deps, customerId: string, actorContactId: string | null, revealedContactId: string): Promise<string[]> {
+  const skip = (id: string) => id === actorContactId || id === revealedContactId;
   const { configs, world } = await deps.repo.pagingContext(customerId);
-  const first = pagingPath(configs, { customerId }, world, deps.now())?.steps[0]?.nowIds[0];
-  if (first && first !== actorContactId) return [first];
-  return (await deps.repo.adminStaff()).map((a) => a.contactId).filter((id) => id !== actorContactId);
+  for (const id of pagingPath(configs, { customerId }, world, deps.now())?.steps[0]?.nowIds ?? []) {
+    if (skip(id)) continue;
+    const c = await deps.repo.getContact(id);
+    if (c && c.kind === 'INTERNAL' && c.active) return [c.id];
+  }
+  return (await deps.repo.adminStaff()).map((a) => a.contactId).filter((id) => !skip(id));
 }
 
 export async function revealContact(req: ApiRequest, deps: Deps, contactId: string): Promise<ApiResponse> {
@@ -76,7 +94,8 @@ export async function revealContact(req: ApiRequest, deps: Deps, contactId: stri
   const contact = await deps.repo.getContact(contactId);
 
   // 1. scope first: the same 404 for "no such contact" and "not yours" (§2). Portal: only people of its own customer.
-  if (!contact) throw notFound();
+  // an inactive contact is gone for this purpose: the same 404 (NORMAL and EMERGENCY alike)
+  if (!contact || !contact.active) throw notFound();
   let customerId: string | null; // the customer the reveal is logged against
   let isResponder: boolean;
   if (auth.kind === 'CUSTOMER') {
@@ -108,10 +127,12 @@ export async function revealContact(req: ApiRequest, deps: Deps, contactId: stri
 
   const standing = revealStanding(auth, isResponder, contact.kind);
   if ('denied' in standing) {
+    refused(deps, req, auth, contact.id, 403, standing.denied);
     throw standing.denied === 'ROLE_REQUIRED' ? roleRequired('OPERATOR') : new ApiError(403, 'NOT_A_RESPONDER', 'Only a responder of this customer can open this contact.');
   }
   // 3. a typed reason for an emergency (no value, nothing logged)
   if (standing.mode === 'EMERGENCY' && reason.length === 0) {
+    refused(deps, req, auth, contact.id, 422, 'EMERGENCY_REASON_REQUIRED');
     throw new ApiError(422, 'EMERGENCY_REASON_REQUIRED', 'You are not a responder for this customer. Give the reason you need this contact.', { field: 'reason' });
   }
   // 4. nothing on file: nothing to reveal, nothing to log
@@ -120,12 +141,15 @@ export async function revealContact(req: ApiRequest, deps: Deps, contactId: stri
 
   // 5. log first (limits + log + audit in one transaction), value after
   const actorContactId = await deps.repo.contactIdForUser(auth.userId);
-  const notified = standing.mode === 'EMERGENCY' && customerId ? await emergencyRecipients(deps, customerId, actorContactId) : [];
+  const notified = standing.mode === 'EMERGENCY' && customerId ? await emergencyRecipients(deps, customerId, actorContactId, contact.id) : [];
   const res = await deps.repo.recordReveal({
-    actorUserId: auth.userId, actorRole: effectiveRole(auth) ?? 'VIEWER', contactId: contact.id, contactName: contact.name, customerId, channel, mode: standing.mode,
+    actorUserId: auth.userId, actorRole: auth.kind === 'CUSTOMER' ? PORTAL_ACTOR : effectiveRole(auth) ?? 'VIEWER', contactId: contact.id, contactName: contact.name, customerId, channel, mode: standing.mode,
     reason: reason || null, notifiedContactIds: notified, requestId: req.requestId, limits: REVEAL_LIMITS,
   });
-  if (!res.ok) throw rateLimited('Too many reveals. Try again shortly.', res.retryAfterSec);
+  if (!res.ok) {
+    refused(deps, req, auth, contact.id, 429, 'RATE_LIMITED');
+    throw rateLimited('Too many reveals. Try again shortly.', res.retryAfterSec);
+  }
   return ok({ channel, value, mode: standing.mode, revealedAt: res.at.toISOString(), auditId: res.id }, { 'cache-control': 'no-store' });
 }
 
@@ -170,8 +194,10 @@ export async function listContactReveals(req: ApiRequest, deps: Deps): Promise<A
   const last = page.rows[page.rows.length - 1];
   return ok({
     items: page.rows.map((r) => ({
-      id: r.id, at: r.at.toISOString(), mode: r.mode, actor: { id: r.actorUserId, name: r.actorName }, contact: { id: r.contactId, name: r.contactName },
+      id: r.id, at: r.at.toISOString(), mode: r.mode, actor: { id: r.actorUserId, name: r.actorName, kind: r.actorRole === PORTAL_ACTOR ? 'PORTAL' : 'STAFF' }, contact: { id: r.contactId, name: r.contactName },
       org: { customer: r.customer }, channel: r.channel, reason: r.reason, notified: r.notified,
+      // recording only (nothing is delivered yet): an empty list on an EMERGENCY row is NO_RECIPIENT, never "fine"
+      notifyStatus: r.mode !== 'EMERGENCY' ? 'NOT_APPLICABLE' : r.notified.length ? 'RECORDED' : 'NO_RECIPIENT',
     })),
     nextCursor: page.hasMore && last ? encodeCursor({ t: last.at.toISOString(), id: last.id } satisfies Cursor) : null,
   });

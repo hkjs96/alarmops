@@ -6,12 +6,13 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { Contact, TickRepository } from '@alarmops/core';
 import type { MakeFixture, StoreFixture } from '../../../core/test/contract/fixture.js';
 import { seedWorld, PATTERNS, config, step, T0 } from '../../../core/test/world.js';
-import { createApi, MemoryApiStore, REVEAL_LIMITS, VIEWER_RESPONDER_MAY_REVEAL, type ApiRepository, type ApiRequest, type ApiResponse, type AuthContext } from '../../src/index.js';
+import { createApi, MemoryApiStore, REVEAL_LIMITS, VIEWER_RESPONDER_MAY_REVEAL, revealStanding, type ApiRepository, type ApiRequest, type ApiResponse, type AuthContext } from '../../src/index.js';
 import { USERS, body } from '../helpers.js';
 
 type Repo = TickRepository & ApiRepository;
 type Call = (auth: AuthContext | null, method: ApiRequest['method'], path: string, opts?: { query?: Record<string, string | undefined>; body?: unknown; headers?: Record<string, string> }) => Promise<ApiResponse>;
-interface RWorld { fx: StoreFixture<Repo>; call: Call; callOn2: Call; clock: { now: Date } }
+interface Logged { level: string; msg: string; data?: Record<string, unknown> }
+interface RWorld { fx: StoreFixture<Repo>; call: Call; callOn2: Call; clock: { now: Date }; logs: Logged[] }
 
 const JUNHO: AuthContext = { userId: 'usr_junho', name: 'Junho Park', kind: 'INTERNAL', customerIds: '*', role: 'VIEWER' }; // VIEWER, Responder of Mirae
 const ROOT: AuthContext = { userId: 'usr_root', name: 'Root Admin', kind: 'INTERNAL', customerIds: '*', role: 'ADMIN' }; // ADMIN, Responder nowhere
@@ -19,30 +20,33 @@ const HAEUN = USERS.haeun; // OPERATOR, Responder of Mirae
 const MINJAE = USERS.minjae; // ADMIN, Responder of Hanbit (not of Mirae)
 const HANBIT_ONLY: AuthContext = { userId: 'usr_minjae', name: 'Minjae Lee', kind: 'INTERNAL', customerIds: ['cus_hanbit'], role: 'ADMIN' };
 
-async function rworld(make: MakeFixture<Repo>, o: { hanbitConfig?: boolean } = {}): Promise<RWorld> {
+async function rworld(make: MakeFixture<Repo>, o: { hanbitConfig?: boolean; mirae?: 'default' | 'none' | 'customerPerson'; rootRole?: 'ADMIN' | 'OPERATOR' } = {}): Promise<RWorld> {
   const seed = seedWorld(new MemoryApiStore()) as MemoryApiStore;
   const user = (id: string, name: string, contactId: string | null, role: 'VIEWER' | 'OPERATOR' | 'ADMIN', customerId: string | null) =>
     seed.users.set(id, { id, name, contactId, email: `${id}@example.test`, role, customerId });
   user('usr_haeun', 'Haeun Kim', 'ct_haeun', 'OPERATOR', null);
   user('usr_minjae', 'Minjae Lee', 'ct_minjae', 'ADMIN', null);
   user('usr_junho', 'Junho Park', 'ct_junho', 'VIEWER', null);
-  user('usr_root', 'Root Admin', 'ct_root', 'ADMIN', null);
+  user('usr_root', 'Root Admin', 'ct_root', o.rootRole ?? 'ADMIN', null);
   user('usr_viewer', 'Viewer', null, 'VIEWER', null);
   user('usr_yuna', 'Yuna Seo', 'ct_yuna', 'VIEWER', 'cus_mirae');
   user('usr_dohyun', 'Dohyun Han', 'ct_dohyun', 'VIEWER', 'cus_hanbit');
   seed.contacts.set('ct_root', { id: 'ct_root', kind: 'INTERNAL', customerId: null, name: 'Root Admin', active: true, email: 'root@msp.example', phone: '+821099990000', slackUserId: 'U_root' });
   seed.contacts.set('ct_nophone', { id: 'ct_nophone', kind: 'CUSTOMER', customerId: 'cus_mirae', name: 'No Phone', active: true, email: 'nophone@mirae.example', phone: null, slackUserId: null });
-  seed.configs.push(PATTERNS.templateStandard()); // Mirae: step 1 = rotation rot_night → Haeun is on shift at T0
+  // Mirae: step 1 = rotation rot_night → Haeun is on shift at T0
+  if (o.mirae === 'customerPerson') seed.configs.push(config('cus_mirae', [step(0, 0, 'PERSON', 'ct_yuna', ['SMS'])]));
+  else if (o.mirae !== 'none') seed.configs.push(PATTERNS.templateStandard());
   if (o.hanbitConfig !== false) seed.configs.push(config('cus_hanbit', [step(0, 0, 'ROTATION', 'rot_hanbit', ['SMS'])], { style: 'CUSTOMER_ROTATION' }));
   const fx = await make(seed);
   const clock = { now: T0 };
+  const logs: Logged[] = [];
   fx.setClock(() => clock.now);
   const mk = (repo: Repo): Call => {
-    const api = createApi({ repo, now: () => clock.now });
+    const api = createApi({ repo, now: () => clock.now, log: (level, msg, data) => { logs.push({ level, msg, data }); } });
     let seq = 0;
     return (auth, method, path, c = {}) => api.handle({ method, path, auth, query: c.query, body: c.body, headers: c.headers, requestId: `req_${++seq}` });
   };
-  return { fx, call: mk(fx.repo), callOn2: mk(fx.secondRunner()), clock };
+  return { fx, call: mk(fx.repo), callOn2: mk(fx.secondRunner()), clock, logs };
 }
 
 const reveal = (id: string, b: unknown) => ['POST', `/contacts/${id}/reveal`, { body: b }] as const;
@@ -267,12 +271,17 @@ export function revealContract(make: MakeFixture<Repo>): void {
       expect((await w.callOn2(HAEUN, ...reveal('ct_yuna', { channel: 'PHONE' }))).status).toBe(429);
     });
 
-    it('simultaneous requests cannot slip past the limit', async () => {
+    it('simultaneous requests never exceed the limit; a request that finds the user lock taken gets 429 at once (no waiting)', async () => {
       w = await rworld(make);
       const rs = await Promise.all(Array.from({ length: 40 }, () => w.callOn2(HAEUN, ...reveal('ct_yuna', { channel: 'PHONE' }))));
-      expect(rs.filter((r) => r.status === 200)).toHaveLength(30);
-      expect(rs.filter((r) => r.status === 429)).toHaveLength(10);
-      expect(await rows()).toHaveLength(30);
+      const okN = rs.filter((r) => r.status === 200).length;
+      const limited = rs.filter((r) => r.status === 429);
+      expect(okN + limited.length).toBe(40);
+      expect(okN).toBeGreaterThanOrEqual(1);
+      expect(okN).toBeLessThanOrEqual(30);
+      if (!w.fx.concurrent) expect(okN).toBe(30); // one after the other: exactly the limit
+      for (const r of limited) { expect(body(r).error.code).toBe('RATE_LIMITED'); expect(Number(r.headers['retry-after'])).toBeGreaterThanOrEqual(1); noValue(r, await phoneOf('ct_yuna')); }
+      expect(await rows()).toHaveLength(okN); // every value handed out has exactly one row
     });
 
     it('10 emergency reveals an hour per user; normal reveals are not counted against that, and an hour later it is free again', async () => {
@@ -314,8 +323,8 @@ export function revealContract(make: MakeFixture<Repo>): void {
       expect(ids(r)).toEqual(['ct_yuna:EMERGENCY', 'ct_dohyun:NORMAL', 'ct_yuna:NORMAL']);
       expect(body(r).nextCursor).toBeNull();
       expect(body(r).items[0]).toEqual({
-        id: expect.any(String), at: new Date(T0.getTime() + 120_000).toISOString(), mode: 'EMERGENCY', actor: { id: 'usr_minjae', name: 'Minjae Lee' }, contact: { id: 'ct_yuna', name: 'Yuna Seo' },
-        org: { customer: { id: 'cus_mirae', name: 'Mirae Pay', slug: 'mirae' } }, channel: 'PHONE', reason: 'SEV-1 no answer', notified: [{ contactId: 'ct_haeun', name: 'Haeun Kim' }],
+        id: expect.any(String), at: new Date(T0.getTime() + 120_000).toISOString(), mode: 'EMERGENCY', actor: { id: 'usr_minjae', name: 'Minjae Lee', kind: 'STAFF' }, contact: { id: 'ct_yuna', name: 'Yuna Seo' },
+        org: { customer: { id: 'cus_mirae', name: 'Mirae Pay', slug: 'mirae' } }, channel: 'PHONE', reason: 'SEV-1 no answer', notified: [{ contactId: 'ct_haeun', name: 'Haeun Kim' }], notifyStatus: 'RECORDED',
       });
       noValue(r, await phoneOf('ct_yuna'), await phoneOf('ct_dohyun'), 'ct_yuna@example.test', 'ct_dohyun@example.test');
     });
@@ -378,6 +387,65 @@ export function revealContract(make: MakeFixture<Repo>): void {
         if (!cursor) break;
       }
       expect(seen).toEqual(['ct_yuna:EMERGENCY', 'ct_dohyun:NORMAL', 'ct_yuna:NORMAL']);
+    });
+  });
+
+  describe('review follow-ups (security review of 1e5cb65)', () => {
+    it('inactive contact: the same 404 as an unknown id, NORMAL and EMERGENCY, nothing logged', async () => {
+      w = await rworld(make);
+      const unknown = await w.call(HAEUN, ...reveal('ct_nope', { channel: 'PHONE' }));
+      await w.fx.patchContact('ct_yuna', { active: false });
+      for (const [who, b] of [[HAEUN, { channel: 'PHONE' }], [MINJAE, { channel: 'PHONE', reason: 'urgent' }], [USERS.yuna, { channel: 'PHONE' }]] as const) {
+        const r = await w.call(who, ...reveal('ct_yuna', b));
+        expect([who.userId, r.status]).toEqual([who.userId, 404]);
+        expect({ ...body(r).error, requestId: '' }).toEqual({ ...body(unknown).error, requestId: '' });
+      }
+      expect(await rows()).toHaveLength(0);
+    });
+
+    it('recipients are INTERNAL and active only: a customer person as step-1 target is skipped (other admins instead); the revealed contact and the caller are never told', async () => {
+      w = await rworld(make, { mirae: 'customerPerson' });
+      await w.call(MINJAE, ...reveal('ct_seojun', { channel: 'PHONE', reason: 'urgent' }));
+      expect((await rows())[0]!.notifiedContactIds).toEqual(['ct_root']); // not ct_yuna, not the caller ct_minjae
+    });
+
+    it('nobody to tell: notifiedContactIds is empty and the list says NO_RECIPIENT (not "fine"); NORMAL rows say NOT_APPLICABLE', async () => {
+      w = await rworld(make, { mirae: 'none', rootRole: 'OPERATOR' }); // Minjae is the only ADMIN
+      await w.call(MINJAE, ...reveal('ct_yuna', { channel: 'PHONE', reason: 'nobody else' }));
+      await w.call(HAEUN, ...reveal('ct_yuna', { channel: 'EMAIL' }));
+      expect((await rows())[0]!.notifiedContactIds).toEqual([]);
+      const items = body(await w.call(MINJAE, 'GET', '/contact-reveals')).items as Array<{ mode: string; notifyStatus: string; notified: unknown[] }>;
+      expect(items.map((i) => [i.mode, i.notifyStatus, i.notified.length])).toEqual([['NORMAL', 'NOT_APPLICABLE', 0], ['EMERGENCY', 'NO_RECIPIENT', 0]]);
+    });
+
+    it('refused attempts (403, 422 emergency without reason, 429) are logged with requestId, userId, contactId, code; never the value or the reason text', async () => {
+      w = await rworld(make);
+      await w.call(HAEUN, ...reveal('ct_sora', { channel: 'PHONE', reason: 'secret-reason-text' }));
+      await w.call(MINJAE, ...reveal('ct_yuna', { channel: 'PHONE' }));
+      for (let i = 0; i < 30; i++) await w.call(HAEUN, ...reveal('ct_yuna', { channel: 'PHONE' }));
+      const last = await w.call(HAEUN, ...reveal('ct_yuna', { channel: 'PHONE', reason: 'secret-reason-text' }));
+      expect(last.status).toBe(429);
+      const got = w.logs.filter((l) => l.msg === 'contact.reveal.refused');
+      expect(got.map((l) => [l.data!.userId, l.data!.contactId, l.data!.status, l.data!.code])).toEqual([
+        ['usr_haeun', 'ct_sora', 403, 'NOT_A_RESPONDER'], ['usr_minjae', 'ct_yuna', 422, 'EMERGENCY_REASON_REQUIRED'], ['usr_haeun', 'ct_yuna', 429, 'RATE_LIMITED']]);
+      for (const l of got) expect(typeof l.data!.requestId).toBe('string');
+      const dump = JSON.stringify(w.logs);
+      for (const v of [await phoneOf('ct_sora'), await phoneOf('ct_yuna'), 'secret-reason-text', 'ct_yuna@example.test']) expect(dump).not.toContain(v);
+    });
+
+    it('a portal reveal is recorded and listed as a portal actor, not as a staff VIEWER', async () => {
+      w = await rworld(make);
+      await w.call(USERS.yuna, ...reveal('ct_seojun', { channel: 'EMAIL' }));
+      expect((await rows())[0]).toMatchObject({ actorUserId: 'usr_yuna', actorRole: 'PORTAL' });
+      const items = body(await w.call(MINJAE, 'GET', '/contact-reveals')).items;
+      expect(items[0].actor).toEqual({ id: 'usr_yuna', name: 'Yuna Seo', kind: 'PORTAL' });
+    });
+
+    it('an unknown auth kind is refused (fail closed)', async () => {
+      w = await rworld(make);
+      const odd = { userId: 'usr_root', kind: 'SERVICE', customerIds: '*', role: 'ADMIN' } as unknown as AuthContext;
+      expect((await w.call(odd, ...reveal('ct_yuna', { channel: 'PHONE', reason: 'x' }))).status).toBe(401);
+      expect(revealStanding({ ...ROOT, kind: 'SERVICE' } as unknown as AuthContext, false, 'CUSTOMER')).toEqual({ denied: 'NOT_A_RESPONDER' });
     });
   });
 

@@ -166,7 +166,7 @@ export interface RevealWrite {
   channel: RevealChannelValue; mode: RevealModeValue; reason: string | null; notifiedContactIds: string[]; requestId: string | null;
   limits: RevealLimits;
 }
-/** `at` is the store's clock (R-14). `retryAfterSec` of a refusal: when the oldest row in the window leaves it. */
+/** `at` is the store's clock (R-14). `retryAfterSec` of a refusal: when the oldest row in the window leaves it (1 when another request of the same user holds the lock — nothing waits). */
 export type RevealWriteOutcome = { ok: true; id: string; at: Date } | { ok: false; retryAfterSec: number };
 export interface RevealLogFilter {
   /** null = every customer (ADMIN; also rows without a customer). A list = only those customers (may be empty). */
@@ -176,7 +176,7 @@ export interface RevealLogFilter {
 }
 /** One ContactRevealLog row with the names the review list shows. Never a contact value. */
 export interface RevealLogRow {
-  id: string; at: Date; mode: RevealModeValue; actorUserId: string; actorName: string; contactId: string; contactName: string;
+  id: string; at: Date; mode: RevealModeValue; actorUserId: string; actorName: string; actorRole: string; contactId: string; contactName: string;
   customer: { id: string; name: string; slug: string } | null; channel: RevealChannelValue; reason: string | null;
   notified: Array<{ contactId: string; name: string }>;
 }

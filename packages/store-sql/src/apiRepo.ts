@@ -541,7 +541,10 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
     return this.sql.transaction(async (tx) => {
       // One writer per user at a time: the count below and the INSERT are one step, so two requests (or two
       // instances) cannot both pass at 29 of 30. The limit is read from the rows themselves.
-      await tx.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`contact-reveal:${w.actorUserId}`]);
+      // Never wait for the lock (a waiting request holds a pooled connection): if another request of this user is
+      // writing right now, answer 429 with Retry-After 1 at once.
+      const [lock] = await tx.query(`SELECT pg_try_advisory_xact_lock(hashtext($1)) AS "got"`, [`contact-reveal:${w.actorUserId}`]);
+      if (!lock?.got) return { ok: false as const, retryAfterSec: 1 };
       const now = this.sql.now();
       // The row that, once it leaves the window, frees a slot: the `limit`-th newest inside it.
       const wait = async (windowSec: number, limit: number, emergencyOnly: boolean): Promise<number> => {
@@ -576,7 +579,7 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
     if (f.to) where.push(`l."at" <= ${p.add(iso(f.to))}::timestamptz`);
     if (f.after) { const t = p.add(f.after.t); const i = p.add(f.after.id); where.push(`(l."at" < ${t}::timestamptz OR (l."at" = ${t}::timestamptz AND l."id" < ${i}))`); }
     const rows = await this.sql.query(
-      `SELECT l."id", l."at", l."mode", l."channel", l."reason", l."actorUserId", u."name" AS "actorName", l."contactId", l."contactName", l."notifiedContactIds",
+      `SELECT l."id", l."at", l."mode", l."channel", l."reason", l."actorUserId", l."actorRole", u."name" AS "actorName", l."contactId", l."contactName", l."notifiedContactIds",
               cu."id" AS "cid", cu."name" AS "cname", cu."slug" AS "cslug",
               COALESCE((SELECT jsonb_agg(jsonb_build_object('contactId', n."id", 'name', n."name") ORDER BY x.ord) FROM unnest(l."notifiedContactIds") WITH ORDINALITY AS x(id, ord) JOIN "Contact" n ON n."id" = x.id), '[]'::jsonb) AS "notified"
          FROM "ContactRevealLog" l JOIN "User" u ON u."id" = l."actorUserId" LEFT JOIN "Customer" cu ON cu."id" = l."customerId"
@@ -584,7 +587,7 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
     return {
       hasMore: rows.length > f.limit,
       rows: rows.slice(0, f.limit).map((r) => ({
-        id: r.id, at: dReq(r.at), mode: r.mode, actorUserId: r.actorUserId, actorName: r.actorName, contactId: r.contactId, contactName: r.contactName,
+        id: r.id, at: dReq(r.at), mode: r.mode, actorUserId: r.actorUserId, actorName: r.actorName, actorRole: r.actorRole, contactId: r.contactId, contactName: r.contactName,
         customer: r.cid ? { id: r.cid, name: r.cname, slug: r.cslug } : null, channel: r.channel, reason: r.reason ?? null,
         notified: (typeof r.notified === 'string' ? JSON.parse(r.notified) : r.notified) as Array<{ contactId: string; name: string }>,
       })),
