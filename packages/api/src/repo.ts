@@ -156,6 +156,31 @@ export interface ExportIncidentRow {
   memberCount: number; eventCount: number; accountIds: string[]; resourceTypes: string[]; pagingSuppressed: string | null;
 }
 
+// ── contact reveal (D-35) ──
+export type RevealChannelValue = 'PHONE' | 'EMAIL' | 'SLACK';
+export type RevealModeValue = 'NORMAL' | 'EMERGENCY';
+/** Per user, counted from the ContactRevealLog rows themselves (so the limit holds across instances). */
+export interface RevealLimits { perMinute: number; emergencyPerHour: number }
+export interface RevealWrite {
+  actorUserId: string; actorRole: string; contactId: string; contactName: string; customerId: string | null;
+  channel: RevealChannelValue; mode: RevealModeValue; reason: string | null; notifiedContactIds: string[]; requestId: string | null;
+  limits: RevealLimits;
+}
+/** `at` is the store's clock (R-14). `retryAfterSec` of a refusal: when the oldest row in the window leaves it (1 when another request of the same user holds the lock — nothing waits). */
+export type RevealWriteOutcome = { ok: true; id: string; at: Date } | { ok: false; retryAfterSec: number };
+export interface RevealLogFilter {
+  /** null = every customer (ADMIN; also rows without a customer). A list = only those customers (may be empty). */
+  customerIds: readonly string[] | null;
+  mode?: RevealModeValue; actorUserId?: string; contactId?: string; from?: Date; to?: Date;
+  after?: { t: string; id: string }; limit: number;
+}
+/** One ContactRevealLog row with the names the review list shows. Never a contact value. */
+export interface RevealLogRow {
+  id: string; at: Date; mode: RevealModeValue; actorUserId: string; actorName: string; actorRole: string; contactId: string; contactName: string;
+  customer: { id: string; name: string; slug: string } | null; channel: RevealChannelValue; reason: string | null;
+  notified: Array<{ contactId: string; name: string }>;
+}
+
 export interface ApiRepository {
   // ── org / scope ──
   orgTree(scope: ScopeFilter): Promise<OrgTree>;
@@ -259,6 +284,20 @@ export interface ApiRepository {
   recordAudit(audit: AuditInput): Promise<void>;
   /** Suspended-customer incidents (pagingSuppressed = CUSTOMER_SUSPENDED, triggeredAt in [from, to)) and TERMINATED residual sources (lastAt in [from, to)). Only customers inside `scope` (B-1): residuals need the whole customer in scope, incidents follow the usual scope rule. */
   digestData(scope: ScopeFilter, from: Date, to: Date): Promise<DigestData>;
+
+  // ── contact reveal (D-35) ──
+  /** Customers this CONTACT is a Responder of (direct or via template). */
+  responderCustomerIdsOfContact(contactId: string): Promise<string[]>;
+  /** Active ADMIN staff (MSP users with a contact) — the emergency-reveal notice goes to them when no primary Responder can be named (Q-API-14). */
+  adminStaff(): Promise<Array<{ contactId: string; name: string }>>;
+  /**
+   * ONE transaction: take the actor's lock, count the actor's rows in the window (minute; for EMERGENCY also the hour),
+   * refuse when at the limit, else INSERT the ContactRevealLog row and the AuditLog row (`contact.reveal`). Anything
+   * that fails throws and nothing is written: the caller must not hand out the value then.
+   */
+  recordReveal(w: RevealWrite): Promise<RevealWriteOutcome>;
+  /** Newest first (at, id), one more than `limit` is NOT fetched: `hasMore` says whether there is another page. */
+  revealLog(f: RevealLogFilter): Promise<{ rows: RevealLogRow[]; hasMore: boolean }>;
 
   // ── idempotency (API-CONTRACT §2 "멱등", 24h) ──
   getIdempotent(key: string, now: Date): Promise<IdempotentEntry | null>;
