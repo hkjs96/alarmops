@@ -1,0 +1,194 @@
+name: deploy-central
+
+# Deploys infra/aws/central.yaml (SAM, Seoul) to the central AWS account. Started by a person with workflow_dispatch;
+# an agent never runs it. Two phases, each gated by the `central` environment (branch main only, required reviewer):
+#   plan   creates a CloudFormation change set WITHOUT executing it and prints every change (IAM ones first) to the
+#          job summary. The reviewer reads that before approving the second job.
+#   apply  executes exactly that change set (by id) and prints the stack outputs.
+#
+# AWS access: GitHub OIDC only (no long-lived keys). The role in CENTRAL_DEPLOY_ROLE_ARN must have a trust policy that
+# requires
+#   token.actions.githubusercontent.com:aud = sts.amazonaws.com
+#   token.actions.githubusercontent.com:sub = repo:hkjs96/alarmops:environment:central
+# (the `sub` of a job that uses `environment: central`; no wildcard). Its permissions and boundary: infra/aws/README.md.
+# Variables are `central` ENVIRONMENT variables (Settings -> Environments -> central -> Variables), not repository
+# variables: only jobs that passed the environment's rules can read them. None of them is a secret. The DB connection
+# strings are never passed here; a person puts them into the Secrets Manager secrets this stack creates.
+# TODO(security, 권고 5): pin every `uses:` below to a full commit SHA. The repository has no pinned SHAs to copy yet
+# and none are invented here; a person (or Dependabot) copies them from each action's release page.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-central
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-northeast-2
+  STACK_NAME: alarmops-central
+  BUS_STACK_NAME: alarmops-central-bus
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: central
+    # workflow_dispatch can start any branch's copy of this file; only main may touch the central account.
+    if: github.ref == 'refs/heads/main'
+    outputs:
+      changeset: ${{ steps.cs.outputs.changeset }}
+      mode: ${{ steps.cs.outputs.mode }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install "cfn-lint==1.60.1"
+      - name: cfn-lint
+        run: cfn-lint infra/aws/central.yaml infra/aws/central-bus.yaml infra/customer-stack/template.yaml
+      - name: Template structure tests
+        run: python -m unittest discover -s infra/test -v
+      # The Lambda code is built by the backend packaging step (not part of this repository state yet). Fail early and
+      # clearly instead of letting `sam deploy` zip an empty or missing folder.
+      - name: Check the build output exists
+        run: |
+          missing=0
+          for f in services/ingest/dist/webhook/index.mjs services/ingest/dist/eventbridge/index.mjs \
+                   services/ingest/dist/consumer/index.mjs services/alarm-engine/build/alarm_engine/handler.py; do
+            if [ ! -f "$f" ]; then echo "::error::Missing build output: $f (backend packaging, see infra/aws/central.yaml header)"; missing=1; fi
+          done
+          exit $missing
+      - name: Check the required variables are set
+        env:
+          ROLE: ${{ vars.CENTRAL_DEPLOY_ROLE_ARN }}
+          PROVIDER: ${{ vars.VERCEL_OIDC_PROVIDER_ARN }}
+          TEAM: ${{ vars.VERCEL_TEAM_SLUG }}
+          PROJECT: ${{ vars.VERCEL_PROJECT_NAME }}
+        run: |
+          for v in ROLE PROVIDER TEAM PROJECT; do
+            if [ -z "${!v}" ]; then echo "::error::Environment variable for $v is not set in the central environment"; exit 1; fi
+          done
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.CENTRAL_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: deploy-central-plan
+      - name: Check the central bus stack exists
+        run: aws cloudformation describe-stacks --stack-name "$BUS_STACK_NAME" --query 'Stacks[0].StackStatus' --output text
+      - name: sam validate
+        run: sam validate --lint --template-file infra/aws/central.yaml
+      - name: Create the change set (not executed)
+        env:
+          VERCEL_OIDC_PROVIDER_ARN: ${{ vars.VERCEL_OIDC_PROVIDER_ARN }}
+          VERCEL_TEAM_SLUG: ${{ vars.VERCEL_TEAM_SLUG }}
+          VERCEL_PROJECT_NAME: ${{ vars.VERCEL_PROJECT_NAME }}
+          SES_IDENTITY_ARN: ${{ vars.SES_IDENTITY_ARN }}
+          SES_FROM_ADDRESS: ${{ vars.SES_FROM_ADDRESS }}
+          ALARM_TOPIC_ARN: ${{ vars.ALARM_TOPIC_ARN }}
+          CENTRAL_BUS_NAME: ${{ vars.CENTRAL_BUS_NAME }}
+          DLQ_OPS_ROLE_ARN: ${{ vars.DLQ_OPS_ROLE_ARN }}
+          REMEDIATION_EXECUTION: ${{ vars.REMEDIATION_EXECUTION }}
+        run: |
+          params=(
+            "VercelOidcProviderArn=${VERCEL_OIDC_PROVIDER_ARN}"
+            "VercelTeamSlug=${VERCEL_TEAM_SLUG}"
+            "VercelProjectName=${VERCEL_PROJECT_NAME}"
+          )
+          # Optional variables: only passed when set, so the template defaults apply otherwise.
+          [ -n "$SES_IDENTITY_ARN" ] && params+=("SesIdentityArn=${SES_IDENTITY_ARN}")
+          [ -n "$SES_FROM_ADDRESS" ] && params+=("SesFromAddress=${SES_FROM_ADDRESS}")
+          [ -n "$ALARM_TOPIC_ARN" ] && params+=("AlarmTopicArn=${ALARM_TOPIC_ARN}")
+          [ -n "$CENTRAL_BUS_NAME" ] && params+=("CentralBusName=${CENTRAL_BUS_NAME}")
+          [ -n "$DLQ_OPS_ROLE_ARN" ] && params+=("DlqOpsRoleArn=${DLQ_OPS_ROLE_ARN}")
+          [ -n "$REMEDIATION_EXECUTION" ] && params+=("RemediationExecution=${REMEDIATION_EXECUTION}")
+          sam deploy \
+            --template-file infra/aws/central.yaml \
+            --stack-name "$STACK_NAME" \
+            --region "$AWS_REGION" \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --resolve-s3 \
+            --no-execute-changeset \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides "${params[@]}"
+      - name: Change set to the job summary
+        id: cs
+        run: |
+          status=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo NONE)
+          if [ "$status" = "REVIEW_IN_PROGRESS" ]; then mode=create; else mode=update; fi
+          id=$(aws cloudformation list-change-sets --stack-name "$STACK_NAME" \
+                 --query "sort_by(Summaries[?Status=='CREATE_COMPLETE' && ExecutionStatus=='AVAILABLE'], &CreationTime)[-1].ChangeSetId" --output text)
+          if [ -z "$id" ] || [ "$id" = "None" ]; then
+            echo "changeset=" >> "$GITHUB_OUTPUT"
+            { echo "## ${STACK_NAME}: no changes"; } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "changeset=$id" >> "$GITHUB_OUTPUT"
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          {
+            echo "## ${STACK_NAME}: change set to approve (${mode})"
+            echo
+            echo "### IAM changes (read these first)"
+            echo
+            echo "| Action | Logical id | Type | Replacement |"
+            echo "|---|---|---|---|"
+            aws cloudformation describe-change-set --change-set-name "$id" \
+              --query "Changes[?starts_with(ResourceChange.ResourceType, 'AWS::IAM')].[ResourceChange.Action,ResourceChange.LogicalResourceId,ResourceChange.ResourceType,ResourceChange.Replacement]" --output text |
+              awk -F'\t' '{ printf "| %s | %s | %s | %s |\n", $1, $2, $3, $4 }'
+            echo
+            echo "### All changes"
+            echo
+            echo "| Action | Logical id | Type | Replacement |"
+            echo "|---|---|---|---|"
+            aws cloudformation describe-change-set --change-set-name "$id" \
+              --query "Changes[].[ResourceChange.Action,ResourceChange.LogicalResourceId,ResourceChange.ResourceType,ResourceChange.Replacement]" --output text |
+              awk -F'\t' '{ printf "| %s | %s | %s | %s |\n", $1, $2, $3, $4 }'
+            echo
+            echo "Approve the \`apply\` job only after reading the IAM table. Role policy bodies: see the change set in the CloudFormation console."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  apply:
+    needs: plan
+    if: github.ref == 'refs/heads/main' && needs.plan.outputs.changeset != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    # Second approval: the reviewer has seen the plan summary.
+    environment: central
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.CENTRAL_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: deploy-central-apply
+      - name: Execute the approved change set
+        env:
+          CHANGESET: ${{ needs.plan.outputs.changeset }}
+          MODE: ${{ needs.plan.outputs.mode }}
+        run: |
+          aws cloudformation execute-change-set --change-set-name "$CHANGESET"
+          if [ "$MODE" = "create" ]; then
+            aws cloudformation wait stack-create-complete --stack-name "$STACK_NAME"
+          else
+            aws cloudformation wait stack-update-complete --stack-name "$STACK_NAME"
+          fi
+      # Outputs hold ARNs, URLs and the account id: none is a secret. Secret values are never read here.
+      - name: Stack outputs to the job summary
+        if: success()
+        run: |
+          {
+            echo "## ${STACK_NAME} outputs"
+            echo
+            echo "| Output | Value |"
+            echo "|---|---|"
+            aws cloudformation describe-stacks --stack-name "$STACK_NAME" \
+              --query 'Stacks[0].Outputs[].[OutputKey,OutputValue]' --output text |
+              awk -F'\t' '{ printf "| %s | `%s` |\n", $1, $2 }'
+            echo
+            echo "Next: put the two DB connection strings (docs/GO-LIVE.md, step 4), then copy the values into Vercel."
+          } >> "$GITHUB_STEP_SUMMARY"
