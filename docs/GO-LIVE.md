@@ -22,10 +22,10 @@
 
 ## 1단계 — 결정 [사람] (먼저, 다른 단계를 막는다)
 
-- [ ] 문자·전화 업체(Q-API-06, 후보 솔라피): 계정 만들고 API 키 발급(키는 아직 어디에도 넣지 않는다)
-- [ ] 이메일 발송 업체(D-44 DEGRADED 알림용)
+- [ ] 문자·전화 업체(Q-API-06, 후보 솔라피) — **11/16 보류**(#10). 나머지를 먼저 진행한다
+- [x] 이메일 발송: **AWS SES**(D-52)
 - [ ] Slack 워크스페이스·앱, MSP 공용 채널 이름(D-46)
-- [ ] 콘솔 도메인(예: `console.<회사도메인>`) — `CONSOLE_ORIGIN`이 된다
+- [x] 콘솔 도메인: 우선 `*.vercel.app`(D-54), 회사 도메인은 파일럿 전 — DNS 담당 확인 필요
 - [ ] Google SSO 연결 시점(파일럿 전 필수 여부)
 - [ ] 파일럿 고객 1곳과 그 AWS 계정 ID
 
@@ -37,7 +37,9 @@
 
 ## 3단계 — 콘솔 배포(Vercel) [사람 + 에이전트]
 
-[에이전트] 배포 워크플로(#46): `check-console-deploy-env.mjs` 통과 후 Vercel 배포, `next build`는 mock 없이.
+[에이전트] 배포 워크플로(#46, D-53: GitHub Actions → Vercel): `check-console-deploy-env.mjs` 통과 후 배포, `next build`는 mock 없이.
+
+[사람] Vercel 토큰을 만들어 GitHub 환경 시크릿에 등록(이름은 #46 워크플로가 정한다).
 
 [사람] Vercel 프로젝트 만들고 환경변수(Production) 입력:
 
