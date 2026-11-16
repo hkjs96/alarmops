@@ -12,6 +12,7 @@ from datetime import timedelta
 from typing import Any
 
 import psycopg
+import psycopg.conninfo
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
@@ -40,8 +41,28 @@ def _f(v: Any) -> float | None:
     return None if v is None else float(v)
 
 
+TLS_MODES = frozenset({"require", "verify-ca", "verify-full"})
+
+
+def require_tls_in_lambda(conninfo: str, env: Any = None) -> None:
+    """In Lambda (AWS_LAMBDA_FUNCTION_NAME set) refuse to connect unless the connection string asks for TLS
+    (security review lambda-packaging 2). Only the rule is reported, never the connection string."""
+    import os
+
+    env = os.environ if env is None else env
+    if not env.get("AWS_LAMBDA_FUNCTION_NAME"):
+        return
+    try:
+        mode = psycopg.conninfo.conninfo_to_dict(conninfo).get("sslmode")
+    except Exception:  # noqa: BLE001
+        raise RuntimeError("database connection string is not valid") from None
+    if mode not in TLS_MODES:
+        raise RuntimeError("database connection string needs sslmode=require, verify-ca or verify-full")
+
+
 class PgRepository:
     def __init__(self, conninfo: str):
+        require_tls_in_lambda(conninfo)
         self.conn = psycopg.connect(conninfo, autocommit=True, row_factory=dict_row)  # type: ignore[arg-type]
 
     def _one(self, sql: str, *args: Any) -> dict | None:
@@ -71,6 +92,16 @@ class PgRepository:
             tag_writer_role_arn=r["tagWriterRoleArn"], tag_writer_enabled=r["tagWriterEnabled"],
             remediator_role_arn=r["remediatorRoleArn"], remediator_enabled=r["remediatorEnabled"],
         )
+
+    def find_active_account_by_aws_id(self, aws_account_id: str) -> CloudAccount | None:
+        r = self._one('''SELECT a.id FROM "CloudAccount" a JOIN "Customer" c ON c.id = a."customerId"
+                         WHERE a."awsAccountId" = %s AND c.status = 'ACTIVE'
+                           AND NOT a.disabled AND a."connectionPurgedAt" IS NULL ''', aws_account_id)
+        return self.get_account(r["id"]) if r else None
+
+    def sync_run_started_since(self, cloud_account_id: str, within: timedelta) -> bool:
+        return self._one('''SELECT 1 AS x FROM "AlarmSyncRun" WHERE "cloudAccountId" = %s
+                            AND "startedAt" > now() - %s LIMIT 1''', cloud_account_id, within) is not None
 
     def update_account_status(self, cloud_account_id: str, statuses: dict[str, str]) -> None:
         cols = {"reader": "readerStatus", "alarmWriter": "alarmWriterStatus", "tagWriter": "tagWriterStatus",

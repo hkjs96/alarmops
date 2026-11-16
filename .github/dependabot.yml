@@ -1,0 +1,12 @@
+version: 2
+updates:
+  # Workflows pin actions to full commit SHAs; Dependabot proposes the next tagged release as a PR (keeps the tag comment).
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  # The pinned Vercel CLI used by deploy-console.yml.
+  - package-ecosystem: npm
+    directory: /tools/vercel-cli
+    schedule:
+      interval: weekly

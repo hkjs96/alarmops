@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from collections.abc import Callable
 from typing import Any
 
-from alarm_engine import offboard, remediation
+from alarm_engine import events, offboard, remediation
 from alarm_engine.aws import CapabilityDisabled
 from alarm_engine.engine import Engine, classify_liveness
 
@@ -67,7 +68,7 @@ def _check_type(name: str, v: Any, types: tuple[type, ...]) -> None:
 def parse(body: str) -> dict[str, Any]:
     try:
         cmd = json.loads(body)
-    except ValueError as e:
+    except (ValueError, RecursionError) as e:
         raise InvalidCommand("body is not JSON") from e
     if not isinstance(cmd, dict) or cmd.get("schemaVersion") != 1:
         raise InvalidCommand("schemaVersion must be 1")
@@ -172,9 +173,68 @@ def dispatch(engine: Engine, cmd: dict, liveness_sink: Callable[[str, str, dict]
     raise InvalidCommand(t)
 
 
-def handle_batch(engine: Engine, event: dict) -> dict:
-    failures = []
-    for rec in event.get("Records", []):
+DEFAULT_TIME_MARGIN_MS = 30_000
+
+
+def safe_error(e: BaseException) -> str:
+    """Log-safe description: exception type plus a short code (SQLSTATE / AWS error code). Never the message or
+    traceback: a driver error can carry the DB host, user or connection string (security review lambda-packaging 1)."""
+    code = getattr(e, "sqlstate", None)
+    if code is None:
+        resp = getattr(e, "response", None)
+        if isinstance(resp, dict):
+            code = (resp.get("Error") or {}).get("Code")
+    code_s = str(code) if isinstance(code, str) and code.replace("_", "").isalnum() and len(code) <= 64 else None
+    return f"{type(e).__name__}" + (f" code={code_s}" if code_s else "")
+
+
+def _debug_tb() -> bool:
+    """Local debugging only: tracebacks are off unless ALARMOPS_DEBUG_TRACEBACK=1."""
+    return os.environ.get("ALARMOPS_DEBUG_TRACEBACK") == "1"
+
+
+def _margin_ms() -> int:
+    try:
+        return max(0, int(os.environ.get("ALARMOPS_TIME_MARGIN_MS", DEFAULT_TIME_MARGIN_MS)))
+    except ValueError:
+        return DEFAULT_TIME_MARGIN_MS
+
+
+def handle_batch(engine: Engine, event: dict, remaining_ms: Callable[[], int] | None = None,
+                 margin_ms: int = DEFAULT_TIME_MARGIN_MS) -> dict:
+    """Process the SQS records in order. With `remaining_ms` (Lambda context), a record is only started while at least
+    `margin_ms` is left; the rest are returned in `batchItemFailures` (SQS redelivers them; commands are idempotent)."""
+    failures: list[dict[str, str]] = []
+    records = event.get("Records", [])
+    for i, rec in enumerate(records):
+        if remaining_ms is not None and remaining_ms() < margin_ms:
+            logger.warning("time budget reached: %d of %d records not started", len(records) - i, len(records))
+            failures.extend({"itemIdentifier": r["messageId"]} for r in records[i:])
+            break
+        try:
+            envelope = json.loads(rec["body"])
+        except (ValueError, RecursionError):
+            envelope = None
+        if events.is_cloudtrail_event(envelope):    # forwarded CloudTrail tag event (customer stack TagChangeRule)
+            try:
+                out = events.handle_tag_event(engine, envelope)
+                logger.info("tag event %s → %s", rec.get("messageId"), out.get("status"))
+            except Exception as e:  # noqa: BLE001
+                logger.error("tag event %s failed: %s", rec.get("messageId"), safe_error(e), exc_info=_debug_tb())
+                failures.append({"itemIdentifier": rec["messageId"]})
+            continue
+        try:
+            envelope = json.loads(rec["body"])
+        except (ValueError, RecursionError):
+            envelope = None
+        if events.is_cloudtrail_event(envelope):    # forwarded CloudTrail tag event (customer stack TagChangeRule)
+            try:
+                out = events.handle_tag_event(engine, envelope)
+                logger.info("tag event %s → %s", rec.get("messageId"), out.get("status"))
+            except Exception:  # noqa: BLE001
+                logger.exception("tag event %s failed", rec.get("messageId"))
+                failures.append({"itemIdentifier": rec["messageId"]})
+            continue
         try:
             cmd = parse(rec["body"])
         except InvalidCommand as e:
@@ -186,8 +246,9 @@ def handle_batch(engine: Engine, event: dict) -> dict:
                         out.get("status"))
         except InvalidCommand as e:
             logger.error("invalid command %s customer=%s: %s", cmd["commandId"], cmd["customerId"], e)
-        except Exception:  # noqa: BLE001
-            logger.exception("command %s customer=%s failed", cmd["commandId"], cmd["customerId"])
+        except Exception as e:  # noqa: BLE001
+            logger.error("command %s customer=%s failed: %s", cmd["commandId"], cmd["customerId"], safe_error(e),
+                         exc_info=_debug_tb())
             failures.append({"itemIdentifier": rec["messageId"]})
     return {"batchItemFailures": failures}
 
@@ -195,9 +256,17 @@ def handle_batch(engine: Engine, event: dict) -> dict:
 _ENGINE: Engine | None = None
 
 
-def lambda_handler(event: dict, context: Any) -> dict:  # pragma: no cover - wiring only
+def lambda_handler(event: dict, context: Any) -> dict:
+    """SQS entry (template: Handler alarm_engine.handler.lambda_handler). The engine (DB URL from Secrets Manager)
+    is built once per container; a failed build is not cached and fails the whole batch so SQS redelivers it."""
     global _ENGINE
     if _ENGINE is None:
         from alarm_engine.wiring import build_engine
-        _ENGINE = build_engine()
-    return handle_batch(_ENGINE, event)
+        try:
+            _ENGINE = build_engine()
+        except Exception as e:  # noqa: BLE001
+            # Only the exception type: a driver error can carry the connection string.
+            logger.error("engine init failed: %s", type(e).__name__)
+            return {"batchItemFailures": [{"itemIdentifier": r["messageId"]} for r in event.get("Records", [])]}
+    remaining = getattr(context, "get_remaining_time_in_millis", None)
+    return handle_batch(_ENGINE, event, remaining, _margin_ms())

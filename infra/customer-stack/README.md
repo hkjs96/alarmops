@@ -18,7 +18,7 @@
 
 | 역할 | 필수 | 허용 | 명시적 Deny / 제한 |
 |---|---|---|---|
-| `AlarmOps-Reader` | 예 | CloudWatch 조회(`DescribeAlarms*`, `ListMetrics`, `ListTagsForResource`, `GetMetricData`, `GetMetricStatistics`, `GetMetricWidgetImage`), `tag:GetResources/GetTagKeys/GetTagValues`, 자원 종류별 Describe/List. **Lambda는 `ListFunctions`·`GetFunction*`를 주지 않는다**(환경 변수에 비밀값이 있을 수 있음): 발견은 `tag:GetResources`(ARN·태그만)와 `cloudwatch:ListMetrics`로 한다. 이 목록은 (템플릿의 `ResourceInventoryAndTags`, 수집기 작성 때 29종에 맞춰 조정) | `secretsmanager:*`, `ssm:GetParameter(s)`·`GetParametersByPath`·`GetParameterHistory`, `s3:GetObject*`·`ListBucket*`, `kms:Decrypt`·`GenerateDataKey*`·`ReEncrypt*` |
+| `AlarmOps-Reader` | 예 | CloudWatch 조회(`DescribeAlarms*`, `ListMetrics`, `ListTagsForResource`, `GetMetricData`, `GetMetricStatistics`, `GetMetricWidgetImage`), `tag:GetResources/GetTagKeys/GetTagValues`, 자원 종류별 Describe/List(수집기 추가분: `apigateway:GET`은 `/restapis`·`/apis` 두 경로만, `mq:ListBrokers`(DescribeBroker 없음), `sagemaker:DescribeEndpoint`(`endpoint/*`), `directconnect:DescribeConnections`). **Lambda는 `ListFunctions`·`GetFunction*`를 주지 않는다**(환경 변수에 비밀값이 있을 수 있음): 발견은 `tag:GetResources`(ARN·태그만)와 `cloudwatch:ListMetrics`로 한다. 이 목록은 (템플릿의 `ResourceInventoryAndTags`, 수집기 작성 때 29종에 맞춰 조정) | `secretsmanager:*`, `ssm:GetParameter(s)`·`GetParametersByPath`·`GetParameterHistory`, `s3:GetObject*`·`ListBucket*`, `kms:Decrypt`·`GenerateDataKey*`·`ReEncrypt*`, `apigateway:GET`의 `/apikeys*`·`/usageplans/*/keys*`·`/restapis/*/*` |
 | `AlarmOps-EventForwarder` | 예 | `events:PutEvents` on `CentralEventBusArn` 하나 | 신뢰 주체는 `events.amazonaws.com`, `aws:SourceAccount`=이 계정, `aws:SourceArn`=이 계정의 `rule/AlarmOps-*` |
 | `AlarmOps-AlarmWriter` | 선택 | `DescribeAlarms`; 알람 ARN에 `ListTagsForResource`; **생성**은 `PutMetricAlarm` 한 번에 `Tags`로 `ManagedBy=AlarmOps`를 실을 때만(`aws:RequestTag`); 기존 알람의 `PutMetricAlarm`·`TagResource`·`UntagResource`·`DeleteAlarms`는 `aws:ResourceTag/ManagedBy=AlarmOps`일 때만 | `TagResource`·`UntagResource`는 `aws:TagKeys`에 `ManagedBy`가 있으면 항상 거부(생성 뒤 추가·변경·제거 불가). 이미 있는 알람에 `ManagedBy`를 붙이는 권한은 없다 |
 | `AlarmOps-TagWriter` | 선택 | `tag:TagResources`와 서비스별 태그 API(`ec2:CreateTags`, `rds:AddTagsToResource`, `elasticloadbalancing:AddTags`, `lambda:TagResource`, `sqs:TagQueue`, `sns:TagResource`, `dynamodb:TagResource`, `elasticache:AddTagsToResource`, `ecs:TagResource`, `es:AddTags`, `kafka:TagResource`)는 `ForAllValues:StringEquals aws:TagKeys=[Monitoring]`, `aws:TagKeys` 존재, `aws:RequestTag/Monitoring=on`일 때만 | S3·Route 53 태그 쓰기 없음. **서비스 목록은 잠정**: 29종 검증 과제(`docs/specs/alarm-rules.md`) 결과로 확정 |
@@ -52,11 +52,11 @@ EventBridge 규칙은 `events.amazonaws.com`이 역할을 맡아 중앙 버스�
 
 ```bash
 pip install "cfn-lint==1.60.1"
-cfn-lint infra/customer-stack/template.yaml infra/aws/central-bus.yaml infra/aws/alarm-commands-queue.yaml
+cfn-lint infra/customer-stack/template.yaml infra/aws/central-bus.yaml infra/aws/central.yaml
 python -m unittest discover -s infra/test -v
 ```
 
-`sam validate`는 SAM 변환이 없는 순수 CloudFormation이라 해당이 없고(이 템플릿에 `Transform`이 없다), 이 환경에는 SAM CLI도 없다. 중앙 계정의 SAM 템플릿이 생기면 그쪽에 `sam validate --lint`를 단다.
+이 템플릿은 순수 CloudFormation이라 `sam validate`는 해당이 없다. 중앙 계정의 SAM 템플릿(`infra/aws/central.yaml`)은 `infra/aws/README.md`의 검증 절을 따른다.
 
 ## 엔진이 맞춰야 할 것 (AlarmWriter)
 

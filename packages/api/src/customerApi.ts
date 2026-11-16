@@ -144,22 +144,25 @@ async function noop(req: ApiRequest, deps: Deps, userId: string, customerId: str
 
 // ───────────────────────────── offboarding ─────────────────────────────
 
-function offboardingView(o: OffboardingState) {
+function offboardingView(o: OffboardingState, names: Map<string, string>) {
   return {
     id: o.id, startedAt: o.startedAt.toISOString(), completedAt: iso(o.completedAt), reason: o.reason,
     steps: OFFBOARD_STEP_KEYS.map((key) => {
       const s = o.steps[key];
-      return { key, state: s.state, ...(s.at ? { at: s.at } : {}), ...(s.byUserId ? { byUserId: s.byUserId } : {}), ...(s.detail ? { detail: s.detail } : {}) };
+      return { key, state: s.state, ...(s.at ? { at: s.at } : {}), ...(s.byUserId ? { byUserId: s.byUserId, byUserName: names.get(s.byUserId) ?? null } : {}), ...(s.detail ? { detail: s.detail } : {}) };
     }),
     residual: { ...(o.residual.lastEventAt ? { lastEventAt: o.residual.lastEventAt.toISOString() } : {}), count: o.residual.count },
   };
 }
 
+const stepNames = (deps: Deps, o: OffboardingState): Promise<Map<string, string>> =>
+  deps.repo.staffNames([...new Set(OFFBOARD_STEP_KEYS.map((k) => o.steps[k].byUserId).filter((x): x is string => !!x))]);
+
 export async function getOffboarding(req: ApiRequest, deps: Deps, customerId: string): Promise<ApiResponse> {
   const { customer } = await adminCustomer(req, deps, customerId, true);
   const o = await deps.repo.offboardingState(customer.id);
   if (!o) throw notFound(); // a customer that was never terminated has no checklist
-  return ok(offboardingView(o));
+  return ok(offboardingView(o, await stepNames(deps, o)));
 }
 
 /**
@@ -192,5 +195,5 @@ export async function patchOffboarding(req: ApiRequest, deps: Deps, customerId: 
   if (r === 'NOT_ALLOWED') throw new ApiError(409, 'STEP_NOT_MANUAL', 'ALARMS_DELETED is set by the alarm engine; it can be marked only when it needs a person (MANUAL).');
   const o = await deps.repo.offboardingState(customer.id);
   if (!o) throw notFound();
-  return ok(offboardingView(o));
+  return ok(offboardingView(o, await stepNames(deps, o)));
 }
