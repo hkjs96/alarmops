@@ -169,6 +169,9 @@ export interface ApiRepository {
   /**
    * Display names of MSP staff (User.customerId IS NULL) only, for 'who did it' fields (legal hold, purge log, offboarding).
    * Never email or phone. Absent from the map: unknown, a portal user, or scrubbed by D-45 retention (callers answer null).
+   * Contract (security review, record-user-names): pass ONLY ids read from rows the caller has already authorised and
+   * scoped (e.g. legalHold.byUserId, purge-log actor, offboarding step byUserId). Never ids from a request body or query:
+   * this method does no scope check itself and would become a staff-name enumeration oracle.
    */
   staffNames(userIds: string[]): Promise<Map<string, string>>;
   /** Slack channel for the customer is set and verified (paging health input). */
