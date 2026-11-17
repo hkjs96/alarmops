@@ -316,12 +316,15 @@ Supabase는 프로젝트마다 **Data API**를 기본으로 켜 둔다. Data API
 1. `main`에 대한 규칙을 만든다.
    - 어디서: **Settings > Branches**(또는 Rules > Rulesets)
 2. **Require a pull request before merging**을 켠다. main 직접 푸시가 막힌다.
-3. **Require status checks to pass**를 켜고 아래 세 개를 필수로 추가한다.
+3. **Require status checks to pass**를 켜고 아래 여섯 개를 필수로 추가한다.
    - `ci / test` : 타입 검사, 린트, 단위 테스트, 콘솔 빌드
    - `ci / e2e` : 브라우저로 화면을 실제로 눌러 보는 테스트(가짜 데이터)
+   - `ci / e2e-live` : 실제 Postgres 16에 붙여 화면을 눌러 보는 테스트
    - `ci / db` : 실제 Postgres 16에 마이그레이션을 적용해 보고, 스키마 파일과 맞는지 확인
+   - `ci / engine` : 알람 엔진(Python) 테스트·린트·타입 검사
+   - `ci / infra` : CloudFormation 템플릿·워크플로 구조 검사
 
-   > **참고** PR 화면에는 `ci / test`, `ci / e2e`, `ci / db`로 보인다. 검색창에서는 `test`, `e2e`, `db`로 찾는다.
+   > **참고** PR 화면에는 `ci / test`처럼 보인다. 검색창에서는 `test`, `e2e`, `e2e-live`, `db`, `engine`, `infra`로 찾는다.
 
    > **참고** 이 목록에는 한 번이라도 실행된 검사만 나온다. 워크플로가 든 PR을 먼저 하나 올린 뒤에 설정한다.
 4. `dev-db`는 필수 검사에 넣지 않는다. PR에서는 돌지 않는다.
