@@ -14,6 +14,7 @@ import { effectiveRole, inScope, requireAuth, requireRole, scopeOf, type AuthCon
 import { ApiError, ifMatch, invalid, isRecord, notFound, ok, q, versionConflict, type ApiRequest, type ApiResponse } from './http.js';
 import { pathStepOut, visibleCustomer } from './pagingApi.js';
 import type { ApiRepository, OrgTree, Principal, ResponderOp, RespondersState, RotationsWorld } from './repo.js';
+import { revealFlags } from './revealApi.js';
 import { resolveNodeFilter } from './scope.js';
 
 interface Deps { repo: ApiRepository; now: () => Date }
@@ -78,7 +79,7 @@ export async function getPagingHealth(req: ApiRequest, deps: Deps, customerId: s
 
 // ───────────────────────────── Responders ─────────────────────────────
 
-function respondersView(state: RespondersState, world: PagingWorld, slackVerified: boolean, customer: { id: string; name: string }, now: Date) {
+function respondersView(state: RespondersState, world: PagingWorld, slackVerified: boolean, customer: { id: string; name: string }, now: Date, auth: AuthContext, callerIsResponder: boolean) {
   const staff = [];
   const people = [];
   for (const e of state.entries) {
@@ -87,9 +88,9 @@ function respondersView(state: RespondersState, world: PagingWorld, slackVerifie
       const mine = state.scopes.filter((s) => s.contactId === e.contactId);
       const extras = [...new Set(mine.filter((s) => s.role === 'APPROVER' || s.role === 'PORTAL_USER').map((s) => s.role))];
       const notify = mine.find((s) => s.role === 'NOTIFY') ?? mine[0];
-      people.push({ contactId: e.contactId, role: e.role, extras, scope: notify ? { level: notify.scopeType, id: notify.scopeId, name: notify.scopeName } : { level: 'CUSTOMER', id: customer.id, name: customer.name }, ...display(c, e.contactId, now) });
+      people.push({ contactId: e.contactId, role: e.role, extras, scope: notify ? { level: notify.scopeType, id: notify.scopeId, name: notify.scopeName } : { level: 'CUSTOMER', id: customer.id, name: customer.name }, ...display(c, e.contactId, now), ...revealFlags(auth, callerIsResponder, 'CUSTOMER') });
     } else {
-      staff.push({ contactId: e.contactId, source: e.source, ...(e.templateId ? { templateId: e.templateId } : {}), ...(e.templateName ? { templateName: e.templateName } : {}), ...display(c, e.contactId, now) });
+      staff.push({ contactId: e.contactId, source: e.source, ...(e.templateId ? { templateId: e.templateId } : {}), ...(e.templateName ? { templateName: e.templateName } : {}), ...display(c, e.contactId, now), ...revealFlags(auth, callerIsResponder, 'INTERNAL') });
     }
   }
   return { staff, people, templateId: state.templateId, version: state.version, slackChannel: slackVerified ? 'VERIFIED' : 'NOT_SET' };
@@ -99,8 +100,9 @@ export async function getResponders(req: ApiRequest, deps: Deps, customerId: str
   const auth = requireAuth(req);
   internalOnly(auth);
   const { customer } = await visibleCustomer(deps, auth, customerId, 'CUSTOMER');
-  const [state, { world }, slack] = await Promise.all([deps.repo.respondersState(customer.id), deps.repo.pagingContext(customer.id), deps.repo.slackChannelVerified(customer.id)]);
-  return ok(respondersView(state, world, slack, customer, deps.now()), { etag: `"${state.version}"` });
+  const [state, { world }, slack, mine] = await Promise.all([deps.repo.respondersState(customer.id), deps.repo.pagingContext(customer.id), deps.repo.slackChannelVerified(customer.id), deps.repo.responderCustomerIds(auth.userId)]);
+  // canReveal / revealRequiresReason: the same rule as POST /contacts/{id}/reveal (D-35), for the caller's own standing in this customer
+  return ok(respondersView(state, world, slack, customer, deps.now(), auth, mine.includes(customer.id)), { etag: `"${state.version}"` });
 }
 
 const ROLES = ['PAGEABLE', 'NOTIFY_ONLY'] as const;

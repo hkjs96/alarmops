@@ -26,6 +26,7 @@ export async function sqlFixture(db: TestDb, seed: MemoryTickStore): Promise<Sql
   const sql = withClock(counted, () => clock());
   const q = (text: string, params?: unknown[]) => sql.query(text, params);
   const store = new SqlApiStore(sql);
+  let broken = false;
 
   const addContact = async (c: Contact): Promise<void> => {
     await q(
@@ -181,7 +182,13 @@ export async function sqlFixture(db: TestDb, seed: MemoryTickStore): Promise<Sql
       return (await q(`SELECT * FROM "AuditLog" ORDER BY "at", "id"`)).map((r) => ({ at: dReq(r.at), customerId: r.customerId ?? null, actorType: r.actorType, actorId: r.actorId ?? null, action: r.action,
         targetType: r.targetType, targetId: r.targetId, before: r.before ?? undefined, after: r.after ?? undefined, requestId: r.requestId ?? null }));
     },
-    async close() { void d; },
+    async revealRows() { return (await q(`SELECT * FROM "ContactRevealLog" ORDER BY "at", "id"`)) as Array<Record<string, unknown>>; },
+    async breakRevealLog() {
+      await q(`CREATE OR REPLACE FUNCTION test_fail_reveal() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'reveal log write refused (test)'; END $$`);
+      await q(`CREATE TRIGGER test_fail_reveal BEFORE INSERT ON "ContactRevealLog" FOR EACH ROW EXECUTE FUNCTION test_fail_reveal()`);
+      broken = true;
+    },
+    async close() { if (broken) await q(`DROP TRIGGER IF EXISTS test_fail_reveal ON "ContactRevealLog"`); void d; },
   };
 }
 

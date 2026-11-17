@@ -13,6 +13,7 @@ import { getCustomerStatus, getOffboarding, patchCustomerStatus, patchOffboardin
 import { deletePagingOverride, getCustomerPaging, getPagingPath, putCustomerPaging, putPagingOverride } from './pagingApi.js';
 import type { ApiRepository } from './repo.js';
 import { getScopeTree } from './scope.js';
+import { listContactReveals, revealContact } from './revealApi.js';
 import { deleteResponder, getMe, getOncallNow, getPagingHealth, getResponders, listRotations, listStaff, patchResponder, postResponder } from './peopleApi.js';
 
 export interface ApiDeps {
@@ -82,6 +83,9 @@ export const ROUTES: Route[] = [
   route('GET', '/digests/latest', (r, d) => getLatestDigest(r, d)),
   route('GET', '/rotations', (r, d) => listRotations(r, d)),
   route('GET', '/staff', (r, d) => listStaff(r, d)),
+  // D-35. The reveal response carries a contact value: never stored for replay (security review SQL R-7), a second call runs and is logged again.
+  route('POST', '/contacts/:id/reveal', (r, d, p) => revealContact(r, d, p[0]!), () => false),
+  route('GET', '/contact-reveals', (r, d) => listContactReveals(r, d)),
 ];
 
 function match(method: string, path: string): { route: Route; params: string[]; canonical: string } | null {

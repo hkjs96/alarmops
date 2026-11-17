@@ -33,6 +33,6 @@ export function fail(e: unknown): ActionFailure {
     const details = safeDetails((e as Error & { details?: Record<string, unknown> }).details ?? {});
     return { ok: false, code, message: e.message, requestId: "", ...(details ? { details } : {}) };
   }
-  if (e instanceof Error && (code === "UNAUTHORIZED" || code === "INVALID_INPUT" || code === "NOT_CONFIGURED")) return { ok: false, code, message: e.message, requestId: "" };
+  if (e instanceof Error && (code === "UNAUTHORIZED" || code === "INVALID_INPUT" || code === "NOT_CONFIGURED" || code === "READ_ONLY")) return { ok: false, code, message: e.message, requestId: "" };
   return { ok: false, code: "UNKNOWN", message: "Something went wrong.", requestId: "" };
 }
