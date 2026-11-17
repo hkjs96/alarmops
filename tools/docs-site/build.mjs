@@ -68,7 +68,15 @@ const docs = files.map((rel) => {
         return `<h${depth} id="${hid}"><a class="anchor" href="#${hid}" aria-hidden="true">#</a>${text}</h${depth}>\n`;
       },
       html({ text }) {
-        return text.replace(/<br\s*\/?>/gi, '\u0000BR\u0000').replace(/[&<>"]/g, (c) => esc(c)).replace(/\u0000BR\u0000/g, '<br>');
+        // keep empty anchors (<a id="d-07"></a>) as link targets, scoped to this document like headings
+        // (inline, the open and close tags arrive as two separate tokens)
+        const lone = text.trim().match(/^<a\s+(?:id|name)="([A-Za-z0-9_-]+)"\s*>$/);
+        if (lone) return `<span class="target" id="${id}--${lone[1]}"></span>`;
+        if (/^<\/a>$/.test(text.trim())) return '';
+        const anchors = [];
+        text = text.replace(/<a\s+(?:id|name)="([A-Za-z0-9_-]+)"\s*>\s*<\/a>/g, (_, a) => { anchors.push(a); return '\u0000A' + (anchors.length - 1) + '\u0000'; });
+        return text.replace(/<br\s*\/?>/gi, '\u0000BR\u0000').replace(/[&<>"]/g, (c) => esc(c)).replace(/\u0000BR\u0000/g, '<br>')
+          .replace(/\u0000A(\d+)\u0000/g, (_, i) => `<span class="target" id="${id}--${anchors[Number(i)]}"></span>`);
       },
       link({ href, title, tokens }) {
         const text = this.parser.parseInline(tokens);
@@ -93,7 +101,7 @@ const docs = files.map((rel) => {
   const titleMatch = src.match(/^#\s+(.+)$/m);
   const title = titleMatch ? titleMatch[1].replace(/[`*_]/g, '').trim() : rel;
   const group = GROUPS.findIndex((g) => g.match(rel));
-  const text = src.replace(/[#>*`|_\-[\]()]/g, ' ').replace(/\s+/g, ' ').toLowerCase();
+  const text = src.replace(/<[^>]*>/g, ' ').replace(/[#>*`|_\-[\]()]/g, ' ').replace(/\s+/g, ' ').toLowerCase();
   return { rel, id, title, html, toc, group, text };
 });
 
@@ -178,6 +186,7 @@ main{padding:28px 40px 80px;min-width:0}
 .md h3{font-size:18px;margin:30px 0 8px}
 .md h4{font-size:16px;margin:22px 0 6px}
 .md h1,.md h2,.md h3,.md h4{position:relative;scroll-margin-top:16px}
+.target{display:block;scroll-margin-top:16px}
 .anchor{position:absolute;left:-1em;opacity:0;color:var(--muted);font-weight:400}
 h1:hover .anchor,h2:hover .anchor,h3:hover .anchor,h4:hover .anchor{opacity:1}
 .md p,.md ul,.md ol{margin:10px 0}
