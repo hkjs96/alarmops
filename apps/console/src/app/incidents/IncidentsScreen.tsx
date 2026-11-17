@@ -53,6 +53,8 @@ export async function IncidentsScreen({ sp, panel }: { sp: SP; panel?: PanelRout
   let error: ApiError | null = null;
   try {
     data = await api.listIncidents(q);
+    // unmapped AWS accounts are for MSP staff (security R-2): a portal user gets no banner and the data is not passed on
+    if (data.unmapped.length && (await api.me()).kind === "CUSTOMER") data = { ...data, unmapped: [] };
   } catch (e) {
     // unknown customer, project or service — or one this user may not see: the same Not found
     if (isHidden(e)) notFound();

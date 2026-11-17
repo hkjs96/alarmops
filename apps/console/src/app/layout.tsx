@@ -19,7 +19,7 @@ export const dynamic = "force-dynamic";
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const nonce = (await headers()).get("x-nonce") ?? undefined;
   // /login renders without a session; everything else is gated by middleware.
-  let shell: { user: { id: string; name: string; role: "VIEWER" | "OPERATOR" | "ADMIN" }; open: number; digest: Digest | null; customers: Awaited<ReturnType<Awaited<ReturnType<typeof getApi>>["scopeTree"]>>["customers"] } | null = null;
+  let shell: { user: { id: string; name: string; role: "VIEWER" | "OPERATOR" | "ADMIN"; kind?: "INTERNAL" | "CUSTOMER" }; open: number; digest: Digest | null; customers: Awaited<ReturnType<Awaited<ReturnType<typeof getApi>>["scopeTree"]>>["customers"] } | null = null;
   if (await getSession()) {
     const api = await getApi();
     let loaded: [Awaited<ReturnType<typeof api.me>>, Awaited<ReturnType<typeof api.listIncidents>>, Awaited<ReturnType<typeof api.scopeTree>>] | null = null;
@@ -37,7 +37,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     let digest: Digest | null = null;
     if (me.kind !== "CUSTOMER") { try { digest = await api.getLatestDigest(); } catch { digest = null; } }
     // badge = open in ALL customers, whatever the list filter is
-    shell = { user: { id: me.id, name: me.name, role: me.role }, open: list.counts.open, digest, customers: tree.customers };
+    shell = { user: { id: me.id, name: me.name, role: me.role, ...(me.kind ? { kind: me.kind } : {}) }, open: list.counts.open, digest, customers: tree.customers };
   }
   return (
     <html lang="en" className={fontVariables} suppressHydrationWarning>

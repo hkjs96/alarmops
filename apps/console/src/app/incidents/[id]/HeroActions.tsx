@@ -3,7 +3,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Banner, Button, isSameSpot, markSpot } from "@alarmops/design-system";
 import type { IncidentStatus } from "@/lib/api/types";
-import { hasRole, roleReason, useShell } from "@/components/ShellContext";
+import { hasRole, isPortal, roleReason, useShell } from "@/components/ShellContext";
 import { errorText } from "@/lib/errors";
 import { kstTime } from "@/lib/format";
 import { SESSION_ENDED, callAction, sessionEndReason } from "@/lib/session-ended";
@@ -61,6 +61,7 @@ export function HeroActions({ id, title, pathText, status, version, canEscalate,
     if (el) { el.focus(); refocus.current = false; }
   });
 
+  const portal = isPortal(shell.user);
   const may = hasRole(shell.user, "OPERATOR");
   const noRole = may ? undefined : roleReason(shell.user, "OPERATOR", "Acknowledging, escalating and resolving");
   const fail = (r: { code: string; message: string; details?: Record<string, unknown> }) => setErr({ conflict: r.code === "VERSION_CONFLICT", msg: errorText(r, { what: "This action", where: pathText }) });
@@ -131,7 +132,7 @@ export function HeroActions({ id, title, pathText, status, version, canEscalate,
             <Button ref={keepRef} variant="primary" size="lg" onClick={() => setConfirm(false)} disabled={pending}>Keep it open</Button>
           </div>
         </div>
-      ) : (
+      ) : portal ? null : (
         <>
           <div className="row hero-actions">
             <Button disabled title="Maintenance windows are not built yet">Mute 1h</Button>
@@ -155,7 +156,7 @@ export function HeroActions({ id, title, pathText, status, version, canEscalate,
           ) : null}
         </>
       )}
-      {noRole ? <div className="sm mut" style={{ marginTop: 8 }} data-testid="hero-role">{noRole}</div> : null}
+      {noRole && !portal ? <div className="sm mut" style={{ marginTop: 8 }} data-testid="hero-role">{noRole}</div> : null}
       {err ? (
         <div style={{ marginTop: 10 }}>
           <Banner tone="red" action={<Button size="sm" onClick={() => { setErr(null); router.refresh(); }}>Reload</Button>}>

@@ -52,6 +52,10 @@ export interface StoreFixture<R extends TickRepository = TickRepository> {
   alertAcked(alertId: string): Promise<boolean>;
   resolutions(): Promise<ResolutionInput[]>;
   audits(): Promise<AuditInput[]>;
+  /** ContactRevealLog rows (D-35, MemoryApiStore / SqlApiStore only), oldest first. Every column the table has, so a test can look for a contact value. */
+  revealRows?(): Promise<Array<Record<string, unknown>>>;
+  /** From now on every ContactRevealLog write fails (a trigger / a switch); `close()` removes it. */
+  breakRevealLog?(): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -90,6 +94,8 @@ export function memoryFixture<S extends MemoryTickStore>(store: S): StoreFixture
     async alertAcked(alertId) { return store.alertAcked.get(alertId) === true; },
     async resolutions() { return structuredClone(store.resolutions); },
     async audits() { return structuredClone(store.audits); },
+    async revealRows() { return structuredClone((store as unknown as { revealLogs?: Array<Record<string, unknown>> }).revealLogs ?? []); },
+    async breakRevealLog() { (store as unknown as { failRevealWrites: boolean }).failRevealWrites = true; },
     async close() { /* nothing to release */ },
   };
 }

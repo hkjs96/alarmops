@@ -8,6 +8,7 @@ import {
 } from "../../call-order/model";
 import { MAX_ALL_RESPONDERS, MAX_SENDS_PER_CYCLE, MAX_SENDS_PER_HOUR, capViolation, estimateSends } from "../../call-order/limits";
 import { isSlug } from "../../validate";
+import { revealRule } from "./reveal-mock";
 import type { FxContact, FxPaging, FxStoredConfig } from "./paging-fixtures";
 import type { FxCustomer, FxProject, FxService } from "./scope-fixtures";
 
@@ -18,7 +19,7 @@ type PagingApi = Pick<ConsoleApi,
 interface Ctx {
   customers: FxCustomer[];
   paging: FxPaging;
-  me: { name: string; role: Role };
+  me: { name: string; role: Role; id?: string; contactId?: string; email?: string; kind?: "INTERNAL" | "CUSTOMER" };
   now: () => string;
   /** customers with an open incident, for onlyProblems */
   openCustomerIds: () => Set<string>;
@@ -262,7 +263,13 @@ export function createPagingApi(x: Ctx): PagingApi {
       const c = customerById(customerId);
       const d = directoryOf(paging, c);
       const cp = paging.byCustomer[c.id]!;
-      return structuredClone({ staff: d.staff, people: d.people, templateId: cp.templateId, version: cp.respondersVersion, slackChannel: cp.slackChannel });
+      // D-35: what the caller may do with each contact's full value (the same rule POST /contacts/{id}/reveal applies)
+      const who = { id: x.me.id ?? "", contactId: x.me.contactId ?? "", name: x.me.name, email: x.me.email ?? "", role: x.me.role, kind: x.me.kind };
+      const flag = <T extends { contactId: string }>(p: T): T & { canReveal: boolean; revealRequiresReason: boolean } => {
+        const r = revealRule({ me: who, directory: () => d }, c, paging.contacts[p.contactId]!);
+        return { ...p, canReveal: r.ok, revealRequiresReason: r.reason };
+      };
+      return structuredClone({ staff: d.staff.map(flag), people: d.people.map(flag), templateId: cp.templateId, version: cp.respondersVersion, slackChannel: cp.slackChannel });
     },
     async addResponder(customerId, input, opts) {
       const c = customerById(customerId);

@@ -66,7 +66,7 @@ jobs:
             echo "::error::Nothing was changed. The confirmation does not match the account id."
             exit 1
           fi
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v5
         with:
           node-version: 20

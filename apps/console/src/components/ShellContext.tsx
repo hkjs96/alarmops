@@ -6,11 +6,14 @@ import { roleAtLeast } from "@/lib/roles";
 
 export interface ToastAction { label: string; href?: string; onAction?: () => void }
 export type LocalMark = "RESOLVED" | "REOPENED";
-export interface ShellUser { id: string; name: string; role: Role }
+export interface ShellUser { id: string; name: string; role: Role; /** CUSTOMER = portal user: the console is read-only for them (GET /me `kind`) */ kind?: "INTERNAL" | "CUSTOMER" }
+/** A portal (customer) user sees everything read-only: no edit, add, remove, status, escalate or acknowledge control anywhere. */
+export const isPortal = (user: Pick<ShellUser, "kind">): boolean => user.kind === "CUSTOMER";
 /** What the console offers follows GET /me; what is allowed is decided by the API (a 403 is worded by lib/errors.ts). */
-export const hasRole = (user: Pick<ShellUser, "role">, min: Role): boolean => roleAtLeast(user.role, min);
+export const hasRole = (user: Pick<ShellUser, "role"> & { kind?: "INTERNAL" | "CUSTOMER" }, min: Role): boolean => user.kind !== "CUSTOMER" && roleAtLeast(user.role, min);
 /** Why an action is not offered: "Changing the call order needs the Admin role. You are signed in as Operator." */
-export function roleReason(user: Pick<ShellUser, "role">, min: Role, what: string): string {
+export function roleReason(user: Pick<ShellUser, "role"> & { kind?: "INTERNAL" | "CUSTOMER" }, min: Role, what: string): string {
+  if (user.kind === "CUSTOMER") return `${what} is not available in the read-only view.`;
   const n: Record<Role, string> = { ADMIN: "Admin", OPERATOR: "Operator", VIEWER: "Viewer" };
   return `${what} needs the ${n[min]} role. You are signed in as ${n[user.role]}.`;
 }
