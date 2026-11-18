@@ -6,7 +6,7 @@
 import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 import { T0 } from '../../../core/test/world.js';
-import { loggablePath, MemoryApiStore, type AuthContext, type VerificationSender } from '../../src/index.js';
+import { loggablePath, PORTAL_CONTACTS_PER_DAY, VERIFY_CAP_PER_DESTINATION_HOUR, MemoryApiStore, type AuthContext, type VerificationSender } from '../../src/index.js';
 import { USERS, body, wire } from '../helpers.js';
 import { cworld, type CWorld, type MakeApiFixture } from './apiContract.js';
 
@@ -239,6 +239,11 @@ export function onboardingContract(make: MakeApiFixture): void {
       const r = await w.call(admin, 'POST', `/accounts/${id}/check`);
       expect(r.status).toBe(202);
       expect(Object.keys(body(r))).toEqual(['commandId']);
+      const tooSoon = await w.call(admin, 'POST', `/accounts/${id}/check`);
+      expect([tooSoon.status, body(tooSoon).error.code]).toEqual([429, 'RATE_LIMITED']);
+      expect(Number(tooSoon.headers['retry-after'])).toBeGreaterThan(0);
+      expect(w.commands.sent).toHaveLength(1);
+      w.sim.now = new Date(w.sim.now.getTime() + 31_000);
       const again = await w.call(admin, 'POST', `/accounts/${id}/check`);
       expect(body(again).commandId).not.toBe(body(r).commandId);
       expect(w.commands.sent).toHaveLength(2);
@@ -256,6 +261,7 @@ export function onboardingContract(make: MakeApiFixture): void {
       const r = await bare.handle({ method: 'POST', path: `/accounts/${id}/check`, auth: admin, requestId: 'r1' });
       expect([r.status, (r.body as any).error.code]).toEqual([503, 'COMMANDS_UNAVAILABLE']);
       w.commands.failFor.add(id);
+      w.sim.now = new Date(w.sim.now.getTime() + 31_000);
       const f = await w.call(admin, 'POST', `/accounts/${id}/check`);
       expect([f.status, body(f).error.code]).toEqual([502, 'COMMAND_PUBLISH_FAILED']);
       expect(JSON.stringify(f.body)).not.toMatch(/simulated|sqs\.|https:/i);
@@ -422,6 +428,31 @@ export function onboardingContract(make: MakeApiFixture): void {
     expect(loggablePath('/api/v1/verify/vf_abc?x=1')).toBe('/api/v1/verify/[token]?x=1');
     expect(loggablePath('/verify/vf_abc')).toBe('/verify/[token]');
     expect(loggablePath('/contacts/ct_1')).toBe('/contacts/ct_1');
+  });
+
+  describe('send and creation caps (R-5)', () => {
+    it('one address gets at most 3 links an hour, however many contacts name it; the cap frees after the hour', async () => {
+      await open();
+      const ids: string[] = [];
+      for (let i = 0; i < VERIFY_CAP_PER_DESTINATION_HOUR + 1; i++) ids.push((await mkContact({ name: `Same Mail ${i}`, email: 'shared@mirae.example', phone: undefined })).id);
+      const codes: number[] = [];
+      for (const id of ids) codes.push((await w.call(admin, 'POST', `/contacts/${id}/verify`, { body: { channel: 'EMAIL', method: 'link' } })).status);
+      expect(codes).toEqual([202, 202, 202, 429]);
+      expect(sender.sent).toHaveLength(3);
+      w.sim.now = new Date(w.sim.now.getTime() + 3600_000 + 1000);
+      expect((await w.call(admin, 'POST', `/contacts/${ids[3]}/verify`, { body: { channel: 'EMAIL', method: 'link' } })).status).toBe(202);
+    });
+
+    it('a portal user can add at most 20 people a day; the count is read from the database', async () => {
+      await open();
+      let last = 201;
+      for (let i = 0; i < PORTAL_CONTACTS_PER_DAY + 1; i++) last = (await w.call(USERS.yuna, 'POST', '/contacts', { body: { name: `P ${i}`, email: `p${i}@mirae.example` } })).status;
+      expect(last).toBe(429);
+      expect((await listed(USERS.yuna)).filter((x) => x.name.startsWith('P '))).toHaveLength(PORTAL_CONTACTS_PER_DAY);
+      expect((await w.call(admin, 'POST', '/contacts', { body: { kind: 'CUSTOMER', customerId: 'cus_mirae', name: 'Staff added', email: 's@mirae.example' } })).status).toBe(201); // staff are not capped
+      w.sim.now = new Date(w.sim.now.getTime() + 25 * 3600_000);
+      expect((await w.call(USERS.yuna, 'POST', '/contacts', { body: { name: 'Next day', email: 'nd@mirae.example' } })).status).toBe(201);
+    });
   });
 
   describe('B-1: staff contacts belong to every customer they serve', () => {

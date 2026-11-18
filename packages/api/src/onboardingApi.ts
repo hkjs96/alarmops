@@ -17,7 +17,7 @@
 import { randomBytes } from 'node:crypto';
 import { customerWide, requireAuth, requireRole, scopeOf, type AuthContext } from './auth.js';
 import { adminCustomer, type CommandPublisher } from './customerApi.js';
-import { withoutUndefined, ApiError, invalid, isRecord, notFound, ok, validation, type ApiRequest, type ApiResponse } from './http.js';
+import { rateLimited, withoutUndefined, ApiError, invalid, isRecord, notFound, ok, validation, type ApiRequest, type ApiResponse } from './http.js';
 import type { AccountPatch, ApiRepository, CloudAccountRecord, EnvironmentValue, NewAccount, RoleStatusValue } from './repo.js';
 import { RESERVED_SLUGS, slugProblem } from './slug.js';
 
@@ -232,6 +232,9 @@ export async function deleteAccount(req: ApiRequest, deps: Deps, accountId: stri
 
 // ───────────────────────────── check / status ─────────────────────────────
 
+/** One check per account every 30 s: each one is five AssumeRole calls in the customer's account. Counted from the stored audit row, so it holds across instances. */
+export const CHECK_COOLDOWN_SEC = 30;
+
 /** One id per request: a repeated Check connection is a new command, not a duplicate the engine would drop. */
 const newCommandId = (): string => `cmd_${randomBytes(12).toString('hex')}`;
 
@@ -246,8 +249,13 @@ export async function checkAccount(req: ApiRequest, deps: Deps, accountId: strin
   const st = await deps.repo.customerStatusState(account.customerId);
   if (!st) throw notFound();
   if (st.status === 'TERMINATED' || account.disabled || account.connectionPurged) throw new ApiError(409, 'ACCOUNT_DISABLED', 'This account is disabled; its connection cannot be checked.');
-  const commandId = newCommandId();
   const now = deps.now();
+  const last = await deps.repo.lastAccountCheckAt(account.customerId, account.id);
+  if (last && now.getTime() - last.getTime() < CHECK_COOLDOWN_SEC * 1000) {
+    // a check queued in the last 30 s is still running or just finished: poll the status instead of queueing another
+    throw rateLimited('A check for this account was queued a moment ago. Wait for its result.', CHECK_COOLDOWN_SEC - (now.getTime() - last.getTime()) / 1000);
+  }
+  const commandId = newCommandId();
   const audit = (action: string) => ({ at: now, customerId: account.customerId, actorType: 'USER' as const, actorId: auth.userId, action, targetType: 'CloudAccount', targetId: account.id, before: null, after: { commandId }, requestId: req.requestId });
   try {
     await deps.commands.publish({ schemaVersion: 1, commandId, type: 'CHECK_CONNECTION', customerId: account.customerId, cloudAccountId: account.id, requestedBy: { type: 'USER', id: auth.userId }, requestedAt: now.toISOString(), payload: {} });

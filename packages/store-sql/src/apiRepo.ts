@@ -5,7 +5,7 @@
  */
 import { createHash } from 'node:crypto';
 import { incidentMute, type DigestData, type PurgeLogEntry, type Contact, type Leave, type Override, type Rotation, type AuditInput, type DeliveryLog, type IncidentEventInput, type IncidentRow, type MaintenanceWindow, type PagingConfig } from '@alarmops/core';
-import { nodeVisible, type ApiRepository, type AlertMemberRow, type IdempotentEntry, type IncidentFilter, type IncidentPage, type NodeFilter, type NotifiedPerson, type OpenCounts, type OrgTree, type ScopeFilter, type StatusCounts, type UndoRecord, type UserInfo, type Principal, type ResponderOp, type ResponderWriteOutcome, type RespondersState, type RotationsWorld, type ChangeStatusOutcome, type CustomerStatusState, type CustomerStatusValue, type ExportIncidentRow, type RetentionView, type MarkStepOutcome, type OffboardStep, type OffboardStepKey, type OffboardingState, type RevealLogFilter, type RevealLogRow, type RevealWrite, type RevealWriteOutcome, type AccountPatch, type AccountWriteOutcome, type AuditTemplate, type CloudAccountRecord, type ContactPatch, type ContactScopeInfo, type ContactWriteOutcome, type ContactsWorld, type NewAccount, type NewContact, type VerificationIssue, type VerificationLink, type VerificationTaken, type VerifyChannelValue, OFFBOARD_STEP_KEYS } from '@alarmops/api';
+import { nodeVisible, type ApiRepository, type AlertMemberRow, type IdempotentEntry, type IncidentFilter, type IncidentPage, type NodeFilter, type NotifiedPerson, type OpenCounts, type OrgTree, type ScopeFilter, type StatusCounts, type UndoRecord, type UserInfo, type Principal, type ResponderOp, type ResponderWriteOutcome, type RespondersState, type RotationsWorld, type ChangeStatusOutcome, type CustomerStatusState, type CustomerStatusValue, type ExportIncidentRow, type RetentionView, type MarkStepOutcome, type OffboardStep, type OffboardStepKey, type OffboardingState, type RevealLogFilter, type RevealLogRow, type RevealWrite, type RevealWriteOutcome, type AccountPatch, type AccountWriteOutcome, type AuditTemplate, type CloudAccountRecord, type ContactPatch, type ContactScopeInfo, type ContactWriteOutcome, type ContactsWorld, type NewAccount, type NewContact, type VerificationIssue, type VerificationLimits, type IssueOutcome, type VerificationLink, type VerificationTaken, type VerifyChannelValue, OFFBOARD_STEP_KEYS } from '@alarmops/api';
 import { PG, pgCode, type SqlExecutor } from './client.js';
 import { purgeLogOf } from './retentionSql.js';
 import { CONTACT_COLS, toContact, Params, d, dReq, incidentCols, iso, js, newId, num, toEvent, toIncident, toLog } from './rows.js';
@@ -775,6 +775,10 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
       return SqlApiStore.toAccount(row!);
     });
   }
+  async lastAccountCheckAt(customerId: string, accountId: string): Promise<Date | null> {
+    const [r] = await this.sql.query(`SELECT max("at") AS "at" FROM "AuditLog" WHERE "targetType" = 'CloudAccount' AND "targetId" = $1 AND "customerId" = $2 AND "action" = 'account.check'`, [accountId, customerId]);
+    return d(r?.at);
+  }
   async deleteAccount(customerId: string, accountId: string, audit: AuditTemplate) {
     return this.sql.transaction(async (tx) => {
       const [cus] = await tx.query(`SELECT "status" FROM "Customer" WHERE "id" = $1 FOR SHARE`, [customerId]);
@@ -886,8 +890,15 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
       return 'OK' as const;
     });
   }
-  async issueVerification(v: VerificationIssue, cooldownSec: number) {
+  async countAudits(customerId: string, actorId: string, action: string, since: Date): Promise<number> {
+    const [r] = await this.sql.query(`SELECT count(*)::int AS "n" FROM "AuditLog" WHERE "customerId" = $1 AND "actorId" = $2 AND "action" = $3 AND "at" > $4::timestamptz`, [customerId, actorId, action, iso(since)]);
+    return (r?.n as number) ?? 0;
+  }
+  async issueVerification(v: VerificationIssue, limits: VerificationLimits): Promise<IssueOutcome> {
+    const cooldownSec = limits.cooldownSec;
     return this.sql.transaction(async (tx) => {
+      // sends of one customer queue here, so two instances cannot both pass the count
+      await tx.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`verify:${v.customerId ?? '-'}`]);
       // one link at a time per contact + channel: the row lock makes two requests queue instead of both passing the cooldown
       const [c] = await tx.query(`SELECT 1 FROM "Contact" WHERE "id" = $1 FOR UPDATE`, [v.contactId]);
       if (!c) return { cooling: 1 };
@@ -895,9 +906,18 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
         `SELECT "sentAt" FROM "ChannelVerification" WHERE "contactId" = $1 AND "channel" = $2::"VerifyChannel" AND "via" = 'link' AND "sentAt" > $3::timestamptz - make_interval(secs => $4) ORDER BY "sentAt" DESC LIMIT 1`,
         [v.contactId, v.channel, iso(v.sentAt), cooldownSec]);
       if (recent) return { cooling: Math.max(1, Math.ceil((dReq(recent.sentAt).getTime() + cooldownSec * 1000 - v.sentAt.getTime()) / 1000)) };
+      const capped = async (where: string, param: unknown, cap: number, kind: 'CUSTOMER' | 'DESTINATION'): Promise<IssueOutcome | null> => {
+        const rows = await tx.query(`SELECT "sentAt" FROM "ChannelVerification" WHERE ${where} AND "via" = 'link' AND "sentAt" > $2::timestamptz - interval '1 hour' ORDER BY "sentAt" DESC LIMIT $3`, [param, iso(v.sentAt), cap]);
+        if (rows.length < cap) return null;
+        return { capped: kind, retryAfterSec: Math.max(1, Math.ceil((dReq(rows[cap - 1]!.sentAt).getTime() + 3600_000 - v.sentAt.getTime()) / 1000)) };
+      };
+      const byCustomer = await capped(`"customerId" IS NOT DISTINCT FROM $1`, v.customerId, limits.perCustomerHour, 'CUSTOMER');
+      if (byCustomer) return byCustomer;
+      const byDest = await capped(`"note" = $1`, v.destinationHash, limits.perDestinationHour, 'DESTINATION');
+      if (byDest) return byDest;
       await tx.query(
-        `INSERT INTO "ChannelVerification"("id", "customerId", "contactId", "channel", "tokenHash", "sentAt", "expiresAt", "via") VALUES ($1, $2, $3, $4::"VerifyChannel", $5, $6::timestamptz, $7::timestamptz, 'link')`,
-        [newId('cv'), v.customerId, v.contactId, v.channel, v.tokenHash, iso(v.sentAt), iso(v.expiresAt)]);
+        `INSERT INTO "ChannelVerification"("id", "customerId", "contactId", "channel", "tokenHash", "sentAt", "expiresAt", "via", "note") VALUES ($1, $2, $3, $4::"VerifyChannel", $5, $6::timestamptz, $7::timestamptz, 'link', $8)`,
+        [newId('cv'), v.customerId, v.contactId, v.channel, v.tokenHash, iso(v.sentAt), iso(v.expiresAt), v.destinationHash]);
       return 'OK' as const;
     });
   }

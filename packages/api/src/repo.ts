@@ -227,7 +227,11 @@ export interface NewContact { kind: 'INTERNAL' | 'CUSTOMER'; customerId: string 
 /** `undefined` = unchanged. Changing a value clears that channel's verification (the store does it, in the same statement). */
 export interface ContactPatch { name?: string; email?: string | null; phone?: string | null; slackUserId?: string | null; active?: boolean }
 export type ContactWriteOutcome = ContactRow | 'NOT_FOUND' | 'SLACK_EXISTS';
-export interface VerificationIssue { customerId: string | null; contactId: string; channel: VerifyChannelValue; tokenHash: string; sentAt: Date; expiresAt: Date }
+/** `destinationHash`: SHA-256 of channel + lower-case address — kept in `ChannelVerification.note` of a link row so sends per address can be counted without storing the address (follow-up: a real column). */
+export interface VerificationIssue { customerId: string | null; contactId: string; channel: VerifyChannelValue; tokenHash: string; sentAt: Date; expiresAt: Date; destinationHash: string }
+/** Send limits per hour, counted from stored rows (so they hold across instances). `cooldownSec`: same contact + channel. */
+export interface VerificationLimits { cooldownSec: number; perCustomerHour: number; perDestinationHour: number }
+export type IssueOutcome = 'OK' | { cooling: number } | { capped: 'CUSTOMER' | 'DESTINATION'; retryAfterSec: number };
 export interface VerificationTaken { contactId: string; customerId: string | null; channel: VerifyChannelValue; tokenHash: string }
 
 export interface ApiRepository {
@@ -363,6 +367,8 @@ export interface ApiRepository {
   createAccount(customerId: string, a: NewAccount, audit: AuditTemplate): Promise<AccountWriteOutcome>;
   /** `WHERE id = ? AND customerId = ?`. Refused for a TERMINATED customer and for a purged account. */
   updateAccount(customerId: string, accountId: string, patch: AccountPatch, audit: AuditTemplate): Promise<AccountWriteOutcome>;
+  /** When the last CHECK_CONNECTION was queued for this account (its `account.check` audit row), or null. */
+  lastAccountCheckAt(customerId: string, accountId: string): Promise<Date | null>;
   /** Deletes only an account that has no Resource and no ManagedAlarm rows (nothing of ours in the customer's AWS); else 'IN_USE'. */
   deleteAccount(customerId: string, accountId: string, audit: AuditTemplate): Promise<'OK' | 'NOT_FOUND' | 'IN_USE' | 'CUSTOMER_TERMINATED'>;
 
@@ -383,7 +389,9 @@ export interface ApiRepository {
   /** 'IN_USE': the contact is a Responder, a rotation member, named in a step, or a login user. */
   deleteContact(contactId: string, customerId: string | null, audit: AuditTemplate): Promise<'OK' | 'NOT_FOUND' | 'IN_USE'>;
   /** Stores only the token HASH. 'COOLING' (with seconds) when this contact + channel got a link less than `cooldownSec` ago: nothing written. */
-  issueVerification(v: VerificationIssue, cooldownSec: number): Promise<'OK' | { cooling: number }>;
+  issueVerification(v: VerificationIssue, limits: VerificationLimits): Promise<IssueOutcome>;
+  /** AuditLog rows of this actor + action for this customer since `since` (a DB count: the caps hold across instances). */
+  countAudits(customerId: string, actorId: string, action: string, since: Date): Promise<number>;
   /** The sender failed: take the unused link back so no valid token exists for a message that was never sent. */
   discardVerification(tokenHash: string): Promise<void>;
   /** A person (ADMIN) states the channel is verified: sets the channel's verified time + via `admin:<name>`, writes a ChannelVerification history row (already used) and `audit`. */

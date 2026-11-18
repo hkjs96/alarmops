@@ -5,7 +5,7 @@
 import { MemoryTickStore, incidentMute, type DigestData, type PurgeLogEntry, type RetentionStage, parseSnapshot, type AuditInput, type Contact, type IncidentRow, type PagingConfig } from '@alarmops/core';
 import { inScope, nodeVisible, seesCustomer, type Role, type ScopeFilter } from './auth.js';
 import type { UserInfo } from './audience.js';
-import type { AccountPatch, AccountWriteOutcome, AuditTemplate, CloudAccountRecord, ContactPatch, ContactScopeInfo, ContactWriteOutcome, ContactsWorld, NewAccount, NewContact, VerificationIssue, VerificationLink, VerificationTaken, VerifyChannelValue, ExportIncidentRow, RetentionView, RevealLogFilter, RevealLogRow, RevealWrite, RevealWriteOutcome } from './repo.js';
+import type { AccountPatch, AccountWriteOutcome, AuditTemplate, CloudAccountRecord, ContactPatch, ContactScopeInfo, ContactWriteOutcome, ContactsWorld, NewAccount, NewContact, VerificationIssue, VerificationLimits, IssueOutcome, VerificationLink, VerificationTaken, VerifyChannelValue, ExportIncidentRow, RetentionView, RevealLogFilter, RevealLogRow, RevealWrite, RevealWriteOutcome } from './repo.js';
 import { OFFBOARD_STEP_KEYS, type ChangeStatusOutcome, type CustomerStatusState, type CustomerStatusValue, type MarkStepOutcome, type OffboardStepKey, type OffboardingState, type Principal, ResponderOp, ResponderWriteOutcome, RespondersState, RotationsWorld, AlertMemberRow, ApiRepository, IdempotentEntry, IncidentFilter, IncidentPage, NodeFilter, NotifiedPerson, OpenCounts, StatusCounts, UndoRecord } from './repo.js';
 
 export interface ContactScopeRow { contactId: string; customerId: string; scopeType: 'CUSTOMER' | 'PROJECT' | 'SERVICE'; scopeId: string; role: 'NOTIFY' | 'APPROVER' | 'PORTAL_USER' }
@@ -414,6 +414,10 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     this.audits.push({ ...audit, customerId, targetId: accountId });
     return this.accountRecord(org);
   }
+  async lastAccountCheckAt(customerId: string, accountId: string): Promise<Date | null> {
+    const t = this.audits.filter((a) => a.action === 'account.check' && a.customerId === customerId && a.targetId === accountId).map((a) => a.at.getTime());
+    return t.length ? new Date(Math.max(...t)) : null;
+  }
   async deleteAccount(customerId: string, accountId: string, audit: AuditTemplate) {
     const org = this.accounts.get(accountId);
     if (!org || org.customerId !== customerId) return 'NOT_FOUND' as const;
@@ -489,11 +493,22 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     this.audits.push({ ...audit, customerId, targetId: c.id });
     return 'OK' as const;
   }
-  async issueVerification(v: VerificationIssue, cooldownSec: number) {
+  async countAudits(customerId: string, actorId: string, action: string, since: Date): Promise<number> {
+    return this.audits.filter((a) => a.customerId === customerId && a.actorId === actorId && a.action === action && a.at.getTime() > since.getTime()).length;
+  }
+  async issueVerification(v: VerificationIssue, limits: VerificationLimits): Promise<IssueOutcome> {
+    const cooldownSec = limits.cooldownSec;
+    const hourAgo = v.sentAt.getTime() - 3600_000;
+    const hour = [...this.verifications.values()].filter((x) => x.via === 'link' && x.sentAt.getTime() > hourAgo);
+    const retry = (rows: MemoryVerification[], cap: number): number => { const o = rows.sort((a, b) => a.sentAt.getTime() - b.sentAt.getTime())[rows.length - cap]; return Math.max(1, Math.ceil((o!.sentAt.getTime() + 3600_000 - v.sentAt.getTime()) / 1000)); };
+    const byCustomer = hour.filter((x) => (x.customerId ?? null) === (v.customerId ?? null));
+    if (byCustomer.length >= limits.perCustomerHour) return { capped: 'CUSTOMER', retryAfterSec: retry(byCustomer, limits.perCustomerHour) };
+    const byDest = hour.filter((x) => x.note === v.destinationHash);
+    if (byDest.length >= limits.perDestinationHour) return { capped: 'DESTINATION', retryAfterSec: retry(byDest, limits.perDestinationHour) };
     const recent = [...this.verifications.values()].filter((x) => x.contactId === v.contactId && x.channel === v.channel && x.via === 'link' && x.sentAt.getTime() > v.sentAt.getTime() - cooldownSec * 1000)
       .sort((a, b) => b.sentAt.getTime() - a.sentAt.getTime())[0];
     if (recent) return { cooling: Math.max(1, Math.ceil((recent.sentAt.getTime() + cooldownSec * 1000 - v.sentAt.getTime()) / 1000)) };
-    this.verifications.set(v.tokenHash, { id: this.nextId('cv'), customerId: v.customerId, contactId: v.contactId, channel: v.channel, tokenHash: v.tokenHash, sentAt: v.sentAt, expiresAt: v.expiresAt, usedAt: null, via: 'link', note: null });
+    this.verifications.set(v.tokenHash, { id: this.nextId('cv'), customerId: v.customerId, contactId: v.contactId, channel: v.channel, tokenHash: v.tokenHash, sentAt: v.sentAt, expiresAt: v.expiresAt, usedAt: null, via: 'link', note: v.destinationHash });
     return 'OK' as const;
   }
   async discardVerification(tokenHash: string) { this.verifications.delete(tokenHash); }

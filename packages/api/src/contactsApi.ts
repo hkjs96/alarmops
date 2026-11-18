@@ -38,6 +38,11 @@ export const VERIFY_TTL_MS = 24 * 3600_000;
 export const VERIFY_COOLDOWN_SEC = 60;
 /** API-CONTRACT §2 "한도": 일괄 처리 항목 200. */
 export const BULK_MAX = 200;
+/** Hourly caps (DB-counted): sends per customer and per destination address, on top of the per-contact cooldown. */
+export const VERIFY_CAP_PER_CUSTOMER_HOUR = 200;
+export const VERIFY_CAP_PER_DESTINATION_HOUR = 3;
+/** A portal user may create this many contacts per 24 hours (DB-counted from the audit trail). */
+export const PORTAL_CONTACTS_PER_DAY = 20;
 const NAME_MAX = 80;
 const NOTE_MAX = 500;
 const SLACK_ID_RE = /^[UW][A-Z0-9]{2,20}$/;
@@ -232,6 +237,10 @@ export async function createContact(req: ApiRequest, deps: Deps): Promise<ApiRes
     if (!st) throw notFound();
     if (st.status === 'TERMINATED') throw new ApiError(409, 'CUSTOMER_TERMINATED', 'A terminated customer cannot get new contacts.');
   }
+  if (a.auth.kind === 'CUSTOMER' && customerId) {
+    const since = new Date(deps.now().getTime() - 24 * 3600_000);
+    if ((await deps.repo.countAudits(customerId, a.auth.userId, 'contact.create', since)) >= PORTAL_CONTACTS_PER_DAY) throw rateLimited(`At most ${PORTAL_CONTACTS_PER_DAY} people can be added per day.`, 3600);
+  }
   const r = await deps.repo.createContact(
     { kind, customerId, name, email: v.email ?? null, phone: v.phone ?? null, slackUserId: v.slackUserId ?? null },
     // never a value in an audit row (D-35, D-45): which channels were filled in, not what is in them
@@ -300,13 +309,14 @@ const CHANNELS: readonly VerifyChannelValue[] = ['EMAIL', 'SMS', 'SLACK'];
 const valueOf = (c: ContactRow, ch: VerifyChannelValue): string | null => (ch === 'EMAIL' ? c.email : ch === 'SMS' ? c.phone : c.slackUserId) || null;
 
 /** Issue one link and hand it to the sender. 'COOLING' = too soon; 'FAILED' = the sender refused (the link is taken back). */
-async function sendLink(deps: Deps, sender: VerificationSender, c: ContactRow, channel: 'EMAIL' | 'SMS', to: string): Promise<'SENT' | 'COOLING' | 'FAILED'> {
+async function sendLink(deps: Deps, sender: VerificationSender, c: ContactRow, channel: 'EMAIL' | 'SMS', to: string): Promise<'SENT' | 'COOLING' | 'FAILED' | { capped: number }> {
   const token = newVerifyToken();
   const now = deps.now();
   const expiresAt = new Date(now.getTime() + VERIFY_TTL_MS);
   // The hash is stored first so the link works the moment it arrives; if the sender then fails the row is taken back.
-  const issued = await deps.repo.issueVerification({ customerId: c.customerId, contactId: c.id, channel, tokenHash: hashToken(token), sentAt: now, expiresAt }, VERIFY_COOLDOWN_SEC);
-  if (issued !== 'OK') return 'COOLING';
+  const issued = await deps.repo.issueVerification({ customerId: c.customerId, contactId: c.id, channel, tokenHash: hashToken(token), sentAt: now, expiresAt, destinationHash: hashToken(`${channel}:${to.trim().toLowerCase()}`) },
+    { cooldownSec: VERIFY_COOLDOWN_SEC, perCustomerHour: VERIFY_CAP_PER_CUSTOMER_HOUR, perDestinationHour: VERIFY_CAP_PER_DESTINATION_HOUR });
+  if (issued !== 'OK') return 'capped' in issued ? { capped: issued.retryAfterSec } : 'COOLING';
   try {
     await sender.send({ channel, to, contactId: c.id, customerId: c.customerId, token, expiresAt });
   } catch {
@@ -352,6 +362,7 @@ export async function verifyContact(req: ApiRequest, deps: Deps, contactId: stri
   if (channel === 'SLACK') throw invalid('channel', 'A Slack id is not verified by a link. Use method manual.');
   if (!deps.verification) throw senderMissing(); // nothing written, no token made
   const sent = await sendLink(deps, deps.verification, c, channel, value);
+  if (typeof sent === 'object') throw rateLimited('Too many verification links were sent recently. Try again later.', sent.capped);
   if (sent === 'COOLING') throw rateLimited('A link was sent a moment ago. Wait a minute before sending another.', VERIFY_COOLDOWN_SEC);
   if (sent === 'FAILED') throw new ApiError(502, 'SEND_FAILED', 'The link could not be sent. Try again.');
   await deps.repo.recordAudit({ at: now, customerId: c.customerId, actorType: 'USER', actorId: a.auth.userId, action: 'contact.verify.link_sent', targetType: 'Contact', targetId: c.id, before: null, after: { channel }, requestId: req.requestId });
@@ -405,7 +416,7 @@ export async function verifyBulk(req: ApiRequest, deps: Deps): Promise<ApiRespon
       if (value === null) { notSet.push({ contactId: c.id, channel }); continue; }
       if (verifiedAt(channel === 'EMAIL' ? c.emailVerifiedAt : c.phoneVerifiedAt, now)) continue;
       const r = await sendLink(deps, deps.verification, c, channel, value);
-      if (r === 'SENT') sent++; else if (r === 'COOLING') throttled++; else failed++;
+      if (r === 'SENT') sent++; else if (r === 'COOLING' || typeof r === 'object') throttled++; else failed++;
     }
   }
   if (targets.length) await deps.repo.recordAudit({ at: now, customerId: null, actorType: 'USER', actorId: auth.userId, action: 'contact.verify.bulk', targetType: 'Contact', targetId: 'bulk', before: null, after: { contacts: targets.length, sent, throttled, failed, notSet: notSet.length }, requestId: req.requestId });
