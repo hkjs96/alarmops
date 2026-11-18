@@ -8,7 +8,7 @@
     "migrate:diff": "node scripts/migrate-diff-offline.mjs prisma/schema.prisma",
     "seed": "tsx prisma/seed.ts",
     "check:rls": "node scripts/check-rls.mjs",
-    "test:db": "node scripts/check-rls.mjs && node --test scripts/test-rls.mjs"
+    "test:db": "node scripts/check-rls.mjs && node --test --test-concurrency=1 scripts/test-rls.mjs scripts/test-roles.mjs"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
