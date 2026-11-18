@@ -32,7 +32,9 @@ export interface SignInOptions { sub?: string; bindGoogleSub?: BindGoogleSub }
  */
 export async function decideSignIn(email: string, cfg: Pick<SsoConfig, "domains" | "emails">, lookup: (email: string) => Promise<SignInUser | null>, enrolByDomain?: (domain: string, email: string) => Promise<SignInUser | null>, opts: SignInOptions = {}): Promise<SignInDecision> {
   const d = await decideEligibility(email, cfg, lookup, enrolByDomain);
-  if (!d.ok || !opts.bindGoogleSub || !opts.sub) return d;
+  if (!d.ok) return d;
+  // fail closed: no binding hook or no verified sub means the Google account cannot be tied to the row, so no session
+  if (!opts.bindGoogleSub || !opts.sub) return { ok: false, reason: "sub_mismatch" };
   return (await opts.bindGoogleSub(d.user.id, opts.sub)) === "ok" ? d : { ok: false, reason: "sub_mismatch" };
 }
 

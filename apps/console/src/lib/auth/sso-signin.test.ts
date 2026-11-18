@@ -1,6 +1,10 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
-import { FREE_MAIL_DOMAINS, decideSignIn, isFreeMailDomain, type SignInUser } from "./sso-signin";
+import { FREE_MAIL_DOMAINS, decideSignIn as decide, isFreeMailDomain, type SignInOptions, type SignInUser } from "./sso-signin";
+
+// the binding is required (fail closed): the tests that are not about it bind "ok" unless they pass their own options
+const decideSignIn = (e: string, c: Parameters<typeof decide>[1], l: Parameters<typeof decide>[2], en?: Parameters<typeof decide>[3], o?: SignInOptions) =>
+  decide(e, c, l, en, o ?? { sub: "g-1", bindGoogleSub: async () => "ok" });
 
 const cfg = { domains: ["mz.co.kr"], emails: ["dev@example.com"] };
 const staff: SignInUser = { id: "usr_staff", name: "Staff", kind: "INTERNAL" };
@@ -86,7 +90,7 @@ describe("address guard before any lookup", () => {
   });
 });
 
-describe("Google sub binding hook (not wired in the route until #69)", () => {
+describe("Google sub binding (required, fail closed)", () => {
   const opts = (r: "ok" | "mismatch") => { const bind = vi.fn(async () => r); return { bind, o: { sub: "g-1", bindGoogleSub: bind } }; };
   it("ok: allowed, called with the user id and the verified sub", async () => {
     const { bind, o } = opts("ok");
@@ -103,7 +107,10 @@ describe("Google sub binding hook (not wired in the route until #69)", () => {
     await decideSignIn("new@mz.co.kr", cfg, lookup, undefined, o);
     expect(bind).not.toHaveBeenCalled();
   });
-  it("without the hook (today) nothing changes", async () => {
-    expect((await decideSignIn("ops@mz.co.kr", cfg, lookup, undefined, { sub: "g-1" })).ok).toBe(true);
+  it("without the hook or without the sub: refused with sub_mismatch (fail closed), never passed", async () => {
+    expect(await decide("ops@mz.co.kr", cfg, lookup, undefined, { sub: "g-1" })).toEqual({ ok: false, reason: "sub_mismatch" });
+    expect(await decide("ops@mz.co.kr", cfg, lookup, undefined, { bindGoogleSub: async () => "ok" })).toEqual({ ok: false, reason: "sub_mismatch" });
+    expect(await decide("ops@mz.co.kr", cfg, lookup)).toEqual({ ok: false, reason: "sub_mismatch" });
+    expect(await decide("outsider@evil.com", cfg, lookup)).toEqual({ ok: false, reason: "staff_outside_fence" });
   });
 });

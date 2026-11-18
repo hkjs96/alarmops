@@ -60,3 +60,11 @@
   .us-f .inp, .us-f select, .us-filters .inp, .us-filters select, .us-dlg-sel select { font-size: 16px; }
   .us-bar .btn { flex: 1 1 100%; }
 }
+
+/* masked e-mails break after the "@" (a <wbr> is there), never in the middle of a word and never with an ellipsis */
+.us-table td.us-mail { overflow-wrap: normal; word-break: normal; hyphens: none; min-width: 12ch; }
+.us-count:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* the confirm dialog's buttons are 44 px targets like the rest of this screen */
+.us-dlgwrap .dguard-acts .btn { min-height: 44px; }
+.us-dlgwrap .dguard-b label.us-radio { min-height: 44px; }
+.us-unavailable p { margin: 0; }

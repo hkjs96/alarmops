@@ -115,7 +115,7 @@ VALUES ('usr_' || substr(md5(random()::text), 1, 12), 'you@mz.co.kr', 'Your Name
 
 1. 도메인 추가·삭제: `SSO_ALLOWED_DOMAINS` 값을 고친다. 예: `mz.co.kr,megazone.com,newco.com`
 2. 예외 주소 추가·삭제: `SSO_ALLOWED_EMAILS` 값을 고친다. 정확한 주소 전체를 쓴다(도메인 전체를 열지 않는다).
-3. 다시 배포한다. 확인: 새 주소로 로그인된다. 뺀 주소는 다음 로그인부터 거절되며, 이미 로그인한 세션은 최대 8시간 남는다. 바로 끊어야 하면 그 사용자 행의 `status`를 `DISABLED`로 바꾼다(요청마다 확인한다).
+3. 다시 배포한다. 확인: 새 주소로 로그인된다. 뺀 주소는 다음 로그인부터 거절되며, 이미 로그인한 세션은 최대 8시간 남는다. 바로 끊어야 하면 **Settings › Users에서 비활성화**한다(요청마다 확인한다). 화면을 쓸 수 없을 때만 DB에서 그 사용자 행의 `status`를 `DISABLED`로 바꾼다(SQL은 예비 수단).
 4. 도메인이나 주소를 허용해도 **사용자 행이 없으면 로그인되지 않는다.** 직원은 ADMIN이 Settings › Users › Add user에서 등록한다(역할 ADMIN/OPERATOR/VIEWER). 화면은 직원 주소가 허용 도메인 밖이면 등록 전에 경고한다.
 
 ## 6. 알려진 빈틈

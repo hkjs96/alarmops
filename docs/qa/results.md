@@ -1045,3 +1045,9 @@ mock 모드(MOCK_API=1 E2E_ALLOW_MOCK=1 next build 후 next start -p 3191), Chro
 권고: (1) refused 문구의 "your administrator"가 포털 사용자에게 모호 (2) 알림이 버튼 위 안내문 앞에 있고 실패가 중립 톤 (3) dev 링크 탭 영역 14px. 참고: 미설정+unavailable 중복 문구; 운영형 화면은 코드로만 확인.
 
 수정(console, 다음 커밋): 권고 1~3과 중복 문구를 반영함. refused 문구를 "contact the person who gave you access."로, 알림을 "Use your Google account." 아래 버튼 바로 위로 옮기고 오류 톤(banner red, role alert), 미설정+unavailable은 한 문구만, dev 링크는 줄마다 최소 44px.
+| 2026-11-18 | Settings › Users: 목록·필터·추가·역할·비활성·이동·Google 연결 해제 (#74) | 777fdd4 | P2 준호 (1440×900·390×844, 라이트·다크) | 8명 목록에서 상태(모양+글자)·Staff/Portal·고객명·Never·Google Yes/No가 구분됨; 가로 스크롤 0, 말줄임 0, 390 카드; 이메일 마스킹; 추가(도메인 안/밖 경고/중복/포털); 확인창 6종 평문 설명, 포커스 Cancel → 취소 시 호출 버튼 복귀, 완료 시 role=status; 본인 행 비활성+이유; 필터·빈 결과; 390 컨트롤 ≥44px(1440 확인창 버튼 30px); CSP 위반 0, 콘솔 오류 0 | 통과 (권고 5, 참고 4) | |
+| 2026-11-18 | Users 접근 제한 | 777fdd4 | P4 민재(운영자), P3 소연(포털) | /settings/users에서 Not found만 보임 | 통과 (권고 1) | |
+
+권고(Settings › Users, 777fdd4): (1) 운영자·열람자에게 역할 안내 없음(Not found만) (2) 마스킹 이메일이 1440에서 단어 중간 줄바꿈 (3) "Clear Google link…" 비활성 사유가 title 툴팁뿐 (4) 허용 도메인 밖 직원 추가 후 다음 행동이 불분명 (5) Pending 사용자에게 Enable/"again" 문구. 참고: 확인창 버튼 30px, 필터 적용 후 포커스 body, 포털 사용자 고객 선택 목록이 필터와 다름, 미확인: "last admin" 비활성 안내는 mock에서 도달하지 못함.
+
+수정(console, 다음 커밋): 권고 1~5를 이 커밋에서 반영함. 1 "Only admins with access to all customers can manage users."(직원만, 포털은 404 유지) 2 `@` 뒤에서만 줄바꿈 3 사유는 Google 열 글자("No — links at first sign-in")와 행 아래 안내로, title 사용 안 함 4 경고·완료 문구에 "cannot sign in yet … sign-in exception list" 5 Pending은 "Activate…"("They will be able to sign in")와 상태 설명 줄. 참고 항목도 반영(확인창 버튼 44px, 필터 적용 후 포커스는 결과 줄, 고객 선택 규칙 안내문).

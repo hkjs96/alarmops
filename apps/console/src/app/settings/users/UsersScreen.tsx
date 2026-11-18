@@ -10,7 +10,7 @@ import { NAME_MAX, ROLE_HELP, ROLE_LABEL, STATUS_LABEL, STATUS_MARK, newUserProb
 import { addUserAccount, changeUserAccount } from "./actions";
 import "./users.css";
 
-export interface UsersFilters { kind: UserKind | ""; customerId: string; status: UserStatus | ""; role: Role | ""; q: string }
+export interface UsersFilters { kind: UserKind | ""; customerId: string; status: UserStatus | ""; role: Role | "" }
 export interface UsersScreenProps {
   users: UserItem[];
   customers: { id: string; name: string; status: CustomerStatusValue }[];
@@ -27,10 +27,25 @@ export interface UsersScreenProps {
 type Ask = { type: "role" | "disable" | "enable" | "move" | "google"; user: UserItem };
 const ROLES: Role[] = ["ADMIN", "OPERATOR", "VIEWER"];
 
-export function UsersScreen({ users, customers, meId, activeAdmins, fenceDomains, filters, error }: UsersScreenProps) {
+export function UsersScreen({ users: loaded, customers, meId, activeAdmins, fenceDomains, filters, error }: UsersScreenProps) {
   const router = useRouter();
   const cname = (id: string | null) => customers.find((c) => c.id === id)?.name ?? "a customer";
-  const filtered = Boolean(filters.kind || filters.customerId || filters.status || filters.role || filters.q);
+  // the text search never leaves the browser: it narrows the list already loaded (names and masked addresses), so no address fragment reaches the URL, history, proxy logs or Referer
+  const [search, setSearch] = useState("");
+  const needle = search.trim().toLowerCase();
+  const users = needle ? loaded.filter((u) => `${u.name} ${u.emailMasked} ${u.kind === "CUSTOMER" ? cname(u.customerId) : "staff"}`.toLowerCase().includes(needle)) : loaded;
+  const serverFiltered = Boolean(filters.kind || filters.customerId || filters.status || filters.role);
+  const filtered = serverFiltered || needle !== "";
+  // after Apply filters the results line takes the focus (not the body)
+  const countRef = useRef<HTMLParagraphElement>(null);
+  const filterKey = JSON.stringify(filters);
+  const seenKey = useRef(filterKey);
+  useEffect(() => {
+    if (seenKey.current === filterKey) return;
+    seenKey.current = filterKey;
+    const t = setTimeout(() => countRef.current?.focus(), 120); // after the shell has moved the focus on a navigation
+    return () => clearTimeout(t);
+  }, [filterKey]);
 
   // ---- result line (role=status): the one place a finished change is said; it takes the focus when a dialog or form closes
   const [result, setResult] = useState("");
@@ -72,7 +87,7 @@ export function UsersScreen({ users, customers, meId, activeAdmins, fenceDomains
     setAsk(null);
     say(type === "role" ? `${user.name} is now ${ROLE_LABEL[roleSel]}. It applies from their next action; they stay signed in.`
       : type === "disable" ? `${user.name} is disabled. They are signed out on their next action and cannot sign in until you enable them.`
-      : type === "enable" ? `${user.name} is enabled. They can sign in with their Google account again.`
+      : type === "enable" ? (user.status === "PENDING" ? `${user.name} is activated. They can sign in with their Google account.` : `${user.name} is enabled. They can sign in with their Google account again.`)
       : type === "move" ? `${user.name} now belongs to ${cname(custSel)} and sees only that customer, read-only.`
       : `Google link cleared for ${user.name}. The next sign-in with their e-mail address links the Google account used then.`);
     router.refresh();
@@ -85,7 +100,10 @@ export function UsersScreen({ users, customers, meId, activeAdmins, fenceDomains
   return (
     <>
       <div className="us-bar">
-        <p className="sm mut" style={{ margin: 0 }} data-testid="us-count">{error ? "The list could not be loaded." : `${users.length} ${users.length === 1 ? "user" : "users"}${filtered ? " match the filters" : ""}. E-mail addresses are shown masked.`}</p>
+        <div>
+          <p className="sm mut us-count" style={{ margin: 0 }} role="status" tabIndex={-1} ref={countRef} data-testid="us-count">{error ? "The list could not be loaded." : `${users.length} ${users.length === 1 ? "user" : "users"}${filtered ? " match the filters" : ""}. E-mail addresses are shown masked.`}</p>
+          <p className="us-hint" data-testid="us-legend"><b>Active</b> can sign in. <b>Disabled</b> was turned off by an admin. <b>Pending</b> was added but not activated yet: they cannot sign in until you activate them.</p>
+        </div>
         <button type="button" ref={addBtn} className="btn pri" data-testid="us-add" aria-expanded={adding} aria-controls="us-add-panel" onClick={() => { setAdding((a) => !a); setResult(""); }}>
           {adding ? "Close" : "Add user"}
         </button>
@@ -102,7 +120,7 @@ export function UsersScreen({ users, customers, meId, activeAdmins, fenceDomains
       ) : null}
 
       <Card title="People who can sign in">
-        <Filters customers={customers} filters={filters} filtered={filtered} />
+        <Filters customers={customers} filters={filters} serverFiltered={serverFiltered} search={search} onSearch={setSearch} />
         {error ? (
           <div className="co-err" role="alert" data-testid="us-error"><span>{error}</span> <Link className="btn sm" href="/settings/users">Try again</Link></div>
         ) : users.length === 0 ? (
@@ -117,16 +135,16 @@ export function UsersScreen({ users, customers, meId, activeAdmins, fenceDomains
               {users.map((u) => {
                 const rules = rowRules(u, { meId, activeAdmins });
                 const noteId = `us-note-${u.id}`;
-                const off = (why: string | null) => ({ disabled: Boolean(why), title: why ?? undefined, "aria-describedby": why && rules.notes.length ? noteId : undefined });
+                const off = (why: string | null, by?: string) => ({ disabled: Boolean(why), "aria-describedby": why ? (rules.notes.length ? noteId : by) : undefined });
                 return (
                   <tr key={u.id} data-testid="us-row" data-user={u.id} data-status={u.status} data-role={u.role} data-kind={u.kind}>
                     <td className="us-c-name"><span className="us-name" data-testid="us-name">{u.name}</span>{u.id === meId ? <span className="us-you">You</span> : null}</td>
-                    <td data-label="E-mail" className="us-mail">{u.emailMasked}</td>
+                    <td data-label="E-mail" className="us-mail">{u.emailMasked.split("@")[0]}@<wbr />{u.emailMasked.split("@")[1]}</td>
                     <td data-label="Type">{u.kind === "INTERNAL" ? "Staff" : `Portal · ${cname(u.customerId)}`}</td>
                     <td data-label="Role" data-testid="us-role">{ROLE_LABEL[u.role]}{u.kind === "CUSTOMER" ? " (read-only)" : ""}</td>
                     <td data-label="Status"><span className={`us-st ${u.status}`} data-testid="us-status"><span aria-hidden="true">{STATUS_MARK[u.status]}</span>{STATUS_LABEL[u.status]}</span></td>
                     <td data-label="Last sign-in">{u.lastLoginAt ? kstDateTime(u.lastLoginAt) : "Never"}</td>
-                    <td data-label="Google linked" data-testid="us-google"><span aria-hidden="true">{u.googleBound ? "✓" : "–"}</span> {u.googleBound ? "Yes" : "No"}</td>
+                    <td data-label="Google linked" data-testid="us-google" id={`us-g-${u.id}`}><span aria-hidden="true">{u.googleBound ? "✓" : "–"}</span> {u.googleBound ? "Yes" : "No — links at first sign-in"}</td>
                     <td className="us-c-acts" data-label="Actions">
                       <div className="us-acts" role="group" aria-label={`Actions for ${u.name}`}>
                         {u.kind === "INTERNAL"
@@ -134,8 +152,8 @@ export function UsersScreen({ users, customers, meId, activeAdmins, fenceDomains
                           : <button type="button" className="btn" data-testid="us-act-move" {...off(rules.move)} onClick={() => begin("move", u)}>Move to customer…</button>}
                         {u.status === "ACTIVE"
                           ? <button type="button" className="btn" data-testid="us-act-disable" {...off(rules.status)} onClick={() => begin("disable", u)}>Disable…</button>
-                          : <button type="button" className="btn" data-testid="us-act-enable" onClick={() => begin("enable", u)}>Enable…</button>}
-                        <button type="button" className="btn" data-testid="us-act-google" {...off(rules.google)} onClick={() => begin("google", u)}>Clear Google link…</button>
+                          : <button type="button" className="btn" data-testid="us-act-enable" onClick={() => begin("enable", u)}>{u.status === "PENDING" ? "Activate…" : "Enable…"}</button>}
+                        <button type="button" className="btn" data-testid="us-act-google" {...off(rules.google, `us-g-${u.id}`)} onClick={() => begin("google", u)}>Clear Google link…</button>
                       </div>
                       {rules.notes.map((n) => <p key={n} className="us-note" id={noteId} data-testid="us-note">{n}</p>)}
                     </td>
@@ -147,11 +165,12 @@ export function UsersScreen({ users, customers, meId, activeAdmins, fenceDomains
         )}
       </Card>
 
+      <div className="us-dlgwrap">
       <ConfirmDialog
         open={ask !== null}
-        title={!target ? "" : ask!.type === "role" ? `Change the role of ${target.name}` : ask!.type === "disable" ? `Disable ${target.name}?` : ask!.type === "enable" ? `Enable ${target.name}?`
+        title={!target ? "" : ask!.type === "role" ? `Change the role of ${target.name}` : ask!.type === "disable" ? `Disable ${target.name}?` : ask!.type === "enable" ? `${target.status === "PENDING" ? "Activate" : "Enable"} ${target.name}?`
           : ask!.type === "move" ? `Move ${target.name} to another customer` : `Clear the Google link of ${target.name}?`}
-        confirmLabel={busy ? "Working…" : !target ? "" : ask!.type === "role" ? `Change role to ${ROLE_LABEL[roleSel]}` : ask!.type === "disable" ? `Disable ${target.name}` : ask!.type === "enable" ? `Enable ${target.name}`
+        confirmLabel={busy ? "Working…" : !target ? "" : ask!.type === "role" ? `Change role to ${ROLE_LABEL[roleSel]}` : ask!.type === "disable" ? `Disable ${target.name}` : ask!.type === "enable" ? `${target.status === "PENDING" ? "Activate" : "Enable"} ${target.name}`
           : ask!.type === "move" ? `Move to ${cname(custSel)}` : "Clear Google link"}
         cancelLabel="Cancel" danger={ask?.type === "disable" || ask?.type === "google"} busy={busy}
         confirmDisabled={same || (ask?.type === "move" && !custSel)}
@@ -176,7 +195,9 @@ export function UsersScreen({ users, customers, meId, activeAdmins, fenceDomains
               <p>They are signed out on their next action and cannot sign in again until you enable them. Their history and audit records stay. Users are never deleted.</p>
             ) : null}
             {ask.type === "enable" ? (
-              <p>They can sign in again with their Google account{target.kind === "INTERNAL" ? ". Staff addresses must still be in the allowed domains or on the exception list" : ""}. Their role{target.kind === "CUSTOMER" ? " (read-only) and customer stay" : " stays"} as it was.</p>
+              target.status === "PENDING"
+                ? <p>They will be able to sign in with their Google account{target.kind === "INTERNAL" ? ". Staff addresses must be in the allowed domains or on the exception list" : ""}. Nothing else changes.</p>
+                : <p>They can sign in again with their Google account{target.kind === "INTERNAL" ? ". Staff addresses must still be in the allowed domains or on the exception list" : ""}. Their role{target.kind === "CUSTOMER" ? " (read-only) and customer stay" : " stays"} as it was.</p>
             ) : null}
             {ask.type === "move" ? (
               <>
@@ -186,7 +207,7 @@ export function UsersScreen({ users, customers, meId, activeAdmins, fenceDomains
                     {movable.map((c) => <option key={c.id} value={c.id}>{c.name}{c.status === "SUSPENDED" ? " (suspended)" : ""}</option>)}
                   </select>
                 </label>
-                <p className="us-hint">A portal user linked to a contact of {cname(target.customerId)} cannot be moved.</p>
+                <p className="us-hint">Terminated customers are not listed. A suspended customer can be chosen, but its portal users cannot sign in until it is resumed. A portal user linked to a contact of {cname(target.customerId)} cannot be moved.</p>
               </>
             ) : null}
             {ask.type === "google" ? (
@@ -199,11 +220,12 @@ export function UsersScreen({ users, customers, meId, activeAdmins, fenceDomains
           </div>
         ) : null}
       </ConfirmDialog>
+      </div>
     </>
   );
 }
 
-function Filters({ customers, filters, filtered }: { customers: UsersScreenProps["customers"]; filters: UsersFilters; filtered: boolean }) {
+function Filters({ customers, filters, serverFiltered, search, onSearch }: { customers: UsersScreenProps["customers"]; filters: UsersFilters; serverFiltered: boolean; search: string; onSearch: (v: string) => void }) {
   const router = useRouter();
   function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -231,10 +253,10 @@ function Filters({ customers, filters, filtered }: { customers: UsersScreenProps
         <select className="inp" name="role" defaultValue={filters.role} data-testid="us-f-role">
           <option value="">All</option><option value="ADMIN">Admin</option><option value="OPERATOR">Operator</option><option value="VIEWER">Viewer</option>
         </select></label>
-      <label><span>Search (name or e-mail)</span>
-        <input className="inp" type="search" name="q" maxLength={100} defaultValue={filters.q} autoComplete="off" data-testid="us-f-q" /></label>
+      <label><span>Search the list (name or masked e-mail)</span>
+        <input className="inp" type="search" maxLength={100} value={search} onChange={(e) => onSearch(e.target.value)} autoComplete="off" data-testid="us-f-q" /></label>
       <button type="submit" className="btn pri" data-testid="us-apply">Apply filters</button>
-      {filtered ? <Link className="btn" href="/settings/users" data-testid="us-clear">Clear filters</Link> : null}
+      {serverFiltered || search ? <Link className="btn" href="/settings/users" data-testid="us-clear" onClick={() => onSearch("")}>Clear filters</Link> : null}
     </form>
   );
 }
@@ -273,9 +295,12 @@ function AddUser({ customers, fenceDomains, onDone, onCancel }: {
     setBusy(false);
     if (!r.ok) { setErr(userErrorText(r, { what: "Adding a user" })); return; }
     const who = r.data.name;
+    const passOn = `Tell them to open ${window.location.origin} and choose "Sign in with Google".`;
     onDone(kind === "INTERNAL"
-      ? `${who} was added as ${ROLE_LABEL[r.data.role]}. They can sign in with this Google account${outside ? ", but only if the address is on the exception list (it is outside the allowed domains)" : ""}.`
-      : `${who} was added as a read-only portal user of ${cust?.name ?? "the customer"}. They can sign in with this Google account.`);
+      ? (outside
+        ? `${who} was added as ${ROLE_LABEL[r.data.role]}, but they cannot sign in yet. Their address is outside the allowed domains. They can sign in only after it is added to the sign-in exception list (a deployment setting: ask whoever manages the console's deployment).`
+        : `${who} was added as ${ROLE_LABEL[r.data.role]}. They can sign in with this Google account. ${passOn}`)
+      : `${who} was added as a read-only portal user of ${cust?.name ?? "the customer"}. They can sign in with this Google account. ${passOn}`);
   }
 
   return (
@@ -323,7 +348,7 @@ function AddUser({ customers, fenceDomains, onDone, onCancel }: {
               <option value="">Choose a customer…</option>
               {customers.filter((c) => c.status !== "TERMINATED").map((c) => <option key={c.id} value={c.id}>{c.name}{c.status === "SUSPENDED" ? " (suspended)" : ""}</option>)}
             </select>
-            <p className="us-hint" id={`${id}-cust-h`}>Role: Viewer, always. Portal users never change anything.</p>
+            <p className="us-hint" id={`${id}-cust-h`}>Role: Viewer, always. Portal users never change anything. Terminated customers are not listed (they cannot get portal users). A suspended customer can be chosen, but its portal users cannot sign in until it is resumed.</p>
             {show("customerId") ? <p className="us-bad" id={`${id}-cust-e`}>{show("customerId")}</p> : null}
           </div>
         )}
@@ -336,7 +361,7 @@ function AddUser({ customers, fenceDomains, onDone, onCancel }: {
         {kind === "INTERNAL" && fenceDomains.length === 0 ? <p className="us-hint" data-testid="us-fence-unknown">This console cannot check the address against the allowed domains here.</p> : null}
         <div role="status" data-testid="us-fence-status">
           {outside ? (
-            <p className="us-warn" data-testid="us-fence-warn"><span aria-hidden="true">▲</span><span>This address is outside the allowed domains (<span className="mono">{fenceDomains.join(", ")}</span>). The user can be added, but cannot sign in unless the exact address is on the exception list.</span></p>
+            <p className="us-warn" data-testid="us-fence-warn"><span aria-hidden="true">▲</span><span>This address is outside the allowed domains (<span className="mono">{fenceDomains.join(", ")}</span>). This person cannot sign in yet. They can sign in only after the address is added to the sign-in exception list (a deployment setting: ask whoever manages the console&apos;s deployment).</span></p>
           ) : null}
         </div>
 

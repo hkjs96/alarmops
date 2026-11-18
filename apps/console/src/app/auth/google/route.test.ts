@@ -291,6 +291,37 @@ describe("GET /auth/google/callback", () => {
       await refusedCleanly("no_user");
       expect(enrolByLoginDomain).not.toHaveBeenCalled();
     });
+    it("an address on the exception list with no user row never reaches the enrolment", async () => {
+      vi.stubEnv("SSO_ALLOWED_EMAILS", "someone@example.com");
+      tokenBody = (n) => idToken(n, { email: "someone@example.com" });
+      signInUserByEmail.mockResolvedValue(null);
+      enrolByLoginDomain.mockResolvedValue({ user: portal });
+      await refusedCleanly("no_user");
+      expect(enrolByLoginDomain).not.toHaveBeenCalled();
+    });
+    it("the enrolment answering with an INTERNAL user gives no session", async () => {
+      tokenBody = (n) => idToken(n, { email: "new.person@customer.example" });
+      signInUserByEmail.mockResolvedValue(null);
+      enrolByLoginDomain.mockResolvedValue({ user: staff });
+      await refusedCleanly("no_user");
+      expect(bindGoogleAccount).not.toHaveBeenCalled();
+    });
+    it("enrolled, but the Google account does not match the binding: refused with sub_mismatch", async () => {
+      tokenBody = (n) => idToken(n, { email: "new.person@customer.example" });
+      signInUserByEmail.mockResolvedValue(null);
+      enrolByLoginDomain.mockResolvedValue({ user: portal });
+      bindGoogleAccount.mockResolvedValue("mismatch");
+      await refusedCleanly("sub_mismatch");
+    });
+    it("the binding store throwing: unavailable, no session, no last sign-in", async () => {
+      signInUserByEmail.mockResolvedValue(staff);
+      bindGoogleAccount.mockRejectedValue(new Error("db down"));
+      const f = await begin();
+      const res = await cb({ code: "c", state: f.state }, f.cookie);
+      expect(where(res)).toBe("/login?sso=unavailable");
+      expect(res.cookies.get(SESSION_COOKIE)).toBeUndefined();
+      expect(touchLastLogin).not.toHaveBeenCalled();
+    });
     it("a free-mail domain without a row never reaches the enrolment", async () => {
       tokenBody = (n) => idToken(n, { email: "someone@gmail.com" });
       signInUserByEmail.mockResolvedValue(null);
