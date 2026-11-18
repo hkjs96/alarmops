@@ -166,6 +166,21 @@ describe("server actions", () => {
     expect(await A.checkAccountAction(a.data.id)).toMatchObject({ ok: true });
     expect(await A.checkAccountAction(a.data.id)).toMatchObject({ ok: false, code: "RATE_LIMITED", details: { retryAfterSec: expect.any(Number) } });
   });
+  it("manual verification needs a note (5 to 300 characters); invisible characters are refused in names and notes", async () => {
+    const c = await A.createCustomerAction({ name: "Cedar" });
+    if (!c.ok) throw new Error("x");
+    const p = await A.createContactAction(c.data.id, { name: "Yuna", email: "y@cedar.example" });
+    if (!p.ok) throw new Error("x");
+    for (const note of [undefined, "", "   ", "ok", "x".repeat(301)]) expect(await A.verifyContactAction(p.data.id, "EMAIL", "manual", note), String(note)).toMatchObject({ ok: false, code: "INVALID_INPUT" });
+    expect(await A.verifyContactAction(p.data.id, "EMAIL", "manual", "  Confirmed by phone  ")).toMatchObject({ ok: true });
+    for (const bad of ["Evil‮Name", "Zero​Width", "Bom﻿Name", "Iso⁦late"]) {
+      expect(await A.createCustomerAction({ name: bad }), bad).toMatchObject({ ok: false, code: "INVALID_INPUT" });
+      expect(await A.createProjectAction(c.data.id, bad)).toMatchObject({ ok: false, code: "INVALID_INPUT" });
+      expect(await A.createServiceAction("prj_x", bad)).toMatchObject({ ok: false, code: "INVALID_INPUT" });
+      expect(await A.createContactAction(c.data.id, { name: bad, email: "a@b.co" })).toMatchObject({ ok: false, code: "INVALID_INPUT" });
+    }
+    expect(await A.verifyContactAction(p.data.id, "SMS", "manual", "Called​ them")).toMatchObject({ ok: false, code: "INVALID_INPUT" });
+  });
   it("the public confirm action needs no session and answers one thing for every dead link", async () => {
     state.sub = null;
     expect(await confirmVerificationAction("vf_demo_email_4")).toEqual({ ok: true, channel: "EMAIL" });

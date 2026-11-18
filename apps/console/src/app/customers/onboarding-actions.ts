@@ -28,9 +28,12 @@ async function run<T>(min: "VIEWER" | "ADMIN", fn: () => Promise<T>, revalidate 
 }
 
 const NAME_MAX = 80;
+const HIDDEN_CHARS = /[­؜᠎​-‏‪-‮⁠-⁤⁦-⁯﻿]/;
 function assertName(v: unknown, what = "name"): string {
   const n = typeof v === "string" ? v.trim() : "";
   if (!n || n.length > NAME_MAX || /[\u0000-\u001f]/.test(n)) throw new InvalidInputError(`Give a ${what} of 1 to ${NAME_MAX} characters.`);
+  // bidi controls and zero-width characters make two different names look the same (or reorder what is shown)
+  if (HIDDEN_CHARS.test(n)) throw new InvalidInputError(`The ${what} has characters that cannot be seen. Type it again without copying from a document.`);
   return n;
 }
 const ENVS: readonly AccountEnvironment[] = ["PRD", "STG", "DEV"];
@@ -118,6 +121,10 @@ export async function verifyContactAction(contactId: string, channel: VerifyChan
     if (method !== "link" && method !== "manual") throw new InvalidInputError("Invalid method.");
     const n = typeof note === "string" ? note.trim() : "";
     if (n.length > 300) throw new InvalidInputError("The note is at most 300 characters.");
+    // Marking a channel verified by hand is a statement that someone checked it: the note says how. The API does not require
+    // it yet (backend follow-up), so the console does.
+    if (method === "manual" && n.length < 5) throw new InvalidInputError("Say how you checked it, in at least 5 characters (for example “Confirmed by phone with the person”).");
+    if (HIDDEN_CHARS.test(n)) throw new InvalidInputError("The note has characters that cannot be seen.");
     return (await getApi()).verifyContact(id, { channel, method, ...(n ? { note: n } : {}) });
   });
 }

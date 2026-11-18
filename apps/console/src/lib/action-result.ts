@@ -7,6 +7,9 @@ export type ActionResult<T = null> = { ok: true; data: T } | ActionFailure;
 /** Only plain, known values cross to the browser: numbers, strings, booleans and one level of field lists. */
 function safeDetails(d: Record<string, unknown>): Record<string, unknown> | undefined {
   const out: Record<string, unknown> = {};
+  // existingCustomerId: only POST /customers sends it (409 for a duplicate name), and that route is ADMIN with all-customer range
+  // only (packages/api onboardingApi.createCustomer: 403 otherwise), so the id is one the caller may already see. If a narrower
+  // caller could ever get it, drop it here and show "already exists" without a link.
   for (const k of ["field", "role", "perCycle", "perHour", "responders", "limit", "retryAfterSec", "currentVersion", "mutedUntil", "existingCustomerId"]) {
     const v = d[k];
     if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") out[k] = v;

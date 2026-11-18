@@ -262,6 +262,7 @@ test.describe("public verification page", () => {
       expect(res?.status()).toBe(200);
       expect(res?.headers()["referrer-policy"]).toBe("no-referrer");
       expect(res?.headers()["cache-control"]).toContain("no-store");
+      expect(res?.headers()["x-robots-tag"]).toBe("noindex, nofollow"); // and the global strict-origin-when-cross-origin did not win
       await expect(page.getByTestId("verify-pending")).toContainText("e-mail address");
       await expect(page.locator("body")).not.toContainText("@"); // the channel only, never the address
       await noHScroll(page, `verify ${name}`);

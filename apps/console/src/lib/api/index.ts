@@ -23,12 +23,17 @@ export const isMock = () => mockMode();
  * The API without a session, for the one public page (GET/POST /verify/{token}, API-CONTRACT 8.4): the credential is the
  * token in the path. Live: the same in-process handler with no AuthContext, so every other route still answers 401.
  */
-export function getPublicApi(): ConsoleApi {
+export type PublicVerifyApi = Pick<ConsoleApi, "peekVerify" | "confirmVerify">;
+export function getPublicApi(): PublicVerifyApi {
+  let api: ConsoleApi;
   if (isMock()) {
     g.__aoMockStore ??= createStore({ customers: process.env.MOCK_CUSTOMERS === "34" ? 34 : 14 });
-    return createMockApi(g.__aoMockStore, undefined, { id: "", contactId: "", name: "", email: "", role: "VIEWER" });
+    api = createMockApi(g.__aoMockStore, undefined, { id: "", contactId: "", name: "", email: "", role: "VIEWER" });
+  } else {
+    api = createHttpApi({ baseUrl: "http://in-process.invalid", fetch: inProcessFetch(async () => null) });
   }
-  return createHttpApi({ baseUrl: "http://in-process.invalid", fetch: inProcessFetch(async () => null) });
+  // only the two calls the public page needs: nothing else of the API is reachable through this object
+  return { peekVerify: (t) => api.peekVerify(t), confirmVerify: (t) => api.confirmVerify(t) };
 }
 
 export async function getApi(): Promise<ConsoleApi> {
