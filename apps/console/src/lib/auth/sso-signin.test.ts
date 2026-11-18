@@ -75,3 +75,35 @@ describe("per-customer login domain (enrolByDomain hook)", () => {
     expect(await decideSignIn("outsider@evil.com", cfg, lookup, async () => portal)).toEqual({ ok: false, reason: "staff_outside_fence" });
   });
 });
+
+describe("address guard before any lookup", () => {
+  it.each(["a@mz.co.Kr", "Kevin@customer.example", "someone@customer.example\n", "some one@customer.example", "a@b@customer.example", "nobody"])("%j: refused, the store is not asked", async (e) => {
+    const spy = vi.fn(async () => portal);
+    const enrol = vi.fn(async () => portal);
+    expect(await decideSignIn(e, cfg, spy, enrol)).toEqual({ ok: false, reason: "no_user" });
+    expect(spy).not.toHaveBeenCalled();
+    expect(enrol).not.toHaveBeenCalled();
+  });
+});
+
+describe("Google sub binding hook (not wired in the route until #69)", () => {
+  const opts = (r: "ok" | "mismatch") => { const bind = vi.fn(async () => r); return { bind, o: { sub: "g-1", bindGoogleSub: bind } }; };
+  it("ok: allowed, called with the user id and the verified sub", async () => {
+    const { bind, o } = opts("ok");
+    expect((await decideSignIn("ops@mz.co.kr", cfg, lookup, undefined, o)).ok).toBe(true);
+    expect(bind).toHaveBeenCalledWith("usr_staff", "g-1");
+  });
+  it("mismatch: refused with sub_mismatch, for staff and for portal users", async () => {
+    expect(await decideSignIn("ops@mz.co.kr", cfg, lookup, undefined, opts("mismatch").o)).toEqual({ ok: false, reason: "sub_mismatch" });
+    expect(await decideSignIn("someone@customer.example", cfg, lookup, undefined, opts("mismatch").o)).toEqual({ ok: false, reason: "sub_mismatch" });
+  });
+  it("not asked when the user was refused anyway", async () => {
+    const { bind, o } = opts("ok");
+    await decideSignIn("outsider@evil.com", cfg, lookup, undefined, o);
+    await decideSignIn("new@mz.co.kr", cfg, lookup, undefined, o);
+    expect(bind).not.toHaveBeenCalled();
+  });
+  it("without the hook (today) nothing changes", async () => {
+    expect((await decideSignIn("ops@mz.co.kr", cfg, lookup, undefined, { sub: "g-1" })).ok).toBe(true);
+  });
+});

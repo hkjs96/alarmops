@@ -101,6 +101,31 @@ describe("GET /auth/google/callback", () => {
     expect(res.cookies.get(FLOW_COOKIE)).toMatchObject({ value: "", maxAge: 0 });
     expect(signInUserByEmail).toHaveBeenCalledWith("ops@mz.co.kr");
   });
+  it("session cookie: HttpOnly, SameSite=Lax, Secure from the https CONSOLE_ORIGIN, path /, 8 h, no e-mail inside", async () => {
+    signInUserByEmail.mockResolvedValue(staff);
+    const f = await begin();
+    // the request itself looks like plain http (a proxy ended TLS): Secure still follows the configured origin
+    const res = await callback(new NextRequest(`http://internal.invalid/auth/google/callback?${new URLSearchParams({ code: "c", state: f.state })}`, { headers: { cookie: `${FLOW_COOKIE}=${f.cookie}` } }));
+    const c = res.cookies.get(SESSION_COOKIE)!;
+    expect(c).toMatchObject({ httpOnly: true, sameSite: "lax", secure: true, path: "/", maxAge: 8 * 60 * 60 });
+    const payload = JSON.parse(Buffer.from(c.value.split(".")[0]!, "base64url").toString());
+    expect(payload.email).toBe("");
+    expect(JSON.stringify(payload)).not.toContain("@");
+  });
+  it("a flow cookie cannot be used twice: it is cleared, and a replay (Google refuses the used code) gets no session", async () => {
+    signInUserByEmail.mockResolvedValue(staff);
+    const f = await begin();
+    const first = await cb({ code: "c", state: f.state }, f.cookie);
+    expect(first.cookies.get(FLOW_COOKIE)).toMatchObject({ value: "", maxAge: 0, httpOnly: true, secure: true });
+    expect(first.cookies.get(SESSION_COOKIE)).toBeDefined();
+    const noCookie = await cb({ code: "c", state: f.state });
+    expect(where(noCookie)).toBe("/login?sso=failed");
+    expect(noCookie.cookies.get(SESSION_COOKIE)).toBeUndefined();
+    vi.mocked(fetch).mockImplementation((async () => new Response('{"error":"invalid_grant"}', { status: 400 })) as never);
+    const replay = await cb({ code: "c", state: f.state }, f.cookie);
+    expect(where(replay)).toBe("/login?sso=failed");
+    expect(replay.cookies.get(SESSION_COOKIE)).toBeUndefined();
+  });
   it("open redirect: a hostile next never survives (dropped at start, and again at the callback)", async () => {
     signInUserByEmail.mockResolvedValue(staff);
     for (const next of ["//evil.example", "https://evil.example", "/%09/evil.example", "/\\evil.example"]) {

@@ -8,7 +8,14 @@ export const FREE_MAIL_DOMAINS: readonly string[] = [
 ];
 export const isFreeMailDomain = (domain: string): boolean => FREE_MAIL_DOMAINS.includes(domain.toLowerCase());
 
-export type SignInDecision = { ok: true; user: SignInUser } | { ok: false; reason: "no_user" | "staff_outside_fence" | "free_mail_domain" };
+export type SignInDecision = { ok: true; user: SignInUser } | { ok: false; reason: "no_user" | "staff_outside_fence" | "free_mail_domain" | "sub_mismatch" };
+
+/**
+ * NOT WIRED YET (backend #69 adds User.googleSub): bind the verified Google `sub` to the user row on first sign-in and
+ * compare on every later one. "mismatch" = the row is bound to another Google account → refused (`sub_mismatch`).
+ */
+export type BindGoogleSub = (userId: string, sub: string) => Promise<"ok" | "mismatch">;
+export interface SignInOptions { sub?: string; bindGoogleSub?: BindGoogleSub }
 
 /**
  * Who gets a session once Google has said who it is (D-55 and the 11/18 addition).
@@ -23,7 +30,16 @@ export type SignInDecision = { ok: true; user: SignInUser } | { ok: false; reaso
  *     (null when none or more than one). The console does not pass it yet: the store has no such method (see README).
  * The caller shows the same calm refusal for every `reason`; the reason is for the server log only.
  */
-export async function decideSignIn(email: string, cfg: Pick<SsoConfig, "domains" | "emails">, lookup: (email: string) => Promise<SignInUser | null>, enrolByDomain?: (domain: string, email: string) => Promise<SignInUser | null>): Promise<SignInDecision> {
+export async function decideSignIn(email: string, cfg: Pick<SsoConfig, "domains" | "emails">, lookup: (email: string) => Promise<SignInUser | null>, enrolByDomain?: (domain: string, email: string) => Promise<SignInUser | null>, opts: SignInOptions = {}): Promise<SignInDecision> {
+  const d = await decideEligibility(email, cfg, lookup, enrolByDomain);
+  if (!d.ok || !opts.bindGoogleSub || !opts.sub) return d;
+  return (await opts.bindGoogleSub(d.user.id, opts.sub)) === "ok" ? d : { ok: false, reason: "sub_mismatch" };
+}
+
+async function decideEligibility(email: string, cfg: Pick<SsoConfig, "domains" | "emails">, lookup: (email: string) => Promise<SignInUser | null>, enrolByDomain?: (domain: string, email: string) => Promise<SignInUser | null>): Promise<SignInDecision> {
+  // Before any lookup: plain printable ASCII with exactly one "@". CUSTOMER rows have no fence and User.email is citext,
+  // so a look-alike (Kelvin sign …) must not reach the database.
+  if (/[^\x21-\x7e]/.test(email) || email.split("@").length !== 2) return { ok: false, reason: "no_user" };
   const addr = email.trim().toLowerCase();
   if (!addr) return { ok: false, reason: "no_user" };
   const user = await lookup(addr);

@@ -18,7 +18,10 @@ export const dynamic = "force-dynamic";
  * /login?sso=refused — the reason code goes to the server log, without the address. The flow cookie is single use.
  */
 export async function GET(req: NextRequest) {
-  const secure = req.nextUrl.protocol === "https:";
+  // the origin first: the Secure attribute follows the configured origin, not what the (proxied) request looks like
+  let origin: string | null = null;
+  try { origin = consoleOrigin() ?? req.nextUrl.origin; } catch { origin = null; }
+  const secure = (origin ?? req.nextUrl.origin).startsWith("https:");
   const done = (path: string, session?: string) => {
     const res = new NextResponse(null, { status: 303, headers: { Location: path, "Cache-Control": "no-store" } });
     res.cookies.set(FLOW_COOKIE, "", { httpOnly: true, sameSite: "lax", secure, path: "/auth/google", maxAge: 0 });
@@ -34,8 +37,7 @@ export async function GET(req: NextRequest) {
   let mock = false;
   try { mock = mockMode(); } catch { mock = false; }
   const secret = sessionSecret(process.env, mock);
-  let origin: string;
-  try { origin = consoleOrigin() ?? req.nextUrl.origin; } catch { return fail("console origin not configured", "unavailable"); }
+  if (!origin) return fail("console origin not configured", "unavailable");
   if (!cfg.ok || !secret) return fail(cfg.ok ? "SESSION_SECRET missing" : cfg.reason, "unavailable");
   if (!hit(`sso:cb:${clientIp(req.headers)}`, 30, 60_000).ok) return fail("rate limited", "failed");
 
@@ -58,7 +60,7 @@ export async function GET(req: NextRequest) {
 
   let decision;
   try {
-    decision = await decideSignIn(claims.email, cfg.config, signInUserByEmail);
+    decision = await decideSignIn(claims.email, cfg.config, signInUserByEmail, undefined, { sub: claims.sub /* bindGoogleSub: not wired until #69 adds User.googleSub */ });
   } catch {
     return fail("user store did not answer", "unavailable");
   }

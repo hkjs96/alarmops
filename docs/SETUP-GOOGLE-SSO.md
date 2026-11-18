@@ -86,6 +86,12 @@ VALUES ('usr_' || substr(md5(random()::text), 1, 12), 'you@mz.co.kr', 'Your Name
    - 값: `email`은 Google 로그인에 쓰는 주소(대소문자 구분 없음), `customerId`는 **넣지 않는다**(비워 두면 MSP 직원).
    - 확인: `SELECT "email", "role", "status", "customerId" FROM "User";` 에서 그 행이 `ADMIN`, `ACTIVE`, `customerId` 비어 있음으로 나온다.
 
+> **주의** 이 SQL은 감사 기록(AuditLog)을 남기지 않는다. 누가 언제 만들었는지 직접 따로 기록해 둔다.
+
+> **주의** 메일 주소 철자를 한 번 더 확인한다. 한 글자라도 틀리면 그 사람은 로그인되지 않는다.
+
+> **주의** Gmail 같은 예외 주소는 Google이 돌려주는 모양 그대로 등록한다(예: Google 계정 화면에 보이는 주소 전체, 대소문자는 상관없음). 점(.)이나 `+` 별칭을 임의로 바꾸지 않는다.
+
 > **참고** 예외 주소(개인 Gmail)로 들어갈 사람도 같은 방식으로 행이 있어야 한다.
 
 > **참고** Contact(알림 연락처) 행은 로그인에 필요하지 않다. 온콜 목록에 올리려면 나중에 콘솔에서 연결한다.

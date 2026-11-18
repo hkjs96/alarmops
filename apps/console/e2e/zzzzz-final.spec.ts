@@ -289,7 +289,7 @@ async function signInAgain(page: Page) {
   const here = new URL(page.url());
   await ended(page).getByTestId("session-sign-in").click();
   await expect(page).toHaveURL(new RegExp(`/login\\?next=${encodeURIComponent(here.pathname + here.search).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`));
-  await page.getByRole("link", { name: /sign in as Haeun Kim/ }).click();
+  await page.getByRole("link", { name: /sign in as Haeun Kim/i }).click();
   await expect(page).toHaveURL(here.pathname + here.search);
   await page.waitForLoadState("networkidle");
   await expect(ended(page)).toHaveCount(0);
@@ -571,7 +571,7 @@ for (const vp of VIEWPORTS) {
 
       await ended(page).getByTestId("session-sign-in").click();
       await expect(page).toHaveURL(/\/login\?next=%2Fc%2Firuda%2Fcall-order$/);
-      await page.getByRole("link", { name: /sign in as Haeun Kim/ }).click();
+      await page.getByRole("link", { name: /sign in as Haeun Kim/i }).click();
       await expect(page).toHaveURL(/\/c\/iruda\/call-order$/);
       await expect(page.getByTestId("co-draft-here")).toHaveCount(0);
       await page.getByTestId("co-edit").click();
