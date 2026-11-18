@@ -21,6 +21,12 @@ import pg from 'pg';
 const url = process.env.DATABASE_URL;
 if (!url) throw new Error('DATABASE_URL is required');
 
+// This test inserts fixtures, runs DROP OWNED BY and DROP ROLE. Never against anything but a throw-away database.
+const host = new URL(url).hostname.replace(/^\[|\]$/g, '');
+if (!['localhost', '127.0.0.1', '::1'].includes(host) && host !== process.env.ROLES_TEST_ALLOW_HOST) {
+  throw new Error(`test-roles refuses to run against host "${host}": only localhost / 127.0.0.1 (set ROLES_TEST_ALLOW_HOST to the name of a CI service host)`);
+}
+
 const ENGINE = 'alarmops_engine';
 const INGEST = 'alarmops_ingest';
 
@@ -28,6 +34,30 @@ const INGEST = 'alarmops_ingest';
 const EXPECTED = {
   [ENGINE]: ['AlarmSyncRun', 'CloudAccount', 'Customer', 'CustomerOffboarding', 'ManagedAlarm', 'RemediationPolicy', 'RemediationRequest', 'Resource', 'ThresholdChange', 'ThresholdDefault'],
   [INGEST]: ['Alert', 'AlertGroup', 'CloudAccount', 'Customer', 'IngestRejection', 'IntegrationSource', 'MaintenanceWindow', 'OffboardResidual', 'RawEvent', 'SeverityMapping', 'SuppressionPolicy'],
+};
+
+// Exact column-level privileges per role: table -> { select | insert | update: 'all' or [columns] }. 'all' = every column.
+// Keep in step with db/sql/roles.sql; the test compares them with has_column_privilege for EVERY column of EVERY table.
+const ALL = 'all';
+const SPEC = {
+  [ENGINE]: {
+    Customer: { select: ALL }, CloudAccount: { select: ALL, update: ['readerStatus', 'alarmWriterStatus', 'tagWriterStatus', 'remediatorStatus', 'lastCheckedAt', 'updatedAt'] },
+    Resource: { select: ALL, insert: ALL, update: ['resourceArn', 'name', 'tags', 'monitoringTag', 'monitoringState', 'needsReviewSince', 'needsReviewReason', 'monitoringTagSetBy', 'lastSeenAt', 'discoveryRunId', 'updatedAt'] },
+    ManagedAlarm: { select: ALL, insert: ALL, update: ['alarmName', 'alarmArn', 'region', 'severity', 'severityManual', 'threshold', 'thresholdSource', 'consoleThreshold', 'evalM', 'evalN', 'evalSource', 'comparison', 'statistic', 'period', 'treatMissingData', 'driftStatus', 'driftDetail', 'lastSyncedAt', 'version'] },
+    ThresholdDefault: { select: ALL }, ThresholdChange: { select: ALL, update: ['applyStatus', 'error'] },
+    AlarmSyncRun: { select: ALL, insert: ALL, update: ['status', 'heartbeatAt', 'counts', 'error', 'finishedAt'] },
+    RemediationPolicy: { select: ALL },
+    RemediationRequest: { select: ALL, insert: ['id', 'customerId', 'cloudAccountId', 'resourceId', 'trigger', 'action', 'status', 'requestedAt', 'expiresAt'], update: ['status', 'result', 'version', 'executedAt'] },
+    CustomerOffboarding: { select: ALL, update: ['steps', 'completedAt'] },
+  },
+  [INGEST]: {
+    Customer: { select: ['id', 'status'] }, CloudAccount: { select: ['id', 'customerId', 'awsAccountId'] },
+    IntegrationSource: { select: ALL, update: ['lastReceivedAt'] }, SeverityMapping: { select: ALL }, SuppressionPolicy: { select: ALL }, MaintenanceWindow: { select: ALL },
+    IngestRejection: { insert: ALL }, OffboardResidual: { select: ALL, insert: ALL, update: ['firstAt', 'lastAt', 'count'] },
+    RawEvent: { select: ALL, insert: ALL, update: ['decision', 'decisionReason', 'groupId'] },
+    Alert: { select: ALL, insert: ALL, update: ['fingerprintVersion', 'sourceId', 'awsAccountId', 'region', 'resourceType', 'metricKey', 'namespace', 'title', 'status', 'severity', 'severityRaw', 'value', 'threshold', 'comparison', 'lastNotifiedAt', 'episodeOpen', 'episodeStartedAt', 'episodeNotified', 'recentEpisodes', 'quarantinedUntil', 'fireCount', 'lastEventAt', 'version'] },
+    AlertGroup: { select: ALL, insert: ALL, update: ['status', 'closedAt', 'sweptReason', 'version', 'deliveredAt'] },
+  },
 };
 
 const owner = new pg.Client({ connectionString: url });
@@ -339,4 +369,49 @@ test('(c) why BYPASSRLS: without it the same role reads 0 rows and writes nothin
   }
   const ok = await ingest.query('SELECT count(*)::int AS n FROM "Customer" WHERE id = $1', [ID]);
   assert.equal(ok.rows[0].n, 1, 'with BYPASSRLS the open connection sees the row again');
+});
+
+test('(b) exact column-level privileges: SELECT / INSERT / UPDATE on every column of every table, per role', async () => {
+  const { rows: cols } = await owner.query(
+    `SELECT c.relname AS t, a.attname AS c FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace JOIN pg_attribute a ON a.attrelid = c.oid
+      WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND a.attnum > 0 AND NOT a.attisdropped ORDER BY 1, a.attnum`);
+  for (const role of [ENGINE, INGEST]) {
+    for (const priv of ['select', 'insert', 'update']) {
+      const expected = [];
+      for (const [t, p] of Object.entries(SPEC[role])) {
+        const want = p[priv];
+        if (!want) continue;
+        for (const { c } of cols.filter((x) => x.t === t)) if (want === ALL || want.includes(c)) expected.push(`${t}.${c}`);
+        if (want !== ALL) for (const c of want) assert.ok(cols.some((x) => x.t === t && x.c === c), `${t}.${c} exists (typo in the test list?)`);
+      }
+      const actual = [];
+      for (const { t, c } of cols) {
+        const r = await owner.query('SELECT has_column_privilege($1, $2, $3, $4) AS ok', [role, `public."${t}"`, c, priv.toUpperCase()]);
+        if (r.rows[0].ok) actual.push(`${t}.${c}`);
+      }
+      assert.deepEqual(actual.sort(), expected.sort(), `${role}: columns with ${priv.toUpperCase()}`);
+    }
+  }
+});
+
+test('(b) engine cannot approve its own remediation, nor rewrite the identity of rows it owns', async () => {
+  const ins = (extraCols, extraVals, status = 'PENDING_APPROVAL') => engine.query(
+    `INSERT INTO "RemediationRequest" (id, "customerId", "cloudAccountId", "resourceId", trigger, action, status, "requestedAt"${extraCols})
+     VALUES ($1, $2, $2, $3, '{}'::jsonb, 'EC2_STOP'::"RemediationAction", $4::"RemediationStatus", now()${extraVals})`, [ID + 'x', ID, ID + 'seed', status]);
+  // approval columns are not insertable at all
+  await denied(ins(', "decidedBy", "decidedAt"', `, '${ID}', now()`, 'APPROVED'), 'insert with decidedBy / decidedAt');
+  await denied(ins(', "decidedBy"', `, '${ID}'`), 'insert with decidedBy');
+  await denied(ins(', "decidedAt"', ', now()'), 'insert with decidedAt');
+  await denied(ins(', "decisionVia"', ", 'SLACK'"), 'insert with decisionVia');
+  // an approved-looking status without those columns is refused by the table's own CHECK, not by a privilege
+  for (const status of ['APPROVED', 'EXECUTING', 'SUCCEEDED', 'FAILED']) {
+    await assert.rejects(ins('', '', status), (e) => e.code === '23514', `insert with status ${status} violates RemediationRequest_decided_chk`);
+  }
+  // identity columns of upserted rows cannot be changed
+  await denied(engine.query(`UPDATE "Resource" SET "customerId" = 'x' WHERE false`), 'Resource.customerId');
+  await denied(engine.query(`UPDATE "Resource" SET "cloudAccountId" = 'x' WHERE false`), 'Resource.cloudAccountId');
+  await denied(engine.query(`UPDATE "Resource" SET id = 'x' WHERE false`), 'Resource.id');
+  await denied(engine.query(`UPDATE "ManagedAlarm" SET "customerId" = 'x' WHERE false`), 'ManagedAlarm.customerId');
+  await denied(engine.query(`UPDATE "ManagedAlarm" SET "resourceId" = 'x' WHERE false`), 'ManagedAlarm.resourceId');
+  await denied(engine.query(`UPDATE "AlarmSyncRun" SET "customerId" = 'x' WHERE false`), 'AlarmSyncRun.customerId');
 });

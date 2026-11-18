@@ -701,6 +701,7 @@ class ProdDbWorkflow(unittest.TestCase):
         self.assertNotEqual(self.job["environment"], "dev")
         self.assertEqual(self.job["permissions"], {"contents": "read"})
         self.assertNotIn("id-token", self.text)
+        self.assertEqual(self.wf["env"], {"CHECKPOINT_DISABLE": "1"})
 
     def test_only_production_secrets_and_never_dev_ones(self):
         used = set(re.findall(r"secrets\.([A-Z_]+)", self.text))
@@ -776,7 +777,17 @@ class DbRolesSql(unittest.TestCase):
     def test_grants_are_small(self):
         grants = re.findall(r"(?is)\bGRANT\b(.*?);", self.code)
         for g in grants:
-            self.assertNotRegex(g, r"(?i)ALL PRIVILEGES|\bALL\b(?! TABLES)|TRUNCATE|REFERENCES|TRIGGER|\bSEQUENCE|FUNCTION|WITH GRANT OPTION")
+            self.assertNotRegex(g, r"(?i)ALL PRIVILEGES|\bALL\b(?! TABLES)|TRUNCATE|REFERENCES|(?<!\")TRIGGER(?!\")|\bSEQUENCE|FUNCTION|WITH GRANT OPTION")
+        # no table-wide UPDATE anywhere: every UPDATE grant names its columns
+        for g in grants:
+            if re.search(r"(?i)\bUPDATE\b(?!\s*\()", g):
+                self.fail(f"table-wide UPDATE grant: {g.strip()}")
+        # RemediationRequest INSERT is column-limited and never names the approval columns
+        rr = [g for g in grants if re.search(r'(?i)\bINSERT\b.*"RemediationRequest"', g, re.S)]
+        self.assertEqual(len(rr), 1)
+        self.assertRegex(rr[0], r"(?i)INSERT\s*\(")
+        for col in ("decidedBy", "decidedAt", "decisionVia"):
+            self.assertNotIn(col, rr[0])
         # DELETE only on ManagedAlarm, for the engine
         deletes = [g for g in grants if re.search(r"(?i)\bDELETE\b", g)]
         self.assertEqual(len(deletes), 1)

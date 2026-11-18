@@ -39,6 +39,10 @@ concurrency:
   group: prod-db
   cancel-in-progress: false
 
+env:
+  # Prisma CLI: no update check / telemetry call during a run that holds the production URL.
+  CHECKPOINT_DISABLE: "1"
+
 jobs:
   migrate:
     if: github.ref == 'refs/heads/main'
@@ -136,7 +140,11 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
           DIRECT_URL: ${{ secrets.PROD_DIRECT_URL }}
-        run: npx prisma migrate status
+        run: |
+          if ! npx prisma migrate status; then
+            echo "::error::The migrations were applied, but the status after them is not 'up to date' (or could not be read). Do not run this again. Read the status above and give it to the hub."
+            exit 1
+          fi
       - name: Applied migrations
         run: |
           applied=$(grep -oE 'Applying migration `[^`]+`' "$RUNNER_TEMP/deploy.log" | sed -E 's/.*`([^`]+)`/- \1/' || true)

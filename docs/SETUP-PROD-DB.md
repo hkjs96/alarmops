@@ -43,10 +43,10 @@ D-40은 `public`의 모든 테이블에 RLS(행 단위 보안)를 켜고 **정�
 |---|---|---|
 | `Customer`, `ThresholdDefault`, `RemediationPolicy` | 읽기 | 고객 상태, 기본 임계값, 조치 정책을 읽는다 |
 | `CloudAccount` | 읽기, 일부 열만 쓰기 (`readerStatus`, `alarmWriterStatus`, `tagWriterStatus`, `remediatorStatus`, `lastCheckedAt`, `updatedAt`) | 역할 점검 결과만 기록한다. 역할 ARN·`externalId`는 못 바꾼다 |
-| `Resource`, `ManagedAlarm` | 읽기, 추가, 수정 (`ManagedAlarm`은 삭제도) | 발견한 리소스와 만든 알람을 upsert한다. 알람 삭제는 동기화가 한다 |
+| `Resource`, `ManagedAlarm` | 읽기, 추가, 수정은 upsert가 바꾸는 열만 (`id`·`customerId`·`cloudAccountId` 등 식별 열은 못 바꾼다). `ManagedAlarm`은 삭제도 | 발견한 리소스와 만든 알람을 upsert한다. 알람 삭제는 동기화가 한다 |
 | `ThresholdChange` | 읽기, `applyStatus`·`error`만 수정 | 변경 이력은 추가만 되는 기록이다. 엔진은 적용 결과만 적는다 |
-| `AlarmSyncRun` | 읽기, 추가, 수정 | 동기화 실행 기록 |
-| `RemediationRequest` | 읽기, 추가, `status`·`result`·`version`·`executedAt`만 수정 | 요청을 만들고 `EXECUTING`→`SUCCEEDED`/`FAILED`로 옮긴다. 승인 열(`decidedBy` 등)은 못 쓴다: 승인은 사람이 Slack에서 하고 콘솔이 기록한다 |
+| `AlarmSyncRun` | 읽기, 추가, 수정은 `status`·`heartbeatAt`·`counts`·`error`·`finishedAt`만 | 동기화 실행 기록 |
+| `RemediationRequest` | 읽기, 추가는 엔진이 쓰는 9개 열만(`decidedBy`·`decidedAt`·`decisionVia` 제외), `status`·`result`·`version`·`executedAt`만 수정 | 요청을 만들고 `EXECUTING`→`SUCCEEDED`/`FAILED`로 옮긴다. 승인 열은 못 쓴다: 승인은 사람이 Slack에서 하고 콘솔이 기록한다. 승인 열 없이 `APPROVED` 등으로 넣는 것은 테이블의 CHECK가 막는다. 남는 구멍(이미 사람이 결정한 행의 `status`를 `APPROVED`로 바꾸기)은 backend의 DB 트리거 후속 작업 대상이다 |
 | `CustomerOffboarding` | 읽기, `steps`·`completedAt`만 수정 | `ALARMS_DELETED` 단계만(D-43) |
 
 ### `alarmops_ingest` (수집 Lambda 3개)
@@ -131,6 +131,10 @@ D-40은 `public`의 모든 테이블에 RLS(행 단위 보안)를 켜고 **정�
    **값:** "선택한 브랜치만"으로 바꾸고 `main` 하나만 추가한다. **(필수)**
    **확인:** 저장 후 다시 열어도 `main` 하나만 있다.
    > **주의** 3·4번이 필수인 이유는 `docs/SETUP-SUPABASE.md` 4단계와 같다. 수동 실행은 시작한 브랜치의 워크플로 파일로 돈다. 브랜치 제한이 없으면 다른 브랜치가 이 시크릿을 읽어 갈 수 있다.
+5. **어디서:** 같은 화면의 **Allow administrators to bypass configured protection rules**.
+   **값:** **끈다.** (켜 두면 관리자는 승인 없이 실행할 수 있다.) 가능하면 승인자를 실행하는 사람과 다른 사람 1명 이상 더 넣고 **Prevent self-review**를 켠다.
+   **확인:** 저장 후 다시 열어도 꺼져 있다.
+   > **주의** 승인자가 본인 한 명뿐이면 `migrate-production` 입력은 **두 번째 통제가 아니다**(같은 사람이 입력하고 승인한다). 오타 방지 장치일 뿐이다. 그래서 승인 화면에서 승인하기 전에 **표시된 커밋 SHA**가 CI를 통과해 머지한 `main`의 커밋과 같은지 Actions 실행 화면과 `main` 커밋 목록으로 직접 비교한다. 다르면 승인하지 않고 거부한다.
 
 ## 5. 운영 DB에 테이블 만들기 (`prod-db` 워크플로)
 
@@ -173,14 +177,17 @@ D-40은 `public`의 모든 테이블에 RLS(행 단위 보안)를 켜고 **정�
    openssl rand -hex 24
    ```
    **확인:** 48자 영문·숫자가 두 줄 나온다. 첫째는 엔진용, 둘째는 수집용으로 비밀번호 관리자에 저장한다(`alarmops_engine`, `alarmops_ingest`). 두 개는 서로 달라야 하고, 1단계의 `postgres` 비밀번호와도 달라야 한다.
-4. **어디서:** SQL Editor, 새 쿼리.
-   **값:**
-   ```sql
-   alter role alarmops_engine password '<엔진용 비밀번호>';
-   alter role alarmops_ingest password '<수집용 비밀번호>';
+4. **어디서:** 회사 PC의 Git Bash에서 `psql`로 운영 DB에 접속한다(권장: 비밀번호가 SQL 문장이나 편집기 기록에 남지 않는다. `psql`은 비밀번호를 내 PC에서 해시해 보낸다). `psql --version`이 나오지 않으면 PostgreSQL 클라이언트를 설치하거나 아래 대체 방법을 쓴다.
+   **값:** 3단계의 `DIRECT_URL`에서 비밀번호를 뺀 주소로 접속하고(비밀번호는 물어볼 때 입력), 두 사용자의 비밀번호를 정한다. `\password`는 입력을 두 번 받고 화면에 보이지 않는다. 3번에서 만든 값을 붙여 넣는다.
    ```
-   **확인:** `Success`. 실행한 뒤 이 쿼리의 **내용을 지우고** 저장된 스니펫이 있으면 삭제한다.
-   > **주의** 이 SQL에만 비밀번호가 들어간다. 저장소·채팅·이슈에 붙여 넣지 않는다. SQL Editor는 쿼리를 저장해 두므로 실행 뒤 지운다.
+   psql "postgresql://postgres.<프로젝트ID>@aws-0-ap-northeast-2.pooler.supabase.com:5432/postgres?sslmode=require"
+   \password alarmops_engine
+   \password alarmops_ingest
+   \q
+   ```
+   **확인:** 두 번 모두 오류 없이 프롬프트로 돌아온다. 이 명령에는 주소·비밀번호를 붙여 넣은 채팅이나 파일이 없어야 한다.
+   **대체(psql이 없을 때만):** SQL Editor, 새 쿼리에서 `alter role alarmops_engine password '<엔진용 비밀번호>';`와 `alter role alarmops_ingest password '<수집용 비밀번호>';`를 실행하고, 실행 뒤 쿼리 **내용을 지우고** 저장·기록된 스니펫을 삭제한다.
+   > **주의** 대체 방법은 평문 비밀번호가 Supabase의 쿼리 기록에 남을 수 있다. 쓴 뒤에는 6단계 3번처럼 비밀번호를 새로 만들어 `psql` 방법으로 다시 바꾼다. 어느 방법이든 저장소·채팅·이슈에 붙여 넣지 않는다.
 5. **어디서:** SQL Editor.
    **값:**
    ```sql
@@ -191,8 +198,11 @@ D-40은 `public`의 모든 테이블에 RLS(행 단위 보안)를 켜고 **정�
    from information_schema.role_table_grants
    where grantee in ('alarmops_engine', 'alarmops_ingest') and table_schema = 'public'
    group by grantee;
+
+   select r, has_schema_privilege(r, 'public', 'USAGE') as usage, has_schema_privilege(r, 'public', 'CREATE') as can_create
+   from unnest(array['alarmops_engine', 'alarmops_ingest']) as r;
    ```
-   **확인:** 두 사용자 모두 `rolcanlogin = t`, `rolsuper = f`, `rolbypassrls = t`, `rolconnlimit = 20`. 테이블 수는 엔진 10, 수집 9(수집의 `Customer`·`CloudAccount`는 열 단위 권한이라 이 표에 안 잡힌다).
+   **확인:** 마지막 질의에서 두 사용자 모두 `usage = t`, **`can_create = f`**(`public`에 테이블·함수를 만들 수 없다). `can_create`가 `t`면 멈추고 허브에 알린다. 첫 질의(역할 속성)는 두 사용자 모두 `rolcanlogin = t`, `rolsuper = f`, `rolbypassrls = t`, `rolconnlimit = 20`. 둘째 질의의 테이블 수는 엔진 10, 수집 9(수집의 `Customer`·`CloudAccount`는 열 단위 권한이라 이 표에 안 잡힌다).
 6. **어디서:** 마이그레이션이 새 테이블이나 열을 더한 뒤.
    **값:** 그 테이블을 엔진 또는 수집이 쓰면 `db/sql/roles.sql`(과 `db/scripts/test-roles.mjs`)에 먼저 반영하는 PR을 머지하고, 위 2번을 다시 한다.
    **확인:** 새 테이블은 이 두 사용자에게 **자동으로 권한이 없다**(기본 권한을 주지 않았다). 반영하지 않으면 해당 Lambda가 `permission denied`로 실패한다.
@@ -212,21 +222,23 @@ D-40은 `public`의 모든 테이블에 RLS(행 단위 보안)를 켜고 **정�
 
 엔진이 5432(Session)를 쓰는 이유: 엔진의 Python 드라이버(psycopg)는 같은 문장이 반복되면 서버 쪽 준비된 문장을 쓰는데, 트랜잭션 풀러(6543)는 이를 처리하지 못해 `prepared statement does not exist` 오류가 날 수 있다. 수집 쪽은 풀러 모드로 접속하도록 만들어져 있어(포트 6543이면 자동) 6543이 맞다. **엔진의 풀러 호환은 아직 검증하지 않았다**: 첫 실행에서 오류가 나면 허브에 알린다.
 
-1. **어디서:** 회사 PC의 텍스트 편집기(메모장 가능). 파일은 저장소 **밖**에 둔다(예: `C:/Users/<본인>/secret-engine.txt`).
-   **값:** 엔진용 한 줄을 만든다. 줄바꿈 없이, 따옴표 없이.
+`sslmode=require`는 암호화만 하고 **서버 인증서를 검증하지 않는다**(엔진의 psycopg/libpq). 엔진 코드는 `require`·`verify-ca`·`verify-full`을 받아들이지만(`pg_repository.py`), `verify-full`에 필요한 CA 파일(`sslrootcert`)을 Lambda 묶음에 넣는 부분은 아직 없다. 그래서 지금은 `require`로 시작하고, `verify-full` 전환은 backend 후속 작업(CA 파일 묶기)이 끝난 뒤에 한다. Supabase CA 파일을 어디서 받는지는 확인 필요(Supabase 문서에서 직접 확인한 뒤 적는다).
+
+1. **어디서:** AWS 콘솔(중앙 계정, SSO·MFA 로그인) > Secrets Manager > `EngineDbSecretArn` 비밀 > **Retrieve secret value** > **Edit** > **Plaintext**. (권장: 파일도 셸 기록도 남지 않는다.)
+   **값:** 엔진용 한 줄을 붙여 넣는다. 줄바꿈 없이, 따옴표 없이, 비밀번호 관리자에서 복사한다.
    ```
    postgresql://alarmops_engine.<프로젝트ID>:<엔진용 비밀번호>@aws-0-ap-northeast-2.pooler.supabase.com:5432/postgres?sslmode=require
    ```
-   호스트는 3단계에서 본 주소의 호스트 그대로 쓴다. 수집용도 같은 방식으로 다른 파일에, 사용자 `alarmops_ingest.<프로젝트ID>`, 포트 `6543`으로 만든다.
-   **확인:** 두 파일 모두 한 줄이고, `[YOUR-PASSWORD]`나 `<`가 남아 있지 않다.
-2. **어디서:** 본인 터미널(SSO·MFA로 로그인한 **중앙 계정** 세션. 에이전트가 쓰는 세션이 아니다). `docs/GO-LIVE.md` 4단계 9번과 같은 작업이다.
-   **값:**
+   호스트는 3단계에서 본 주소의 호스트 그대로 쓴다. 저장한다. 이어서 `IngestDbSecretArn` 비밀에는 수집용 한 줄을 같은 방식으로 넣는다(사용자 `alarmops_ingest.<프로젝트ID>`, 포트 `6543`).
+   **확인:** 두 비밀 모두 새 버전이 생겼고, 값에 `[YOUR-PASSWORD]`나 `<`가 남아 있지 않다. 엔진 비밀에 수집용 주소(또는 반대)를 넣지 않았는지 사용자 이름을 다시 읽는다. `docs/GO-LIVE.md` 4단계 9번과 같은 작업이다.
+2. **어디서(콘솔을 쓸 수 없을 때만):** 본인 터미널(SSO·MFA로 로그인한 중앙 계정 세션. 에이전트가 쓰는 세션이 아니다).
+   **값:** 주소를 임시 파일에 한 줄로 저장해 `file://`로 준다. 파일은 **OneDrive·바탕화면·문서처럼 동기화되는 폴더에 두지 않는다**. 동기화되지 않는 임시 폴더(예: `C:/Temp/<무작위 이름>/`)를 쓴다.
    ```
-   aws secretsmanager put-secret-value --region ap-northeast-2 --secret-id <EngineDbSecretArn 값> --secret-string file://C:/Users/<본인>/secret-engine.txt
-   aws secretsmanager put-secret-value --region ap-northeast-2 --secret-id <IngestDbSecretArn 값> --secret-string file://C:/Users/<본인>/secret-ingest.txt
+   aws secretsmanager put-secret-value --region ap-northeast-2 --secret-id <EngineDbSecretArn 값> --secret-string file://C:/Temp/<무작위 이름>/engine.txt
+   aws secretsmanager put-secret-value --region ap-northeast-2 --secret-id <IngestDbSecretArn 값> --secret-string file://C:/Temp/<무작위 이름>/ingest.txt
    ```
-   **확인:** 두 번 모두 `VersionId`가 출력된다. 그 뒤 두 파일을 **삭제**한다.
-   > **주의** `--secret-string`에 주소를 직접 쓰지 않고 `file://`로 준다. 직접 쓰면 셸 기록에 비밀번호가 남는다. 엔진용 비밀에 수집용 주소를 넣거나 그 반대로 넣지 않도록 파일 이름을 확인한다.
+   **확인:** 두 번 모두 `VersionId`가 출력된다. 그 즉시 파일과 폴더를 **삭제**하고 휴지통도 비운다.
+   > **주의** `--secret-string`에 주소를 직접 쓰지 않는다. 직접 쓰면 셸 기록에 비밀번호가 남는다.
 3. **어디서:** Vercel 프로젝트 > Settings > Environment Variables (Production).
    **값:** `DATABASE_URL`에 3단계의 `DATABASE_URL`(소유자, 6543, `?pgbouncer=true&connection_limit=1`), `DATABASE_POOLER`에 `transaction`. 나머지 변수는 `docs/GO-LIVE.md` 3단계 표를 따른다.
    **확인:** 변수 목록에 두 이름이 Production 범위로 있다.
@@ -275,5 +287,6 @@ D-40은 `public`의 모든 테이블에 RLS(행 단위 보안)를 켜고 **정�
 | `password authentication failed for user "alarmops_…"` | 6단계 4번을 안 했거나, 주소의 비밀번호가 다르다 | 6단계 4번, 7단계 1·2번 |
 | `Tenant or user not found` | 풀러 사용자 이름에 `.프로젝트ID`가 빠졌다 | 7단계 표대로 `<사용자>.<프로젝트ID>` |
 | 엔진 로그에 `prepared statement ... does not exist` | 엔진이 6543(Transaction)에 붙었다 | 엔진 비밀의 포트를 5432로 |
+| 엔진을 `sslmode=verify-full`로 바꾸고 싶다 | 코드는 받지만 CA 파일(`sslrootcert`)을 묶는 부분이 없고 Supabase CA의 출처도 **확인 필요** | backend 후속 작업 전에는 `require`를 유지하고 허브에 알린다 |
 | Lambda가 시작하지 않고 `sslmode` 언급 | 주소 끝에 `?sslmode=require`가 없다 | 7단계 1번 |
 | 수집 Lambda가 `self-signed certificate` 류의 TLS 오류 | Node가 Supabase 인증서 체인을 믿지 못한다 | 허브에 알린다(`sslrootcert`를 번들에 넣는 방법이 있다, `docs/GO-LIVE.md` 4단계 9번) |

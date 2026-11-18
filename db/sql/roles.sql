@@ -6,7 +6,10 @@
 --
 -- Run as the TABLE OWNER (Supabase: `postgres`), AFTER `prisma migrate deploy`, in the Supabase SQL Editor or with psql.
 -- Safe to run again: it resets both roles' table privileges and grants them anew. Run it again after any migration that
--- adds a table or column one of these services uses (db/scripts/test-roles.mjs fails CI when the list and the code drift).
+-- adds a table or column one of these services uses. db/scripts/test-roles.mjs pins the exact table- and column-level
+-- privileges below (a change here without the same change there fails CI). It does NOT read the service code: it runs
+-- copies of its statements, so a service that starts using a new table or column is only caught when someone updates
+-- those copies. Review changes to pg_repository.py / ingestRepo.ts against this file.
 --
 -- NO PASSWORD IS IN THIS FILE. The roles are created with LOGIN but without a password, so nobody can log in as them
 -- until a person sets one (docs/SETUP-PROD-DB.md, step 3):  ALTER ROLE alarmops_engine PASSWORD '<generated>';
@@ -51,13 +54,28 @@ GRANT SELECT ON "Customer", "CloudAccount", "Resource", "ManagedAlarm", "Thresho
 GRANT UPDATE ("readerStatus", "alarmWriterStatus", "tagWriterStatus", "remediatorStatus", "lastCheckedAt", "updatedAt")
   ON "CloudAccount" TO alarmops_engine;
 -- Resource and ManagedAlarm: upsert (INSERT ... ON CONFLICT DO UPDATE). ManagedAlarm rows are also removed.
-GRANT INSERT, UPDATE ON "Resource", "ManagedAlarm" TO alarmops_engine;
+-- Insert is table-wide (a new row is the engine's own). UPDATE is limited to the SET list of the upsert, so id, customerId
+-- and cloudAccountId of an existing row cannot be rewritten.
+GRANT INSERT ON "Resource", "ManagedAlarm" TO alarmops_engine;
+GRANT UPDATE ("resourceArn", "name", "tags", "monitoringTag", "monitoringState", "needsReviewSince", "needsReviewReason",
+              "monitoringTagSetBy", "lastSeenAt", "discoveryRunId", "updatedAt") ON "Resource" TO alarmops_engine;
+GRANT UPDATE ("alarmName", "alarmArn", "region", "severity", "severityManual", "threshold", "thresholdSource", "consoleThreshold",
+              "evalM", "evalN", "evalSource", "comparison", "statistic", "period", "treatMissingData", "driftStatus",
+              "driftDetail", "lastSyncedAt", "version") ON "ManagedAlarm" TO alarmops_engine;
 GRANT DELETE ON "ManagedAlarm" TO alarmops_engine;
 -- ThresholdChange is append-only for everybody: the engine only closes its apply status.
 GRANT UPDATE ("applyStatus", "error") ON "ThresholdChange" TO alarmops_engine;
-GRANT INSERT, UPDATE ON "AlarmSyncRun" TO alarmops_engine;
--- RemediationRequest: creates rows, moves EXECUTING -> SUCCEEDED / FAILED. No approval columns.
-GRANT INSERT ON "RemediationRequest" TO alarmops_engine;
+GRANT INSERT ON "AlarmSyncRun" TO alarmops_engine;
+GRANT UPDATE ("status", "heartbeatAt", "counts", "error", "finishedAt") ON "AlarmSyncRun" TO alarmops_engine;
+-- RemediationRequest: creates NOTIFIED / PENDING_APPROVAL rows, moves EXECUTING -> SUCCEEDED / FAILED.
+-- The INSERT is limited to the columns of the engine's INSERT: NOT decidedBy, decidedAt, decisionVia, so a stolen engine
+-- credential cannot write an "approved" row. The table's CHECK RemediationRequest_decided_chk (0001_init) rejects status
+-- APPROVED / EXECUTING / SUCCEEDED / FAILED while decidedBy / decidedAt are NULL, so those statuses cannot be inserted either.
+-- Residual (needs a backend migration, not done here): `status` has to stay insertable and updatable, and the CHECK does not
+-- stop an UPDATE of status to APPROVED on a row that a person already decided (for example REJECTED -> APPROVED). A trigger
+-- that allows only the engine's transitions (EXECUTING -> SUCCEEDED / FAILED) would close that.
+GRANT INSERT ("id", "customerId", "cloudAccountId", "resourceId", "trigger", "action", "status", "requestedAt", "expiresAt")
+  ON "RemediationRequest" TO alarmops_engine;
 GRANT UPDATE ("status", "result", "version", "executedAt") ON "RemediationRequest" TO alarmops_engine;
 -- CustomerOffboarding: the ALARMS_DELETED step and completedAt only (D-43).
 GRANT UPDATE ("steps", "completedAt") ON "CustomerOffboarding" TO alarmops_engine;
