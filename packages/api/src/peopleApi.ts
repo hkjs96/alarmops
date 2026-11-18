@@ -172,8 +172,8 @@ async function writeResponders(req: ApiRequest, deps: Deps, customerId: string, 
   return ok(r, { etag: `"${r.version}"` }, op.kind === 'add' || op.kind === 'create' ? 201 : 200);
 }
 
-const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
-const PHONE_RE = /^\+?[0-9][0-9 -]{6,18}$/;
+export const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+export const PHONE_RE = /^\+?[0-9][0-9 -]{6,18}$/;
 
 /** POST /customers/{id}/responders — `{ contactId, role? }` or a new customer person `{ name, email?, phone?, role, extras? }`. */
 export function postResponder(req: ApiRequest, deps: Deps, customerId: string): Promise<ApiResponse> {

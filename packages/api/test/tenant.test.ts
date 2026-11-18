@@ -151,7 +151,7 @@ describe('404 parity: unknown and out-of-scope are the same bytes, never 403 (AP
       expect(res.status, `${r.method} ${path}`).toBe(404);
       tested.push(`${r.method} ${path}`);
     }
-    expect(tested).toHaveLength(24); // +contacts/:id/reveal (D-35), +legal-hold PUT/DELETE, purge-log, export.csv (D-45), digests/latest (D-46), + paging-health, the four Responders routes and the four status/offboarding routes (D-43)
+    expect(tested).toHaveLength(34); /* #62: +10 onboarding routes with an id */ // +contacts/:id/reveal (D-35), +legal-hold PUT/DELETE, purge-log, export.csv (D-45), digests/latest (D-46), + paging-health, the four Responders routes and the four status/offboarding routes (D-43)
     // the scope tree is the only source of slugs/ids: nothing of Hanbit's is in any list response either
     for (const path of ['/scope-tree', '/incidents']) expect(JSON.stringify((await w.call(USERS.yuna, 'GET', path)).body)).not.toMatch(/hanbit|Hanbit|svc_web|shop/);
   });
@@ -166,7 +166,7 @@ describe('404 parity: unknown and out-of-scope are the same bytes, never 403 (AP
 
   it('no session → 401 on every route; unknown routes and the disabled alert ack → 404', async () => {
     const w = await world();
-    for (const r of ROUTES) expect((await w.call(null, r.method, '/' + r.pattern.join('/'))).status).toBe(401);
+    for (const r of ROUTES) if (!r.public) expect((await w.call(null, r.method, '/' + r.pattern.join('/'))).status).toBe(401); // a public route (GET /verify/{token}) has its credential in the path
     expect((await w.call(USERS.minjae, 'POST', '/alerts/al_m1/ack')).status).toBe(404);
     expect((await w.call(USERS.minjae, 'GET', '/nope')).status).toBe(404);
   });

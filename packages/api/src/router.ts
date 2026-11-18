@@ -14,6 +14,8 @@ import { deletePagingOverride, getCustomerPaging, getPagingPath, putCustomerPagi
 import type { ApiRepository } from './repo.js';
 import { getScopeTree } from './scope.js';
 import { listContactReveals, revealContact } from './revealApi.js';
+import { createCustomer, listAccounts, createAccount, patchAccount, deleteAccount, checkAccount, getAccountStatus } from './onboardingApi.js';
+import { listContacts, createContact, patchContact, deleteContact, verifyContact, verifyBulk, useVerifyLink, type VerificationSender } from './contactsApi.js';
 import { deleteResponder, getMe, getOncallNow, getPagingHealth, getResponders, listRotations, listStaff, patchResponder, postResponder } from './peopleApi.js';
 
 export interface ApiDeps {
@@ -28,12 +30,16 @@ export interface ApiDeps {
    * is not the boolean `true` is treated as off (R-15).
    */
   config?: Partial<ApiConfig>;
+  /** Delivers contact verification links (e-mail / SMS adapters, hkjs96/alarmops#39, #10). Without it a link request is 503 VERIFICATION_UNAVAILABLE. */
+  verification?: VerificationSender;
   log?: (level: 'warn' | 'error', msg: string, data?: Record<string, unknown>) => void;
 }
 
-type Handler = (req: ApiRequest, deps: { repo: ApiRepository; now: () => Date; config: ApiConfig; commands?: CommandPublisher; retention?: RetentionConfig; log?: ApiDeps['log'] }, p: string[]) => Promise<ApiResponse>;
+type Handler = (req: ApiRequest, deps: { repo: ApiRepository; now: () => Date; config: ApiConfig; commands?: CommandPublisher; retention?: RetentionConfig; verification?: VerificationSender; log?: ApiDeps['log'] }, p: string[]) => Promise<ApiResponse>;
 interface Route {
   method: ApiRequest['method']; pattern: string[]; run: Handler;
+  /** true → no session is required (the credential is in the path: GET /verify/{token}). Everything else answers 401 without one. */
+  public?: boolean;
   /**
    * false → the response is never stored for Idempotency-Key replay.
    * - read-only requests (N-19: a bulk preview);
@@ -45,7 +51,7 @@ interface Route {
   replayable?: (req: ApiRequest) => boolean;
 }
 
-const route = (method: ApiRequest['method'], path: string, run: Handler, replayable?: Route['replayable']): Route => ({ method, pattern: path.split('/').filter(Boolean), run, replayable });
+const route = (method: ApiRequest['method'], path: string, run: Handler, replayable?: Route['replayable'], isPublic = false): Route => ({ method, pattern: path.split('/').filter(Boolean), run, replayable, ...(isPublic ? { public: true } : {}) });
 
 /** Order matters only where a literal and a parameter compete (`/incidents/bulk` before `/incidents/:id`). */
 export const ROUTES: Route[] = [
@@ -86,6 +92,23 @@ export const ROUTES: Route[] = [
   // D-35. The reveal response carries a contact value: never stored for replay (security review SQL R-7), a second call runs and is logged again.
   route('POST', '/contacts/:id/reveal', (r, d, p) => revealContact(r, d, p[0]!), () => false),
   route('GET', '/contact-reveals', (r, d) => listContactReveals(r, d)),
+  // ── onboarding (#62): customer, AWS accounts, contacts, verification ──
+  route('POST', '/customers', (r, d) => createCustomer(r, d)),
+  // An account response carries the ExternalId: never kept for replay (a second call with the same Idempotency-Key runs again).
+  route('GET', '/customers/:id/accounts', (r, d, p) => listAccounts(r, d, p[0]!)),
+  route('POST', '/customers/:id/accounts', (r, d, p) => createAccount(r, d, p[0]!), () => false),
+  route('PATCH', '/accounts/:id', (r, d, p) => patchAccount(r, d, p[0]!), () => false),
+  route('DELETE', '/accounts/:id', (r, d, p) => deleteAccount(r, d, p[0]!)),
+  route('POST', '/accounts/:id/check', (r, d, p) => checkAccount(r, d, p[0]!)),
+  route('GET', '/accounts/:id/status', (r, d, p) => getAccountStatus(r, d, p[0]!)),
+  // Contact responses are masked, but a list of people is still personal data: never replayed from the idempotency store.
+  route('GET', '/contacts', (r, d) => listContacts(r, d)),
+  route('POST', '/contacts', (r, d) => createContact(r, d), () => false),
+  route('POST', '/contacts/verify-bulk', (r, d) => verifyBulk(r, d)),
+  route('PATCH', '/contacts/:id', (r, d, p) => patchContact(r, d, p[0]!), () => false),
+  route('DELETE', '/contacts/:id', (r, d, p) => deleteContact(r, d, p[0]!)),
+  route('POST', '/contacts/:id/verify', (r, d, p) => verifyContact(r, d, p[0]!)),
+  route('GET', '/verify/:token', (r, d, p) => useVerifyLink(r, d, p[0]!), undefined, true),
 ];
 
 function match(method: string, path: string): { route: Route; params: string[]; canonical: string } | null {
@@ -122,12 +145,13 @@ const stable = (v: unknown): string =>
       : JSON.stringify(v) ?? 'null';
 
 export function createApi(deps: ApiDeps) {
-  const inner = { repo: deps.repo, now: deps.now ?? (() => new Date()), config: strictApiConfig(deps.config), commands: deps.commands, retention: deps.retention, log: deps.log };
+  const inner = { repo: deps.repo, now: deps.now ?? (() => new Date()), config: strictApiConfig(deps.config), commands: deps.commands, retention: deps.retention, verification: deps.verification, log: deps.log };
   async function handle(req: ApiRequest): Promise<ApiResponse> {
     try {
-      const auth = requireAuth(req); // every console route needs a session (401 before anything else)
-      assertCleanInput(req); // R-5: NUL bytes and malformed path ids are a 400 here, never an error from the database
       const m = match(req.method, req.path);
+      // Every console route needs a session (401 before anything else) — except a route marked `public`, whose credential is its path.
+      const auth = m?.route.public ? null : requireAuth(req);
+      assertCleanInput(req); // R-5: NUL bytes and malformed path ids are a 400 here, never an error from the database
       if (!m) throw notFound();
       // Idempotency-Key (§2): the same key from the same user for the same request replays the first response for 24h.
       // R-5: - the key is looked up together with the caller's CURRENT range and role (scopeKey): after a change of
@@ -138,7 +162,7 @@ export function createApi(deps: ApiDeps) {
       //       - a user holds at most IDEMPOTENCY_MAX_PER_USER live entries (the store drops the oldest).
       const replayable = m.route.replayable ? m.route.replayable(req) : true;
       const idem = req.method === 'GET' || !replayable ? undefined : header(req, 'idempotency-key');
-      const idemKey = idem ? sha([auth.userId, sha(scopeKey(auth)), sha(idem)].join('|')) : undefined;
+      const idemKey = idem && auth ? sha([auth.userId, sha(scopeKey(auth)), sha(idem)].join('|')) : undefined;
       const fingerprint = idem ? sha([req.method, m.canonical, header(req, 'if-match') ?? '', stable(req.body)].join('\n')) : '';
       if (idemKey) {
         const replay = await inner.repo.getIdempotent(idemKey, inner.now());
@@ -149,7 +173,7 @@ export function createApi(deps: ApiDeps) {
       }
       const res = await m.route.run(req, inner, m.params);
       if (idemKey && res.status >= 200 && res.status < 300) {
-        await inner.repo.putIdempotent(idemKey, { fingerprint, res: { status: res.status, headers: res.headers, body: storable(res.body) } }, new Date(inner.now().getTime() + IDEMPOTENCY_TTL_MS), { owner: auth.userId, maxPerOwner: IDEMPOTENCY_MAX_PER_USER });
+        await inner.repo.putIdempotent(idemKey, { fingerprint, res: { status: res.status, headers: res.headers, body: storable(res.body) } }, new Date(inner.now().getTime() + IDEMPOTENCY_TTL_MS), { owner: auth!.userId, maxPerOwner: IDEMPOTENCY_MAX_PER_USER });
       }
       return res;
     } catch (err) {

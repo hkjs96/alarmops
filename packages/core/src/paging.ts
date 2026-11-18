@@ -23,6 +23,9 @@ export interface Contact {
   /** How the phone was verified (`admin:seed` = a seed/demo number that must never reach a real SMS/voice provider). */
   phoneVerifiedVia?: string | null;
   slackVerifiedAt?: Date | null;
+  /** How the e-mail / Slack id was verified (`link`, `admin:<name>`); the phone's is `phoneVerifiedVia`. Display only. */
+  emailVerifiedVia?: string | null;
+  slackVerifiedVia?: string | null;
 }
 export interface Responder {
   customerId: string;

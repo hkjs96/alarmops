@@ -13,16 +13,18 @@ import { visibleCustomer } from './pagingApi.js';
 import { OFFBOARD_STEP_KEYS, type ApiRepository, type CustomerStatusValue, type OffboardStepKey, type OffboardingState } from './repo.js';
 
 /** The alarm-commands message of API-CONTRACT §6 (SQS `alarm-commands`). */
-export interface AlarmCommand {
+interface AlarmCommandBase {
   schemaVersion: 1;
   commandId: string;
-  type: 'OFFBOARD_ACCOUNT';
   customerId: string;
   cloudAccountId: string;
   requestedBy: { type: 'USER'; id: string };
   requestedAt: string;
-  payload: { offboardingId: string };
 }
+/** The two commands this API sends: D-43 offboarding and the onboarding connection check (D-07, P4-1). */
+export type AlarmCommand =
+  | (AlarmCommandBase & { type: 'OFFBOARD_ACCOUNT'; payload: { offboardingId: string } })
+  | (AlarmCommandBase & { type: 'CHECK_CONNECTION'; payload: Record<string, never> });
 
 /**
  * Port to the `alarm-commands` queue. Production adapter = `SqsCommandPublisher` (sqsCommandPublisher.ts; the console injects the SQS client). Publishing happens AFTER the database commit and may fail: see `PATCH /customers/{id}/status`.

@@ -81,7 +81,10 @@ export async function sqlFixture(db: TestDb, seed: MemoryTickStore): Promise<Sql
      VALUES ('global', $1, $2, $3, $4, $5, $6::jsonb, $7, $8, now())`,
     [p.repeatIntervalSec, p.flappingPerDay, p.flappingWindowDays, p.flappingQuarantineSec, p.groupWaitSec, js(p.autoPauseSec), p.renotifyAfterSec, p.incidentMergeMaxSec]);
   let order = 0;
-  for (const c of seed.customers.values()) await q(`INSERT INTO "Customer"("id", "name", "slug", "status", "createdAt", "updatedAt") VALUES ($1, $2, $3, $4::"CustomerStatus", now() + make_interval(secs => $5), now())`, [c.id, c.name, c.slug, c.status ?? 'ACTIVE', order++]);
+  for (const c of seed.customers.values()) {
+    await q(`INSERT INTO "Customer"("id", "name", "slug", "status", "portalGrants", "loginDomains", "createdAt", "updatedAt") VALUES ($1, $2, $3, $4::"CustomerStatus", $5::text[], $6::text[], now() + make_interval(secs => $7), now())`,
+      [c.id, c.name, c.slug, c.status ?? 'ACTIVE', (api.portalGrantsOf?.get(c.id) ?? []), (api.loginDomains?.get(c.id) ?? []), order++]);
+  }
   for (const x of seed.projects.values()) await q(`INSERT INTO "Project"("id", "customerId", "name", "slug") VALUES ($1, $2, $3, $4)`, [x.id, x.customerId, x.name, x.slug]);
   for (const x of seed.services.values()) await q(`INSERT INTO "Service"("id", "customerId", "projectId", "name", "slug") VALUES ($1, $2, $3, $4, $5)`, [x.id, x.customerId, x.projectId, x.name, x.slug]);
   const accountRow = async (id: string, customerId: string, serviceId: string | null, awsAccountId: string): Promise<void> => {
@@ -90,6 +93,11 @@ export async function sqlFixture(db: TestDb, seed: MemoryTickStore): Promise<Sql
       [id, customerId, serviceId, awsAccountId, `ext-${id}`]);
   };
   for (const a of seed.accounts.values()) await accountRow(`ca_${a.awsAccountId}`, a.customerId, a.serviceId, a.awsAccountId);
+  // #62 test hook: accounts that already have discovered resources (their DELETE is refused)
+  for (const aws of api.accountsWithResources ?? []) {
+    const a = seed.accounts.get(aws)!;
+    await q(`INSERT INTO "Resource"("id", "customerId", "cloudAccountId", "region", "resourceType", "resourceArn", "resourceKey", "lastSeenAt", "updatedAt") VALUES ($1, $2, $3, 'ap-northeast-2', 'EC2', 'arn:x', 'i-1', now(), now())`, [`res_${aws}`, a.customerId, `ca_${aws}`]);
+  }
   for (const c of seed.contacts.values()) await addContact(c);
   for (const [i, r] of seed.responders.entries()) {
     await q(`INSERT INTO "Responder"("customerId", "contactId", "role", "order") VALUES ($1, $2, $3::"ResponderRole", $4)`, [r.customerId, r.contactId, r.role, typeof r.order === 'number' && Number.isFinite(r.order) ? r.order : 0]);

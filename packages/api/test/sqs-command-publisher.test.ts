@@ -64,7 +64,7 @@ describe('SqsCommandPublisher', () => {
     const pub = new SqsCommandPublisher(client, { queueUrl: FIFO, expectedAccount: ACCT });
     await expect(pub.publish({ ...fixture, commandId: '' })).rejects.toMatchObject({ reason: 'INVALID' });
     await expect(pub.publish({ ...fixture, commandId: 'has space' })).rejects.toMatchObject({ reason: 'INVALID' });
-    await expect(new SqsCommandPublisher(client, { queueUrl: STD, expectedAccount: ACCT }).publish({ ...fixture, payload: { offboardingId: 'x'.repeat(300_000) } })).rejects.toMatchObject({ reason: 'INVALID' });
+    await expect(new SqsCommandPublisher(client, { queueUrl: STD, expectedAccount: ACCT }).publish({ ...fixture, payload: { offboardingId: 'x'.repeat(300_000) } } as AlarmCommand)).rejects.toMatchObject({ reason: 'INVALID' });
     expect(sent).toHaveLength(0);
     expect(() => new SqsCommandPublisher(client, { queueUrl: STD, expectedAccount: ACCT, fifo: true })).toThrow();
   });

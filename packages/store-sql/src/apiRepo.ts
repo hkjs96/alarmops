@@ -5,7 +5,7 @@
  */
 import { createHash } from 'node:crypto';
 import { incidentMute, type DigestData, type PurgeLogEntry, type Contact, type Leave, type Override, type Rotation, type AuditInput, type DeliveryLog, type IncidentEventInput, type IncidentRow, type MaintenanceWindow, type PagingConfig } from '@alarmops/core';
-import { nodeVisible, type ApiRepository, type AlertMemberRow, type IdempotentEntry, type IncidentFilter, type IncidentPage, type NodeFilter, type NotifiedPerson, type OpenCounts, type OrgTree, type ScopeFilter, type StatusCounts, type UndoRecord, type UserInfo, type Principal, type ResponderOp, type ResponderWriteOutcome, type RespondersState, type RotationsWorld, type ChangeStatusOutcome, type CustomerStatusState, type CustomerStatusValue, type ExportIncidentRow, type RetentionView, type MarkStepOutcome, type OffboardStep, type OffboardStepKey, type OffboardingState, type RevealLogFilter, type RevealLogRow, type RevealWrite, type RevealWriteOutcome, OFFBOARD_STEP_KEYS } from '@alarmops/api';
+import { nodeVisible, type ApiRepository, type AlertMemberRow, type IdempotentEntry, type IncidentFilter, type IncidentPage, type NodeFilter, type NotifiedPerson, type OpenCounts, type OrgTree, type ScopeFilter, type StatusCounts, type UndoRecord, type UserInfo, type Principal, type ResponderOp, type ResponderWriteOutcome, type RespondersState, type RotationsWorld, type ChangeStatusOutcome, type CustomerStatusState, type CustomerStatusValue, type ExportIncidentRow, type RetentionView, type MarkStepOutcome, type OffboardStep, type OffboardStepKey, type OffboardingState, type RevealLogFilter, type RevealLogRow, type RevealWrite, type RevealWriteOutcome, type AccountPatch, type AccountWriteOutcome, type AuditTemplate, type CloudAccountRecord, type ContactPatch, type ContactScopeInfo, type ContactWriteOutcome, type ContactsWorld, type NewAccount, type NewContact, type VerificationIssue, type VerificationLink, type VerificationTaken, type VerifyChannelValue, OFFBOARD_STEP_KEYS } from '@alarmops/api';
 import { PG, pgCode, type SqlExecutor } from './client.js';
 import { purgeLogOf } from './retentionSql.js';
 import { CONTACT_COLS, toContact, Params, d, dReq, incidentCols, iso, js, newId, num, toEvent, toIncident, toLog } from './rows.js';
@@ -681,6 +681,257 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
       steps.ALARMS_DELETED = { ...st, state: 'MANUAL', detail: st.detail ? (st.detail.includes(mark) ? st.detail : `${st.detail}; ${mark}`) : mark };
       await tx.query(`UPDATE "CustomerOffboarding" SET "steps" = $2::jsonb WHERE "customerId" = $1`, [customerId, js(steps)]);
     });
+  }
+
+  // ───────────────────────────── onboarding: customers, accounts, contacts, verification (#62) ─────────────────────────────
+
+  async createCustomer(c: { name: string; slug: string; loginDomains: string[] }, audit: AuditTemplate) {
+    try {
+      return await this.sql.transaction(async (tx) => {
+        if ((await tx.query(`SELECT 1 FROM "Customer" WHERE lower("name") = lower($1)`, [c.name])).length) return 'NAME_EXISTS' as const;
+        if ((await tx.query(`SELECT 1 FROM "Customer" WHERE "slug" = $1`, [c.slug])).length) return 'SLUG_EXISTS' as const;
+        if (c.loginDomains.length && (await tx.query(`SELECT 1 FROM "Customer" WHERE "loginDomains" && $1::text[]`, [c.loginDomains])).length) return 'DOMAIN_EXISTS' as const;
+        const id = newId('cus');
+        const [r] = await tx.query(
+          `INSERT INTO "Customer"("id", "name", "slug", "loginDomains", "createdAt", "updatedAt") VALUES ($1, $2, $3, $4::text[], ${this.sql.now()}, ${this.sql.now()}) RETURNING "createdAt"`,
+          [id, c.name, c.slug, c.loginDomains]);
+        await insertAudit(tx, { ...audit, customerId: id, targetId: id });
+        return { id, createdAt: dReq(r!.createdAt) };
+      });
+    } catch (err) {
+      if (pgCode(err) === PG.UNIQUE) return /slug/i.test(String((err as { constraint?: unknown }).constraint ?? '')) ? 'SLUG_EXISTS' : 'NAME_EXISTS';
+      throw err;
+    }
+  }
+
+  /** The columns of a CloudAccount record. First / last event: the stored column, else the customer's RawEvent rows of this account. */
+  private static readonly ACCOUNT_SELECT = `SELECT a."id", a."customerId", a."serviceId", a."awsAccountId", a."alias", a."environment", a."regions", a."externalId",
+      a."readerRoleArn", a."eventForwarderRoleArn", a."alarmWriterRoleArn", a."tagWriterRoleArn", a."remediatorRoleArn",
+      a."alarmWriterEnabled", a."tagWriterEnabled", a."remediatorEnabled",
+      a."readerStatus", a."eventForwarderStatus", a."alarmWriterStatus", a."tagWriterStatus", a."remediatorStatus", a."lastCheckedAt",
+      LEAST(a."firstEventAt", (SELECT min(e."receivedAt") FROM "RawEvent" e WHERE e."customerId" = a."customerId" AND e."awsAccountId" = a."awsAccountId")) AS "firstEventAt",
+      GREATEST(a."lastEventAt", (SELECT max(e."receivedAt") FROM "RawEvent" e WHERE e."customerId" = a."customerId" AND e."awsAccountId" = a."awsAccountId")) AS "lastEventAt",
+      a."stackVersion", a."disabled", (a."connectionPurgedAt" IS NOT NULL) AS "connectionPurged", a."createdAt" FROM "CloudAccount" a`;
+  private static toAccount(r: Record<string, any>): CloudAccountRecord { // eslint-disable-line @typescript-eslint/no-explicit-any
+    return {
+      id: r.id, customerId: r.customerId, serviceId: r.serviceId ?? null, awsAccountId: String(r.awsAccountId).trim(), alias: r.alias ?? null, environment: r.environment ?? null, regions: r.regions ?? [], externalId: r.externalId,
+      readerRoleArn: r.readerRoleArn, eventForwarderRoleArn: r.eventForwarderRoleArn, alarmWriterRoleArn: r.alarmWriterRoleArn ?? null, tagWriterRoleArn: r.tagWriterRoleArn ?? null, remediatorRoleArn: r.remediatorRoleArn ?? null,
+      alarmWriterEnabled: r.alarmWriterEnabled, tagWriterEnabled: r.tagWriterEnabled, remediatorEnabled: r.remediatorEnabled,
+      readerStatus: r.readerStatus, eventForwarderStatus: r.eventForwarderStatus, alarmWriterStatus: r.alarmWriterStatus, tagWriterStatus: r.tagWriterStatus, remediatorStatus: r.remediatorStatus,
+      lastCheckedAt: d(r.lastCheckedAt), firstEventAt: d(r.firstEventAt), lastEventAt: d(r.lastEventAt), stackVersion: r.stackVersion ?? null, disabled: r.disabled, connectionPurged: r.connectionPurged, createdAt: dReq(r.createdAt),
+    };
+  }
+  async listAccounts(customerId: string): Promise<CloudAccountRecord[]> {
+    return (await this.sql.query(`${SqlApiStore.ACCOUNT_SELECT} WHERE a."customerId" = $1 ORDER BY a."createdAt", a."id"`, [customerId])).map(SqlApiStore.toAccount);
+  }
+  async findAccount(scope: ScopeFilter, accountId: string): Promise<CloudAccountRecord | null> {
+    const all = scope.customerIds === '*';
+    const [r] = await this.sql.query(`${SqlApiStore.ACCOUNT_SELECT} WHERE a."id" = $1 AND ($2::boolean OR a."customerId" = ANY($3::text[]))`, [accountId, all, all ? [] : [...scope.customerIds]]);
+    return r ? SqlApiStore.toAccount(r) : null;
+  }
+  async createAccount(customerId: string, a: NewAccount, audit: AuditTemplate): Promise<AccountWriteOutcome> {
+    try {
+      return await this.sql.transaction(async (tx) => {
+        // FOR SHARE conflicts with the FOR UPDATE of a status change: no account is added behind a termination's account list.
+        const [cus] = await tx.query(`SELECT "status" FROM "Customer" WHERE "id" = $1 FOR SHARE`, [customerId]);
+        if (!cus) return 'NOT_FOUND' as const;
+        if (cus.status === 'TERMINATED') return 'CUSTOMER_TERMINATED' as const;
+        if (a.serviceId !== null && !(await tx.query(`SELECT 1 FROM "Service" WHERE "id" = $1 AND "customerId" = $2`, [a.serviceId, customerId])).length) return 'NO_SUCH_SERVICE' as const;
+        if ((await tx.query(`SELECT 1 FROM "CloudAccount" WHERE "awsAccountId" = $1`, [a.awsAccountId])).length) return 'EXISTS' as const;
+        const id = newId('acc');
+        await tx.query(
+          `INSERT INTO "CloudAccount"("id", "customerId", "serviceId", "awsAccountId", "alias", "environment", "regions", "externalId", "readerRoleArn", "eventForwarderRoleArn", "alarmWriterRoleArn", "tagWriterRoleArn", "remediatorRoleArn",
+             "alarmWriterEnabled", "tagWriterEnabled", "remediatorEnabled", "createdAt", "updatedAt")
+           VALUES ($1, $2, $3, $4, $5, $6::"Environment", $7::text[], $8, $9, $10, $11, $12, $13, $14, $15, $16, ${this.sql.now()}, ${this.sql.now()})`,
+          [id, customerId, a.serviceId, a.awsAccountId, a.alias, a.environment, a.regions, a.externalId, a.readerRoleArn, a.eventForwarderRoleArn, a.alarmWriterRoleArn, a.tagWriterRoleArn, a.remediatorRoleArn,
+            a.alarmWriterEnabled, a.tagWriterEnabled, a.remediatorEnabled]);
+        await insertAudit(tx, { ...audit, customerId, targetId: id });
+        const [row] = await tx.query(`${SqlApiStore.ACCOUNT_SELECT} WHERE a."id" = $1 AND a."customerId" = $2`, [id, customerId]);
+        return SqlApiStore.toAccount(row!);
+      });
+    } catch (err) {
+      if (pgCode(err) === PG.UNIQUE) return 'EXISTS';
+      throw err;
+    }
+  }
+  async updateAccount(customerId: string, accountId: string, patch: AccountPatch, audit: AuditTemplate): Promise<AccountWriteOutcome> {
+    return this.sql.transaction(async (tx) => {
+      const [cus] = await tx.query(`SELECT "status" FROM "Customer" WHERE "id" = $1 FOR SHARE`, [customerId]);
+      const [acc] = await tx.query(`SELECT "connectionPurgedAt" FROM "CloudAccount" WHERE "id" = $1 AND "customerId" = $2 FOR UPDATE`, [accountId, customerId]);
+      if (!cus || !acc) return 'NOT_FOUND' as const;
+      if (cus.status === 'TERMINATED' || acc.connectionPurgedAt) return 'CUSTOMER_TERMINATED' as const;
+      if (patch.serviceId !== undefined && patch.serviceId !== null && !(await tx.query(`SELECT 1 FROM "Service" WHERE "id" = $1 AND "customerId" = $2`, [patch.serviceId, customerId])).length) return 'NO_SUCH_SERVICE' as const;
+      const p = new Params();
+      const sets: string[] = [];
+      const col = (name: string, v: unknown, cast = ''): void => { if (v !== undefined) sets.push(`"${name}" = ${p.add(v)}${cast}`); };
+      col('alias', patch.alias); col('environment', patch.environment, '::"Environment"'); col('regions', patch.regions, '::text[]'); col('serviceId', patch.serviceId);
+      col('alarmWriterEnabled', patch.alarmWriterEnabled); col('tagWriterEnabled', patch.tagWriterEnabled); col('remediatorEnabled', patch.remediatorEnabled);
+      col('alarmWriterRoleArn', patch.alarmWriterRoleArn); col('tagWriterRoleArn', patch.tagWriterRoleArn); col('remediatorRoleArn', patch.remediatorRoleArn);
+      if (sets.length) {
+        await tx.query(`UPDATE "CloudAccount" SET ${sets.join(', ')}, "updatedAt" = ${this.sql.now()} WHERE "id" = ${p.add(accountId)} AND "customerId" = ${p.add(customerId)}`, p.values);
+      }
+      await insertAudit(tx, { ...audit, customerId, targetId: accountId });
+      const [row] = await tx.query(`${SqlApiStore.ACCOUNT_SELECT} WHERE a."id" = $1 AND a."customerId" = $2`, [accountId, customerId]);
+      return SqlApiStore.toAccount(row!);
+    });
+  }
+  async deleteAccount(customerId: string, accountId: string, audit: AuditTemplate) {
+    return this.sql.transaction(async (tx) => {
+      const [cus] = await tx.query(`SELECT "status" FROM "Customer" WHERE "id" = $1 FOR SHARE`, [customerId]);
+      const [acc] = await tx.query(`SELECT 1 FROM "CloudAccount" WHERE "id" = $1 AND "customerId" = $2 FOR UPDATE`, [accountId, customerId]);
+      if (!cus || !acc) return 'NOT_FOUND' as const;
+      if (cus.status === 'TERMINATED') return 'CUSTOMER_TERMINATED' as const;
+      const [used] = await tx.query(`SELECT (EXISTS (SELECT 1 FROM "Resource" WHERE "cloudAccountId" = $1) OR EXISTS (SELECT 1 FROM "ManagedAlarm" WHERE "cloudAccountId" = $1)) AS "used"`, [accountId]);
+      if (used?.used) return 'IN_USE' as const;
+      await tx.query(`DELETE FROM "CloudAccount" WHERE "id" = $1 AND "customerId" = $2`, [accountId, customerId]);
+      await insertAudit(tx, { ...audit, customerId, targetId: accountId });
+      return 'OK' as const;
+    });
+  }
+
+  async portalGrants(customerId: string): Promise<string[]> {
+    const [r] = await this.sql.query(`SELECT "portalGrants" FROM "Customer" WHERE "id" = $1`, [customerId]);
+    return (r?.portalGrants ?? []) as string[];
+  }
+  private async linksOf(q: SqlExecutor, contactIds: string[]): Promise<VerificationLink[]> {
+    if (!contactIds.length) return [];
+    const rows = await q.query(
+      `SELECT DISTINCT ON (v."contactId", v."channel") v."contactId", v."channel", v."sentAt", v."expiresAt", v."usedAt" FROM "ChannelVerification" v
+        WHERE v."contactId" = ANY($1::text[]) AND v."via" = 'link' ORDER BY v."contactId", v."channel", v."sentAt" DESC`, [contactIds]);
+    return rows.map((r) => ({ contactId: r.contactId, channel: r.channel, sentAt: dReq(r.sentAt), expiresAt: dReq(r.expiresAt), usedAt: d(r.usedAt) }));
+  }
+  async contactsWorld(customerIds: readonly string[] | '*', staff: boolean): Promise<ContactsWorld> {
+    const all = customerIds === '*';
+    const ids = all ? [] : [...customerIds];
+    const [cRows, sRows, rRows] = await Promise.all([
+      this.sql.query(`SELECT ${CONTACT_COLS} FROM "Contact" WHERE ("kind" = 'CUSTOMER' AND ($1::boolean OR "customerId" = ANY($2::text[]))) OR ("kind" = 'INTERNAL' AND $3::boolean) ORDER BY "name", "id"`, [all, ids, staff]),
+      this.sql.query(`SELECT "contactId", "scopeType", "scopeId", "role" FROM "ContactScope" WHERE $1::boolean OR "customerId" = ANY($2::text[])`, [all, ids]),
+      this.sql.query(`SELECT "customerId", "contactId", "role" FROM "Responder" WHERE $1::boolean OR "customerId" = ANY($2::text[])`, [all, ids]),
+    ]);
+    const contacts = cRows.map(toContact);
+    const have = new Set(contacts.map((c) => c.id));
+    const scopes: ContactScopeInfo[] = sRows.filter((r) => have.has(r.contactId)).map((r) => ({ contactId: r.contactId, scopeType: r.scopeType, scopeId: r.scopeId, role: r.role }));
+    const responders = rRows.filter((r) => have.has(r.contactId)).map((r) => ({ customerId: r.customerId, contactId: r.contactId, role: r.role }));
+    return { contacts, scopes, responders, links: await this.linksOf(this.sql, [...have]) };
+  }
+  async findContact(customerIds: readonly string[] | '*', staff: boolean, contactId: string) {
+    const all = customerIds === '*';
+    const [r] = await this.sql.query(
+      `SELECT ${CONTACT_COLS} FROM "Contact" WHERE "id" = $1 AND (("kind" = 'CUSTOMER' AND ($2::boolean OR "customerId" = ANY($3::text[]))) OR ("kind" = 'INTERNAL' AND $4::boolean))`,
+      [contactId, all, all ? [] : [...customerIds], staff]);
+    if (!r) return null;
+    const resp = await this.sql.query(`SELECT DISTINCT "customerId" FROM "Responder" WHERE "contactId" = $1 AND ($2::boolean OR "customerId" = ANY($3::text[])) ORDER BY 1`, [contactId, all, all ? [] : [...customerIds]]);
+    return { contact: toContact(r), links: await this.linksOf(this.sql, [contactId]), responderCustomerIds: resp.map((x) => x.customerId as string) };
+  }
+  async createContact(n: NewContact, audit: AuditTemplate): Promise<ContactWriteOutcome> {
+    try {
+      return await this.sql.transaction(async (tx) => {
+        if (n.kind === 'CUSTOMER' && !(n.customerId && (await tx.query(`SELECT 1 FROM "Customer" WHERE "id" = $1 FOR SHARE`, [n.customerId])).length)) return 'NOT_FOUND' as const;
+        const id = newId('ct');
+        const [r] = await tx.query(
+          `INSERT INTO "Contact"("id", "kind", "customerId", "name", "email", "phone", "slackUserId", "active", "createdAt", "updatedAt") VALUES ($1, $2::"ContactKind", $3, $4, $5, $6, $7, true, ${this.sql.now()}, ${this.sql.now()}) RETURNING ${CONTACT_COLS}`,
+          [id, n.kind, n.customerId, n.name, n.email, n.phone, n.slackUserId]);
+        await insertAudit(tx, { ...audit, customerId: n.customerId, targetId: id });
+        return toContact(r!);
+      });
+    } catch (err) {
+      if (pgCode(err) === PG.UNIQUE) return 'SLACK_EXISTS';
+      throw err;
+    }
+  }
+  async updateContact(contactId: string, customerId: string | null, patch: ContactPatch, audit: AuditTemplate): Promise<ContactWriteOutcome> {
+    try {
+      return await this.sql.transaction(async (tx) => {
+        const [cur] = await tx.query(`SELECT ${CONTACT_COLS} FROM "Contact" WHERE "id" = $1 AND "customerId" IS NOT DISTINCT FROM $2 FOR UPDATE`, [contactId, customerId]);
+        if (!cur) return 'NOT_FOUND' as const;
+        const p = new Params();
+        const sets: string[] = [];
+        const channels: Array<[VerifyChannelValue, 'email' | 'phone' | 'slackUserId', string, string, string]> = [
+          ['EMAIL', 'email', 'emailVerifiedAt', 'emailVerifiedVia', 'email'], ['SMS', 'phone', 'phoneVerifiedAt', 'phoneVerifiedVia', 'phone'], ['SLACK', 'slackUserId', 'slackVerifiedAt', 'slackVerifiedVia', 'slackUserId'],
+        ];
+        for (const [ch, key, atCol, viaCol] of channels) {
+          const v = patch[key];
+          if (v === undefined || (cur[key] ?? null) === v) continue;
+          // a changed value is a new, unverified one; a link meant for the old value must not verify it
+          sets.push(`"${key}" = ${p.add(v)}`, `"${atCol}" = NULL`, `"${viaCol}" = NULL`);
+          await tx.query(`UPDATE "ChannelVerification" SET "expiresAt" = LEAST("expiresAt", ${this.sql.now()}) WHERE "contactId" = $1 AND "channel" = $2::"VerifyChannel" AND "usedAt" IS NULL`, [contactId, ch]);
+        }
+        if (patch.name !== undefined) sets.push(`"name" = ${p.add(patch.name)}`);
+        if (patch.active !== undefined) sets.push(`"active" = ${p.add(patch.active)}`);
+        if (sets.length) await tx.query(`UPDATE "Contact" SET ${sets.join(', ')}, "updatedAt" = ${this.sql.now()} WHERE "id" = ${p.add(contactId)}`, p.values);
+        await insertAudit(tx, { ...audit, customerId, targetId: contactId });
+        const [r] = await tx.query(`SELECT ${CONTACT_COLS} FROM "Contact" WHERE "id" = $1`, [contactId]);
+        return toContact(r!);
+      });
+    } catch (err) {
+      if (pgCode(err) === PG.UNIQUE) return 'SLACK_EXISTS';
+      throw err;
+    }
+  }
+  async deleteContact(contactId: string, customerId: string | null, audit: AuditTemplate) {
+    return this.sql.transaction(async (tx) => {
+      const [cur] = await tx.query(`SELECT "userId" FROM "Contact" WHERE "id" = $1 AND "customerId" IS NOT DISTINCT FROM $2 FOR UPDATE`, [contactId, customerId]);
+      if (!cur) return 'NOT_FOUND' as const;
+      // every one of these tables CASCADEs from Contact: without this check the delete would silently remove the person from a call order
+      const [used] = await tx.query(
+        `SELECT ($2::text IS NOT NULL OR EXISTS (SELECT 1 FROM "Responder" WHERE "contactId" = $1) OR EXISTS (SELECT 1 FROM "RotationMember" WHERE "contactId" = $1)
+            OR EXISTS (SELECT 1 FROM "ResponderTemplateMember" WHERE "contactId" = $1) OR EXISTS (SELECT 1 FROM "EscalationStep" WHERE "targetType" = 'PERSON' AND "targetId" = $1)
+            OR EXISTS (SELECT 1 FROM "Leave" WHERE "contactId" = $1 OR "replacementId" = $1) OR EXISTS (SELECT 1 FROM "Override" WHERE "contactId" = $1)) AS "used"`,
+        [contactId, cur.userId ?? null]);
+      if (used?.used) return 'IN_USE' as const;
+      await tx.query(`DELETE FROM "Contact" WHERE "id" = $1 AND "customerId" IS NOT DISTINCT FROM $2`, [contactId, customerId]);
+      await insertAudit(tx, { ...audit, customerId, targetId: contactId });
+      return 'OK' as const;
+    });
+  }
+  async issueVerification(v: VerificationIssue, cooldownSec: number) {
+    return this.sql.transaction(async (tx) => {
+      // one link at a time per contact + channel: the row lock makes two requests queue instead of both passing the cooldown
+      const [c] = await tx.query(`SELECT 1 FROM "Contact" WHERE "id" = $1 FOR UPDATE`, [v.contactId]);
+      if (!c) return { cooling: 1 };
+      const [recent] = await tx.query(
+        `SELECT "sentAt" FROM "ChannelVerification" WHERE "contactId" = $1 AND "channel" = $2::"VerifyChannel" AND "via" = 'link' AND "sentAt" > $3::timestamptz - make_interval(secs => $4) ORDER BY "sentAt" DESC LIMIT 1`,
+        [v.contactId, v.channel, iso(v.sentAt), cooldownSec]);
+      if (recent) return { cooling: Math.max(1, Math.ceil((dReq(recent.sentAt).getTime() + cooldownSec * 1000 - v.sentAt.getTime()) / 1000)) };
+      await tx.query(
+        `INSERT INTO "ChannelVerification"("id", "customerId", "contactId", "channel", "tokenHash", "sentAt", "expiresAt", "via") VALUES ($1, $2, $3, $4::"VerifyChannel", $5, $6::timestamptz, $7::timestamptz, 'link')`,
+        [newId('cv'), v.customerId, v.contactId, v.channel, v.tokenHash, iso(v.sentAt), iso(v.expiresAt)]);
+      return 'OK' as const;
+    });
+  }
+  async discardVerification(tokenHash: string): Promise<void> {
+    await this.sql.query(`DELETE FROM "ChannelVerification" WHERE "tokenHash" = $1 AND "usedAt" IS NULL`, [tokenHash]);
+  }
+  /** Column names of a channel on Contact. */
+  private static channelCols(ch: VerifyChannelValue): { at: string; via: string } {
+    return ch === 'EMAIL' ? { at: 'emailVerifiedAt', via: 'emailVerifiedVia' } : ch === 'SMS' ? { at: 'phoneVerifiedAt', via: 'phoneVerifiedVia' } : { at: 'slackVerifiedAt', via: 'slackVerifiedVia' };
+  }
+  async markVerifiedManually(contactId: string, customerId: string | null, channel: VerifyChannelValue, via: string, note: string | null, now: Date, audit: AuditTemplate) {
+    return this.sql.transaction(async (tx) => {
+      const { at, via: viaCol } = SqlApiStore.channelCols(channel);
+      const r = await tx.query(`UPDATE "Contact" SET "${at}" = $3::timestamptz, "${viaCol}" = $4, "updatedAt" = ${this.sql.now()} WHERE "id" = $1 AND "customerId" IS NOT DISTINCT FROM $2 RETURNING 1`, [contactId, customerId, iso(now), via]);
+      if (!r.length) return 'NOT_FOUND' as const;
+      // history row, already used; the hash is of a random value nobody has (the column is unique and required)
+      await tx.query(
+        `INSERT INTO "ChannelVerification"("id", "customerId", "contactId", "channel", "tokenHash", "sentAt", "expiresAt", "usedAt", "via", "note") VALUES ($1, $2, $3, $4::"VerifyChannel", $5, $6::timestamptz, $6::timestamptz, $6::timestamptz, $7, $8)`,
+        [newId('cv'), customerId, contactId, channel, `manual:${newId('h')}`, iso(now), via, note]);
+      await insertAudit(tx, { ...audit, customerId, targetId: contactId });
+      return 'OK' as const;
+    });
+  }
+  async takeVerification(tokenHash: string, now: Date, audit: AuditTemplate): Promise<VerificationTaken | null> {
+    return this.sql.transaction(async (tx) => {
+      // single use: the UPDATE only matches an unused, unexpired link, so two clicks cannot both win
+      const [v] = await tx.query(
+        `UPDATE "ChannelVerification" SET "usedAt" = $2::timestamptz WHERE "tokenHash" = $1 AND "via" = 'link' AND "usedAt" IS NULL AND "expiresAt" > $2::timestamptz RETURNING "contactId", "customerId", "channel", "tokenHash"`,
+        [tokenHash, iso(now)]);
+      if (!v) return null;
+      const { at, via } = SqlApiStore.channelCols(v.channel);
+      const c = await tx.query(`UPDATE "Contact" SET "${at}" = $2::timestamptz, "${via}" = 'link', "updatedAt" = ${this.sql.now()} WHERE "id" = $1 AND "active" RETURNING 1`, [v.contactId, iso(now)]);
+      if (!c.length) throw new Abort(null); // the contact is gone or inactive: the use is rolled back, the link stays unused
+      await insertAudit(tx, { ...audit, actorId: v.contactId, customerId: v.customerId ?? null, targetId: v.contactId });
+      return { contactId: v.contactId as string, customerId: (v.customerId ?? null) as string | null, channel: v.channel as VerifyChannelValue, tokenHash: v.tokenHash as string };
+    }).catch((e) => { if (e instanceof Abort) return null; throw e; });
   }
 
   // ───────────────────────────── idempotency ─────────────────────────────

@@ -181,6 +181,55 @@ export interface RevealLogRow {
   notified: Array<{ contactId: string; name: string }>;
 }
 
+
+// ── onboarding: customers, accounts, contacts, verification (API-CONTRACT §8.4, D-07, D-37) ──
+export type RoleStatusValue = 'UNKNOWN' | 'OK' | 'DENIED' | 'MISSING';
+export type EnvironmentValue = 'PRD' | 'STG' | 'DEV';
+export interface CloudAccountRecord {
+  id: string; customerId: string; serviceId: string | null; awsAccountId: string; alias: string | null; environment: EnvironmentValue | null; regions: string[];
+  /** Server-generated at creation, never accepted from a client. ADMIN responses only; never in an audit row or a log. */
+  externalId: string;
+  readerRoleArn: string; eventForwarderRoleArn: string; alarmWriterRoleArn: string | null; tagWriterRoleArn: string | null; remediatorRoleArn: string | null;
+  alarmWriterEnabled: boolean; tagWriterEnabled: boolean; remediatorEnabled: boolean;
+  readerStatus: RoleStatusValue; eventForwarderStatus: RoleStatusValue; alarmWriterStatus: RoleStatusValue; tagWriterStatus: RoleStatusValue; remediatorStatus: RoleStatusValue;
+  lastCheckedAt: Date | null;
+  /** First / last event received for this account: the stored columns, else the RawEvent rows of this customer + account. */
+  firstEventAt: Date | null; lastEventAt: Date | null;
+  stackVersion: string | null; disabled: boolean; connectionPurged: boolean; createdAt: Date;
+}
+export interface NewAccount {
+  awsAccountId: string; alias: string | null; environment: EnvironmentValue | null; regions: string[]; serviceId: string | null; externalId: string;
+  readerRoleArn: string; eventForwarderRoleArn: string; alarmWriterRoleArn: string | null; tagWriterRoleArn: string | null; remediatorRoleArn: string | null;
+  alarmWriterEnabled: boolean; tagWriterEnabled: boolean; remediatorEnabled: boolean;
+}
+/** `undefined` = unchanged. */
+export interface AccountPatch {
+  alias?: string | null; environment?: EnvironmentValue | null; regions?: string[]; serviceId?: string | null;
+  alarmWriterEnabled?: boolean; tagWriterEnabled?: boolean; remediatorEnabled?: boolean;
+  alarmWriterRoleArn?: string | null; tagWriterRoleArn?: string | null; remediatorRoleArn?: string | null;
+}
+export type AccountWriteOutcome = CloudAccountRecord | 'NOT_FOUND' | 'NO_SUCH_SERVICE' | 'CUSTOMER_TERMINATED' | 'EXISTS';
+export type AuditTemplate = Omit<AuditInput, 'customerId' | 'targetId'>;
+
+export type VerifyChannelValue = 'EMAIL' | 'SMS' | 'SLACK';
+/** A contact as the onboarding API reads it: the paging contact plus how/when each channel was verified. */
+export type ContactRow = Contact;
+export interface ContactScopeInfo { contactId: string; scopeType: 'CUSTOMER' | 'PROJECT' | 'SERVICE'; scopeId: string; role: 'NOTIFY' | 'APPROVER' | 'PORTAL_USER' }
+/** Latest link per (contact, channel): used = it verified the channel. */
+export interface VerificationLink { contactId: string; channel: VerifyChannelValue; sentAt: Date; expiresAt: Date; usedAt: Date | null }
+export interface ContactsWorld {
+  contacts: ContactRow[];
+  scopes: ContactScopeInfo[];
+  responders: Array<{ customerId: string; contactId: string; role: 'PAGEABLE' | 'NOTIFY_ONLY' }>;
+  links: VerificationLink[];
+}
+export interface NewContact { kind: 'INTERNAL' | 'CUSTOMER'; customerId: string | null; name: string; email: string | null; phone: string | null; slackUserId: string | null }
+/** `undefined` = unchanged. Changing a value clears that channel's verification (the store does it, in the same statement). */
+export interface ContactPatch { name?: string; email?: string | null; phone?: string | null; slackUserId?: string | null; active?: boolean }
+export type ContactWriteOutcome = ContactRow | 'NOT_FOUND' | 'SLACK_EXISTS';
+export interface VerificationIssue { customerId: string | null; contactId: string; channel: VerifyChannelValue; tokenHash: string; sentAt: Date; expiresAt: Date }
+export interface VerificationTaken { contactId: string; customerId: string | null; channel: VerifyChannelValue; tokenHash: string }
+
 export interface ApiRepository {
   // ── org / scope ──
   orgTree(scope: ScopeFilter): Promise<OrgTree>;
@@ -298,6 +347,48 @@ export interface ApiRepository {
   recordReveal(w: RevealWrite): Promise<RevealWriteOutcome>;
   /** Newest first (at, id), one more than `limit` is NOT fetched: `hasMore` says whether there is another page. */
   revealLog(f: RevealLogFilter): Promise<{ rows: RevealLogRow[]; hasMore: boolean }>;
+
+
+  // ── onboarding: customers and accounts (D-07) ──
+  /**
+   * Customer + AuditLog (`audit` without customerId/targetId: the store fills in the new id) in one transaction.
+   * 'NAME_EXISTS' / 'SLUG_EXISTS' / 'DOMAIN_EXISTS' (a login domain already belongs to another customer): nothing written.
+   */
+  createCustomer(c: { name: string; slug: string; loginDomains: string[] }, audit: AuditTemplate): Promise<{ id: string; createdAt: Date } | 'NAME_EXISTS' | 'SLUG_EXISTS' | 'DOMAIN_EXISTS'>;
+  /** Accounts of one customer (caller has checked the customer is visible and customer-wide). */
+  listAccounts(customerId: string): Promise<CloudAccountRecord[]>;
+  /** One account if its customer is inside `scope` — the scope is in the query, so "unknown" and "not yours" are the same null. */
+  findAccount(scope: ScopeFilter, accountId: string): Promise<CloudAccountRecord | null>;
+  /** ONE transaction: row + audit. 'EXISTS' = the AWS account id is registered (any customer); 'NO_SUCH_SERVICE' = serviceId is not a service of THIS customer; 'CUSTOMER_TERMINATED'. */
+  createAccount(customerId: string, a: NewAccount, audit: AuditTemplate): Promise<AccountWriteOutcome>;
+  /** `WHERE id = ? AND customerId = ?`. Refused for a TERMINATED customer and for a purged account. */
+  updateAccount(customerId: string, accountId: string, patch: AccountPatch, audit: AuditTemplate): Promise<AccountWriteOutcome>;
+  /** Deletes only an account that has no Resource and no ManagedAlarm rows (nothing of ours in the customer's AWS); else 'IN_USE'. */
+  deleteAccount(customerId: string, accountId: string, audit: AuditTemplate): Promise<'OK' | 'NOT_FOUND' | 'IN_USE' | 'CUSTOMER_TERMINATED'>;
+
+  // ── onboarding: contacts and verification (D-29, D-37) ──
+  /** `Customer.portalGrants` (`contacts`, `silences`, `channels`): what a portal user of this customer may write. */
+  portalGrants(customerId: string): Promise<string[]>;
+  /** Contacts the caller may list: CUSTOMER contacts of `customerIds` ('*' = every customer) and, when `staff`, INTERNAL ones — plus their scopes, responder rows and latest verification links. */
+  contactsWorld(customerIds: readonly string[] | '*', staff: boolean): Promise<ContactsWorld>;
+  /** One contact inside the caller's range (customer in scope, or INTERNAL when `staff`); the range is in the query. */
+  findContact(customerIds: readonly string[] | '*', staff: boolean, contactId: string): Promise<{ contact: ContactRow; links: VerificationLink[]; responderCustomerIds: string[] } | null>;
+  createContact(c: NewContact, audit: AuditTemplate): Promise<ContactWriteOutcome>;
+  /** `WHERE id = ? AND customerId IS NOT DISTINCT FROM ?` (the customer of the contact as the caller saw it). */
+  updateContact(contactId: string, customerId: string | null, patch: ContactPatch, audit: AuditTemplate): Promise<ContactWriteOutcome>;
+  /** 'IN_USE': the contact is a Responder, a rotation member, named in a step, or a login user. */
+  deleteContact(contactId: string, customerId: string | null, audit: AuditTemplate): Promise<'OK' | 'NOT_FOUND' | 'IN_USE'>;
+  /** Stores only the token HASH. 'COOLING' (with seconds) when this contact + channel got a link less than `cooldownSec` ago: nothing written. */
+  issueVerification(v: VerificationIssue, cooldownSec: number): Promise<'OK' | { cooling: number }>;
+  /** The sender failed: take the unused link back so no valid token exists for a message that was never sent. */
+  discardVerification(tokenHash: string): Promise<void>;
+  /** A person (ADMIN) states the channel is verified: sets the channel's verified time + via `admin:<name>`, writes a ChannelVerification history row (already used) and `audit`. */
+  markVerifiedManually(contactId: string, customerId: string | null, channel: VerifyChannelValue, via: string, note: string | null, now: Date, audit: AuditTemplate): Promise<'OK' | 'NOT_FOUND'>;
+  /**
+   * ONE transaction: the link with this hash, unused and not expired at `now`, is marked used and the contact's channel
+   * becomes verified (via `link`); `audit` is written. null = unknown, used or expired (no difference).
+   */
+  takeVerification(tokenHash: string, now: Date, audit: AuditTemplate): Promise<VerificationTaken | null>;
 
   // ── idempotency (API-CONTRACT §2 "멱등", 24h) ──
   getIdempotent(key: string, now: Date): Promise<IdempotentEntry | null>;

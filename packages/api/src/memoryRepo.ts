@@ -5,7 +5,7 @@
 import { MemoryTickStore, incidentMute, type DigestData, type PurgeLogEntry, type RetentionStage, parseSnapshot, type AuditInput, type Contact, type IncidentRow, type PagingConfig } from '@alarmops/core';
 import { inScope, nodeVisible, seesCustomer, type Role, type ScopeFilter } from './auth.js';
 import type { UserInfo } from './audience.js';
-import type { ExportIncidentRow, RetentionView, RevealLogFilter, RevealLogRow, RevealWrite, RevealWriteOutcome } from './repo.js';
+import type { AccountPatch, AccountWriteOutcome, AuditTemplate, CloudAccountRecord, ContactPatch, ContactScopeInfo, ContactWriteOutcome, ContactsWorld, NewAccount, NewContact, VerificationIssue, VerificationLink, VerificationTaken, VerifyChannelValue, ExportIncidentRow, RetentionView, RevealLogFilter, RevealLogRow, RevealWrite, RevealWriteOutcome } from './repo.js';
 import { OFFBOARD_STEP_KEYS, type ChangeStatusOutcome, type CustomerStatusState, type CustomerStatusValue, type MarkStepOutcome, type OffboardStepKey, type OffboardingState, type Principal, ResponderOp, ResponderWriteOutcome, RespondersState, RotationsWorld, AlertMemberRow, ApiRepository, IdempotentEntry, IncidentFilter, IncidentPage, NodeFilter, NotifiedPerson, OpenCounts, StatusCounts, UndoRecord } from './repo.js';
 
 export interface ContactScopeRow { contactId: string; customerId: string; scopeType: 'CUSTOMER' | 'PROJECT' | 'SERVICE'; scopeId: string; role: 'NOTIFY' | 'APPROVER' | 'PORTAL_USER' }
@@ -13,7 +13,25 @@ export interface ContactScopeRow { contactId: string; customerId: string; scopeT
 /** A ContactRevealLog row as the memory store keeps it (never a contact value). */
 export interface RevealLogEntry extends RevealWrite { id: string; at: Date }
 
+/** Everything of a CloudAccount the tick store's OrgAccount does not carry. Keyed by AWS account id (the memory store's account id). */
+export interface MemoryAccountMeta extends Omit<NewAccount, 'awsAccountId' | 'serviceId'> {
+  readerStatus: CloudAccountRecord['readerStatus']; eventForwarderStatus: CloudAccountRecord['eventForwarderStatus']; alarmWriterStatus: CloudAccountRecord['alarmWriterStatus'];
+  tagWriterStatus: CloudAccountRecord['tagWriterStatus']; remediatorStatus: CloudAccountRecord['remediatorStatus'];
+  lastCheckedAt: Date | null; firstEventAt: Date | null; lastEventAt: Date | null; stackVersion: string | null; createdAt: Date;
+}
+/** A ChannelVerification row as the memory store keeps it (only the hash of the token, never the token). */
+export interface MemoryVerification { id: string; customerId: string | null; contactId: string; channel: VerifyChannelValue; tokenHash: string; sentAt: Date; expiresAt: Date; usedAt: Date | null; via: string; note: string | null }
+
+const inRange = (ids: readonly string[] | '*', id: string | null): boolean => id !== null && (ids === '*' || ids.includes(id));
+
 export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
+  /** Onboarding state (#62). */
+  accountMeta = new Map<string, MemoryAccountMeta>();
+  verifications = new Map<string, MemoryVerification>();
+  loginDomains = new Map<string, string[]>();
+  portalGrantsOf = new Map<string, string[]>();
+  /** Test hooks: this account has Resource / ManagedAlarm rows (the memory store keeps no such tables). */
+  accountsWithResources = new Set<string>();
   users = new Map<string, { id: string; name: string; contactId: string | null; email?: string; role?: Role; customerId?: string | null; status?: 'ACTIVE' | 'PENDING' | 'DISABLED' }>();
   /** Responders list versions (never restart) and the source of each responder row (DIRECT unless set). */
   respondersVersion = new Map<string, number>();
@@ -340,6 +358,164 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     const mark = `COMMAND_PUBLISH_FAILED: ${cloudAccountIds.join(',')}`;
     o.steps.ALARMS_DELETED = { ...o.steps.ALARMS_DELETED, state: 'MANUAL', detail: prev ? (prev.includes(mark) ? prev : `${prev}; ${mark}`) : mark };
     void at;
+  }
+
+  // ───────────── onboarding: customers, accounts, contacts, verification (#62) ─────────────
+  async createCustomer(c: { name: string; slug: string; loginDomains: string[] }, audit: AuditTemplate) {
+    const all = [...this.customers.values()];
+    if (all.some((x) => x.name.toLowerCase() === c.name.toLowerCase())) return 'NAME_EXISTS' as const;
+    if (all.some((x) => x.slug === c.slug)) return 'SLUG_EXISTS' as const;
+    if (c.loginDomains.some((d) => [...this.loginDomains.values()].some((l) => l.includes(d)))) return 'DOMAIN_EXISTS' as const;
+    const id = this.nextId('cus');
+    this.customers.set(id, { id, name: c.name, slug: c.slug, status: 'ACTIVE' });
+    this.loginDomains.set(id, [...c.loginDomains]);
+    this.audits.push({ ...audit, customerId: id, targetId: id });
+    return { id, createdAt: audit.at };
+  }
+  private accountRecord(a: { awsAccountId: string; customerId: string; serviceId: string | null }): CloudAccountRecord {
+    const m = this.accountMeta.get(a.awsAccountId);
+    const base: MemoryAccountMeta = m ?? {
+      alias: null, environment: null, regions: ['ap-northeast-2'], externalId: `ext-${a.awsAccountId}`, readerRoleArn: `arn:aws:iam::${a.awsAccountId}:role/AlarmOps-Reader`,
+      eventForwarderRoleArn: `arn:aws:iam::${a.awsAccountId}:role/AlarmOps-EventForwarder`, alarmWriterRoleArn: null, tagWriterRoleArn: null, remediatorRoleArn: null,
+      alarmWriterEnabled: false, tagWriterEnabled: false, remediatorEnabled: false, readerStatus: 'UNKNOWN', eventForwarderStatus: 'UNKNOWN', alarmWriterStatus: 'UNKNOWN',
+      tagWriterStatus: 'UNKNOWN', remediatorStatus: 'UNKNOWN', lastCheckedAt: null, firstEventAt: null, lastEventAt: null, stackVersion: null, createdAt: new Date(0),
+    };
+    const org = this.accounts.get(a.awsAccountId);
+    return { id: a.awsAccountId, customerId: a.customerId, serviceId: a.serviceId, awsAccountId: a.awsAccountId, ...structuredClone(base), disabled: !!org?.disabled, connectionPurged: !!org?.purgedAt };
+  }
+  async listAccounts(customerId: string): Promise<CloudAccountRecord[]> {
+    return [...this.accounts.values()].filter((a) => a.customerId === customerId).sort((x, y) => (x.awsAccountId < y.awsAccountId ? -1 : 1)).map((a) => this.accountRecord(a));
+  }
+  async findAccount(scope: ScopeFilter, accountId: string): Promise<CloudAccountRecord | null> {
+    const a = this.accounts.get(accountId);
+    return a && seesCustomer(scope, a.customerId) ? this.accountRecord(a) : null;
+  }
+  async createAccount(customerId: string, a: NewAccount, audit: AuditTemplate): Promise<AccountWriteOutcome> {
+    const cus = this.customers.get(customerId);
+    if (!cus) return 'NOT_FOUND';
+    if ((cus.status ?? 'ACTIVE') === 'TERMINATED') return 'CUSTOMER_TERMINATED';
+    if (this.accounts.has(a.awsAccountId)) return 'EXISTS';
+    if (a.serviceId !== null && this.services.get(a.serviceId)?.customerId !== customerId) return 'NO_SUCH_SERVICE';
+    const { awsAccountId, serviceId, ...rest } = a;
+    this.accounts.set(awsAccountId, { awsAccountId, customerId, serviceId, externalId: rest.externalId, roleArns: [rest.readerRoleArn, rest.eventForwarderRoleArn] });
+    this.accountMeta.set(awsAccountId, { ...structuredClone(rest), readerStatus: 'UNKNOWN', eventForwarderStatus: 'UNKNOWN', alarmWriterStatus: 'UNKNOWN', tagWriterStatus: 'UNKNOWN', remediatorStatus: 'UNKNOWN', lastCheckedAt: null, firstEventAt: null, lastEventAt: null, stackVersion: null, createdAt: audit.at });
+    this.audits.push({ ...audit, customerId, targetId: awsAccountId });
+    return this.accountRecord(this.accounts.get(awsAccountId)!);
+  }
+  async updateAccount(customerId: string, accountId: string, patch: AccountPatch, audit: AuditTemplate): Promise<AccountWriteOutcome> {
+    const org = this.accounts.get(accountId);
+    if (!org || org.customerId !== customerId) return 'NOT_FOUND';
+    if ((this.customers.get(customerId)?.status ?? 'ACTIVE') === 'TERMINATED' || org.purgedAt) return 'CUSTOMER_TERMINATED';
+    if (patch.serviceId !== undefined && patch.serviceId !== null && this.services.get(patch.serviceId)?.customerId !== customerId) return 'NO_SUCH_SERVICE';
+    const meta = this.accountMeta.get(accountId) ?? (() => { const { id: _i, customerId: _c, serviceId: _s, awsAccountId: _a, disabled: _d, connectionPurged: _p, ...m } = this.accountRecord(org); return m as MemoryAccountMeta; })();
+    const { serviceId, ...rest } = patch;
+    if (serviceId !== undefined) org.serviceId = serviceId;
+    this.accountMeta.set(accountId, { ...meta, ...Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined)) } as MemoryAccountMeta);
+    this.audits.push({ ...audit, customerId, targetId: accountId });
+    return this.accountRecord(org);
+  }
+  async deleteAccount(customerId: string, accountId: string, audit: AuditTemplate) {
+    const org = this.accounts.get(accountId);
+    if (!org || org.customerId !== customerId) return 'NOT_FOUND' as const;
+    if ((this.customers.get(customerId)?.status ?? 'ACTIVE') === 'TERMINATED') return 'CUSTOMER_TERMINATED' as const;
+    if (this.accountsWithResources.has(accountId)) return 'IN_USE' as const;
+    this.accounts.delete(accountId);
+    this.accountMeta.delete(accountId);
+    this.audits.push({ ...audit, customerId, targetId: accountId });
+    return 'OK' as const;
+  }
+
+  async portalGrants(customerId: string): Promise<string[]> { return [...(this.portalGrantsOf.get(customerId) ?? [])]; }
+  private linksFor(contactIds: Set<string>): VerificationLink[] {
+    const latest = new Map<string, MemoryVerification>();
+    for (const v of this.verifications.values()) {
+      if (!contactIds.has(v.contactId) || v.via !== 'link') continue;
+      const k = `${v.contactId}|${v.channel}`;
+      const cur = latest.get(k);
+      if (!cur || v.sentAt > cur.sentAt) latest.set(k, v);
+    }
+    return [...latest.values()].map((v) => ({ contactId: v.contactId, channel: v.channel, sentAt: v.sentAt, expiresAt: v.expiresAt, usedAt: v.usedAt }));
+  }
+  async contactsWorld(customerIds: readonly string[] | '*', staff: boolean): Promise<ContactsWorld> {
+    const contacts = [...this.contacts.values()].filter((c) => (c.kind === 'CUSTOMER' ? inRange(customerIds, c.customerId) : staff)).map((c) => structuredClone(c));
+    const ids = new Set(contacts.map((c) => c.id));
+    const scopes: ContactScopeInfo[] = this.contactScopes.filter((s) => ids.has(s.contactId) && inRange(customerIds, s.customerId)).map(({ contactId, scopeType, scopeId, role }) => ({ contactId, scopeType, scopeId, role }));
+    const responders = this.responders.filter((r) => ids.has(r.contactId) && inRange(customerIds, r.customerId)).map((r) => ({ customerId: r.customerId, contactId: r.contactId, role: r.role }));
+    return { contacts, scopes, responders, links: this.linksFor(ids) };
+  }
+  async findContact(customerIds: readonly string[] | '*', staff: boolean, contactId: string) {
+    const c = this.contacts.get(contactId);
+    if (!c || !(c.kind === 'CUSTOMER' ? inRange(customerIds, c.customerId) : staff)) return null;
+    return { contact: structuredClone(c), links: this.linksFor(new Set([c.id])), responderCustomerIds: [...new Set(this.responders.filter((r) => r.contactId === c.id && inRange(customerIds, r.customerId)).map((r) => r.customerId))] };
+  }
+  async createContact(n: NewContact, audit: AuditTemplate): Promise<ContactWriteOutcome> {
+    if (n.kind === 'CUSTOMER' && (!n.customerId || !this.customers.has(n.customerId))) return 'NOT_FOUND';
+    if (n.slackUserId && [...this.contacts.values()].some((c) => c.slackUserId === n.slackUserId)) return 'SLACK_EXISTS';
+    const id = this.nextId('ct');
+    const c: Contact = { id, kind: n.kind, customerId: n.customerId, name: n.name, active: true, email: n.email, phone: n.phone, slackUserId: n.slackUserId };
+    this.contacts.set(id, c);
+    this.audits.push({ ...audit, customerId: n.customerId, targetId: id });
+    return structuredClone(c);
+  }
+  async updateContact(contactId: string, customerId: string | null, patch: ContactPatch, audit: AuditTemplate): Promise<ContactWriteOutcome> {
+    const c = this.contacts.get(contactId);
+    if (!c || (c.customerId ?? null) !== customerId) return 'NOT_FOUND';
+    if (patch.slackUserId && [...this.contacts.values()].some((o) => o.id !== c.id && o.slackUserId === patch.slackUserId)) return 'SLACK_EXISTS';
+    const reset = (ch: VerifyChannelValue, key: 'email' | 'phone' | 'slackUserId', value: string | null | undefined): void => {
+      if (value === undefined || (c[key] ?? null) === value) return;
+      c[key] = value;
+      if (ch === 'EMAIL') { c.emailVerifiedAt = null; c.emailVerifiedVia = null; } else if (ch === 'SMS') { c.phoneVerifiedAt = null; c.phoneVerifiedVia = null; } else { c.slackVerifiedAt = null; c.slackVerifiedVia = null; }
+      // an unused link was meant for the OLD value: it must not verify the new one
+      for (const v of this.verifications.values()) if (v.contactId === c.id && v.channel === ch && !v.usedAt && v.expiresAt > audit.at) v.expiresAt = audit.at;
+    };
+    reset('EMAIL', 'email', patch.email); reset('SMS', 'phone', patch.phone); reset('SLACK', 'slackUserId', patch.slackUserId);
+    if (patch.name !== undefined) c.name = patch.name;
+    if (patch.active !== undefined) c.active = patch.active;
+    this.audits.push({ ...audit, customerId, targetId: c.id });
+    return structuredClone(c);
+  }
+  async deleteContact(contactId: string, customerId: string | null, audit: AuditTemplate) {
+    const c = this.contacts.get(contactId);
+    if (!c || (c.customerId ?? null) !== customerId) return 'NOT_FOUND' as const;
+    const named = this.configs.some((cfg) => cfg.steps.some((st) => st.targetType === 'PERSON' && st.targetId === c.id));
+    const used = this.responders.some((r) => r.contactId === c.id) || [...this.rotations.values()].some((r) => r.members.some((m) => m.contactId === c.id))
+      || this.leaves.some((l) => l.contactId === c.id || l.replacementId === c.id) || this.overrides.some((o) => o.contactId === c.id) || [...this.users.values()].some((u) => u.contactId === c.id) || named;
+    if (used) return 'IN_USE' as const;
+    this.contacts.delete(c.id);
+    this.contactScopes = this.contactScopes.filter((s) => s.contactId !== c.id);
+    for (const [h, v] of this.verifications) if (v.contactId === c.id) this.verifications.delete(h);
+    this.audits.push({ ...audit, customerId, targetId: c.id });
+    return 'OK' as const;
+  }
+  async issueVerification(v: VerificationIssue, cooldownSec: number) {
+    const recent = [...this.verifications.values()].filter((x) => x.contactId === v.contactId && x.channel === v.channel && x.via === 'link' && x.sentAt.getTime() > v.sentAt.getTime() - cooldownSec * 1000)
+      .sort((a, b) => b.sentAt.getTime() - a.sentAt.getTime())[0];
+    if (recent) return { cooling: Math.max(1, Math.ceil((recent.sentAt.getTime() + cooldownSec * 1000 - v.sentAt.getTime()) / 1000)) };
+    this.verifications.set(v.tokenHash, { id: this.nextId('cv'), customerId: v.customerId, contactId: v.contactId, channel: v.channel, tokenHash: v.tokenHash, sentAt: v.sentAt, expiresAt: v.expiresAt, usedAt: null, via: 'link', note: null });
+    return 'OK' as const;
+  }
+  async discardVerification(tokenHash: string) { this.verifications.delete(tokenHash); }
+  private setVerified(c: Contact, ch: VerifyChannelValue, at: Date, via: string): void {
+    if (ch === 'EMAIL') { c.emailVerifiedAt = at; c.emailVerifiedVia = via; } else if (ch === 'SMS') { c.phoneVerifiedAt = at; c.phoneVerifiedVia = via; } else { c.slackVerifiedAt = at; c.slackVerifiedVia = via; }
+  }
+  async markVerifiedManually(contactId: string, customerId: string | null, channel: VerifyChannelValue, via: string, note: string | null, now: Date, audit: AuditTemplate) {
+    const c = this.contacts.get(contactId);
+    if (!c || (c.customerId ?? null) !== customerId) return 'NOT_FOUND' as const;
+    this.setVerified(c, channel, now, via);
+    const h = `manual:${this.nextId('cv')}`;
+    this.verifications.set(h, { id: h, customerId, contactId, channel, tokenHash: h, sentAt: now, expiresAt: now, usedAt: now, via, note });
+    this.audits.push({ ...audit, customerId, targetId: contactId });
+    return 'OK' as const;
+  }
+  async takeVerification(tokenHash: string, now: Date, audit: AuditTemplate): Promise<VerificationTaken | null> {
+    const v = this.verifications.get(tokenHash);
+    if (!v || v.via !== 'link' || v.usedAt || v.expiresAt.getTime() <= now.getTime()) return null;
+    const c = this.contacts.get(v.contactId);
+    if (!c || !c.active) return null;
+    v.usedAt = now;
+    this.setVerified(c, v.channel, now, 'link');
+    this.audits.push({ ...audit, actorId: c.id, customerId: v.customerId, targetId: c.id });
+    return { contactId: c.id, customerId: v.customerId, channel: v.channel, tokenHash: v.tokenHash };
   }
 
   async getIdempotent(key: string, now: Date) {

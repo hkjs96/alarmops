@@ -8,7 +8,7 @@ import { IDEMPOTENCY_MAX_PER_USER, type TickRepository } from '@alarmops/core';
 import { CSim } from '../../../core/test/contract/tickContract.js';
 import type { MakeFixture, StoreFixture } from '../../../core/test/contract/fixture.js';
 import { PATTERNS, T0, at, closedGroup, seedWorld } from '../../../core/test/world.js';
-import { createApi, InMemoryCommandPublisher, MemoryApiStore, type ApiRepository, type ApiRequest, type ApiResponse, type AuthContext } from '../../src/index.js';
+import { createApi, InMemoryCommandPublisher, MemoryApiStore, type ApiDeps, type ApiRepository, type ApiRequest, type ApiResponse, type AuthContext } from '../../src/index.js';
 import { USERS, body, wire } from '../helpers.js';
 
 type Repo = TickRepository & ApiRepository;
@@ -25,7 +25,7 @@ export interface CWorld {
 }
 
 /** The world of test/helpers.ts (two customers + one unmapped account, one open incident each), built through the fixture. */
-export async function cworld(make: MakeApiFixture, extra: (s: MemoryApiStore) => void = () => undefined): Promise<CWorld> {
+export async function cworld(make: MakeApiFixture, extra: (s: MemoryApiStore) => void = () => undefined, deps: Partial<ApiDeps> = {}): Promise<CWorld> {
   const seed = seedWorld(new MemoryApiStore()) as MemoryApiStore;
   for (const [id, name, contactId, customerId] of [['usr_haeun', 'Haeun Kim', 'ct_haeun', null], ['usr_minjae', 'Minjae Lee', 'ct_minjae', null], ['usr_viewer', 'Viewer', null, null], ['usr_yuna', 'Yuna Seo', 'ct_yuna', 'cus_mirae'], ['usr_dohyun', 'Dohyun Han', 'ct_dohyun', 'cus_hanbit']] as const) {
     seed.users.set(id, { id, name, contactId, customerId });
@@ -45,7 +45,7 @@ export async function cworld(make: MakeApiFixture, extra: (s: MemoryApiStore) =>
   const incs = await fx.incidents();
   const by = (customerId: string | null): string => incs.find((i) => i.customerId === customerId)!.id;
   const commands = new InMemoryCommandPublisher();
-  const api = createApi({ repo: fx.repo, now: () => sim.now, commands });
+  const api = createApi({ repo: fx.repo, now: () => sim.now, commands, ...deps });
   let seq = 0;
   return {
     fx, sim, commands, ids: { mirae: by('cus_mirae'), hanbit: by('cus_hanbit'), unmapped: by(null) },
