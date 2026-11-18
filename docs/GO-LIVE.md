@@ -347,6 +347,8 @@ http://localhost:3107/auth/dev-login?as=admin
 
 ### 3-1. [사람] Vercel 프로젝트 만들기 (10분)
 
+> **참고** 화면별 클릭 순서는 `docs/SETUP-VERCEL.md` 1~4단계
+
 어디서: Vercel 대시보드
 
 - [ ] **Vercel 프로젝트 만들기**
@@ -372,6 +374,8 @@ http://localhost:3107/auth/dev-login?as=admin
 6. 프로젝트 Domains에서 `*.vercel.app` 주소를 확인해 적어 둔다. 3-3의 `CONSOLE_ORIGIN`에 쓴다. 스모크 검사는 이 주소를 부른다.
 
 ### 3-2. [사람] Vercel 토큰·ID와 GitHub `production` 환경 (15분)
+
+> **참고** 화면별 클릭 순서는 `docs/SETUP-VERCEL.md` 5~7단계
 
 어디서: Vercel 대시보드 → GitHub 저장소
 
@@ -408,6 +412,8 @@ http://localhost:3107/auth/dev-login?as=admin
 5. 확인: `production` 환경 화면에 시크릿 이름 세 개가 보인다. 이름은 글자 그대로여야 한다. 하나라도 없으면 배포가 `Secret … is not set in the production environment`로 멈춘다.
 
 ### 3-3. [사람] Vercel 환경변수 넣기 (15분)
+
+> **참고** 화면별 클릭 순서는 `docs/SETUP-VERCEL.md` 8단계
 
 어디서: 본인 터미널(Git Bash) → Vercel 프로젝트의 환경변수 설정(Production)
 
@@ -454,6 +460,8 @@ http://localhost:3107/auth/dev-login?as=admin
 - "4단계 후"인 세 변수는 지금 넣지 않는다. 4-5에서 넣는다.
 
 ### 3-4. [사람] 첫 배포 (10분)
+
+> **참고** 화면별 클릭 순서는 `docs/SETUP-VERCEL.md` 9~10단계
 
 어디서: GitHub 저장소의 Actions
 

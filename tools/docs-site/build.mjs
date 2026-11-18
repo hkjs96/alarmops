@@ -24,7 +24,7 @@ const out = resolve(process.argv[2] ?? join(here, 'out', 'alarmops-docs.html'));
 
 // Sidebar groups, in order. First matching rule wins; paths are relative to docs/.
 const GROUPS = [
-  { key: 'start', title: '시작하기', blurb: '실운영까지의 순서와 설정 가이드', match: (p) => ['GO-LIVE.md', 'SETUP-SUPABASE.md', 'SETUP-PROD-DB.md', 'SETUP-GOOGLE-SSO.md', 'SETUP-WINDOWS.md', 'HANDOFF.md'].includes(p) },
+  { key: 'start', title: '시작하기', blurb: '실운영까지의 순서와 설정 가이드', match: (p) => ['GO-LIVE.md', 'SETUP-SUPABASE.md', 'SETUP-PROD-DB.md', 'SETUP-GOOGLE-SSO.md', 'SETUP-VERCEL.md', 'SETUP-WINDOWS.md', 'HANDOFF.md'].includes(p) },
   { key: 'decide', title: '결정·기준', blurb: '확정된 결정 D-01~ 과 검증 페르소나', match: (p) => p.startsWith('decisions/') || p === 'PERSONAS.md' },
   { key: 'design', title: '설계', blurb: 'API 계약, 데이터 모델, 이전 계획', match: (p) => ['API-CONTRACT.md', 'DATA-MODEL.md'].includes(p) || p.startsWith('migration/') || p.startsWith('infra-todo/') },
   { key: 'spec', title: '동작 명세', blurb: '기존 두 저장소에서 뽑은 규칙', match: (p) => p.startsWith('specs/') },
@@ -33,7 +33,7 @@ const GROUPS = [
   { key: 'qa', title: 'QA 기록', blurb: '페르소나 점검과 화면 평가', match: (p) => p.startsWith('qa/') },
   { key: 'etc', title: '기타', blurb: '', match: () => true },
 ];
-const PIN = ['GO-LIVE.md', 'SETUP-SUPABASE.md', 'SETUP-PROD-DB.md', 'SETUP-GOOGLE-SSO.md', 'SETUP-WINDOWS.md', 'HANDOFF.md', 'decisions/DECISIONS.md', 'PERSONAS.md', 'API-CONTRACT.md', 'DATA-MODEL.md', 'specs/README.md', 'ui/README.md', 'ui/IA.md', 'qa/results.md'];
+const PIN = ['GO-LIVE.md', 'SETUP-SUPABASE.md', 'SETUP-PROD-DB.md', 'SETUP-GOOGLE-SSO.md', 'SETUP-VERCEL.md', 'SETUP-WINDOWS.md', 'HANDOFF.md', 'decisions/DECISIONS.md', 'PERSONAS.md', 'API-CONTRACT.md', 'DATA-MODEL.md', 'specs/README.md', 'ui/README.md', 'ui/IA.md', 'qa/results.md'];
 // Figures shown at the top of a document, full width above the text.
 const INSERT = {
   'GO-LIVE.md': ['roadmap', 'architecture'],
