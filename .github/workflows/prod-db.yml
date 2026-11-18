@@ -1,0 +1,153 @@
+name: prod-db
+
+# Applies db/prisma/migrations to the PRODUCTION Supabase database with `prisma migrate deploy`. Started by a person with
+# workflow_dispatch; an agent never runs it. Setup and the run-through: docs/SETUP-PROD-DB.md.
+#
+# Not dev-db.yml: that one is for the dev database, runs on every merge to db/prisma and has its own secrets. This one
+#   - runs only when started by hand (no push, no schedule, no pull_request trigger),
+#   - runs only from main (the job `if` below, and the environment's "Deployment branches" rule: workflow_dispatch runs
+#     the workflow file of whatever branch it is started from, so without the environment rule a branch could read the
+#     secrets),
+#   - waits in the `production-db` environment for a required reviewer before any step runs,
+#   - reads PROD_DATABASE_URL / PROD_DIRECT_URL, which exist only as secrets of that environment.
+# It never runs `prisma db push` and never seeds (D-10: the schema is changed by migrations only; production data is not
+# seeded). The migrations create the tables only. The two least-privilege service roles and their grants are NOT part of
+# them: a person creates them afterwards with db/sql/roles.sql (docs/SETUP-PROD-DB.md).
+#
+# Order: confirm -> checkout -> hide the connection strings in the log (before anything else can print one) -> install
+# without install scripts -> `prisma migrate status` (what is pending) -> `prisma migrate deploy` -> drift check of the live
+# database against schema.prisma -> `prisma migrate status` again. A failed migration stops the job at that point; what was
+# applied before it stays applied (Prisma runs one transaction per migration file). Do not re-run blindly: read the log first.
+#
+# The two connection strings are given only to the steps that need them. `npm ci --ignore-scripts` runs no install script of
+# any dependency, and the Prisma engines are fetched by a separate step that has no secret.
+# Actions are pinned to full commit SHAs (tag in the comment), copied from deploy-central.yml. Dependabot proposes updates.
+# Runners are pinned to ubuntu-24.04, like ci.yml.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "migrate-production" to apply pending migrations to the PRODUCTION database'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prod-db
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: production-db
+    permissions:
+      contents: read
+    steps:
+      - name: Check confirmation
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if [ "$CONFIRM" != "migrate-production" ]; then
+            echo "::error::Nothing was changed. To run this, type exactly: migrate-production"
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 20
+          cache: npm
+      # Fails the job when a secret is missing or is not a connection string. Runs before anything else could print one.
+      - name: Check the connection strings and hide them in the log
+        env:
+          DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.PROD_DIRECT_URL }}
+          DB_SECRET_PREFIX: PROD_
+          DB_ENVIRONMENT: production-db
+          DB_SETUP_DOC: docs/SETUP-PROD-DB.md
+        run: node .github/scripts/mask-db-urls.mjs
+      # --ignore-scripts: no package install script runs (no secret is present in this step either).
+      - run: npm ci --ignore-scripts
+      # Downloads the Prisma engines (a postinstall would have, but scripts are off). No secret in this step.
+      - name: Fetch the Prisma engines
+        working-directory: db
+        run: npx prisma --version
+      - name: Status before
+        working-directory: db
+        env:
+          DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.PROD_DIRECT_URL }}
+        run: |
+          set +e
+          npx prisma migrate status > "$RUNNER_TEMP/status-before.log" 2>&1
+          code=$?
+          set -e
+          # Log only, not the job summary: Prisma prints the database host in its first lines, and the log masks it.
+          cat "$RUNNER_TEMP/status-before.log"
+          # A failed migration, or a history that differs from this repository, needs a person, not another deploy.
+          if grep -qiE "failed|diverge|not found locally|modified after" "$RUNNER_TEMP/status-before.log"; then
+            echo "::error::The production database has a failed migration, or a migration history that differs from this repository. Nothing was changed. Do not re-run: give the status above to the hub (docs/SETUP-PROD-DB.md, 'Stuck' table)."
+            exit 1
+          fi
+          # Exit 1 with pending migrations is the normal case here. Stop only when the database was not reached.
+          if [ "$code" -ne 0 ] && ! grep -qE "have not yet been applied|Database schema is up to date" "$RUNNER_TEMP/status-before.log"; then
+            echo "::error::Could not read the migration status of the production database. Nothing was changed. Check PROD_DIRECT_URL (session connection, port 5432) and the database password."
+            exit 1
+          fi
+      - name: Apply migrations (prisma migrate deploy)
+        working-directory: db
+        env:
+          DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.PROD_DIRECT_URL }}
+        run: |
+          set -o pipefail
+          npx prisma migrate deploy 2>&1 | tee "$RUNNER_TEMP/deploy.log"
+      # The live database against schema.prisma. Same allowance for hand-written indexes as the CI db job
+      # (.github/scripts/check-migration-drift.mjs). Only the direct (session) URL is needed.
+      - name: Drift check (live database vs schema.prisma)
+        working-directory: db
+        env:
+          DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.PROD_DIRECT_URL }}
+        run: |
+          set +e
+          npx prisma migrate diff \
+            --from-url "$DIRECT_URL" \
+            --to-schema-datamodel prisma/schema.prisma \
+            --script --exit-code > "$RUNNER_TEMP/drift.sql" 2> "$RUNNER_TEMP/drift.err"
+          code=$?
+          set -e
+          echo "prisma migrate diff exit code: $code (0 = no difference, 2 = difference, other = error)"
+          if [ "$code" -ne 0 ] && [ "$code" -ne 2 ]; then
+            cat "$RUNNER_TEMP/drift.err"
+            echo "::error::prisma migrate diff could not run (exit $code). The migrations above were applied; the drift check was not done."
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/drift.sql"
+          node ../.github/scripts/check-migration-drift.mjs "$RUNNER_TEMP/drift.sql" prisma/migrations
+      - name: Status after
+        working-directory: db
+        env:
+          DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.PROD_DIRECT_URL }}
+        run: npx prisma migrate status
+      - name: Applied migrations
+        run: |
+          applied=$(grep -oE 'Applying migration `[^`]+`' "$RUNNER_TEMP/deploy.log" | sed -E 's/.*`([^`]+)`/- \1/' || true)
+          {
+            echo "### production database migrations"
+            echo
+            echo "Applied in this run:"
+            if [ -n "$applied" ]; then echo "$applied"; else echo "- (none, already up to date)"; fi
+            echo
+            echo "All migrations in this repository:"
+            find db/prisma/migrations -mindepth 1 -maxdepth 1 -type d -printf '- %f\n' | sort
+            echo
+            echo "Next: if a migration added a table or column that the alarm engine or the ingest Lambdas use, run db/sql/roles.sql again (docs/SETUP-PROD-DB.md)."
+          } | tee -a "$GITHUB_STEP_SUMMARY"

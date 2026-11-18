@@ -533,7 +533,7 @@ def all_steps(wf):
 
 class PinnedActions(unittest.TestCase):
     def test_deploy_workflows_pin_actions_to_full_shas(self):
-        for fn in ("deploy-central.yml", "deploy-console.yml"):
+        for fn in ("deploy-central.yml", "deploy-console.yml", "prod-db.yml"):
             wf = yaml.safe_load((WORKFLOWS / fn).read_text(encoding="utf-8"))
             for job, st in all_steps(wf):
                 if "uses" in st:
@@ -674,6 +674,113 @@ class DeployConsoleWorkflow(unittest.TestCase):
         pkg = json.loads((ROOT.parent / "tools" / "vercel-cli" / "package.json").read_text(encoding="utf-8"))
         self.assertRegex(pkg["dependencies"]["vercel"], r"^\d+\.\d+\.\d+$")
         self.assertTrue((ROOT.parent / "tools" / "vercel-cli" / "package-lock.json").is_file())
+
+
+class ProdDbWorkflow(unittest.TestCase):
+    """prod-db.yml: production migrations, by hand, from main, behind a reviewer (issue #65)."""
+
+    def setUp(self):
+        self.text = (WORKFLOWS / "prod-db.yml").read_text(encoding="utf-8")
+        self.wf = yaml.safe_load(self.text)
+        self.job = self.wf["jobs"]["migrate"]
+        self.steps = self.job["steps"]
+
+    def idx(self, needle):
+        for i, st in enumerate(self.steps):
+            if needle in st.get("run", "") or needle in st.get("name", ""):
+                return i
+        self.fail(f"no step contains {needle!r}")
+
+    def test_manual_main_only_and_own_environment(self):
+        on = self.wf.get("on", self.wf.get(True))
+        self.assertEqual(list(on), ["workflow_dispatch"])
+        self.assertEqual(self.wf["permissions"], {"contents": "read"})
+        self.assertEqual(list(self.wf["jobs"]), ["migrate"])
+        self.assertIn("github.ref == 'refs/heads/main'", self.job["if"])
+        self.assertEqual(self.job["environment"], "production-db")
+        self.assertNotEqual(self.job["environment"], "dev")
+        self.assertEqual(self.job["permissions"], {"contents": "read"})
+        self.assertNotIn("id-token", self.text)
+
+    def test_only_production_secrets_and_never_dev_ones(self):
+        used = set(re.findall(r"secrets\.([A-Z_]+)", self.text))
+        self.assertEqual(used, {"PROD_DATABASE_URL", "PROD_DIRECT_URL"})
+        self.assertNotIn("DEV_", self.text.replace("DEV_DATABASE_URL", "").replace("dev-db", ""))
+
+    def test_never_db_push_never_seed(self):
+        runs = " ".join(st.get("run", "") for st in self.steps)
+        for bad in ("db push", "db seed", "migrate dev", "migrate reset", "migrate resolve", "tsx", "seed", "--accept-data-loss", "--force-reset"):
+            self.assertNotIn(bad, runs)
+
+    def test_mask_first_then_install_without_scripts(self):
+        names = [st.get("name", st.get("run", st.get("uses", ""))) for st in self.steps]
+        mask = self.idx("mask-db-urls.mjs")
+        # nothing before the mask step touches a secret or installs anything
+        for st in self.steps[:mask]:
+            self.assertNotIn("secrets.", str(st), st)
+            self.assertNotIn("npm", st.get("run", ""), st)
+            self.assertNotIn("npx", st.get("run", ""), st)
+        env = self.steps[mask]["env"]
+        self.assertEqual(env["DB_SECRET_PREFIX"], "PROD_")
+        self.assertEqual(env["DB_ENVIRONMENT"], "production-db")
+        self.assertEqual(env["DB_SETUP_DOC"], "docs/SETUP-PROD-DB.md")
+        install = self.idx("npm ci")
+        self.assertLess(mask, install)
+        self.assertIn("npm ci --ignore-scripts", self.steps[install]["run"])
+        self.assertNotIn("env", self.steps[install])
+        self.assertNotIn("secrets.", str(self.steps[install]))
+        self.assertTrue(names)
+
+    def test_secrets_only_where_needed(self):
+        for i, st in enumerate(self.steps):
+            uses_secret = "secrets." in str(st)
+            if uses_secret:
+                self.assertTrue("mask-db-urls.mjs" in st.get("run", "") or "npx prisma" in st.get("run", ""), st)
+
+    def test_order_status_deploy_drift_status(self):
+        status_before = self.idx("Status before")
+        deploy = self.idx("npx prisma migrate deploy")
+        drift = self.idx("check-migration-drift.mjs")
+        status_after = self.idx("Status after")
+        self.assertLess(self.idx("npm ci"), status_before)
+        self.assertLess(status_before, deploy)
+        self.assertLess(deploy, drift)
+        self.assertLess(drift, status_after)
+        self.assertIn("prisma migrate status", self.steps[status_before]["run"])
+        self.assertIn("prisma migrate diff", self.steps[drift]["run"])
+        self.assertIn("--from-url", self.steps[drift]["run"])
+
+    def test_confirmation_is_a_required_input(self):
+        on = self.wf.get("on", self.wf.get(True))
+        inp = on["workflow_dispatch"]["inputs"]["confirm"]
+        self.assertTrue(inp["required"])
+        self.assertIn("migrate-production", self.text)
+        self.assertEqual(self.steps[0]["name"], "Check confirmation")
+
+
+class DbRolesSql(unittest.TestCase):
+    """db/sql/roles.sql: no secret in it, the two roles, no grant outside the documented lists."""
+
+    def setUp(self):
+        self.sql = (ROOT.parent / "db" / "sql" / "roles.sql").read_text(encoding="utf-8")
+        self.code = re.sub(r"--[^\n]*", "", self.sql)
+
+    def test_no_password_in_the_file(self):
+        self.assertNotRegex(self.code, r"(?i)password")
+
+    def test_roles_have_bypassrls_and_no_extra_power(self):
+        self.assertIn("NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS", self.code)
+        self.assertIn("alarmops_engine", self.code)
+        self.assertIn("alarmops_ingest", self.code)
+
+    def test_grants_are_small(self):
+        grants = re.findall(r"(?is)\bGRANT\b(.*?);", self.code)
+        for g in grants:
+            self.assertNotRegex(g, r"(?i)ALL PRIVILEGES|\bALL\b(?! TABLES)|TRUNCATE|REFERENCES|TRIGGER|\bSEQUENCE|FUNCTION|WITH GRANT OPTION")
+        # DELETE only on ManagedAlarm, for the engine
+        deletes = [g for g in grants if re.search(r"(?i)\bDELETE\b", g)]
+        self.assertEqual(len(deletes), 1)
+        self.assertRegex(deletes[0], r'"ManagedAlarm" TO alarmops_engine')
 
 
 if __name__ == "__main__":
