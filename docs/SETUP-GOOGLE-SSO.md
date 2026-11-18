@@ -19,7 +19,11 @@
 - 고객사 담당자(포털 사용자)는 도메인 목록과 상관없이, 관리자가 등록한 활성 포털 사용자 행이 있으면 로그인된다. 이때는 그 고객 데이터만 읽기 전용으로 보인다.
 - 실패하면 이유와 상관없이 같은 안내가 나온다("This Google account can't sign in…"). 이유는 서버 로그에만 남는다.
 - **Google 계정이 없는 고객은 아직 로그인할 수 없다.** 메일 링크 로그인은 다음 작업이다.
-- 고객사 도메인(`loginDomains`)으로 자동 로그인되는 기능은 **아직 켜져 있지 않다**. 지금은 고객 담당자를 한 명씩 등록해야 한다(아래 "알려진 빈틈").
+- **Google 계정 묶기(켜져 있음):** 처음 로그인하면 Google이 알려 준 계정 id(`sub`)가 그 사용자 행에 묶인다. 이후에는 같은 Google 계정만 들어온다. 메일 주소가 다른 사람에게 재배정되어도 그 사람은 들어오지 못한다(서버 로그에 `sub_mismatch`, 화면에는 같은 안내). 묶음 값 자체는 어디에도 보이지 않고, Users 화면에는 "Google linked: yes/no"만 나온다.
+- **묶음 풀기:** 정당하게 Google 계정이 바뀐 사람(퇴사 후 재입사, 계정 이전 등)은 ADMIN이 **Settings › Users › 그 사용자 › Clear Google link**로 푼다(확인 단계가 있다. API는 `PATCH /users/{id} {clearGoogleSub: true}`, 감사 `user.update`). 다음 로그인에서 새 계정이 묶인다. 자기 자신의 묶음은 풀 수 없다(다른 ADMIN이 한다).
+- **고객사 로그인 도메인(켜져 있음):** 고객에 `loginDomains`가 등록되어 있으면, 사용자 행이 없고 직원 허용 목록(`SSO_ALLOWED_DOMAINS`/`SSO_ALLOWED_EMAILS`)에도 없는 주소가 그 도메인으로 로그인할 때 그 고객의 **읽기 전용 포털 사용자(VIEWER)** 가 자동으로 만들어진다(감사 `user.enrol_domain`). 조건: 도메인이 정확히 **한 곳의 활성 고객**에만 등록되어 있다. 둘 이상이면 거절, 무료 메일 도메인(gmail.com 등)은 등록 자체가 안 된다. **직원 규칙이 이긴다**: 허용 목록에 있는 주소는 자동 등록되지 않는다. 이미 있는 DISABLED 사용자는 되살리지 않는다. 도메인을 빼도 이미 만들어진 사용자는 ADMIN이 비활성화할 때까지 남는다.
+- 로그인 도메인을 정하는 곳: 고객 화면(이슈 #63, 고객 온보딩)이다. 그 화면이 나오기 전에는 API(`PATCH /customers/{id}` `{loginDomains:[...]}`, ADMIN)로 넣는다.
+- 로그인에 성공하면 사용자 행의 마지막 로그인 시각(`lastLoginAt`)이 갱신되어 Users 화면의 "Last sign-in"에 나온다. 갱신이 실패해도 로그인은 막히지 않는다(서버 로그 `[sso] touchLastLogin failed`).
 
 ## 목차
 
@@ -71,7 +75,7 @@
 
 ## 3. 첫 관리자(ADMIN) 사용자 행 만들기
 
-현재 사용자 행을 만드는 곳은 **개발용 시드(`db/prisma/seed.ts`)뿐**이다. 시드는 `admin@msp.example` 같은 가짜 사용자만 만들며 운영 DB에는 쓰지 않는다. 콘솔에 사용자를 추가하는 화면과 API는 아직 없다(6단계 참고). 그래서 **첫 관리자는 DB에 직접 한 줄을 넣어야 한다.**
+**첫 관리자만** DB에 직접 한 줄을 넣는다(아직 로그인할 사람이 없으니 화면을 쓸 수 없다). 개발용 시드(`db/prisma/seed.ts`)는 `admin@msp.example` 같은 가짜 사용자만 만들며 운영 DB에는 쓰지 않는다. 첫 관리자가 로그인한 뒤의 사용자(직원·고객 담당자)는 **Settings › Users 화면**에서 추가한다(5단계).
 
 > **주의** 운영 DB 작업은 사람이 직접, 별도 터미널에서 한다. 에이전트나 자동화에 연결 주소를 주지 않는다. `prisma db push`는 쓰지 않는다.
 
@@ -111,13 +115,13 @@ VALUES ('usr_' || substr(md5(random()::text), 1, 12), 'you@mz.co.kr', 'Your Name
 
 1. 도메인 추가·삭제: `SSO_ALLOWED_DOMAINS` 값을 고친다. 예: `mz.co.kr,megazone.com,newco.com`
 2. 예외 주소 추가·삭제: `SSO_ALLOWED_EMAILS` 값을 고친다. 정확한 주소 전체를 쓴다(도메인 전체를 열지 않는다).
-3. 다시 배포한다. 확인: 새 주소로 로그인된다. 뺀 주소는 다음 로그인부터 거절되며, 이미 로그인한 세션은 최대 8시간 남는다. 바로 끊어야 하면 그 사용자 행의 `status`를 `DISABLED`로 바꾼다(요청마다 확인한다).
-4. 도메인이나 주소를 허용해도 **사용자 행이 없으면 로그인되지 않는다.** 직원은 행을 따로 만들어야 한다(3단계의 SQL, `role`만 `OPERATOR` 또는 `VIEWER`로).
+3. 다시 배포한다. 확인: 새 주소로 로그인된다. 뺀 주소는 다음 로그인부터 거절되며, 이미 로그인한 세션은 최대 8시간 남는다. 바로 끊어야 하면 **Settings › Users에서 비활성화**한다(요청마다 확인한다). 화면을 쓸 수 없을 때만 DB에서 그 사용자 행의 `status`를 `DISABLED`로 바꾼다(SQL은 예비 수단).
+4. 도메인이나 주소를 허용해도 **사용자 행이 없으면 로그인되지 않는다.** 직원은 ADMIN이 Settings › Users › Add user에서 등록한다(역할 ADMIN/OPERATOR/VIEWER). 화면은 직원 주소가 허용 도메인 밖이면 등록 전에 경고한다.
 
 ## 6. 알려진 빈틈
 
-- **사용자 추가 화면·API 없음.** Settings › Users 화면은 아직 빈 페이지다. `docs/API-CONTRACT.md`에 `GET/PATCH /users`가 "가입 승인, 역할"로 적혀 있지만 구현되어 있지 않다. 지금은 DB에 직접 넣어야 한다. 백엔드에 사용자 생성·활성화·역할 변경(감사 기록 포함) API가 필요하다.
-- **고객 담당자는 한 명씩 등록해야 한다.** 고객사 `loginDomains`로 도메인 전체를 받는 방식(org-tenant R4-3)은 로그인 경로에 아직 연결되지 않았다. 연결하려면 백엔드가 "도메인으로 고객 한 곳을 찾고(둘 이상이면 거절), 그 고객의 VIEWER 포털 사용자를 감사 기록과 함께 만드는" 저장소 메서드를 먼저 추가해야 한다. 무료 메일 도메인(gmail.com 등)은 어떤 경우에도 이 방식에 쓰지 않는다.
+- **첫 관리자는 DB에 직접 넣는다**(3단계). 그 뒤는 Settings › Users 화면이다. 마지막 활성 전 고객 범위 ADMIN은 강등·비활성화할 수 없다(409 `LAST_ADMIN`).
+- **로그인 도메인 입력 화면은 이슈 #63(고객 화면)** 에서 나온다. 그 전에는 API로 넣는다(위 "먼저 알아 둘 것").
 - **Google 계정이 없는 고객은 로그인할 수 없다.** 메일 링크 로그인은 다음 작업이다.
 - `GOOGLE_CLIENT_SECRET`은 Sensitive라 배포 점검이 값을 볼 수 없다. 빠져 있으면 배포는 통과하고, 로그인 화면이 "unavailable"을 보여 준다(4단계에서 확인).
 
@@ -128,7 +132,8 @@ VALUES ('usr_' || substr(md5(random()::text), 1, 12), 'you@mz.co.kr', 'Your Name
 | Google 화면에 `redirect_uri_mismatch` | 1단계 3번의 주소가 `CONSOLE_ORIGIN`과 다르다 | 주소를 `<CONSOLE_ORIGIN>/auth/google/callback`과 한 글자도 다르지 않게 고친다 |
 | Google 화면에 `access_denied`, 또는 "앱이 확인되지 않음" | 동의 화면이 Testing이고 테스트 사용자가 아니다 | 게시 상태를 In production으로 하거나 Internal로 바꾼다 |
 | 버튼이 비활성이거나 "Google sign-in is unavailable" | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SSO_ALLOWED_*`, `SESSION_SECRET` 중 런타임에 없는 것이 있다 | 2단계 표를 확인하고 다시 배포한다. 서버 로그의 `[sso] … unavailable: <이유>`를 본다 |
-| 허용한 주소인데 "can't sign in" | DB에 그 주소의 활성 사용자 행이 없다. 고객이 중지된 포털 사용자도 같다 | 3단계의 확인 SELECT로 행과 `status`를 본다. 서버 로그에 `no_user` |
+| 허용한 주소인데 "can't sign in" | DB에 그 주소의 활성 사용자 행이 없다. 고객이 중지된 포털 사용자도 같다 | Settings › Users에서 행과 상태를 본다(없으면 3단계의 확인 SELECT). 서버 로그에 `no_user` (로그인 도메인 자동 등록이 거절되었으면 `(enrol DOMAIN_UNKNOWN 등)`이 붙는다) |
+| 사용자는 있는데 거절되고 로그에 `sub_mismatch` | 그 행에 다른 Google 계정이 묶여 있다(또는 그 Google 계정이 다른 사용자에 묶여 있다) | 본인 계정이 맞으면 다른 ADMIN이 Users 화면에서 Clear Google link 후 다시 로그인한다 |
 | 직원인데 거절되고 로그에 `staff_outside_fence` | 주소가 허용 도메인·예외 주소에 없다 | 5단계로 목록에 추가한다 |
 | "Sign-in didn't complete. Try again." | 로그인 중간에 10분이 지났거나 쿠키가 막혔다 | 처음부터 다시 한다. 다른 사이트에서 열었다면 콘솔 주소로 직접 들어간다 |
 | 배포 점검 실패: `SSO_ALLOWED_DOMAINS …` | 값이 비었거나 `*`, 공백, `@` 항목이 있다 | 2단계 주의를 본다 |

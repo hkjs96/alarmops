@@ -11,7 +11,7 @@ export const isFreeMailDomain = (domain: string): boolean => FREE_MAIL_DOMAINS.i
 export type SignInDecision = { ok: true; user: SignInUser } | { ok: false; reason: "no_user" | "staff_outside_fence" | "free_mail_domain" | "sub_mismatch" };
 
 /**
- * NOT WIRED YET (backend #69 adds User.googleSub): bind the verified Google `sub` to the user row on first sign-in and
+ * Wired in the callback (#74, store bindGoogleSub): bind the verified Google `sub` to the user row on first sign-in and
  * compare on every later one. "mismatch" = the row is bound to another Google account → refused (`sub_mismatch`).
  */
 export type BindGoogleSub = (userId: string, sub: string) => Promise<"ok" | "mismatch">;
@@ -27,12 +27,14 @@ export interface SignInOptions { sub?: string; bindGoogleSub?: BindGoogleSub }
  *   - no user row at all: refused — unless the caller passes `enrolByDomain` (per-customer login domain, org-tenant R4-3).
  *     It is asked only when the address is NOT in the staff fence (the staff rule wins, no auto-enrolment), the domain is
  *     not a free-mail domain, and it must return the VIEWER portal user of the ONE customer that registered that domain
- *     (null when none or more than one). The console does not pass it yet: the store has no such method (see README).
+ *     (null when none or more than one). The callback passes it (store enrolPortalUserByDomain, #74).
  * The caller shows the same calm refusal for every `reason`; the reason is for the server log only.
  */
 export async function decideSignIn(email: string, cfg: Pick<SsoConfig, "domains" | "emails">, lookup: (email: string) => Promise<SignInUser | null>, enrolByDomain?: (domain: string, email: string) => Promise<SignInUser | null>, opts: SignInOptions = {}): Promise<SignInDecision> {
   const d = await decideEligibility(email, cfg, lookup, enrolByDomain);
-  if (!d.ok || !opts.bindGoogleSub || !opts.sub) return d;
+  if (!d.ok) return d;
+  // fail closed: no binding hook or no verified sub means the Google account cannot be tied to the row, so no session
+  if (!opts.bindGoogleSub || !opts.sub) return { ok: false, reason: "sub_mismatch" };
   return (await opts.bindGoogleSub(d.user.id, opts.sub)) === "ok" ? d : { ok: false, reason: "sub_mismatch" };
 }
 

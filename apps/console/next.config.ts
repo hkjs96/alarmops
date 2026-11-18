@@ -34,7 +34,11 @@ const config: NextConfig = {
   },
   reactStrictMode: true,
   async headers() {
-    return [{ source: "/:path*", headers: securityHeaders(process.env.NODE_ENV === "production") }];
+    return [
+      { source: "/:path*", headers: securityHeaders(process.env.NODE_ENV === "production") },
+      // the Users screen shows people: its address and filters never go out in a Referer, and the page is never cached
+      { source: "/settings/users", headers: [{ key: "Referrer-Policy", value: "no-referrer" }, { key: "Cache-Control", value: "no-store" }] },
+    ];
   },
 };
 export default config;

@@ -105,9 +105,11 @@ describe("every server action goes through callAction", () => {
 
   it("finds the actions (ack, resolve, escalate, bulk, undo, call-order save, own steps, Responders, customer status, offboarding)", () => {
     expect(names.sort()).toEqual([
-      "accountStatusAction", "ackIncident", "addResponder", "changeCustomerStatus", "checkAccountAction", "confirmVerificationAction", "createAccountAction", "createContactAction", "createCustomerAction",
-      "createProjectAction", "createServiceAction", "escalateIncident", "executeBulk", "listAccountsAction", "listContactsAction", "markOffboardingStep", "previewBulk", "removeOwnSteps", "removeResponder",
-      "resolveIncident", "revealContact", "saveCallOrder", "setCapabilityAction", "setLegalHold", "setResponderRole", "undoBulk", "verifyBulkAction", "verifyContactAction",
+      "accountStatusAction", "ackIncident", "addResponder", "addUserAccount", "changeCustomerStatus", "changeUserAccount", "checkAccountAction",
+      "confirmVerificationAction", "createAccountAction", "createContactAction", "createCustomerAction", "createProjectAction",
+      "createServiceAction", "escalateIncident", "executeBulk", "listAccountsAction", "listContactsAction", "markOffboardingStep", "previewBulk",
+      "removeOwnSteps", "removeResponder", "resolveIncident", "revealContact", "saveCallOrder", "setCapabilityAction", "setLegalHold",
+      "setResponderRole", "undoBulk", "verifyBulkAction", "verifyContactAction",
     ]);
   });
   it("no client file calls one of them outside callAction(() => …)", () => {

@@ -6,7 +6,15 @@ import { NextRequest } from "next/server";
 
 vi.mock("server-only", () => ({}));
 const signInUserByEmail = vi.fn();
-vi.mock("@/lib/server/backend", () => ({ signInUserByEmail: (e: string) => signInUserByEmail(e) }));
+const bindGoogleAccount = vi.fn();
+const enrolByLoginDomain = vi.fn();
+const touchLastLogin = vi.fn();
+vi.mock("@/lib/server/backend", () => ({
+  signInUserByEmail: (e: string) => signInUserByEmail(e),
+  bindGoogleAccount: (u: string, s: string) => bindGoogleAccount(u, s),
+  enrolByLoginDomain: (e: string) => enrolByLoginDomain(e),
+  touchLastLogin: (u: string) => touchLastLogin(u),
+}));
 
 import { SESSION_COOKIE, sessionSecret, verifySession } from "@/lib/auth/session";
 import { FLOW_COOKIE, resetJwksCache } from "@/lib/auth/google-oidc";
@@ -38,6 +46,9 @@ beforeEach(() => {
   vi.stubEnv("SSO_ALLOWED_DOMAINS", "mz.co.kr,megazone.com");
   vi.stubEnv("SSO_ALLOWED_EMAILS", "");
   signInUserByEmail.mockReset();
+  bindGoogleAccount.mockReset().mockResolvedValue("bound");
+  enrolByLoginDomain.mockReset().mockResolvedValue({ refused: "DOMAIN_UNKNOWN" });
+  touchLastLogin.mockReset().mockResolvedValue(undefined);
   resetRateLimits();
   resetJwksCache();
   vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -213,6 +224,132 @@ describe("GET /auth/google/callback", () => {
     const res = await cb({ code: "c", state: f.state }, f.cookie);
     expect(where(res)).toBe("/login?sso=unavailable");
     expect(res.cookies.get(SESSION_COOKIE)).toBeUndefined();
+  });
+  describe("Google account binding, login-domain enrolment, last sign-in (#74)", () => {
+    const portal = { id: "usr_portal", name: "Yuna", kind: "CUSTOMER" };
+    const refusedCleanly = async (code?: string) => {
+      const f = await begin();
+      const res = await cb({ code: "c", state: f.state }, f.cookie);
+      expect(where(res)).toBe("/login?sso=refused");
+      expect(res.cookies.get(SESSION_COOKIE)).toBeUndefined();
+      expect(touchLastLogin).not.toHaveBeenCalled();
+      const logged = vi.mocked(console.warn).mock.calls.flat().join(" ");
+      if (code) expect(logged).toContain(code);
+      expect(logged).not.toContain("@");
+      expect(logged).not.toContain("mz.co.kr");
+      return res;
+    };
+    it.each(["bound", "ok"])("bind result %s: session, and lastLoginAt is stamped for that user", async (r) => {
+      signInUserByEmail.mockResolvedValue(staff);
+      bindGoogleAccount.mockResolvedValue(r);
+      const f = await begin();
+      expect(res_ok(await cb({ code: "c", state: f.state }, f.cookie))).toBe(true);
+      expect(bindGoogleAccount).toHaveBeenCalledWith("usr_staff", "g-1");
+      expect(touchLastLogin).toHaveBeenCalledWith("usr_staff");
+    });
+    it.each(["mismatch", "NOT_FOUND"])("bind result %s: the uniform refusal with reason sub_mismatch, no session", async (r) => {
+      signInUserByEmail.mockResolvedValue(staff);
+      bindGoogleAccount.mockResolvedValue(r);
+      await refusedCleanly("sub_mismatch");
+    });
+    it("a staff user outside the fence is refused before the binding is asked", async () => {
+      tokenBody = (n) => idToken(n, { email: "outsider@evil.com" });
+      signInUserByEmail.mockResolvedValue(staff);
+      await refusedCleanly("staff_outside_fence");
+      expect(bindGoogleAccount).not.toHaveBeenCalled();
+    });
+    it("a user row exists: the enrolment is never asked", async () => {
+      tokenBody = (n) => idToken(n, { email: "someone@customer.example" });
+      signInUserByEmail.mockResolvedValue(portal);
+      const f = await begin();
+      expect(res_ok(await cb({ code: "c", state: f.state }, f.cookie))).toBe(true);
+      expect(enrolByLoginDomain).not.toHaveBeenCalled();
+    });
+    it("no row, outside the fence, one customer's domain: enrolled portal user gets a session (bound and stamped)", async () => {
+      tokenBody = (n) => idToken(n, { email: "new.person@customer.example" });
+      signInUserByEmail.mockResolvedValue(null);
+      enrolByLoginDomain.mockResolvedValue({ user: portal });
+      const f = await begin();
+      const res = await cb({ code: "c", state: f.state }, f.cookie);
+      expect(res_ok(res)).toBe(true);
+      expect(enrolByLoginDomain).toHaveBeenCalledWith("new.person@customer.example");
+      const s = await verifySession(res.cookies.get(SESSION_COOKIE)!.value, sessionSecret(process.env, false));
+      expect(s).toMatchObject({ sub: "usr_portal" });
+      expect(bindGoogleAccount).toHaveBeenCalledWith("usr_portal", "g-1");
+      expect(touchLastLogin).toHaveBeenCalledWith("usr_portal");
+    });
+    it.each(["DOMAIN_UNKNOWN", "AMBIGUOUS", "CUSTOMER_INACTIVE", "FREE_MAIL", "STAFF_EMAIL", "OTHER_CUSTOMER", "INVALID_EMAIL", "USER_INACTIVE", "NOT_ACTIVE_PORTAL_USER", "PRINCIPAL_REFUSED"])("enrolment refused %s: the same refusal, the code in the server log only", async (code) => {
+      tokenBody = (n) => idToken(n, { email: "new.person@customer.example" });
+      signInUserByEmail.mockResolvedValue(null);
+      enrolByLoginDomain.mockResolvedValue({ refused: code });
+      await refusedCleanly(code);
+      expect(bindGoogleAccount).not.toHaveBeenCalled();
+    });
+    it("staff rule wins: no row and the address is inside the staff fence → no enrolment, even for a customer's domain", async () => {
+      signInUserByEmail.mockResolvedValue(null); // ops@mz.co.kr, fenced
+      enrolByLoginDomain.mockResolvedValue({ user: portal });
+      await refusedCleanly("no_user");
+      expect(enrolByLoginDomain).not.toHaveBeenCalled();
+    });
+    it("an address on the exception list with no user row never reaches the enrolment", async () => {
+      vi.stubEnv("SSO_ALLOWED_EMAILS", "someone@example.com");
+      tokenBody = (n) => idToken(n, { email: "someone@example.com" });
+      signInUserByEmail.mockResolvedValue(null);
+      enrolByLoginDomain.mockResolvedValue({ user: portal });
+      await refusedCleanly("no_user");
+      expect(enrolByLoginDomain).not.toHaveBeenCalled();
+    });
+    it("the enrolment answering with an INTERNAL user gives no session", async () => {
+      tokenBody = (n) => idToken(n, { email: "new.person@customer.example" });
+      signInUserByEmail.mockResolvedValue(null);
+      enrolByLoginDomain.mockResolvedValue({ user: staff });
+      await refusedCleanly("no_user");
+      expect(bindGoogleAccount).not.toHaveBeenCalled();
+    });
+    it("enrolled, but the Google account does not match the binding: refused with sub_mismatch", async () => {
+      tokenBody = (n) => idToken(n, { email: "new.person@customer.example" });
+      signInUserByEmail.mockResolvedValue(null);
+      enrolByLoginDomain.mockResolvedValue({ user: portal });
+      bindGoogleAccount.mockResolvedValue("mismatch");
+      await refusedCleanly("sub_mismatch");
+    });
+    it("the binding store throwing: unavailable, no session, no last sign-in", async () => {
+      signInUserByEmail.mockResolvedValue(staff);
+      bindGoogleAccount.mockRejectedValue(new Error("db down"));
+      const f = await begin();
+      const res = await cb({ code: "c", state: f.state }, f.cookie);
+      expect(where(res)).toBe("/login?sso=unavailable");
+      expect(res.cookies.get(SESSION_COOKIE)).toBeUndefined();
+      expect(touchLastLogin).not.toHaveBeenCalled();
+    });
+    it("a free-mail domain without a row never reaches the enrolment", async () => {
+      tokenBody = (n) => idToken(n, { email: "someone@gmail.com" });
+      signInUserByEmail.mockResolvedValue(null);
+      await refusedCleanly("free_mail_domain");
+      expect(enrolByLoginDomain).not.toHaveBeenCalled();
+    });
+    it("the enrolment store failing: unavailable, no session", async () => {
+      tokenBody = (n) => idToken(n, { email: "new.person@customer.example" });
+      signInUserByEmail.mockResolvedValue(null);
+      enrolByLoginDomain.mockRejectedValue(new Error("db down"));
+      const f = await begin();
+      const res = await cb({ code: "c", state: f.state }, f.cookie);
+      expect(where(res)).toBe("/login?sso=unavailable");
+      expect(res.cookies.get(SESSION_COOKIE)).toBeUndefined();
+    });
+    it("touchLastLogin failing does not block the sign-in; the failure is logged with a tag and no address", async () => {
+      signInUserByEmail.mockResolvedValue(staff);
+      touchLastLogin.mockRejectedValue(new Error("boom ops@mz.co.kr"));
+      const f = await begin();
+      expect(res_ok(await cb({ code: "c", state: f.state }, f.cookie))).toBe(true);
+      const logged = vi.mocked(console.warn).mock.calls.flat().join(" ");
+      expect(logged).toContain("[sso] touchLastLogin failed");
+      expect(logged).not.toContain("mz.co.kr");
+    });
+    it("a refused sign-in never stamps lastLoginAt", async () => {
+      signInUserByEmail.mockResolvedValue(null);
+      await refusedCleanly();
+    });
   });
   it("no SSO config: unavailable, Google is never called", async () => {
     vi.stubEnv("GOOGLE_CLIENT_SECRET", "");

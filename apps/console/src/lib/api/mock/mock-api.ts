@@ -9,6 +9,7 @@ import { createPagingApi, directoryOf, hasOwnSteps, healthOf } from "./paging-mo
 import { createStatusApi, createStatusStore, type StatusStore } from "./status-mock";
 import { createRevealApi, createRevealStore, type RevealStore } from "./reveal-mock";
 import { createRetentionApi, createRetentionStore, type RetentionStore } from "./retention-mock";
+import { createUsersApi, createUsersStore, type UsersStore } from "./users-mock";
 import { createOnboardingApi, createOnboardingStore, type OnboardingStore } from "./onboarding-mock";
 
 interface Store {
@@ -20,6 +21,7 @@ interface Store {
   customerStatus: StatusStore;
   reveals: RevealStore;
   retention: RetentionStore;
+  users: UsersStore;
   onboarding: OnboardingStore;
 }
 
@@ -33,6 +35,7 @@ export const MOCK_USERS: Record<string, MockUser> = {
   "usr-haeun": { id: "usr_haeun", contactId: "ct_haeun", name: "Haeun Kim", email: "haeun@msp.example", role: "ADMIN" },
   "usr-minjae": { id: "usr_minjae", contactId: "ct_minjae", name: "Minjae Lee", email: "minjae@msp.example", role: "OPERATOR" },
   "usr-sora": { id: "usr_sora", contactId: "ct_sora", name: "Sora Yoon", email: "sora@msp.example", role: "VIEWER" },
+  "usr-junho": { id: "usr_junho", contactId: "ct_junho", name: "Junho Park", email: "junho@msp.example", role: "ADMIN" },
   /** a portal (customer) user: VIEWER, and the customer-status routes do not exist for them (404, D-36) */
   "usr-portal": { id: "usr_portal", contactId: "", name: "Yuna Seo", email: "yuna@mirae.example", role: "VIEWER", kind: "CUSTOMER" },
 };
@@ -43,7 +46,8 @@ export function createStore(opts: { customers?: 14 | 34 } = {}): Store {
   // a copy: onboarding adds customers, projects and services to it, and the fixtures are shared by every store
   const customers = structuredClone(opts.customers === 34 ? customers34 : customers14);
   return {
-    customers, paging: createPaging(customers), customerStatus: createStatusStore(), reveals: createRevealStore(customers), retention: createRetentionStore(), onboarding: createOnboardingStore(),
+    customers, paging: createPaging(customers), customerStatus: createStatusStore(), reveals: createRevealStore(customers), retention: createRetentionStore(), users: createUsersStore(),
+    onboarding: createOnboardingStore(),
     incidents: structuredClone([...fx.openIncidents, ...fx.resolvedIncidents, ...fx.suppressedIncidents]),
     timelines: structuredClone(fx.timelines),
     undo: new Map(),
@@ -156,6 +160,11 @@ export function createMockApi(store: Store = createStore(), clock: () => number 
     err: (status, code, message, details) => new ApiError(status, code, message, `req_mock_${++reqSeq}`, details),
   });
 
+  const usersApi = createUsersApi({
+    store: store.users, customers: store.customers, terminated: () => new Set(Object.entries(store.customerStatus.status).filter(([, s]) => s.status === "TERMINATED").map(([id]) => id)),
+    me: ME, now: nowIso, err: (status, code, message, details) => new ApiError(status, code, message, `req_mock_${++reqSeq}`, details),
+  });
+
   const onboardingApi = createOnboardingApi({
     store: store.onboarding, customers: store.customers, paging: store.paging, me: ME, need, portal: ME.kind === "CUSTOMER", clock: () => Date.now(),
     err: (status, code, message, details) => new ApiError(status, code, message, `req_mock_${++reqSeq}`, details),
@@ -166,6 +175,7 @@ export function createMockApi(store: Store = createStore(), clock: () => number 
     ...revealApi,
     ...statusApi,
     ...retentionApi,
+    ...usersApi,
     ...onboardingApi,
     async me() { return { id: ME.id, name: ME.name, email: ME.email, role: ME.role, ...(ME.kind ? { kind: ME.kind } : {}) }; },
     async listIncidents(q = {}) {

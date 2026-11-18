@@ -1,0 +1,70 @@
+/* Settings › Users. Tokens only (packages/design-system/src/tokens.css), light and dark. */
+.us-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin: 0 0 12px; }
+.us-bar .btn { min-height: 44px; }
+.us-filters { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: end; margin: 0 0 12px; }
+.us-filters label { display: grid; gap: 2px; font-size: 13px; }
+.us-filters .inp, .us-filters select { min-height: 44px; max-width: 100%; }
+.us-filters .btn { min-height: 44px; }
+
+.us-result { display: flex; gap: 8px; align-items: baseline; margin: 0 0 12px; padding: 8px 12px; font-size: 14px; border-left: 3px solid var(--green); background: var(--green-t); color: var(--ink); }
+.us-result:empty { display: none; }
+.us-result:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.us-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.us-table th { text-align: left; font-size: 13px; font-weight: 600; color: var(--ink2); padding: 6px 10px 6px 0; border-bottom: 1px solid var(--rule); }
+.us-table td { padding: 10px 10px 10px 0; border-top: 1px solid var(--rule); vertical-align: top; overflow-wrap: anywhere; }
+.us-name { font-weight: 600; }
+.us-mail { color: var(--ink2); font-family: var(--mono); font-size: 13px; }
+.us-st { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 13px; white-space: nowrap; }
+.us-st.ACTIVE { color: var(--green); }
+.us-st.DISABLED { color: var(--ink2); }
+.us-st.PENDING { color: var(--amber); }
+.us-you { margin-left: 6px; font-size: 13px; font-weight: 600; color: var(--ink2); border: 1px solid var(--ink2); padding: 0 6px; }
+.us-acts { display: flex; flex-wrap: wrap; gap: 6px; }
+.us-acts .btn { min-height: 44px; }
+.us-note { margin: 6px 0 0; font-size: 13px; color: var(--ink2); }
+
+.us-form { display: grid; gap: 14px; max-width: 580px; }
+.us-f { display: grid; gap: 4px; font-size: 14px; border: 0; padding: 0; margin: 0; min-width: 0; }
+.us-f > legend, .us-f > .us-l { font-size: 13px; font-weight: 600; padding: 0; }
+.us-f .inp, .us-f select { min-height: 44px; width: 100%; max-width: 100%; }
+.us-radios { display: flex; flex-wrap: wrap; gap: 8px; }
+.us-radio { display: flex; align-items: flex-start; gap: 8px; min-height: 44px; padding: 8px 12px; border: 1px solid var(--rule); background: var(--surface); flex: 1 1 200px; cursor: pointer; }
+.us-radio input { margin-top: 3px; width: 18px; height: 18px; flex: none; }
+.us-radio b { display: block; font-size: 14px; }
+.us-radio span { display: block; font-size: 13px; color: var(--ink2); }
+.us-radio:has(input:checked) { border-color: var(--ink); background: var(--soft); }
+.us-radio:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.us-hint { font-size: 13px; color: var(--ink2); margin: 0; }
+.us-bad { font-size: 13px; color: var(--red); margin: 0; font-weight: 600; }
+.us-warn { display: flex; gap: 8px; align-items: baseline; padding: 8px 12px; font-size: 14px; border-left: 3px solid var(--amber); background: var(--amber-t); }
+.us-next { padding: 8px 12px; font-size: 14px; border-left: 3px solid var(--accent); background: var(--accent-t); margin: 0; }
+.us-form-acts { display: flex; flex-wrap: wrap; gap: 8px; }
+.us-form-acts .btn { min-height: 44px; }
+.us-form .inp.bad, .us-f select.bad { border-color: var(--red); box-shadow: 0 0 0 3px var(--red-t); }
+.us-dlg-radios { display: grid; gap: 8px; margin: 12px 0 0; }
+.us-dlg-sel { margin: 12px 0 0; display: grid; gap: 4px; }
+.us-dlg-sel select { min-height: 44px; width: 100%; }
+.us-err { margin: 12px 0 0; }
+
+@media (max-width: 760px) {
+  .us-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .us-table, .us-table tbody, .us-table tr, .us-table td { display: block; width: 100%; }
+  .us-table tr { padding: 12px 0; border-top: 1px solid var(--rule); }
+  .us-table td { border: 0; padding: 2px 0; }
+  .us-table td[data-label]::before { content: attr(data-label) ": "; color: var(--ink2); font-size: 13px; }
+  .us-table td.us-c-name::before { content: none; }
+  .us-table td.us-c-acts { padding-top: 8px; }
+  .us-acts .btn { flex: 1 1 140px; }
+  .us-filters label { flex: 1 1 100%; }
+  .us-f .inp, .us-f select, .us-filters .inp, .us-filters select, .us-dlg-sel select { font-size: 16px; }
+  .us-bar .btn { flex: 1 1 100%; }
+}
+
+/* masked e-mails break after the "@" (a <wbr> is there), never in the middle of a word and never with an ellipsis */
+.us-table td.us-mail { overflow-wrap: normal; word-break: normal; hyphens: none; min-width: 12ch; }
+.us-count:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* the confirm dialog's buttons are 44 px targets like the rest of this screen */
+.us-dlgwrap .dguard-acts .btn { min-height: 44px; }
+.us-dlgwrap .dguard-b label.us-radio { min-height: 44px; }
+.us-unavailable p { margin: 0; }

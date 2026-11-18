@@ -5,6 +5,7 @@ import type {
   RespondersResponse, RotationSummary, StaffSummary, ResponderWriteOptions, RespondersWriteResult, UndoResult,
   CustomerStatusChange, CustomerStatusInput, CustomerStatusResponse, Offboarding, OffboardStepKey,
   Digest, LegalHold, PurgeLog, RevealChannel, RevealResult, ContactRevealEntry, ContactRevealQuery,
+  NewUserInput, UserItem, UserListQuery, UserPatchInput,
   CustomerRecord, ProjectRecord, ServiceRecord, AccountRecord, AccountStatus, NewAccountInput, AccountCapabilities, ContactRecord, NewContactInput,
   VerifyContactInput, VerifyContactResult, VerifyBulkResult, VerifyPeek, VerifyDone,
 } from "./types";
@@ -106,6 +107,13 @@ export interface ConsoleApi {
   /** GET /digests/latest (MSP staff; a portal user gets 404) */
   getLatestDigest(): Promise<Digest>;
 
+  /* ---- Users (API-CONTRACT 8.4 #69): ADMIN with all customers only; a portal user gets 404 ---- */
+  /** GET /users (filters kind, customerId, status, role, q). 403 for other staff and for an ADMIN with a narrower range. */
+  listUsers(q?: UserListQuery): Promise<{ items: UserItem[] }>;
+  /** POST /users → 201. 409 ALREADY_EXISTS (e-mail), 400 VALIDATION_FAILED. */
+  createUser(body: NewUserInput): Promise<UserItem>;
+  /** PATCH /users/{id}. 409 LAST_ADMIN / CONTACT_LINKED, 403 FORBIDDEN (yourself), 404. */
+  patchUser(id: string, body: UserPatchInput): Promise<UserItem>;
   /* ---- Customer onboarding (API-CONTRACT 8.4, #62, #69) ---- */
   /** POST /customers (ADMIN). 409 ALREADY_EXISTS (`details.existingCustomerId` for a name), 422 VALIDATION_FAILED for a public mail login domain. */
   createCustomer(body: { name: string; loginDomains?: string[] }): Promise<CustomerRecord>;
@@ -217,6 +225,9 @@ export function createHttpApi(opts: { baseUrl: string; fetch?: typeof fetch; hea
     revealContact: (id, body) => call("POST", `/contacts/${enc(id)}/reveal`, body),
     listContactReveals: (q = {}) => call("GET", "/contact-reveals" + toQuery({ ...q })),
     getLatestDigest: () => call("GET", "/digests/latest"),
+    listUsers: (q = {}) => call("GET", "/users" + toQuery({ ...q })),
+    createUser: (body) => call("POST", "/users", body),
+    patchUser: (id, body) => call("PATCH", `/users/${enc(id)}`, body),
     createCustomer: (body) => call("POST", "/customers", body),
     getCustomer: (id) => call("GET", `/customers/${enc(id)}`),
     listProjects: async (id) => (await call<{ items: ProjectRecord[] }>("GET", `/customers/${enc(id)}/projects`)).items,

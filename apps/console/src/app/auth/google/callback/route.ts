@@ -5,7 +5,7 @@ import { SESSION_COOKIE, SESSION_TTL_S, sessionSecret, signSession } from "@/lib
 import { ssoConfig } from "@/lib/auth/sso-config";
 import { decideSignIn } from "@/lib/auth/sso-signin";
 import { FLOW_COOKIE, SsoError, exchangeCode, openFlow, stateMatches, verifyIdToken } from "@/lib/auth/google-oidc";
-import { signInUserByEmail } from "@/lib/server/backend";
+import { bindGoogleAccount, enrolByLoginDomain, signInUserByEmail, touchLastLogin } from "@/lib/server/backend";
 import { safeNextPath } from "@/lib/safe-next";
 import { clientIp, hit } from "@/lib/server/rate-limit";
 
@@ -59,12 +59,32 @@ export async function GET(req: NextRequest) {
   }
 
   let decision;
+  let enrolRefusal = null as string | null;
+  let bound = null as string | null;
   try {
-    decision = await decideSignIn(claims.email, cfg.config, signInUserByEmail, undefined, { sub: claims.sub /* bindGoogleSub: not wired until #69 adds User.googleSub */ });
+    decision = await decideSignIn(
+      claims.email, cfg.config, signInUserByEmail,
+      // asked only when there is no user row and the address is outside the staff fence (decideSignIn); the refusal code
+      // (never an address) is kept for the log, the visitor sees the same refusal as for any identity reason
+      async (_domain, addr) => {
+        const r = await enrolByLoginDomain(addr);
+        if ("refused" in r) { enrolRefusal = r.refused; return null; }
+        return r.user;
+      },
+      {
+        sub: claims.sub,
+        bindGoogleSub: async (userId, sub) => {
+          bound = await bindGoogleAccount(userId, sub);
+          return bound === "bound" || bound === "ok" ? "ok" : "mismatch"; // mismatch and NOT_FOUND: no session
+        },
+      },
+    );
   } catch {
     return fail("user store did not answer", "unavailable");
   }
-  if (!decision.ok) return fail(decision.reason, "refused");
+  if (!decision.ok) return fail(enrolRefusal ? `${decision.reason} (enrol ${enrolRefusal})` : bound === "NOT_FOUND" ? "sub_mismatch (user not found)" : decision.reason, "refused");
+  // last sign-in is informational: a failure must not block the sign-in
+  try { await touchLastLogin(decision.user.id); } catch { console.warn("[sso] touchLastLogin failed (sign-in continues)"); }
 
   const token = await signSession({ sub: decision.user.id, email: "", name: decision.user.name, exp: Math.floor(Date.now() / 1000) + SESSION_TTL_S }, secret);
   return done(safeNextPath(flow.next), token); // re-checked here: the cookie is signed, but the check costs nothing
