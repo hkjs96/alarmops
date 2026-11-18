@@ -8,6 +8,7 @@ import { errorLine } from "@/lib/errors";
 import { SubNav } from "@/components/SubNav";
 import { CustomerStatusCard } from "../CustomerStatusCard";
 import { OffboardingCard } from "../OffboardingCard";
+import { ConnectionCard } from "../ConnectionCard";
 import { ExportCard, LegalHoldCard, PurgeLogCard } from "../RetentionCards";
 
 /**
@@ -65,6 +66,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         ) : (
           <CustomerStatusCard customerId={c.id} customerName={c.name} status={status} statusChangedAt={st?.statusChangedAt ?? null} version={st ? st.version : null} />
         )}
+        {!portal && me.role === "ADMIN" && status !== "TERMINATED" ? <ConnectionCard customerId={c.id} slug={c.slug} name={c.name} /> : null}
         {off ? <OffboardingCard customerId={c.id} customerName={c.name} off={off} /> : null}
         {portal ? null : purge ? (
           <>

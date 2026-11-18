@@ -4,11 +4,14 @@ import { SESSION_COOKIE, sessionSecret, verifySession } from "@/lib/auth/session
 import { SESSION_ENDED } from "@/lib/session-ended";
 import { buildCsp, newNonce } from "@/lib/csp";
 import { consoleOrigin } from "@/lib/auth/origin";
+import { VERIFY_PATH } from "@/lib/verify-token";
 
 /** Default deny (security review C-2): everything except /login and static assets needs a valid session. */
 const PUBLIC = [/^\/login(\/|$)/, /^\/auth\/dev-login$/, /^\/auth\/google\/(start|callback)$/,/^\/auth\/sign-out$/, /^\/auth\/session$/, /^\/auth\/ended$/,
   // the 1-minute tick: no session, its own shared secret (app/api/internal/tick, fail closed without TICK_SECRET)
-  /^\/api\/internal\/tick$/];
+  /^\/api\/internal\/tick$/,
+  // the verification link sent to a customer's person: no session, the token in the path is the credential (exact pattern; app/verify)
+  VERIFY_PATH];
 
 /**
  * Every response carries the Content-Security-Policy with a nonce made for this request (lib/csp.ts). The nonce also goes
@@ -23,6 +26,12 @@ export async function middleware(req: NextRequest) {
   fwd.set("content-security-policy", csp);
   const res = await gate(req, () => NextResponse.next({ request: { headers: fwd } }));
   res.headers.set("Content-Security-Policy", csp);
+  // the verification link is a credential in the path: it must not leave in a Referer, be indexed or be cached
+  if (VERIFY_PATH.test(req.nextUrl.pathname)) {
+    res.headers.set("Referrer-Policy", "no-referrer");
+    res.headers.set("X-Robots-Tag", "noindex, nofollow");
+    res.headers.set("Cache-Control", "no-store");
+  }
   // the page carries this request's nonce: no cache may keep it for another request
   if (!res.headers.has("Cache-Control")) res.headers.set("Cache-Control", "no-store");
   return res;

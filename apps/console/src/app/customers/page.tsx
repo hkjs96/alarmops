@@ -13,15 +13,19 @@ import { parseScopeParams } from "@/lib/scope";
  */
 export default async function Page({ searchParams }: { searchParams: Promise<SP> }) {
   const scope = parseScopeParams(await searchParams);
-  const all = (await (await getApi()).scopeTree()).customers;
+  const api = await getApi();
+  const [{ customers: all }, me] = await Promise.all([api.scopeTree(), api.me()]);
+  // adding a customer is an Admin action (POST /customers); a portal user never sees this list's button
+  const canAdd = me.kind !== "CUSTOMER" && me.role === "ADMIN";
+  const addBtn = canAdd ? <Link className="btn pri" href="/customers/new" data-testid="new-customer">New customer</Link> : null;
   // the filter of the address (the tree) narrows the list, like on the other screens
   const customers = scope.sel.customer ? all.filter((c) => c.slug === scope.sel.customer) : scope.sel.mine ? all.filter((c) => c.mine) : all;
   return (
     <div className="page">
-      <div className="ph"><div><h1 tabIndex={-1}>Customers</h1><div className="desc">Each customer, its status and open incidents.</div></div></div>
+      <div className="ph"><div><h1 tabIndex={-1}>Customers</h1><div className="desc">Each customer, its status and open incidents.</div></div><span className="sp" />{addBtn}</div>
       <SubNav />
       <p className="sm mut">Showing <ScopeEcho />.</p>
-      {customers.length === 0 ? <Card><EmptyState title="No customers yet" detail="Customers appear here once they are connected." /></Card> : (
+      {customers.length === 0 ? <Card><EmptyState title="No customers yet" detail="Customers appear here once they are connected." action={addBtn} /></Card> : (
         <ul className="cust-list" data-testid="customer-list">
           {customers.map((c) => (
             <li key={c.id} className="cust-item" data-testid="customer-item" data-slug={c.slug} data-row-key={c.id}>
