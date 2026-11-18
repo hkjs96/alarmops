@@ -347,6 +347,8 @@ http://localhost:3107/auth/dev-login?as=admin
 
 ### 3-1. [사람] Vercel 프로젝트 만들기 (10분)
 
+> **참고** 화면별 클릭 순서는 `docs/SETUP-VERCEL.md` 1~4단계
+
 어디서: Vercel 대시보드
 
 - [ ] **Vercel 프로젝트 만들기**
@@ -364,14 +366,16 @@ http://localhost:3107/auth/dev-login?as=admin
 
 - [ ] **Git 자동 배포 끄기**(D-53, 우회 방지)
 
-4. Project → Settings → Git을 연다.
-5. **Ignored Build Step**을 `exit 0`(항상 건너뜀)으로 한다. 또는 Git 연결을 해제한다.
+4. Project → Settings → Git에서 Git 연결을 해제한다(**Disconnect**).
+5. 또는 Project → Settings → Build and Deployment의 **Ignored Build Step**을 **Don't build anything**(항상 건너뜀)으로 한다.
    - 확인: main에 푸시해도 Vercel에 새 배포가 생기지 않는다.
 
    > **주의** 이걸 끄지 않으면 승인·검사를 거치지 않은 코드가 Vercel에 바로 올라간다.
 6. 프로젝트 Domains에서 `*.vercel.app` 주소를 확인해 적어 둔다. 3-3의 `CONSOLE_ORIGIN`에 쓴다. 스모크 검사는 이 주소를 부른다.
 
 ### 3-2. [사람] Vercel 토큰·ID와 GitHub `production` 환경 (15분)
+
+> **참고** 화면별 클릭 순서는 `docs/SETUP-VERCEL.md` 5~7단계
 
 어디서: Vercel 대시보드 → GitHub 저장소
 
@@ -409,11 +413,13 @@ http://localhost:3107/auth/dev-login?as=admin
 
 ### 3-3. [사람] Vercel 환경변수 넣기 (15분)
 
+> **참고** 화면별 클릭 순서는 `docs/SETUP-VERCEL.md` 8단계
+
 어디서: 본인 터미널(Git Bash) → Vercel 프로젝트의 환경변수 설정(Production)
 
 - [ ] **Vercel 환경변수(Production)**
 
-1. 비밀 두 개를 만든다. Git Bash에서 아래 명령을 **두 번** 실행한다. 한 번은 `SESSION_SECRET`, 한 번은 `TICK_SECRET`에 쓴다.
+1. 비밀 세 개를 만든다. Git Bash에서 아래 명령을 **세 번** 실행한다. `SESSION_SECRET`, `TICK_SECRET`, `VERIFY_HASH_SECRET`에 하나씩 쓴다.
    ```bash
    openssl rand -base64 48
    ```
@@ -423,7 +429,7 @@ http://localhost:3107/auth/dev-login?as=admin
 3. `CONSOLE_ORIGIN`과 `TRUSTED_PROXY`는 **일반(Plain) 변수**로 둔다.
 
    > **주의** Vercel의 Sensitive 변수는 `vercel pull`로 내려오지 않는다. 그러면 배포 전 검사가 "없음"으로 실패한다.
-4. 비밀 값(`DATABASE_URL`, `SESSION_SECRET`, `TICK_SECRET`)은 Sensitive로 해도 된다. 런타임은 Vercel에 저장된 값을 쓴다.
+4. 비밀 값(`DATABASE_URL`, `SESSION_SECRET`, `TICK_SECRET`, `VERIFY_HASH_SECRET`, `GOOGLE_CLIENT_SECRET`)은 Sensitive로 해도 된다. 런타임은 Vercel에 저장된 값을 쓴다.
 5. 주소는 우선 `*.vercel.app`(D-54).
 6. 확인: 변수 목록에 `MOCK_API`, `E2E_ALLOW_MOCK`이 **없다**. 값이 비어 있어도 있으면 배포 검사가 실패한다.
 
@@ -434,26 +440,29 @@ http://localhost:3107/auth/dev-login?as=admin
 | 변수 | 값 |
 |---|---|
 | `DATABASE_URL` | Supabase Transaction pooler(6543) — 아래 참고 |
-| `DATABASE_POOLER` | `transaction` |
+| `DATABASE_POOLER` | `transaction`. 일반(Plain) 변수 |
 | `SESSION_SECRET` | 32자 이상 임의 값 |
 | `TICK_SECRET` | 32자 이상 임의 값(아래 pg_cron과 같은 값) |
 | `CONSOLE_ORIGIN` | 아래 참고 |
 | `TRUSTED_PROXY` | `1` |
 | `GOOGLE_CLIENT_ID`, `SSO_ALLOWED_DOMAINS` | 일반(Plain) 변수. `docs/SETUP-GOOGLE-SSO.md` |
 | `GOOGLE_CLIENT_SECRET` | Sensitive. 같은 가이드 |
-| `SSO_ALLOWED_EMAILS` | 선택. 도메인 밖 예외 주소(쉼표 구분) |
-| `VERIFY_HASH_SECRET` | 32자 이상 임의 값. 연락처 확인 링크 한도 계산에 쓴다(#63에서 연결) |
+| `SSO_ALLOWED_EMAILS` | 선택. 도메인 밖 예외 주소(쉼표 구분). Sensitive 권장(Plain이면 배포 검사가 주소 모양을 본다) |
+| `VERIFY_HASH_SECRET` | 32자 이상 임의 값. Sensitive. 연락처 확인 링크 한도 계산에 쓴다(#63에서 연결) |
 | `ALARM_COMMANDS_QUEUE_URL`, `ALARM_COMMANDS_EXPECTED_ACCOUNT` | 4단계 후 |
 | `AWS_ROLE_ARN` | 4단계 후(Vercel OIDC 역할, D-49) |
+| `CENTRAL_ROLE_ARN`, `CENTRAL_EVENT_BUS_ARN`, `REMEDIATOR_CALLER_ROLE_ARN` | 4단계 후. 일반(Plain) 변수. 고객 연결 키트에 쓴다(`apps/console/README.md`) |
 | `MOCK_API`, `E2E_ALLOW_MOCK` | **넣지 않는다**(배포 검사가 막는다) |
 
 - `DATABASE_URL`: Supabase Transaction pooler(6543, `?pgbouncer=true&connection_limit=1`). 운영 DB는 개발과 별도 프로젝트 권장.
 - `CONSOLE_ORIGIN`: 우선 `https://<프로젝트>.vercel.app`(D-54). 파일럿 전에 `https://console.<도메인>`.
   - 모양은 `https://호스트`까지만이다. 끝에 `/`나 경로를 붙이면 배포 검사가 실패한다.
 - `TRUSTED_PROXY`: 정확히 `1`이어야 한다.
-- "4단계 후"인 세 변수는 지금 넣지 않는다. 4-5에서 넣는다.
+- "4단계 후"인 변수는 지금 넣지 않는다. 4-5에서 넣는다.
 
 ### 3-4. [사람] 첫 배포 (10분)
+
+> **참고** 화면별 클릭 순서는 `docs/SETUP-VERCEL.md` 9~10단계
 
 어디서: GitHub 저장소의 Actions
 
@@ -516,10 +525,10 @@ http://localhost:3107/auth/dev-login?as=admin
 > **주의** 배포는 이미 production에 올라가 있다. 바로 되돌린다.
 
 1. 되돌린다. 둘 중 하나를 한다.
-   - Vercel 대시보드 → Deployments에서 직전의 정상 배포 → **Promote to Production**(Instant Rollback)
-   - 본인 터미널에서 직전 production 배포로 되돌린다.
+   - Vercel 대시보드 → 프로젝트 개요의 Production Deployment → **Instant Rollback** → **Continue** → **Confirm Rollback**(자세한 화면은 `docs/SETUP-VERCEL.md` 11단계)
+   - 본인 터미널에서 되돌릴 배포를 지정해 되돌린다.
      ```bash
-     vercel rollback
+     vercel rollback <배포 URL 또는 ID>
      ```
    - 첫 배포라 직전 배포가 없으면 되돌릴 것이 없다. 3번으로 가서 원인을 고친다.
 2. 확인한다.
@@ -533,6 +542,8 @@ http://localhost:3107/auth/dev-login?as=admin
    - 배포 보호 401
    - mock 표식
    - CSP
+
+> **주의** 되돌리기(Instant Rollback)를 하면 Vercel은 그 뒤의 새 production 배포에 production 주소를 **자동으로 붙이지 않는다**. 고친 코드를 다시 배포해도 `CONSOLE_ORIGIN`은 계속 예전 배포를 가리키고, 스모크 검사도 예전 배포를 보고 통과할 수 있다. 다시 배포한 뒤에는 프로젝트 개요의 Production Deployment → **Manage** → 새 배포 선택 → **Confirm**으로 되돌리기를 풀거나, 본인 터미널에서 `vercel promote <새 배포 URL>`을 실행한다(`docs/SETUP-VERCEL.md` 11-4). 확인: 프로젝트 개요의 Production Deployment가 새 배포다.
 
 > **주의** 되돌린 동안 1분 틱이 멈출 수 있다(pg_cron은 같은 주소를 부른다). 틱 표시를 확인한다. 확인하는 법은 3-5의 4번이다.
 
@@ -805,6 +816,11 @@ http://localhost:3107/auth/dev-login?as=admin
    | `ALARM_COMMANDS_QUEUE_URL` | `AlarmCommandsQueueUrl` |
    | `ALARM_COMMANDS_EXPECTED_ACCOUNT` | `CentralAccountId` |
    | `AWS_ROLE_ARN` | `VercelConsoleRoleArn` |
+   | `CENTRAL_ROLE_ARN` | `CentralRoleArn` |
+   | `CENTRAL_EVENT_BUS_ARN` | `CentralBusArn` |
+   | `REMEDIATOR_CALLER_ROLE_ARN` | `RemediatorCallerRoleArn` (Remediator를 켜는 고객이 있을 때만) |
+
+   모두 일반(Plain) 변수로 넣는다. 비밀이 아니다.
 
    > **주의** `AWS_ROLE_ARN`은 배포된 Vercel 런타임에만 넣는다. 회사 PC `.env`, CI, 에이전트 세션에는 넣지 않는다(`apps/console/README.md`).
 2. 콘솔을 다시 배포한다. Actions → `deploy-console` 실행 → 승인(3-4). 새 변수는 새 배포부터 쓰인다.
