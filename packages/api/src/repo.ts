@@ -367,8 +367,11 @@ export interface ApiRepository {
   createAccount(customerId: string, a: NewAccount, audit: AuditTemplate): Promise<AccountWriteOutcome>;
   /** `WHERE id = ? AND customerId = ?`. Refused for a TERMINATED customer and for a purged account. */
   updateAccount(customerId: string, accountId: string, patch: AccountPatch, audit: AuditTemplate): Promise<AccountWriteOutcome>;
-  /** When the last CHECK_CONNECTION was queued for this account (its `account.check` audit row), or null. */
-  lastAccountCheckAt(customerId: string, accountId: string): Promise<Date | null>;
+  /**
+   * ATOMIC check-then-record of the CHECK_CONNECTION cooldown: one transaction (lock per account) looks for an `account.check`
+   * audit row newer than `cooldownSec` and, if none, writes `audit` as that row. 'OK' = reserved (publish now); else seconds to wait.
+   */
+  reserveAccountCheck(customerId: string, accountId: string, now: Date, cooldownSec: number, audit: AuditTemplate): Promise<'OK' | { retryAfterSec: number }>;
   /** Deletes only an account that has no Resource and no ManagedAlarm rows (nothing of ours in the customer's AWS); else 'IN_USE'. */
   deleteAccount(customerId: string, accountId: string, audit: AuditTemplate): Promise<'OK' | 'NOT_FOUND' | 'IN_USE' | 'CUSTOMER_TERMINATED'>;
 

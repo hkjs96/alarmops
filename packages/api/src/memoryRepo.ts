@@ -414,9 +414,12 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     this.audits.push({ ...audit, customerId, targetId: accountId });
     return this.accountRecord(org);
   }
-  async lastAccountCheckAt(customerId: string, accountId: string): Promise<Date | null> {
+  async reserveAccountCheck(customerId: string, accountId: string, now: Date, cooldownSec: number, audit: AuditTemplate): Promise<'OK' | { retryAfterSec: number }> {
     const t = this.audits.filter((a) => a.action === 'account.check' && a.customerId === customerId && a.targetId === accountId).map((a) => a.at.getTime());
-    return t.length ? new Date(Math.max(...t)) : null;
+    const last = t.length ? Math.max(...t) : null;
+    if (last !== null && now.getTime() - last < cooldownSec * 1000) return { retryAfterSec: Math.max(1, Math.ceil((last + cooldownSec * 1000 - now.getTime()) / 1000)) };
+    this.audits.push({ ...audit, customerId, targetId: accountId });
+    return 'OK';
   }
   async deleteAccount(customerId: string, accountId: string, audit: AuditTemplate) {
     const org = this.accounts.get(accountId);
@@ -503,7 +506,7 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     const retry = (rows: MemoryVerification[], cap: number): number => { const o = rows.sort((a, b) => a.sentAt.getTime() - b.sentAt.getTime())[rows.length - cap]; return Math.max(1, Math.ceil((o!.sentAt.getTime() + 3600_000 - v.sentAt.getTime()) / 1000)); };
     const byCustomer = hour.filter((x) => (x.customerId ?? null) === (v.customerId ?? null));
     if (byCustomer.length >= limits.perCustomerHour) return { capped: 'CUSTOMER', retryAfterSec: retry(byCustomer, limits.perCustomerHour) };
-    const byDest = hour.filter((x) => x.note === v.destinationHash);
+    const byDest = byCustomer.filter((x) => x.note === v.destinationHash);
     if (byDest.length >= limits.perDestinationHour) return { capped: 'DESTINATION', retryAfterSec: retry(byDest, limits.perDestinationHour) };
     const recent = [...this.verifications.values()].filter((x) => x.contactId === v.contactId && x.channel === v.channel && x.via === 'link' && x.sentAt.getTime() > v.sentAt.getTime() - cooldownSec * 1000)
       .sort((a, b) => b.sentAt.getTime() - a.sentAt.getTime())[0];

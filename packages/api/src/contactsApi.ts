@@ -16,7 +16,7 @@
  * VERIFICATION_UNAVAILABLE before anything is written — no token is made for a message that cannot be sent.
  * Only the SHA-256 of a token is stored (ChannelVerification.tokenHash). The plaintext exists in the sender call only.
  */
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { verifiedAt } from '@alarmops/core';
 import { customerWide, requireAuth, requireRole, scopeOf, type AuthContext } from './auth.js';
 import { withoutUndefined, ApiError, decodeCursor, encodeCursor, invalid, isCleanId, isRecord, limitOf, notFound, ok, q, rateLimited, validation, type ApiRequest, type ApiResponse } from './http.js';
@@ -30,7 +30,7 @@ export interface VerificationSender {
   send(m: { channel: 'EMAIL' | 'SMS'; to: string; contactId: string; customerId: string | null; token: string; expiresAt: Date }): Promise<void>;
 }
 
-interface Deps { repo: ApiRepository; now: () => Date; verification?: VerificationSender; log?: (level: 'warn' | 'error', msg: string, data?: Record<string, unknown>) => void }
+interface Deps { repo: ApiRepository; now: () => Date; verification?: VerificationSender; verificationSecret?: string; log?: (level: 'warn' | 'error', msg: string, data?: Record<string, unknown>) => void }
 
 /** notification R9-2: a link lives 24 hours and works once. */
 export const VERIFY_TTL_MS = 24 * 3600_000;
@@ -48,6 +48,21 @@ const NOTE_MAX = 500;
 const SLACK_ID_RE = /^[UW][A-Z0-9]{2,20}$/;
 const TOKEN_RE = /^vf_[A-Za-z0-9_-]{43}$/;
 const CONTROL = /[\u0000-\u001f\u007f]/;
+
+/**
+ * One address, one form: e-mail lower-case; a phone number as digits only with the Korean country code folded into the
+ * national form (`+82 10-1234-5678`, `82-10-1234-5678` and `010-1234-5678` are the same destination).
+ */
+export function normalizeDestination(channel: 'EMAIL' | 'SMS', to: string): string {
+  if (channel === 'EMAIL') return to.trim().toLowerCase();
+  const d = to.replace(/\D/g, '');
+  return d.startsWith('82') && d.length >= 11 ? `0${d.slice(2)}` : d;
+}
+/** Keyed hash of a destination, per customer: counts sends without storing the address and without letting another customer use up the allowance. */
+export const destinationHash = (secret: string, customerId: string | null, channel: 'EMAIL' | 'SMS', to: string): string =>
+  createHmac('sha256', secret).update(`${customerId ?? '-'}|${channel}|${normalizeDestination(channel, to)}`).digest('hex');
+const secretMissing = (deps: Deps): ApiError | null =>
+  (deps.verificationSecret ?? '').length >= 32 ? null : new ApiError(503, 'NOT_CONFIGURED', 'Verification links need a server secret that is not configured.');
 
 export const hashToken = (token: string): string => createHash('sha256').update(token).digest('hex');
 /** 256 random bits; the `vf_` prefix only makes a leaked token recognisable. */
@@ -314,7 +329,7 @@ async function sendLink(deps: Deps, sender: VerificationSender, c: ContactRow, c
   const now = deps.now();
   const expiresAt = new Date(now.getTime() + VERIFY_TTL_MS);
   // The hash is stored first so the link works the moment it arrives; if the sender then fails the row is taken back.
-  const issued = await deps.repo.issueVerification({ customerId: c.customerId, contactId: c.id, channel, tokenHash: hashToken(token), sentAt: now, expiresAt, destinationHash: hashToken(`${channel}:${to.trim().toLowerCase()}`) },
+  const issued = await deps.repo.issueVerification({ customerId: c.customerId, contactId: c.id, channel, tokenHash: hashToken(token), sentAt: now, expiresAt, destinationHash: destinationHash(deps.verificationSecret!, c.customerId, channel, to) },
     { cooldownSec: VERIFY_COOLDOWN_SEC, perCustomerHour: VERIFY_CAP_PER_CUSTOMER_HOUR, perDestinationHour: VERIFY_CAP_PER_DESTINATION_HOUR });
   if (issued !== 'OK') return 'capped' in issued ? { capped: issued.retryAfterSec } : 'COOLING';
   try {
@@ -361,6 +376,8 @@ export async function verifyContact(req: ApiRequest, deps: Deps, contactId: stri
 
   if (channel === 'SLACK') throw invalid('channel', 'A Slack id is not verified by a link. Use method manual.');
   if (!deps.verification) throw senderMissing(); // nothing written, no token made
+  const noSecret = secretMissing(deps);
+  if (noSecret) throw noSecret;
   const sent = await sendLink(deps, deps.verification, c, channel, value);
   if (typeof sent === 'object') throw rateLimited('Too many verification links were sent recently. Try again later.', sent.capped);
   if (sent === 'COOLING') throw rateLimited('A link was sent a moment ago. Wait a minute before sending another.', VERIFY_COOLDOWN_SEC);
@@ -379,6 +396,8 @@ export async function verifyBulk(req: ApiRequest, deps: Deps): Promise<ApiRespon
   if (auth.kind !== 'INTERNAL') throw notFound();
   const a = await actorOf(req, deps);
   if (!deps.verification) throw senderMissing();
+  const noSecret = secretMissing(deps);
+  if (noSecret) throw noSecret;
   if (!isRecord(req.body)) throw invalid('body', 'Body must be a JSON object.');
   const b = withoutUndefined(req.body);
   noKeys(b, ['contactIds', 'kind', 'customerId', 'filter']);

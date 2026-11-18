@@ -88,12 +88,17 @@ export class SqlIngestStore implements AlertRepository, SourceRepository {
     if (!rows.length) return 'DUPLICATE';
     // First / last event received per account (onboarding status, #62). At most one write a minute per account, so a noisy account is not a hot row.
     // The customer condition keeps an event from touching an account of another customer.
+    // Best effort: a failure here must never lose the event (the RawEvent row is already stored, so a redelivery would be DUPLICATE and the pipeline would never run).
     if (ev.customerId && ev.awsAccountId) {
-      await this.sql.query(
+      try {
+        await this.sql.query(
         `UPDATE "CloudAccount" SET "firstEventAt" = COALESCE("firstEventAt", t.at), "lastEventAt" = GREATEST(COALESCE("lastEventAt", t.at), t.at)
            FROM (SELECT LEAST($3::timestamptz, ${this.sql.now()}) AS at) t
           WHERE "awsAccountId" = $1 AND "customerId" = $2 AND ("firstEventAt" IS NULL OR "lastEventAt" IS NULL OR "lastEventAt" < t.at - interval '60 seconds')`,
         [ev.awsAccountId, ev.customerId, ev.receivedAt]);
+      } catch (err) {
+        console.warn('ingest.account_event_time_failed', { code: pgCode(err) ?? 'unknown' }); // tag + SQLSTATE only: no account id, no message
+      }
     }
     return { id };
   }

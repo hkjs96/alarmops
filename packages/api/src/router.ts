@@ -32,10 +32,12 @@ export interface ApiDeps {
   config?: Partial<ApiConfig>;
   /** Delivers contact verification links (e-mail / SMS adapters, hkjs96/alarmops#39, #10). Without it a link request is 503 VERIFICATION_UNAVAILABLE. */
   verification?: VerificationSender;
+  /** Server secret (>= 32 chars) that keys the per-destination send cap (HMAC-SHA-256). Required when `verification` is set; otherwise link requests are 503 NOT_CONFIGURED. The console passes e.g. an env secret `VERIFY_HASH_SECRET`. */
+  verificationSecret?: string;
   log?: (level: 'warn' | 'error', msg: string, data?: Record<string, unknown>) => void;
 }
 
-type Handler = (req: ApiRequest, deps: { repo: ApiRepository; now: () => Date; config: ApiConfig; commands?: CommandPublisher; retention?: RetentionConfig; verification?: VerificationSender; log?: ApiDeps['log'] }, p: string[]) => Promise<ApiResponse>;
+type Handler = (req: ApiRequest, deps: { repo: ApiRepository; now: () => Date; config: ApiConfig; commands?: CommandPublisher; retention?: RetentionConfig; verification?: VerificationSender; verificationSecret?: string; log?: ApiDeps['log'] }, p: string[]) => Promise<ApiResponse>;
 interface Route {
   method: ApiRequest['method']; pattern: string[]; run: Handler;
   /** true → no session is required (the credential is in the path: GET /verify/{token}). Everything else answers 401 without one. */
@@ -149,7 +151,7 @@ const stable = (v: unknown): string =>
 export const loggablePath = (path: string): string => path.replace(/(\/verify\/)[^/?#]*/g, '$1[token]');
 
 export function createApi(deps: ApiDeps) {
-  const inner = { repo: deps.repo, now: deps.now ?? (() => new Date()), config: strictApiConfig(deps.config), commands: deps.commands, retention: deps.retention, verification: deps.verification, log: deps.log };
+  const inner = { repo: deps.repo, now: deps.now ?? (() => new Date()), config: strictApiConfig(deps.config), commands: deps.commands, retention: deps.retention, verification: deps.verification, verificationSecret: deps.verificationSecret, log: deps.log };
   async function handle(req: ApiRequest): Promise<ApiResponse> {
     try {
       const m = match(req.method, req.path);

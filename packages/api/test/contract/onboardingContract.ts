@@ -6,7 +6,7 @@
 import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 import { T0 } from '../../../core/test/world.js';
-import { loggablePath, PORTAL_CONTACTS_PER_DAY, VERIFY_CAP_PER_DESTINATION_HOUR, MemoryApiStore, type AuthContext, type VerificationSender } from '../../src/index.js';
+import { destinationHash, normalizeDestination, loggablePath, PORTAL_CONTACTS_PER_DAY, VERIFY_CAP_PER_DESTINATION_HOUR, MemoryApiStore, type AuthContext, type VerificationSender } from '../../src/index.js';
 import { USERS, body, wire } from '../helpers.js';
 import { cworld, type CWorld, type MakeApiFixture } from './apiContract.js';
 
@@ -23,6 +23,7 @@ class FakeVerificationSender implements VerificationSender {
 }
 
 const SQL_ERR = /secret-host/;
+const SECRET = 'test-verification-secret-0123456789abcdef';
 
 export function onboardingContract(make: MakeApiFixture): void {
   let w: CWorld;
@@ -32,7 +33,7 @@ export function onboardingContract(make: MakeApiFixture): void {
     return (w = await cworld(make, (s: MemoryApiStore) => {
       if (o.grants !== false) s.portalGrantsOf.set('cus_mirae', ['contacts']);
       for (const a of o.resources ?? []) s.accountsWithResources.add(a);
-    }, o.sender === false ? {} : { verification: sender }));
+    }, o.sender === false ? {} : { verification: sender, verificationSecret: SECRET }));
   };
   afterEach(async () => { await w?.fx.close(); });
   const admin = USERS.minjae;
@@ -95,7 +96,7 @@ export function onboardingContract(make: MakeApiFixture): void {
 
     it('public mail domains (and their subdomains) cannot be login domains: 422; syntax is strict and the domain is stored lower-case', async () => {
       await open();
-      for (const d of ['gmail.com', 'GMAIL.COM', 'naver.com', 'daum.net', 'hanmail.net', 'kakao.com', 'outlook.com', 'hotmail.com', 'live.com', 'yahoo.com', 'icloud.com', 'proton.me', 'protonmail.com', 'googlemail.com', 'mail.gmail.com']) {
+      for (const d of ['gmail.com', 'GMAIL.COM', 'naver.com', 'daum.net', 'hanmail.net', 'kakao.com', 'outlook.com', 'hotmail.com', 'live.com', 'yahoo.com', 'icloud.com', 'proton.me', 'protonmail.com', 'googlemail.com', 'mail.gmail.com', 'nate.com', 'msn.com', 'aol.com', 'gmx.com', 'gmx.net', 'mail.com', 'yandex.com', 'yandex.ru', 'qq.com', '163.com', 'me.com', 'pm.me', 'x.qq.com']) {
         const r = await w.call(admin, 'POST', '/customers', { body: { name: `Free ${d}`, loginDomains: ['ok.example', d] } });
         expect([d, r.status]).toEqual([d, 422]);
       }
@@ -265,6 +266,15 @@ export function onboardingContract(make: MakeApiFixture): void {
       expect(JSON.stringify(w.commands.sent)).not.toMatch(/externalId|ao-/);
       expect((await w.fx.audits()).filter((a) => a.action === 'account.check')).toHaveLength(2);
       expect((await w.call(USERS.haeun, 'POST', `/accounts/${id}/check`)).status).toBe(403);
+    });
+
+    it('check: parallel requests for one account: exactly one is queued', async () => {
+      await open();
+      const id = (await accounts())[0].id;
+      const rs = await Promise.all([1, 2, 3, 4].map(() => w.call(admin, 'POST', `/accounts/${id}/check`)));
+      expect(rs.map((r) => r.status).sort()).toEqual([202, 429, 429, 429]);
+      expect(w.commands.sent).toHaveLength(1);
+      expect((await w.fx.audits()).filter((a) => a.action === 'account.check')).toHaveLength(1);
     });
 
     it('check without a command publisher is 503 COMMANDS_UNAVAILABLE; a failing publisher is 502 with no queue text', async () => {
@@ -469,6 +479,38 @@ export function onboardingContract(make: MakeApiFixture): void {
     });
   });
 
+  describe('destination cap details', () => {
+    it('phone forms are one destination; the HMAC is keyed and per customer', () => {
+      for (const p of ['+82 10-1234-5678', '82-10-1234-5678', '010-1234-5678', '01012345678']) expect(normalizeDestination('SMS', p)).toBe('01012345678');
+      expect(normalizeDestination('EMAIL', ' A@B.Example ')).toBe('a@b.example');
+      const h = destinationHash(SECRET, 'cus_a', 'SMS', '+82 10-1234-5678');
+      expect(h).toBe(destinationHash(SECRET, 'cus_a', 'SMS', '010-1234-5678'));
+      expect(h).not.toBe(destinationHash(SECRET, 'cus_b', 'SMS', '010-1234-5678'));
+      expect(h).not.toBe(destinationHash(SECRET + 'x', 'cus_a', 'SMS', '010-1234-5678'));
+      expect(h).toMatch(/^[0-9a-f]{64}$/);
+    });
+
+    it('customer A cannot use up an address’s allowance for customer B; the same number in other notations counts as one', async () => {
+      await open();
+      const mk = async (cid: string, name: string, phone: string) => (body(await w.call(admin, 'POST', '/contacts', { body: { kind: 'CUSTOMER', customerId: cid, name, phone } })).id as string);
+      const send = async (id: string) => (await w.call(admin, 'POST', `/contacts/${id}/verify`, { body: { channel: 'SMS', method: 'link' } })).status;
+      const forms = ['+82 10-5555-1111', '010-5555-1111', '82-10-5555-1111', '01055551111'];
+      const ids: string[] = [];
+      for (const [i, f] of forms.entries()) ids.push(await mk('cus_mirae', `A${i}`, f));
+      expect([await send(ids[0]!), await send(ids[1]!), await send(ids[2]!), await send(ids[3]!)]).toEqual([202, 202, 202, 429]);
+      const other = await mk('cus_hanbit', 'B0', '010-5555-1111');
+      expect(await send(other)).toBe(202); // Hanbit's allowance is its own
+    });
+
+    it('without a server secret a link request is 503 NOT_CONFIGURED and nothing is written', async () => {
+      w = await cworld(make, undefined, { verification: new FakeVerificationSender() });
+      const c = await mkContact();
+      const r = await w.call(admin, 'POST', `/contacts/${c.id}/verify`, { body: { channel: 'EMAIL', method: 'link' } });
+      expect([r.status, body(r).error.code]).toEqual([503, 'NOT_CONFIGURED']);
+      expect(await tokenHashes()).toEqual([]);
+    });
+  });
+
   describe('B-1: staff contacts belong to every customer they serve', () => {
     it('a customer-scoped ADMIN lists only the staff who serve its customers, read-only; every write on any staff contact is a 404 and changes nothing', async () => {
       await open();
@@ -563,6 +605,16 @@ export function onboardingContract(make: MakeApiFixture): void {
       expect(again.status).toBe(404);
       expect(wire(again)).toBe(wire(garbage));
       expect(wire(again)).toBe(wire(unknown));
+    });
+
+    it('two simultaneous POST /verify/{token}: exactly one wins', async () => {
+      await open();
+      const c = await mkContact();
+      await w.call(admin, 'POST', `/contacts/${c.id}/verify`, { body: { channel: 'EMAIL', method: 'link' } });
+      const { token } = sender.sent[0]!;
+      const rs = await Promise.all([1, 2, 3].map(() => w.call(null, 'POST', `/verify/${token}`)));
+      expect(rs.map((r) => r.status).sort()).toEqual([200, 404, 404]);
+      expect((await w.fx.audits()).filter((a) => a.action === 'contact.verify.link_used')).toHaveLength(1);
     });
 
     it('a link expires after 24 hours and then verifies nothing', async () => {

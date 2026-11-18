@@ -34,6 +34,7 @@ const DOMAIN_RE = /^(?=.{3,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([
 /** Portal login is granted by e-mail domain: a public mail provider would let anyone sign up as the customer (security review R-7). */
 export const FREE_MAIL_DOMAINS: readonly string[] = [
   'gmail.com', 'googlemail.com', 'naver.com', 'daum.net', 'hanmail.net', 'kakao.com', 'outlook.com', 'hotmail.com', 'live.com', 'yahoo.com', 'icloud.com', 'proton.me', 'protonmail.com',
+  'nate.com', 'msn.com', 'aol.com', 'gmx.com', 'gmx.net', 'mail.com', 'yandex.com', 'yandex.ru', 'qq.com', '163.com', 'me.com', 'pm.me',
 ];
 const isFreeMail = (d: string): boolean => FREE_MAIL_DOMAINS.some((f) => d === f || d.endsWith(`.${f}`));
 
@@ -258,12 +259,12 @@ export async function checkAccount(req: ApiRequest, deps: Deps, accountId: strin
   if (!st) throw notFound();
   if (st.status === 'TERMINATED' || account.disabled || account.connectionPurged) throw new ApiError(409, 'ACCOUNT_DISABLED', 'This account is disabled; its connection cannot be checked.');
   const now = deps.now();
-  const last = await deps.repo.lastAccountCheckAt(account.customerId, account.id);
-  if (last && now.getTime() - last.getTime() < CHECK_COOLDOWN_SEC * 1000) {
-    // a check queued in the last 30 s is still running or just finished: poll the status instead of queueing another
-    throw rateLimited('A check for this account was queued a moment ago. Wait for its result.', CHECK_COOLDOWN_SEC - (now.getTime() - last.getTime()) / 1000);
-  }
   const commandId = newCommandId();
+  // Reserve first (atomic check-then-record, the `account.check` row IS the limit), publish second: parallel requests cannot all pass,
+  // and a failed audit write stops the request before anything is queued. A failed publish keeps the reservation (30 s).
+  const slot = await deps.repo.reserveAccountCheck(account.customerId, account.id, now, CHECK_COOLDOWN_SEC,
+    { at: now, actorType: 'USER', actorId: auth.userId, action: 'account.check', targetType: 'CloudAccount', before: null, after: { commandId }, requestId: req.requestId });
+  if (slot !== 'OK') throw rateLimited('A check for this account was queued a moment ago. Wait for its result.', slot.retryAfterSec);
   const audit = (action: string) => ({ at: now, customerId: account.customerId, actorType: 'USER' as const, actorId: auth.userId, action, targetType: 'CloudAccount', targetId: account.id, before: null, after: { commandId }, requestId: req.requestId });
   try {
     await deps.commands.publish({ schemaVersion: 1, commandId, type: 'CHECK_CONNECTION', customerId: account.customerId, cloudAccountId: account.id, requestedBy: { type: 'USER', id: auth.userId }, requestedAt: now.toISOString(), payload: {} });
@@ -272,7 +273,6 @@ export async function checkAccount(req: ApiRequest, deps: Deps, accountId: strin
     await deps.repo.recordAudit(audit('account.check_failed')).catch(() => undefined);
     throw new ApiError(502, 'COMMAND_PUBLISH_FAILED', 'The check could not be queued. Try again.');
   }
-  await deps.repo.recordAudit(audit('account.check'));
   return ok({ commandId }, {}, 202);
 }
 

@@ -26,6 +26,8 @@ export interface IngestFixture {
   sourceLastReceivedAt(id: string): Promise<Date | null>;
   /** #62: first / last event time kept on the account (SQL store only; the memory store has no such column). */
   accountEventTimes?(awsAccountId: string): Promise<{ first: Date | null; last: Date | null }>;
+  /** #62 test hook: from now on every UPDATE of a CloudAccount fails (a trigger). */
+  breakAccountUpdates?(): Promise<void>;
   /** D-43 */
   residual(customerId: string, sourceKey: string): Promise<{ firstAt: Date; lastAt: Date; count: number } | null>;
   close(): Promise<void>;
@@ -157,6 +159,19 @@ export function ingestContract(make: MakeIngestFixture): void {
       await fx.repo.insertRawEvent(ev2, 'al_t');
       expect(await fx.accountEventTimes('123456789012')).toEqual(t1); // within a minute: no write
       expect(await fx.accountEventTimes('999999999999')).toEqual({ first: null, last: null });
+    });
+
+    it('a failing account-time update never loses the event: it is stored once, redelivery is DUPLICATE, the pipeline can go on', async () => {
+      fx = await make(SEED);
+      if (!fx.breakAccountUpdates) return;
+      await fx.breakAccountUpdates();
+      const ev = cw();
+      await fx.repo.createAlert(alertOf(ev, 'al_f'));
+      const r = await fx.repo.insertRawEvent(ev, 'al_f');
+      expect(r).not.toBe('DUPLICATE');
+      expect((await fx.counts()).rawEvents).toBe(1);
+      expect(await fx.accountEventTimes!('123456789012')).toEqual({ first: null, last: null }); // the time is simply not recorded
+      expect(await fx.repo.insertRawEvent(ev, 'al_f')).toBe('DUPLICATE');
     });
 
     it('raw events are inserted once per dedup key; decisions are recorded', async () => {

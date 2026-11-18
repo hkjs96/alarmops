@@ -774,9 +774,15 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
       return SqlApiStore.toAccount(row!);
     });
   }
-  async lastAccountCheckAt(customerId: string, accountId: string): Promise<Date | null> {
-    const [r] = await this.sql.query(`SELECT max("at") AS "at" FROM "AuditLog" WHERE "targetType" = 'CloudAccount' AND "targetId" = $1 AND "customerId" = $2 AND "action" = 'account.check'`, [accountId, customerId]);
-    return d(r?.at);
+  async reserveAccountCheck(customerId: string, accountId: string, now: Date, cooldownSec: number, audit: AuditTemplate): Promise<'OK' | { retryAfterSec: number }> {
+    return this.sql.transaction(async (tx) => {
+      await tx.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`check:${accountId}`]); // parallel requests for one account queue here
+      const [r] = await tx.query(`SELECT max("at") AS "at" FROM "AuditLog" WHERE "targetType" = 'CloudAccount' AND "targetId" = $1 AND "customerId" = $2 AND "action" = 'account.check'`, [accountId, customerId]);
+      const last = d(r?.at);
+      if (last && now.getTime() - last.getTime() < cooldownSec * 1000) return { retryAfterSec: Math.max(1, Math.ceil((last.getTime() + cooldownSec * 1000 - now.getTime()) / 1000)) };
+      await insertAudit(tx, { ...audit, customerId, targetId: accountId });
+      return 'OK' as const;
+    });
   }
   async deleteAccount(customerId: string, accountId: string, audit: AuditTemplate) {
     return this.sql.transaction(async (tx) => {
@@ -906,7 +912,7 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
         [v.contactId, v.channel, iso(v.sentAt), cooldownSec]);
       if (recent) return { cooling: Math.max(1, Math.ceil((dReq(recent.sentAt).getTime() + cooldownSec * 1000 - v.sentAt.getTime()) / 1000)) };
       const capped = async (where: string, param: unknown, cap: number, kind: 'CUSTOMER' | 'DESTINATION'): Promise<IssueOutcome | null> => {
-        const rows = await tx.query(`SELECT "sentAt" FROM "ChannelVerification" WHERE ${where} AND "via" = 'link' AND "sentAt" > $2::timestamptz - interval '1 hour' ORDER BY "sentAt" DESC LIMIT $3`, [param, iso(v.sentAt), cap]);
+        const rows = await tx.query(`SELECT "sentAt" FROM "ChannelVerification" WHERE ${where} AND "customerId" IS NOT DISTINCT FROM $4 AND "via" = 'link' AND "sentAt" > $2::timestamptz - interval '1 hour' ORDER BY "sentAt" DESC LIMIT $3`, [param, iso(v.sentAt), cap, v.customerId]);
         if (rows.length < cap) return null;
         return { capped: kind, retryAfterSec: Math.max(1, Math.ceil((dReq(rows[cap - 1]!.sentAt).getTime() + 3600_000 - v.sentAt.getTime()) / 1000)) };
       };
