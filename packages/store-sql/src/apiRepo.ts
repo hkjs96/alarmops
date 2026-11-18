@@ -425,7 +425,7 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
     return { id: r.id, customerId: r.customerId, projectId: r.projectId, name: r.name, slug: r.slug };
   }
   async listProjects(customerId: string): Promise<ProjectRecord[]> {
-    return (await this.sql.query(`${SqlApiStore.PROJECT_SELECT} WHERE p."customerId" = $1 ORDER BY p."name", p."id"`, [customerId])).map(SqlApiStore.toProject);
+    return (await this.sql.query(`${SqlApiStore.PROJECT_SELECT} WHERE p."customerId" = $1 ORDER BY p."name" COLLATE "C", p."id"`, [customerId])).map(SqlApiStore.toProject);
   }
   async findProject(scope: ScopeFilter, projectId: string): Promise<ProjectRecord | null> {
     const all = scope.customerIds === '*';
@@ -475,7 +475,7 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
     }
   }
   async listServices(customerId: string, projectId: string): Promise<ServiceRecord[]> {
-    return (await this.sql.query(`SELECT "id", "customerId", "projectId", "name", "slug" FROM "Service" WHERE "customerId" = $1 AND "projectId" = $2 ORDER BY "name", "id"`, [customerId, projectId])).map(SqlApiStore.toService);
+    return (await this.sql.query(`SELECT "id", "customerId", "projectId", "name", "slug" FROM "Service" WHERE "customerId" = $1 AND "projectId" = $2 ORDER BY "name" COLLATE "C", "id"`, [customerId, projectId])).map(SqlApiStore.toService);
   }
   async findService(scope: ScopeFilter, serviceId: string): Promise<ServiceRecord | null> {
     const all = scope.customerIds === '*';
@@ -532,7 +532,7 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
     if (f.status) w.push(`u."status" = ${p.add(f.status)}::"UserStatus"`);
     if (f.role) w.push(`u."role" = ${p.add(f.role)}::"ConsoleRole"`);
     if (f.q) { const like = p.add(`%${f.q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`); w.push(`(u."name" ILIKE ${like} OR u."email"::text ILIKE ${like})`); }
-    const rows = await this.sql.query(`${SqlApiStore.USER_SELECT}${w.length ? ` WHERE ${w.join(' AND ')}` : ''} ORDER BY u."name", u."id"`, p.values);
+    const rows = await this.sql.query(`${SqlApiStore.USER_SELECT}${w.length ? ` WHERE ${w.join(' AND ')}` : ''} ORDER BY u."name" COLLATE "C", u."id"`, p.values);
     return rows.map(SqlApiStore.toUser);
   }
   async findUser(userId: string): Promise<UserRecord | null> {
