@@ -1,0 +1,13 @@
+{
+  "name": "alarmops-docs-site",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Builds one self-contained HTML page from docs/**/*.md (not part of the app workspaces)",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "marked": "18.1.3"
+  }
+}
