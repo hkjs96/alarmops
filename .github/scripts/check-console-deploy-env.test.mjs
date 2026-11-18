@@ -8,7 +8,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { checkConsoleDeployEnv, parseEnvFile } from './check-console-deploy-env.mjs';
 
-const GOOD = { CONSOLE_ORIGIN: 'https://console.example.com', TRUSTED_PROXY: '1' };
+const GOOD = { CONSOLE_ORIGIN: 'https://console.example.com', TRUSTED_PROXY: '1', GOOGLE_CLIENT_ID: 'id.apps.example', SSO_ALLOWED_DOMAINS: 'mz.co.kr,megazone.com' };
 const script = fileURLToPath(new URL('./check-console-deploy-env.mjs', import.meta.url));
 
 test('good environment passes', () => {
@@ -68,8 +68,27 @@ test('CLI: env file argument is checked, process environment is ignored', () => 
   const dir = mkdtempSync(join(tmpdir(), 'deploy-env-'));
   const good = join(dir, 'good.env');
   const bad = join(dir, 'bad.env');
-  writeFileSync(good, 'CONSOLE_ORIGIN=https://console.example.com\nTRUSTED_PROXY=1\n');
-  writeFileSync(bad, 'CONSOLE_ORIGIN=https://console.example.com\nTRUSTED_PROXY=1\nE2E_ALLOW_MOCK=1\n');
+  writeFileSync(good, 'CONSOLE_ORIGIN=https://console.example.com\nTRUSTED_PROXY=1\nGOOGLE_CLIENT_ID=id.apps.example\nSSO_ALLOWED_DOMAINS=mz.co.kr\n');
+  writeFileSync(bad, 'CONSOLE_ORIGIN=https://console.example.com\nTRUSTED_PROXY=1\nGOOGLE_CLIENT_ID=id.apps.example\nSSO_ALLOWED_DOMAINS=mz.co.kr\nE2E_ALLOW_MOCK=1\n');
   assert.equal(run([good], { MOCK_API: '1' }).status, 0);
   assert.equal(run([bad], GOOD).status, 1);
+});
+
+test('Google SSO: client id and allowed domains are required; bad entries fail; the exception list is optional', () => {
+  const without = (k) => { const e = { ...GOOD }; delete e[k]; return e; };
+  assert.ok(checkConsoleDeployEnv(without('GOOGLE_CLIENT_ID')).some((p) => p.startsWith('GOOGLE_CLIENT_ID')));
+  assert.ok(checkConsoleDeployEnv({ ...GOOD, GOOGLE_CLIENT_ID: '  ' }).some((p) => p.startsWith('GOOGLE_CLIENT_ID')));
+  for (const v of [undefined, '', ' , ']) {
+    const e = { ...GOOD };
+    if (v === undefined) delete e.SSO_ALLOWED_DOMAINS; else e.SSO_ALLOWED_DOMAINS = v;
+    assert.ok(checkConsoleDeployEnv(e).some((p) => p.startsWith('SSO_ALLOWED_DOMAINS')), String(v));
+  }
+  for (const v of ['*', '*.mz.co.kr', 'mz.co.kr,@mz.co.kr', 'mz co.kr', 'localhost']) {
+    assert.ok(checkConsoleDeployEnv({ ...GOOD, SSO_ALLOWED_DOMAINS: v }).some((p) => p.startsWith('SSO_ALLOWED_DOMAINS')), v);
+  }
+  assert.deepEqual(checkConsoleDeployEnv({ ...GOOD, SSO_ALLOWED_EMAILS: '' }), []);
+  assert.deepEqual(checkConsoleDeployEnv({ ...GOOD, SSO_ALLOWED_EMAILS: 'someone@example.com' }), []);
+  const bad = checkConsoleDeployEnv({ ...GOOD, SSO_ALLOWED_EMAILS: '*@example.com, someone@example.com' });
+  assert.ok(bad.some((p) => p.startsWith('SSO_ALLOWED_EMAILS')));
+  assert.ok(!bad.join(' ').includes('example.com'), 'no value is echoed');
 });

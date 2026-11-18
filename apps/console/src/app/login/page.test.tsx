@@ -27,3 +27,25 @@ describe("LoginPage notice", () => {
     }
   });
 });
+
+describe("LoginPage Google sign-in", () => {
+  it("not configured: the button is disabled, with a calm note", async () => {
+    vi.stubEnv("GOOGLE_CLIENT_ID", "");
+    const html = await render({});
+    expect(html).not.toContain('data-testid="sign-in-google"');
+    expect(html).toMatch(/<button[^>]*disabled[^>]*>Sign in with Google/);
+    vi.unstubAllEnvs();
+  });
+  it("configured: a plain link to the start route (no script), carrying a safe next only", async () => {
+    vi.stubEnv("GOOGLE_CLIENT_ID", "id"); vi.stubEnv("GOOGLE_CLIENT_SECRET", "s"); vi.stubEnv("SSO_ALLOWED_DOMAINS", "mz.co.kr");
+    expect(await render({})).toContain('href="/auth/google/start"');
+    expect(await render({ next: "/incidents" })).toContain('href="/auth/google/start?next=%2Fincidents"');
+    expect(await render({ next: "//evil.example" })).not.toContain("evil");
+    expect(await render({})).not.toContain("<script");
+    vi.unstubAllEnvs();
+  });
+  it("?sso= shows one fixed calm line per key, nothing else", async () => {
+    for (const k of ["refused", "failed", "unavailable"]) expect(await render({ sso: k })).toContain('data-testid="login-sso-notice"');
+    for (const k of ["x", "<b>", "__proto__", "constructor"]) expect(await render({ sso: k })).not.toContain("login-sso-notice");
+  });
+});
