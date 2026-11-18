@@ -5,6 +5,8 @@ import type {
   RespondersResponse, RotationSummary, StaffSummary, ResponderWriteOptions, RespondersWriteResult, UndoResult,
   CustomerStatusChange, CustomerStatusInput, CustomerStatusResponse, Offboarding, OffboardStepKey,
   Digest, LegalHold, PurgeLog, RevealChannel, RevealResult, ContactRevealEntry, ContactRevealQuery,
+  CustomerRecord, ProjectRecord, ServiceRecord, AccountRecord, AccountStatus, NewAccountInput, AccountCapabilities, ContactRecord, NewContactInput,
+  VerifyContactInput, VerifyContactResult, VerifyBulkResult, VerifyPeek, VerifyDone,
 } from "./types";
 
 export class ApiError extends Error {
@@ -103,6 +105,34 @@ export interface ConsoleApi {
   listContactReveals(q?: ContactRevealQuery): Promise<Paginated<ContactRevealEntry>>;
   /** GET /digests/latest (MSP staff; a portal user gets 404) */
   getLatestDigest(): Promise<Digest>;
+
+  /* ---- Customer onboarding (API-CONTRACT 8.4, #62, #69) ---- */
+  /** POST /customers (ADMIN). 409 ALREADY_EXISTS (`details.existingCustomerId` for a name), 422 VALIDATION_FAILED for a public mail login domain. */
+  createCustomer(body: { name: string; loginDomains?: string[] }): Promise<CustomerRecord>;
+  getCustomer(customerId: string): Promise<CustomerRecord>;
+  listProjects(customerId: string): Promise<ProjectRecord[]>;
+  createProject(customerId: string, body: { name: string }): Promise<ProjectRecord>;
+  listServices(projectId: string): Promise<ServiceRecord[]>;
+  createService(projectId: string, body: { name: string }): Promise<ServiceRecord>;
+  /** GET /customers/{id}/accounts. The ExternalId is in it for an ADMIN. */
+  listAccounts(customerId: string): Promise<AccountRecord[]>;
+  createAccount(customerId: string, body: NewAccountInput): Promise<AccountRecord>;
+  /** PATCH /accounts/{id}: capability toggles (the server adds or removes the role ARN) */
+  patchAccount(accountId: string, body: Partial<AccountCapabilities>): Promise<AccountRecord>;
+  /** POST /accounts/{id}/check -> 202 { commandId }. 429 RATE_LIMITED (`retryAfterSec`), 503 COMMANDS_UNAVAILABLE, 409 ACCOUNT_DISABLED. */
+  checkAccount(accountId: string): Promise<{ commandId: string }>;
+  getAccountStatus(accountId: string): Promise<AccountStatus>;
+  /** GET /contacts?kind=CUSTOMER&customerId= */
+  listContacts(q: { customerId: string; needsAction?: boolean }): Promise<{ items: ContactRecord[]; nextCursor: string | null }>;
+  createContact(body: NewContactInput): Promise<ContactRecord>;
+  /** POST /contacts/{id}/verify. link: 202 LINK_SENT, 503 VERIFICATION_UNAVAILABLE / NOT_CONFIGURED when nothing can send; manual: 200 (ADMIN). */
+  verifyContact(contactId: string, body: VerifyContactInput): Promise<VerifyContactResult>;
+  /** POST /contacts/verify-bulk with `{ contactIds }` */
+  verifyBulk(contactIds: string[]): Promise<VerifyBulkResult>;
+  /** Public, no session. GET /verify/{token}: no side effect. 404 = unknown, used, expired or malformed (all the same). */
+  peekVerify(token: string): Promise<VerifyPeek>;
+  /** Public. POST /verify/{token} consumes the token once. */
+  confirmVerify(token: string): Promise<VerifyDone>;
 }
 
 /** Empty params are dropped (known-bugs 9-6). */
@@ -187,5 +217,22 @@ export function createHttpApi(opts: { baseUrl: string; fetch?: typeof fetch; hea
     revealContact: (id, body) => call("POST", `/contacts/${enc(id)}/reveal`, body),
     listContactReveals: (q = {}) => call("GET", "/contact-reveals" + toQuery({ ...q })),
     getLatestDigest: () => call("GET", "/digests/latest"),
+    createCustomer: (body) => call("POST", "/customers", body),
+    getCustomer: (id) => call("GET", `/customers/${enc(id)}`),
+    listProjects: async (id) => (await call<{ items: ProjectRecord[] }>("GET", `/customers/${enc(id)}/projects`)).items,
+    createProject: (id, body) => call("POST", `/customers/${enc(id)}/projects`, body),
+    listServices: async (id) => (await call<{ items: ServiceRecord[] }>("GET", `/projects/${enc(id)}/services`)).items,
+    createService: (id, body) => call("POST", `/projects/${enc(id)}/services`, body),
+    listAccounts: async (id) => (await call<{ items: AccountRecord[] }>("GET", `/customers/${enc(id)}/accounts`)).items,
+    createAccount: (id, body) => call("POST", `/customers/${enc(id)}/accounts`, body),
+    patchAccount: (id, body) => call("PATCH", `/accounts/${enc(id)}`, body),
+    checkAccount: (id) => call("POST", `/accounts/${enc(id)}/check`, {}),
+    getAccountStatus: (id) => call("GET", `/accounts/${enc(id)}/status`),
+    listContacts: (q) => call("GET", "/contacts" + toQuery({ kind: "CUSTOMER", customerId: q.customerId, needsAction: q.needsAction ? true : undefined })),
+    createContact: (body) => call("POST", "/contacts", { kind: "CUSTOMER", ...body }),
+    verifyContact: (id, body) => call("POST", `/contacts/${enc(id)}/verify`, body),
+    verifyBulk: (contactIds) => call("POST", "/contacts/verify-bulk", { contactIds }),
+    peekVerify: (token) => call("GET", `/verify/${enc(token)}`),
+    confirmVerify: (token) => call("POST", `/verify/${enc(token)}`, {}),
   };
 }

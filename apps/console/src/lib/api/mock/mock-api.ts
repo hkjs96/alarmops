@@ -9,6 +9,7 @@ import { createPagingApi, directoryOf, hasOwnSteps, healthOf } from "./paging-mo
 import { createStatusApi, createStatusStore, type StatusStore } from "./status-mock";
 import { createRevealApi, createRevealStore, type RevealStore } from "./reveal-mock";
 import { createRetentionApi, createRetentionStore, type RetentionStore } from "./retention-mock";
+import { createOnboardingApi, createOnboardingStore, type OnboardingStore } from "./onboarding-mock";
 
 interface Store {
   customers: FxCustomer[];
@@ -19,6 +20,7 @@ interface Store {
   customerStatus: StatusStore;
   reveals: RevealStore;
   retention: RetentionStore;
+  onboarding: OnboardingStore;
 }
 
 export interface MockUser { id: string; contactId: string; name: string; email: string; role: Role; kind?: "INTERNAL" | "CUSTOMER" }
@@ -38,9 +40,10 @@ const RANK: Record<Role, number> = { VIEWER: 0, OPERATOR: 1, ADMIN: 2 };
 
 /** `customers: 34` adds the 20 extra customers of the mockup's "34 customers" toggle. */
 export function createStore(opts: { customers?: 14 | 34 } = {}): Store {
-  const customers = opts.customers === 34 ? customers34 : customers14;
+  // a copy: onboarding adds customers, projects and services to it, and the fixtures are shared by every store
+  const customers = structuredClone(opts.customers === 34 ? customers34 : customers14);
   return {
-    customers, paging: createPaging(customers), customerStatus: createStatusStore(), reveals: createRevealStore(customers), retention: createRetentionStore(),
+    customers, paging: createPaging(customers), customerStatus: createStatusStore(), reveals: createRevealStore(customers), retention: createRetentionStore(), onboarding: createOnboardingStore(),
     incidents: structuredClone([...fx.openIncidents, ...fx.resolvedIncidents, ...fx.suppressedIncidents]),
     timelines: structuredClone(fx.timelines),
     undo: new Map(),
@@ -153,11 +156,17 @@ export function createMockApi(store: Store = createStore(), clock: () => number 
     err: (status, code, message, details) => new ApiError(status, code, message, `req_mock_${++reqSeq}`, details),
   });
 
+  const onboardingApi = createOnboardingApi({
+    store: store.onboarding, customers: store.customers, paging: store.paging, me: ME, need, portal: ME.kind === "CUSTOMER", clock: () => Date.now(),
+    err: (status, code, message, details) => new ApiError(status, code, message, `req_mock_${++reqSeq}`, details),
+  });
+
   return {
     ...pagingApi,
     ...revealApi,
     ...statusApi,
     ...retentionApi,
+    ...onboardingApi,
     async me() { return { id: ME.id, name: ME.name, email: ME.email, role: ME.role, ...(ME.kind ? { kind: ME.kind } : {}) }; },
     async listIncidents(q = {}) {
       const scope = scopeOf(q);
