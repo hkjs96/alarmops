@@ -279,7 +279,13 @@ test('(a) engine: every statement of pg_repository.py runs', async () => {
     [ID, ID, ID, ID + 'seed']);
   assert.equal(created.length, 1);
   // the approval is the console's (a person in Slack, D-07): the owner stands in for it here
-  await owner.query(`UPDATE "RemediationRequest" SET status = 'EXECUTING', "decidedBy" = $1, "decidedAt" = now() WHERE id = $1`, [ID]);
+  // (migration 0007 allows only PENDING_APPROVAL -> APPROVED here; the engine then moves APPROVED -> EXECUTING itself)
+  await owner.query(`UPDATE "RemediationRequest" SET status = 'APPROVED', "decidedBy" = $1, "decidedAt" = now() WHERE id = $1`, [ID]);
+  const started = await q(
+    `UPDATE "RemediationRequest" SET status = 'EXECUTING'::"RemediationStatus", result = COALESCE(NULL::jsonb, result), version = version + 1,
+       "executedAt" = CASE WHEN 'EXECUTING' IN ('SUCCEEDED','FAILED') THEN now() ELSE "executedAt" END
+     WHERE id = $1 AND "customerId" = $2 AND status = 'APPROVED'::"RemediationStatus"`, [ID, ID]);
+  assert.equal(started.rowCount, 1);
   await rows('SELECT * FROM "RemediationRequest" WHERE id = $1', [ID]);
   await rows('SELECT * FROM "RemediationRequest" WHERE id = $1 AND "customerId" = $2', [ID, ID]);
   const moved = await q(
