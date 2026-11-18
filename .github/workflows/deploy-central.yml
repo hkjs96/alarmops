@@ -183,7 +183,7 @@ jobs:
           for v in ROLE PROVIDER TEAM PROJECT; do
             if [ -z "${!v}" ]; then echo "::error::Environment variable for $v is not set in the central environment"; exit 1; fi
           done
-      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ vars.CENTRAL_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
@@ -300,7 +300,7 @@ jobs:
           [ -n "$EXPECTED" ] || { echo "::error::build did not output a manifest checksum"; exit 1; }
           [ "$(sha256sum "$m/MANIFEST.sha256" | cut -d' ' -f1)" = "$EXPECTED" ] || { echo "::error::manifest artifact does not match the build job output"; exit 1; }
           (cd "$m" && sha256sum -c MANIFEST.sha256 >/dev/null)
-      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ vars.CENTRAL_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
