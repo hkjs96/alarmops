@@ -154,75 +154,190 @@
 
 화면별 설명은 `docs/SETUP-SUPABASE.md` 9단계에 있다.
 
-### 2-2. 회사 PC `.env` 채우기 (10분)
+### 2-2. 회사 PC `.env` 채우기 (15분)
 
 - [ ] 회사 PC `.env`에 `DATABASE_URL`/`DIRECT_URL` (SETUP-SUPABASE 7단계) → 허브에 "채웠다"고만 알림
 
-1. 저장소 루트에서 Git Bash를 열고 `.env`를 만든다.
-   ```bash
-   cp .env.example .env
-   ```
-2. `.env`를 VS Code나 메모장으로 열어 아래 값을 넣는다.
+모든 명령은 **Git Bash**에서 실행한다. 값은 채팅·이슈·PR에 붙여 넣지 않는다. 끝나면 허브에 "채웠다"고만 말한다.
 
-   | 키 | 값 |
-   |---|---|
-   | `DATABASE_URL` | 비밀번호 관리자에 저장해 둔 pooled 주소(포트 6543, 끝이 `?pgbouncer=true&connection_limit=1`) |
-   | `DIRECT_URL` | 비밀번호 관리자에 저장해 둔 session 주소(포트 5432) |
-   | `SESSION_SECRET` | 아무 글자 32자 이상(개발용. 운영 값과 다르게) |
+#### 0) 먼저 확인: 작업 폴더가 OneDrive와 동기화되는지
 
-3. 저장하고, 허브에는 "채웠다"고만 말한다.
+회사 PC는 바탕화면(`Desktop`)이 OneDrive와 동기화되는 경우가 많다. 그러면 `.env`에 들어가는 DB 비밀번호가 OneDrive에도 올라간다.
 
-> **주의** 값을 채팅·이슈·PR에 붙여 넣지 않는다. 에이전트는 `.env`를 읽지 못한다.
+- 동기화 중인지 보는 법: 파일 탐색기에서 바탕화면 폴더 경로가 `C:\Users\<사용자명>\OneDrive - …\Desktop`처럼 보이거나, 폴더에 구름 모양 표시가 있다.
+- 동기화 중이면 `C:\workspace`처럼 동기화되지 않는 곳에 둔다. 아래 명령의 경로만 바꾸면 된다.
+- 동기화되지 않으면 `C:\Users\<사용자명>\Desktop\workspace`를 그대로 써도 된다.
+
+> **주의** 이미 동기화 폴더에 `.env`를 만들었다면, 저장소를 동기화되지 않는 곳으로 옮기고 Supabase에서 DB 비밀번호를 바꾼다(`docs/SETUP-SUPABASE.md` 8단계).
+
+#### 1) 프로젝트 폴더로 가기
+
+Git Bash에서는 `C:\`가 `/c/`로 바뀐다.
+
+```bash
+cd /c/Users/<사용자명>/Desktop/workspace
+```
+
+- 이미 `alarmops` 폴더가 있으면 들어가서 최신으로 받는다.
+  ```bash
+  cd alarmops && git checkout main && git pull
+  ```
+- 없으면 먼저 받는다.
+  ```bash
+  git clone https://github.com/hkjs96/alarmops.git && cd alarmops
+  ```
+- 확인: `ls`에 `package.json`, `apps`, `docs`가 보이면 저장소 루트다.
+
+#### 2) `.env` 파일 만들기
+
+```bash
+cp .env.example .env
+```
+
+- 확인: `ls -a`에 `.env`가 보인다.
+- `.env`는 Git에 올라가지 않게 막혀 있다. 아래 명령이 `.gitignore`가 들어간 줄을 출력하면 정상이다.
+  ```bash
+  git check-ignore -v .env
+  ```
+
+#### 3) 넣을 값 준비하기
+
+| 키 | 값 | 어디서 |
+|---|---|---|
+| `DATABASE_URL` | Transaction pooler 주소(포트 6543) + 끝에 `?pgbouncer=true&connection_limit=1` | 비밀번호 관리자(SETUP-SUPABASE 3단계) |
+| `DIRECT_URL` | Session pooler 주소(포트 5432) | 비밀번호 관리자 |
+| `SESSION_SECRET` | 32자 이상 임의 값(개발용. 운영 값과 다르게) | 아래 명령 |
+
+비밀번호 관리자에 저장해 둔 주소가 없으면 다시 만든다.
+
+1. Supabase 대시보드에서 `alarmops-dev` 프로젝트를 연다.
+2. 위쪽의 **Connect** 버튼을 누른다.
+3. **Transaction pooler** 주소(포트 `6543`)를 복사하고, 끝에 `?pgbouncer=true&connection_limit=1`을 붙인다. 이것이 `DATABASE_URL`이다.
+4. **Session pooler** 주소(포트 `5432`)를 복사한다. 이것이 `DIRECT_URL`이다.
+5. 두 주소 모두 `[YOUR-PASSWORD]` 자리에 DB 비밀번호를 넣는다.
+
+`SESSION_SECRET`은 아래 명령이 출력한 한 줄을 그대로 쓴다.
+
+```bash
+openssl rand -base64 48
+```
+
+#### 4) `.env`에 값 넣기
+
+```bash
+code .env
+```
+
+VS Code가 열리지 않으면 `notepad .env`로 연다. 아래 세 줄을 찾아 `=` 뒤에 값을 넣고 저장한다.
+
+```
+DATABASE_URL=postgresql://postgres.<프로젝트ID>:<비밀번호>@aws-0-ap-northeast-2.pooler.supabase.com:6543/postgres?pgbouncer=true&connection_limit=1
+DIRECT_URL=postgresql://postgres.<프로젝트ID>:<비밀번호>@aws-0-ap-northeast-2.pooler.supabase.com:5432/postgres
+SESSION_SECRET=<3)에서 나온 한 줄>
+```
+
+- 값 앞뒤에 따옴표나 공백을 넣지 않는다. 나머지 줄은 그대로 둔다.
+- 확인: 아래 명령이 `DATABASE_URL`, `DIRECT_URL`, `SESSION_SECRET` 세 이름만 출력한다(값은 나오지 않는다).
+  ```bash
+  grep -oE '^(DATABASE_URL|DIRECT_URL|SESSION_SECRET)=.' .env | cut -d= -f1
+  ```
+
+#### 5) 허브에 알리기
+
+허브에 **"채웠다"**고만 말한다.
+
+> **주의** 에이전트는 `.env`를 읽지 못한다. 값은 사람이 직접 넣는다.
 
 ### 2-3. 실제 DB로 콘솔 띄워 보기 (15분)
 
 - [ ] 회사 PC에서 실제 DB로 콘솔 확인
 
-모든 명령은 **저장소 루트**에서 **Git Bash**로 실행한다. Node 20 이상이 필요하다.
+모든 명령은 **저장소 루트**에서 **Git Bash**로 실행한다. Node 20.6 이상이 필요하다(`node -v`로 확인).
 
-1. 패키지를 설치한다. 처음 한 번, 그리고 main을 새로 받은 뒤에 한다.
-   ```bash
-   npm ci
-   ```
-2. 개발 DB에 seed(데모 데이터)를 넣는다.
-   ```bash
-   node --env-file=.env --import tsx db/prisma/seed.ts
-   ```
-   - 들어가는 것: 데모 고객 2곳, 데모 직원 3명(admin·operator·viewer), 열린 인시던트 3건.
-   - 확인: 오류 없이 끝난다. 여러 번 실행해도 데이터가 중복되지 않는다.
-   - `DATABASE_URL is not set.`이 나오면 `.env`가 비어 있거나 루트가 아닌 곳에서 실행한 것이다.
+#### 0) 먼저: 개발 DB에 새 마이그레이션이 적용됐는지
 
-   > **참고** seed는 가짜 이름·가짜 번호만 넣는다. 운영 환경(`NODE_ENV=production`)에서는 실행을 거부한다.
-3. 콘솔을 **실제 DB 모드**로 띄운다.
-   ```bash
-   MOCK_API= LIVE_DEV_LOGIN=1 DATABASE_POOLER=transaction node --env-file=.env node_modules/next/dist/bin/next dev apps/console -p 3107
-   ```
-   - `MOCK_API=`(빈 값): 가짜 데이터 모드를 끈다. `.env`에 `MOCK_API=1`이 있어도 이 값이 이긴다.
-   - `LIVE_DEV_LOGIN=1`: 개발용 로그인 주소를 연다. `next dev`에서만 동작한다.
-   - `DATABASE_POOLER=transaction`: 6543 포트(pooled 주소)로 붙을 때 필요하다.
-   - 확인: 터미널에 `Ready`가 나온다. 이 창은 닫지 않는다.
+`db/prisma/migrations`가 바뀐 PR이 main에 병합되면 `dev-db` 워크플로가 자동으로 시작되고 **승인을 기다린다**. 승인 전에는 새 테이블·칸이 개발 DB에 없어 콘솔이 500을 낸다.
 
-   > **주의** `npm run dev -w @alarmops/console`은 쓰지 않는다. 그 명령은 항상 가짜 데이터 모드(`MOCK_API=1`)로 뜬다.
-4. 브라우저에서 개발용 로그인 주소를 연다.
-   ```
-   http://localhost:3107/auth/dev-login?as=admin
-   ```
-   - `as=` 뒤에는 `admin`, `operator`, `viewer` 중 하나를 쓴다. seed가 만든 데모 직원으로 로그인된다.
-5. 화면을 확인한다.
-   - Incidents에 열린 인시던트 3건이 보인다.
-   - 고객 목록에 `Acme Demo`, `Birch Retail`이 보인다.
-   - 인시던트 하나를 Acknowledge 하고 새로 고침해도 상태가 남아 있다. DB에 저장됐다는 뜻이다.
-6. 끝나면 터미널에서 `Ctrl+C`로 콘솔을 끈다.
+1. GitHub 저장소 → **Actions** → 왼쪽 **dev-db**.
+2. 맨 위 실행이 "Waiting"이면 열어서 **Review deployments** → `dev` 체크 → **Approve and deploy**.
+3. 확인: 초록 체크. 로그에 적용된 마이그레이션 이름이 나온다.
 
-막혔을 때:
+#### 1) 최신 코드 받기와 설치
+
+```bash
+git checkout main && git pull
+```
+
+```bash
+npm ci
+```
+
+- 처음, 그리고 main을 새로 받을 때마다 한다. 처음에는 몇 분 걸린다.
+
+#### 2) 데모 데이터(seed) 넣기
+
+```bash
+node --env-file=.env --import tsx db/prisma/seed.ts
+```
+
+- 들어가는 것: 데모 고객 2곳, 데모 직원 3명(admin·operator·viewer), 열린 인시던트 3건.
+- 확인: 오류 없이 끝난다. 여러 번 실행해도 데이터가 중복되지 않는다.
+- `DATABASE_URL is not set.`이 나오면 `.env`가 비어 있거나 루트가 아닌 곳에서 실행한 것이다.
+
+> **참고** seed는 가짜 이름·가짜 번호만 넣는다. 운영 환경(`NODE_ENV=production`)에서는 실행을 거부한다.
+
+#### 3) 콘솔을 실제 DB 모드로 띄우기
+
+```bash
+MOCK_API= LIVE_DEV_LOGIN=1 DATABASE_POOLER=transaction DATABASE_POOL_MAX=10 node --env-file=.env node_modules/next/dist/bin/next dev apps/console -p 3107
+```
+
+- `MOCK_API=`(빈 값): 가짜 데이터 모드를 끈다. `.env`에 `MOCK_API=1`이 있어도 이 값이 이긴다.
+- `LIVE_DEV_LOGIN=1`: 개발용 로그인 주소를 연다. `next dev`에서만 동작한다.
+- `DATABASE_POOLER=transaction`: 6543 포트(pooled 주소)로 붙을 때 필요하다.
+- `DATABASE_POOL_MAX=10`: DB 연결 수. 기본값 3은 운영(Vercel)용이라, 회사 PC의 개발 모드에서는 연결을 기다리다 500이 날 수 있다(11/18 실제로 겪음).
+- 확인: 터미널에 `Ready`가 나온다. 이 창은 닫지 않는다.
+
+> **주의** `npm run dev -w @alarmops/console`은 쓰지 않는다. 그 명령은 항상 가짜 데이터 모드(`MOCK_API=1`)로 뜬다.
+
+#### 4) 브라우저에서 로그인
+
+```
+http://localhost:3107/auth/dev-login?as=admin
+```
+
+- `as=` 뒤에는 `admin`, `operator`, `viewer` 중 하나를 쓴다. seed가 만든 데모 직원으로 로그인된다.
+
+#### 5) 확인할 것
+
+- Incidents에 열린 인시던트 3건이 보인다.
+- 왼쪽 고객 목록과 Customers에 `Acme Demo`, `Birch Retail`이 보인다.
+- 인시던트 하나를 Acknowledge 하고 새로 고침해도 상태가 남아 있다. DB에 저장됐다는 뜻이다.
+- Settings › Users에 데모 직원 3명이 보인다.
+
+끝나면 터미널에서 `Ctrl+C`로 콘솔을 끈다.
+
+#### 무시해도 되는 메시지
+
+| 메시지 | 이유 |
+|---|---|
+| 터미널의 `[webpack.cache.PackFileCacheStrategy] Skipped not serializable cache item …` | 개발 모드 빌드 캐시 경고. 동작과 무관 |
+| 브라우저의 `A tree hydrated but some attributes … didn't match` (`nonce="…"` vs `nonce=""`) | 브라우저가 보안상 `nonce` 값을 숨겨서 생기는 개발 모드 경고. 스크립트는 정상 실행되고 운영 빌드에서는 나오지 않는다 |
+
+#### 막혔을 때
+
+오류 문구만 허브에 보낸다. 주소나 비밀번호가 섞여 있으면 그 부분은 지운다.
 
 | 증상 | 원인과 할 일 |
 |---|---|
-| 로그인 주소가 500, 터미널에 `ECONNREFUSED`나 timeout | DB에 붙지 못했다. `.env`의 `DATABASE_URL`을 다시 확인한다 |
+| 500, 터미널에 `column "…" does not exist` | 0)의 `dev-db` 승인이 안 됐다 |
+| 500, 터미널에 `[api] unhandled … error: 'Error'` (`code=` 없음) | DB 연결을 기다리다 시간 초과. `DATABASE_POOL_MAX=10`을 붙였는지 본다. 그래도 나면 허브에 그 줄을 보낸다 |
+| 500, 터미널에 `ECONNREFUSED`나 timeout | DB에 붙지 못했다. `.env`의 `DATABASE_URL`을 다시 확인한다 |
 | 화면에 `NOT_CONFIGURED`(503) | `DATABASE_URL`이 비어 있다. 2-2를 다시 본다 |
 | 로그인 주소가 404 | `LIVE_DEV_LOGIN=1`이 빠졌거나 `.env`에 `SESSION_SECRET`이 없다 |
-| 인시던트가 0건 | 2번 seed를 건너뛰었다 |
-| `Module not found` | 1번 `npm ci`를 다시 실행한다 |
+| 인시던트가 0건 | 2) seed를 건너뛰었다 |
+| `Module not found` | 1) `npm ci`를 다시 실행한다 |
+| `--env-file` 오류 | Node가 20.6보다 낮다. Node를 올린다 |
 
 ## 3단계 — 콘솔 배포(Vercel) [사람 + 에이전트]
 
