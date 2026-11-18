@@ -71,6 +71,28 @@ export async function signInUserByEmail(email: string): Promise<{ id: string; na
   return auth && normalizeAuth(auth) ? { id, name: auth.name ?? id, kind: auth.kind } : null;
 }
 
+export type SignInUserRow = { id: string; name: string; kind: "INTERNAL" | "CUSTOMER" };
+
+/**
+ * Login-domain enrolment (D-55 b). Asked by the callback only when no user row exists and the address is outside the
+ * staff fence. `enrolPortalUserByDomain` creates or returns the VIEWER portal user of the ONE active customer that
+ * registered the domain; the result then goes through the same `sessionPrincipal` check as every sign-in (ACTIVE,
+ * customer not suspended). `refused` carries the store's reason code (never an address).
+ */
+export async function enrolByLoginDomain(email: string): Promise<{ user: SignInUserRow } | { refused: string }> {
+  const out = await backend().repo.enrolPortalUserByDomain(email, new Date());
+  if ("refused" in out) return { refused: out.refused };
+  if (out.user.kind !== "CUSTOMER" || out.user.status !== "ACTIVE") return { refused: "NOT_ACTIVE_PORTAL_USER" };
+  const auth = await authForSession(out.user.id);
+  if (!auth || !normalizeAuth(auth) || auth.kind !== "CUSTOMER") return { refused: "PRINCIPAL_REFUSED" };
+  return { user: { id: out.user.id, name: auth.name ?? out.user.id, kind: "CUSTOMER" } };
+}
+
+/** Binds the verified Google `sub` to the user (first sign-in) or compares it (later ones). */
+export const bindGoogleAccount = (userId: string, sub: string) => backend().repo.bindGoogleSub(userId, sub, new Date());
+/** Stamps `User.lastLoginAt` (no audit row). */
+export const touchLastLogin = (userId: string) => backend().repo.touchLastLogin(userId, new Date());
+
 /** Hand one request to packages/api. `auth` is the server-side AuthContext (or null = not signed in). */
 export async function handleApi(req: Omit<ApiRequest, "requestId" | "auth">, auth: AuthContext | null): Promise<ApiResponse> {
   return backend().api.handle({ ...req, auth, requestId: `req_${randomUUID().replace(/-/g, "").slice(0, 20)}` });
