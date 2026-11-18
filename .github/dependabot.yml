@@ -10,3 +10,8 @@ updates:
     directory: /tools/vercel-cli
     schedule:
       interval: weekly
+  # The pinned Markdown renderer used by tools/docs-site/build.mjs (docs → one HTML page).
+  - package-ecosystem: npm
+    directory: /tools/docs-site
+    schedule:
+      interval: weekly

@@ -1,12 +1,20 @@
 # UI
 
-상태: 콘솔 셸 확정(11/10, D-26 개정 · D-33 · D-34 · D-35). 화면 명세·시안 초안은 11/9. 이전 시안: https://claude.ai/artifact/GyYbFEdEHd1eahQ8D9zeFf
+이 문서는 콘솔 UI 문서의 입구다. 어떤 문서·시안이 기준인지, 디자인 시스템과 셸의 핵심 규칙, 화면 목록과 명세 작성 형식을 모았다.
+
+- 상태: 콘솔 셸 확정(11/10, D-26 개정 · D-33 · D-34 · D-35).
+- 화면 명세·시안 초안은 11/9.
+- 이전 시안: https://claude.ai/artifact/GyYbFEdEHd1eahQ8D9zeFf
+
+## 문서와 시안
 
 - 정보 구조: `IA.md`
 - **셸 규칙(기준 문서 하나): `screens/shell-scope.md`** — 메뉴 + 트리 + 필터 줄 + 패널, 읽기 먼저, 저장·확인, 주소, 반응형
 - 화면 명세: `screens/*.md` (화면 16개 + 셸 1개)
 - 시안
-  - `mockups/scope-variants.html` 변형 E(기본 피커 = 트리 · 시트) — **확정된 셸.** 화면 5개(Incidents, Monitoring, Call order, People, Maintenance) + Settings MSP defaults. A~D와 E-1·E-3은 비교 기록
+  - `mockups/scope-variants.html` 변형 E(기본 피커 = 트리 · 시트) — **확정된 셸.**
+    - 화면 5개(Incidents, Monitoring, Call order, People, Maintenance) + Settings MSP defaults.
+    - A~D와 E-1·E-3은 비교 기록
   - `mockups/index.html` (탭 14개) — 셸은 옛것(상단 고객 선택기, On-call 메뉴). **화면 내용만 유효**
   - 캡처 `mockups/shots/`, 범위 시안 캡처 `mockups/shots/scope/`
 - 검사: `mockups/checks/scope-e-check.py` (Playwright)
@@ -24,19 +32,44 @@
 - 글꼴: 본문 Pretendard(alert-hub와 같음, 셀프호스팅), 수치·코드 Space Mono
 
 ## 셸 (D-26 개정, D-33)
+
+메뉴와 범위:
+
 - 메뉴: Incidents / Monitoring / Call order / People / Maintenance / Customers + 오른쪽 Settings. 상단 고객 선택기는 없다
-- 왼쪽 트리(Customer › Project › Service)가 범위를 고르는 유일한 장치다. 본문을 덮지 않고 밀어낸다. 휴대폰은 단계 시트
+- 왼쪽 트리(Customer › Project › Service)가 범위를 고르는 유일한 장치다.
+  - 본문을 덮지 않고 밀어낸다.
+  - 휴대폰은 단계 시트
 - 메뉴 아래 필터 줄: `Showing: …` + 필터가 걸렸을 때 `Outside this view: …`
 - 목록의 기본 보기는 All customers, `My customers`는 필터(D-34)
+
+편집과 저장:
+
 - 연락처는 가린 값이 기본. 전체 값은 그 고객의 Responder만, MSP ADMIN은 사유를 적는 비상 열람만(D-35)
-- 편집은 범위가 정해진 패널에서만. 읽기 전용으로 열리고 `Edit`를 눌러야 편집. 저장 버튼에 전체 경로
+- 편집은 범위가 정해진 패널에서만.
+  - 읽기 전용으로 열리고 `Edit`를 눌러야 편집.
+  - 저장 버튼에 전체 경로
 - 저장 확인은 서비스 둘 이상이거나 범위를 넓혔을 때만. 서비스 하나는 바로 적용 + `Undo`
-- 주소: 목록 필터 `?customer=<slug>&project=<slug>&service=<slug>` · `?mine=1`, 패널 `/c/<customer>[/<project>[/<service>]]/<screen>`, 인시던트 패널 `/c/<customer>/<project>/<service>/incident/<id>`(미매핑 `/c/-/incident/<id>`). 기준: `screens/shell-scope.md` §7
-- 반응형: 1408px 이상은 트리가 패널 옆에 남고, 그 아래는 패널을 열 때 띠로 접히고, 760px 이하는 시트
-- Call order 하위: Call order · Rotations · Templates. Integrations는 Customers 고객 관리 탭 + Settings › Integrations(전체). Reports는 PoC 이후
+
+주소와 반응형:
+
+- 주소 (기준: `screens/shell-scope.md` §7)
+  - 목록 필터 `?customer=<slug>&project=<slug>&service=<slug>` · `?mine=1`
+  - 패널 `/c/<customer>[/<project>[/<service>]]/<screen>`
+  - 인시던트 패널 `/c/<customer>/<project>/<service>/incident/<id>`(미매핑 `/c/-/incident/<id>`)
+- 반응형
+  - 1408px 이상은 트리가 패널 옆에 남고,
+  - 그 아래는 패널을 열 때 띠로 접히고,
+  - 760px 이하는 시트
+
+메뉴 배치:
+
+- Call order 하위: Call order · Rotations · Templates.
+- Integrations는 Customers 고객 관리 탭 + Settings › Integrations(전체).
+- Reports는 PoC 이후
 - Customers는 상단 메뉴, Rotations·Templates는 Call order의 탭으로 확정(D-26, 11/10)
 
 ## 화면 목록
+
 "시안" 열: E = `scope-variants.html` 변형 E(새 셸), I = `index.html`(옛 셸, 내용 유효).
 
 | 화면 | 명세 | 시안 | 주 페르소나 |
@@ -61,4 +94,15 @@
 | 억제 이유 패널 | `incident-detail.md` Suppression 탭 | 탭 자리만 | 민재 |
 
 ## 화면 명세 작성 형식
-화면마다 `docs/ui/screens/<화면>.md`: 목적, 페르소나 시나리오 번호, **셸·범위(트리 필터 적용 여부, 패널, 읽기 화면, 저장 버튼 문구)**, 보이는 데이터(API-CONTRACT 항목), 동작, 빈/로딩/오류 상태, 휴대폰 폭 동작. 셸 공통 규칙은 `shell-scope.md`에만 적는다.
+
+화면마다 `docs/ui/screens/<화면>.md`에 다음을 적는다.
+
+1. 목적
+2. 페르소나 시나리오 번호
+3. **셸·범위(트리 필터 적용 여부, 패널, 읽기 화면, 저장 버튼 문구)**
+4. 보이는 데이터(API-CONTRACT 항목)
+5. 동작
+6. 빈/로딩/오류 상태
+7. 휴대폰 폭 동작
+
+> **참고** 셸 공통 규칙은 `shell-scope.md`에만 적는다.
