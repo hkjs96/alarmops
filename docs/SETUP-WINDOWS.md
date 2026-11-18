@@ -71,7 +71,7 @@ aws configure --profile dev       # 개발 계정만. 기본 리전 ap-northeast
 
 ## 5. 저장소
 
-> **참고** 이미 만들어진 저장소를 회사 PC에 받아 `.env`를 채우고 실제 DB로 콘솔을 띄우는 순서(OneDrive 확인 포함)는 `docs/GO-LIVE.md`의 2-2·2-3에 있다. 아래는 저장소를 처음 만들 때의 기록이다.
+> **참고** 이미 만들어진 저장소를 회사 PC에 받아 `.env`를 채우고 실제 DB로 콘솔을 띄우는 순서는 `docs/GO-LIVE.md`의 2-2·2-3에 있다. 아래는 저장소를 처음 만들 때의 기록이다.
 
 ```powershell
 cd C:\work
