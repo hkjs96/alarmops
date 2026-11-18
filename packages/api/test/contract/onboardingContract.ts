@@ -6,7 +6,7 @@
 import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 import { T0 } from '../../../core/test/world.js';
-import { MemoryApiStore, type AuthContext, type VerificationSender } from '../../src/index.js';
+import { loggablePath, MemoryApiStore, type AuthContext, type VerificationSender } from '../../src/index.js';
 import { USERS, body, wire } from '../helpers.js';
 import { cworld, type CWorld, type MakeApiFixture } from './apiContract.js';
 
@@ -418,6 +418,12 @@ export function onboardingContract(make: MakeApiFixture): void {
     });
   });
 
+  it('the log never sees a verification token in a path', () => {
+    expect(loggablePath('/api/v1/verify/vf_abc?x=1')).toBe('/api/v1/verify/[token]?x=1');
+    expect(loggablePath('/verify/vf_abc')).toBe('/verify/[token]');
+    expect(loggablePath('/contacts/ct_1')).toBe('/contacts/ct_1');
+  });
+
   describe('B-1: staff contacts belong to every customer they serve', () => {
     it('a customer-scoped ADMIN lists only the staff who serve its customers, read-only; every write on any staff contact is a 404 and changes nothing', async () => {
       await open();
@@ -491,7 +497,10 @@ export function onboardingContract(make: MakeApiFixture): void {
       expect(JSON.stringify(await w.fx.audits())).not.toContain(token);
       expect((await listed(admin, { q: 'ji-ho' }))[0].channels.EMAIL).toMatchObject({ status: 'LINK_SENT' });
 
-      const used = await w.call(null, 'GET', `/verify/${token}`);
+      // GET only looks (mail scanners open links): nothing is consumed
+      for (let i = 0; i < 2; i++) expect(body(await w.call(null, 'GET', `/verify/${token}`))).toEqual({ pending: true, channel: 'EMAIL' });
+      expect((await listed(admin, { q: 'ji-ho' }))[0].channels.EMAIL.status).toBe('LINK_SENT');
+      const used = await w.call(null, 'POST', `/verify/${token}`);
       expect(used.status).toBe(200);
       expect(body(used)).toEqual({ verified: true, channel: 'EMAIL' });
       expect(used.headers['referrer-policy']).toBe('no-referrer');
@@ -502,9 +511,10 @@ export function onboardingContract(make: MakeApiFixture): void {
       const audit = (await w.fx.audits()).find((a) => a.action === 'contact.verify.link_used')!;
       expect(audit).toMatchObject({ actorType: 'CONTACT', actorId: c.id, targetId: c.id, customerId: 'cus_mirae' });
 
-      const again = await w.call(null, 'GET', `/verify/${token}`, { requestId: 'req_same' });
-      const garbage = await w.call(null, 'GET', '/verify/not-a-token', { requestId: 'req_same' });
-      const unknown = await w.call(null, 'GET', `/verify/vf_${'A'.repeat(43)}`, { requestId: 'req_same' });
+      const again = await w.call(null, 'POST', `/verify/${token}`, { requestId: 'req_same' });
+      expect((await w.call(null, 'GET', `/verify/${token}`)).status).toBe(404); // used: not pending any more
+      const garbage = await w.call(null, 'POST', '/verify/not-a-token', { requestId: 'req_same' });
+      const unknown = await w.call(null, 'POST', `/verify/vf_${'A'.repeat(43)}`, { requestId: 'req_same' });
       expect(again.status).toBe(404);
       expect(wire(again)).toBe(wire(garbage));
       expect(wire(again)).toBe(wire(unknown));
@@ -518,6 +528,7 @@ export function onboardingContract(make: MakeApiFixture): void {
       expect(to).toBe('+821055556666');
       w.sim.now = new Date(w.sim.now.getTime() + 24 * 3600_000 + 1000);
       expect((await w.call(null, 'GET', `/verify/${token}`)).status).toBe(404);
+      expect((await w.call(null, 'POST', `/verify/${token}`)).status).toBe(404);
       expect((await listed(admin, { q: 'ji-ho' }))[0].channels.SMS.status).toBe('EXPIRED');
     });
 
@@ -527,7 +538,7 @@ export function onboardingContract(make: MakeApiFixture): void {
       await w.call(admin, 'POST', `/contacts/${c.id}/verify`, { body: { channel: 'EMAIL', method: 'link' } });
       const { token } = sender.sent[0]!;
       await w.call(admin, 'PATCH', `/contacts/${c.id}`, { body: { email: 'other@mirae.example' } });
-      expect((await w.call(null, 'GET', `/verify/${token}`)).status).toBe(404);
+      expect((await w.call(null, 'POST', `/verify/${token}`)).status).toBe(404);
       expect((await listed(admin, { q: 'ji-ho' }))[0].channels.EMAIL.status).not.toBe('VERIFIED');
     });
 

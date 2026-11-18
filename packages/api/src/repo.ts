@@ -393,6 +393,8 @@ export interface ApiRepository {
    * becomes verified (via `link`); `audit` is written. null = unknown, used or expired (no difference).
    */
   takeVerification(tokenHash: string, now: Date, audit: AuditTemplate): Promise<VerificationTaken | null>;
+  /** Read-only: is a link with this hash pending (unused, not expired, contact active)? Changes nothing. */
+  peekVerification(tokenHash: string, now: Date): Promise<{ channel: VerifyChannelValue } | null>;
 
   // ── idempotency (API-CONTRACT §2 "멱등", 24h) ──
   getIdempotent(key: string, now: Date): Promise<IdempotentEntry | null>;

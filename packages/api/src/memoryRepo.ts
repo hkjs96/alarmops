@@ -509,6 +509,11 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     this.audits.push({ ...audit, customerId, targetId: contactId });
     return 'OK' as const;
   }
+  async peekVerification(tokenHash: string, now: Date) {
+    const v = this.verifications.get(tokenHash);
+    if (!v || v.via !== 'link' || v.usedAt || v.expiresAt.getTime() <= now.getTime() || !this.contacts.get(v.contactId)?.active) return null;
+    return { channel: v.channel };
+  }
   async takeVerification(tokenHash: string, now: Date, audit: AuditTemplate): Promise<VerificationTaken | null> {
     const v = this.verifications.get(tokenHash);
     if (!v || v.via !== 'link' || v.usedAt || v.expiresAt.getTime() <= now.getTime()) return null;

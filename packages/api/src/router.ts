@@ -15,7 +15,7 @@ import type { ApiRepository } from './repo.js';
 import { getScopeTree } from './scope.js';
 import { listContactReveals, revealContact } from './revealApi.js';
 import { createCustomer, listAccounts, createAccount, patchAccount, deleteAccount, checkAccount, getAccountStatus } from './onboardingApi.js';
-import { listContacts, createContact, patchContact, deleteContact, verifyContact, verifyBulk, useVerifyLink, type VerificationSender } from './contactsApi.js';
+import { listContacts, createContact, patchContact, deleteContact, verifyContact, verifyBulk, useVerifyLink, peekVerifyLink, type VerificationSender } from './contactsApi.js';
 import { deleteResponder, getMe, getOncallNow, getPagingHealth, getResponders, listRotations, listStaff, patchResponder, postResponder } from './peopleApi.js';
 
 export interface ApiDeps {
@@ -108,7 +108,8 @@ export const ROUTES: Route[] = [
   route('PATCH', '/contacts/:id', (r, d, p) => patchContact(r, d, p[0]!), () => false),
   route('DELETE', '/contacts/:id', (r, d, p) => deleteContact(r, d, p[0]!)),
   route('POST', '/contacts/:id/verify', (r, d, p) => verifyContact(r, d, p[0]!)),
-  route('GET', '/verify/:token', (r, d, p) => useVerifyLink(r, d, p[0]!), undefined, true),
+  route('GET', '/verify/:token', (r, d, p) => peekVerifyLink(r, d, p[0]!), undefined, true),
+  route('POST', '/verify/:token', (r, d, p) => useVerifyLink(r, d, p[0]!), () => false, true),
 ];
 
 function match(method: string, path: string): { route: Route; params: string[]; canonical: string } | null {
@@ -144,6 +145,9 @@ const stable = (v: unknown): string =>
     : v !== null && typeof v === 'object' ? `{${Object.keys(v as object).sort().map((k) => `${JSON.stringify(k)}:${stable((v as Record<string, unknown>)[k])}`).join(',')}}`
       : JSON.stringify(v) ?? 'null';
 
+/** `/verify/<token>` carries a credential in the path: it must never reach a log line. */
+export const loggablePath = (path: string): string => path.replace(/(\/verify\/)[^/?#]*/g, '$1[token]');
+
 export function createApi(deps: ApiDeps) {
   const inner = { repo: deps.repo, now: deps.now ?? (() => new Date()), config: strictApiConfig(deps.config), commands: deps.commands, retention: deps.retention, verification: deps.verification, log: deps.log };
   async function handle(req: ApiRequest): Promise<ApiResponse> {
@@ -178,7 +182,7 @@ export function createApi(deps: ApiDeps) {
       return res;
     } catch (err) {
       if (err instanceof ApiError) return errorResponse(err, req.requestId);
-      deps.log?.('error', 'unhandled', { requestId: req.requestId, path: req.path, error: errorTag(err) });
+      deps.log?.('error', 'unhandled', { requestId: req.requestId, path: loggablePath(req.path), error: errorTag(err) });
       return errorResponse(new ApiError(500, 'INTERNAL', 'Something went wrong.'), req.requestId);
     }
   }

@@ -921,6 +921,12 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
       return 'OK' as const;
     });
   }
+  async peekVerification(tokenHash: string, now: Date) {
+    const [v] = await this.sql.query(
+      `SELECT v."channel" FROM "ChannelVerification" v JOIN "Contact" c ON c."id" = v."contactId" WHERE v."tokenHash" = $1 AND v."via" = 'link' AND v."usedAt" IS NULL AND v."expiresAt" > $2::timestamptz AND c."active"`,
+      [tokenHash, iso(now)]);
+    return v ? { channel: v.channel as VerifyChannelValue } : null;
+  }
   async takeVerification(tokenHash: string, now: Date, audit: AuditTemplate): Promise<VerificationTaken | null> {
     return this.sql.transaction(async (tx) => {
       // single use: the UPDATE only matches an unused, unexpired link, so two clicks cannot both win

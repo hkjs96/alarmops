@@ -16,7 +16,7 @@
  * VERIFICATION_UNAVAILABLE before anything is written — no token is made for a message that cannot be sent.
  * Only the SHA-256 of a token is stored (ChannelVerification.tokenHash). The plaintext exists in the sender call only.
  */
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { verifiedAt } from '@alarmops/core';
 import { customerWide, requireAuth, requireRole, scopeOf, type AuthContext } from './auth.js';
 import { withoutUndefined, ApiError, decodeCursor, encodeCursor, invalid, isCleanId, isRecord, limitOf, notFound, ok, q, rateLimited, validation, type ApiRequest, type ApiResponse } from './http.js';
@@ -412,20 +412,28 @@ export async function verifyBulk(req: ApiRequest, deps: Deps): Promise<ApiRespon
   return ok({ sent, notSet, throttled, failed }, { 'cache-control': 'no-store' });
 }
 
+const deadLink = (): ApiError => new ApiError(404, 'NOT_FOUND', 'This link is invalid or has expired.');
+
 /**
- * GET /verify/{token}: no session. The token is looked up by its SHA-256 (the plaintext is not stored); unknown, used and
- * expired are the same 404. One use: `takeVerification` marks it used in the same transaction that verifies the channel.
- * The stored hash is compared with the computed one in constant time before anything is reported.
+ * GET /verify/{token}: SIDE-EFFECT FREE (mail scanners and link previews open links). Answers only whether the link is
+ * pending: `200 { pending: true, channel }`, else the one 404 (unknown, used, expired, malformed). Nothing is consumed.
+ */
+export async function peekVerifyLink(_req: ApiRequest, deps: Deps, token: string): Promise<ApiResponse> {
+  if (!TOKEN_RE.test(token)) throw deadLink();
+  const p = await deps.repo.peekVerification(hashToken(token), deps.now());
+  if (!p) throw deadLink();
+  return ok({ pending: true, channel: p.channel }, { 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' });
+}
+
+/**
+ * POST /verify/{token}: no session. A person pressed the confirm button on the console page. The token is looked up by its
+ * SHA-256 (the plaintext is not stored); one transaction marks it used (only if unused and unexpired), verifies the channel
+ * (via `link`) and writes the audit row. Unknown, used, expired and malformed are the same 404.
  */
 export async function useVerifyLink(req: ApiRequest, deps: Deps, token: string): Promise<ApiResponse> {
-  const dead = (): ApiError => new ApiError(404, 'NOT_FOUND', 'This link is invalid or has expired.');
-  if (!TOKEN_RE.test(token)) throw dead();
-  const hash = hashToken(token);
+  if (!TOKEN_RE.test(token)) throw deadLink();
   const now = deps.now();
-  const taken = await deps.repo.takeVerification(hash, now, { at: now, actorType: 'CONTACT', actorId: null, action: 'contact.verify.link_used', targetType: 'Contact', before: null, after: { via: 'link' }, requestId: req.requestId });
-  const a = Buffer.from(hash, 'utf8');
-  const bb = Buffer.from(taken?.tokenHash ?? '', 'utf8');
-  if (!taken || a.length !== bb.length || !timingSafeEqual(a, bb)) throw dead();
-  // `referrer-policy`: the page the user lands on must not pass this URL on.
+  const taken = await deps.repo.takeVerification(hashToken(token), now, { at: now, actorType: 'CONTACT', actorId: null, action: 'contact.verify.link_used', targetType: 'Contact', before: null, after: { via: 'link' }, requestId: req.requestId });
+  if (!taken) throw deadLink();
   return ok({ verified: true, channel: taken.channel }, { 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' });
 }
