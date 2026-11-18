@@ -565,6 +565,7 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 | version | int | 승인 이중 클릭 방지 |
 
 - UQ(customerId, resourceId, action) where status in (`PENDING_APPROVAL`,`APPROVED`,`EXECUTING`) — 같은 리소스에 동시 요청 하나.
+- **전이 가드(마이그레이션 `0007`, 트리거 `RemediationRequest_guard`, #69):** UPDATE로만 상태가 바뀌고, 허용되는 전이는 `PENDING_APPROVAL`→`APPROVED`·`REJECTED`·`EXPIRED`, `APPROVED`→`EXECUTING`·`EXPIRED`, `EXECUTING`→`SUCCEEDED`·`FAILED`뿐이다(`NOTIFIED`와 `REJECTED`·`EXPIRED`·`SUCCEEDED`·`FAILED`는 나가는 전이 없음). 따라서 거절·만료된 요청은 어떤 역할로도 승인·실행으로 되돌릴 수 없다. `decidedBy`·`decidedAt`·`decisionVia`는 한 번 채워지면 바뀌지 않는다(예외: Contact 삭제의 FK `SET NULL`이 `decidedBy`를 NULL로 만드는 것). INSERT는 가드하지 않는다(엔진은 `NOTIFIED`·`PENDING_APPROVAL`로만 만든다).
 
 ## 5. 온콜 · 에스컬레이션 (D-11, D-30·D-31 개정)
 
