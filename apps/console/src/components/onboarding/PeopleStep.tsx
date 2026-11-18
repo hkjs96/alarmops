@@ -103,7 +103,7 @@ export function PeopleStep({ customerId, customerName, contacts, onContacts, can
 
 function ContactItem({ c, canWrite, onChanged }: { c: ContactRecord; canWrite: boolean; onChanged: () => Promise<void> }) {
   const [busy, setBusy] = useState<string | null>(null);
-  const [msg, setMsg] = useState<{ tone: "ok" | "err" | "warn"; text: string } | null>(null);
+  const [msg, setMsg] = useState<{ tone: "ok" | "err" | "warn"; text: string; ch?: VerifyChannel } | null>(null);
   const [manual, setManual] = useState<VerifyChannel | null>(null);
   const [note, setNote] = useState("");
 
@@ -112,21 +112,21 @@ function ContactItem({ c, canWrite, onChanged }: { c: ContactRecord; canWrite: b
     const r = await callAction(() => verifyContactAction(c.id, ch, "link"));
     setBusy(null);
     if (!r.ok) {
-      if (r.code === "VERIFICATION_UNAVAILABLE" || r.code === "NOT_CONFIGURED") { setManual(ch); setMsg({ tone: "warn", text: onboardingError({ ...r, code: "VERIFICATION_UNAVAILABLE" }, "verify") }); return; }
-      setMsg({ tone: "err", text: onboardingError(r, "verify") });
+      if (r.code === "VERIFICATION_UNAVAILABLE" || r.code === "NOT_CONFIGURED") { setManual(ch); setMsg({ tone: "warn", ch, text: onboardingError({ ...r, code: "VERIFICATION_UNAVAILABLE" }, "verify") }); return; }
+      setMsg({ tone: "err", ch, text: onboardingError(r, "verify") });
       return;
     }
-    setMsg({ tone: "ok", text: `Link sent to ${c.name} by ${CHANNEL_NAME[ch]}. It expires ${r.data.expiresAt ? kstDateTime(r.data.expiresAt) : "in 24 hours"}.` });
+    setMsg({ tone: "ok", ch, text: `Link sent to ${c.name} by ${CHANNEL_NAME[ch]}. It expires ${r.data.expiresAt ? kstDateTime(r.data.expiresAt) : "in 24 hours"}.` });
     await onChanged();
   }
   async function markManual(ch: VerifyChannel) {
-    if (!note.trim()) { setMsg({ tone: "err", text: "Say how you checked it, for example “Confirmed by phone with the person”." }); return; }
+    if (note.trim().length < 5) { setMsg({ tone: "err", ch, text: "Say how you checked it, in at least 5 characters, for example “Confirmed by phone with the person”." }); return; }
     setBusy(ch); setMsg(null);
     const r = await callAction(() => verifyContactAction(c.id, ch, "manual", note));
     setBusy(null);
-    if (!r.ok) { setMsg({ tone: "err", text: onboardingError(r, "verify") }); return; }
+    if (!r.ok) { setMsg({ tone: "err", ch, text: onboardingError(r, "verify") }); return; }
     setManual(null); setNote("");
-    setMsg({ tone: "ok", text: `${CHANNEL_NAME[ch]} of ${c.name} marked as verified by hand. This is recorded with your name.` });
+    setMsg({ tone: "ok", ch, text: `${CHANNEL_NAME[ch]} of ${c.name} marked as verified by hand. This is recorded with your name.` });
     await onChanged();
   }
 
@@ -138,17 +138,21 @@ function ContactItem({ c, canWrite, onChanged }: { c: ContactRecord; canWrite: b
         const s = c.channels[ch];
         const st = CHANNEL_STATE[s.status];
         return (
-          <div key={ch} className="ob-verify" data-testid={`ch-${ch}`} data-status={s.status}>
+          <div key={ch}>
+          <div className="ob-verify" data-testid={`ch-${ch}`} data-status={s.status}>
             <span style={{ minWidth: 70 }}>{CHANNEL_NAME[ch]}</span>
             <StateChip tone={st.tone} label={st.label} testid={`ch-${ch}-state`} />
             {s.status === "LINK_SENT" && s.expiresAt ? <span className="sm mut">expires {kstDateTime(s.expiresAt)}</span> : null}
             {s.status === "VERIFIED" && s.via ? <span className="sm mut">{s.via.startsWith("admin:") ? "by hand" : "by link"}</span> : null}
             {s.status !== "VERIFIED" ? (
               <>
-                <button type="button" className="btn sm" data-testid={`send-${ch}`} disabled={!canWrite || busy !== null} onClick={() => { void link(ch); }}>{busy === ch ? "Sending…" : s.status === "LINK_SENT" ? `Send ${CHANNEL_NAME[ch]} link again` : s.status === "EXPIRED" ? `Send a new ${CHANNEL_NAME[ch]} link` : `Send ${CHANNEL_NAME[ch]} link`}</button>
-                <button type="button" className="btn sm" data-testid={`manual-${ch}`} disabled={!canWrite || busy !== null} aria-expanded={manual === ch} onClick={() => { setManual(manual === ch ? null : ch); setMsg(null); }}>Mark as verified by hand…</button>
+                <button type="button" className="btn ob-btn" data-testid={`send-${ch}`} disabled={!canWrite || busy !== null} onClick={() => { void link(ch); }}>{busy === ch ? "Sending…" : s.status === "LINK_SENT" ? `Send ${CHANNEL_NAME[ch]} link again` : s.status === "EXPIRED" ? `Send a new ${CHANNEL_NAME[ch]} link` : `Send ${CHANNEL_NAME[ch]} link`}</button>
+                <button type="button" className="btn ob-btn" data-testid={`manual-${ch}`} disabled={!canWrite || busy !== null} aria-expanded={manual === ch} onClick={() => { setManual(manual === ch ? null : ch); setMsg(null); }}>Mark as verified by hand…</button>
               </>
             ) : null}
+          </div>
+          {/* the answer to a press is shown right under the row that was pressed */}
+          {msg?.ch === ch ? <div role={msg.tone === "ok" ? "status" : "alert"} data-testid="contact-msg" className={msg.tone === "ok" ? "ob-info" : msg.tone === "warn" ? "ob-note" : "ob-err"} style={{ marginTop: 6 }}>{msg.text}</div> : null}
           </div>
         );
       })}
@@ -163,7 +167,6 @@ function ContactItem({ c, canWrite, onChanged }: { c: ContactRecord; canWrite: b
           </div>
         </div>
       ) : null}
-      <div role="status" data-testid="contact-msg">{msg ? <div className={msg.tone === "ok" ? "ob-info" : msg.tone === "warn" ? "ob-note" : "ob-err"}>{msg.text}</div> : null}</div>
     </li>
   );
 }

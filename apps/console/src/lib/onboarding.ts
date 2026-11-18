@@ -11,11 +11,11 @@ export const MAX_LOGIN_DOMAINS = 10;
 
 /** "mirae.example, pay.mirae.example" → a clean list. Syntax and count only: public mail domains are refused by the API (422), which the page words. */
 export function parseLoginDomains(text: string): { ok: true; domains: string[] } | { ok: false; message: string } {
-  const parts = text.split(/[\s,;]+/).map((p) => p.trim().toLowerCase().replace(/^@/, "")).filter(Boolean);
+  const parts = text.split(/[,;\n\r]+/).map((p) => p.trim().toLowerCase().replace(/^@/, "")).filter(Boolean);
   const domains = [...new Set(parts)];
   if (domains.length > MAX_LOGIN_DOMAINS) return { ok: false, message: `Use at most ${MAX_LOGIN_DOMAINS} login domains.` };
   const bad = domains.find((d) => !DOMAIN_RE.test(d));
-  if (bad) return { ok: false, message: `“${bad.slice(0, 60)}” is not a domain. Each login domain looks like example.com.` };
+  if (bad) return { ok: false, message: `“${bad.slice(0, 60)}” is not a domain. Each login domain looks like example.com; separate several with commas.` };
   return { ok: true, domains };
 }
 
@@ -50,7 +50,7 @@ export function onboardingError(f: Failure, what: OnboardingWhat, nowMs = Date.n
       if (what === "check") return `A check for this account was queued a moment ago. You can check again ${retry ?? "in about 30 seconds"}.`;
       if (what === "verify") return `A link was sent a moment ago. You can send another ${retry ?? "in about a minute"}.`;
       break;
-    case "COMMANDS_UNAVAILABLE": return "The check could not be queued: the command queue is not configured. Nothing was changed. Ask the platform team.";
+    case "COMMANDS_UNAVAILABLE": return "Connection checks are not available yet. Nothing was changed. Ask whoever manages the console’s deployment.";
     case "COMMAND_PUBLISH_FAILED": return "The check could not be queued. Try again in a moment.";
     case "ACCOUNT_DISABLED": return "This account is disabled, so its connection cannot be checked.";
     case "CUSTOMER_TERMINATED": return "This customer is terminated, so nothing can be added to it.";
@@ -117,9 +117,17 @@ export function connectionOf(s: AccountStatus | null): Connection {
   if (!s || s.disabled) return "NOT_CHECKED";
   const lines = roleLines(s);
   if (s.lastCheckedAt === null && s.firstEventAt === null) return "NOT_CHECKED";
-  if (lines.some((l) => l.tone === "fail")) return "FAILED";
+  // a failing OPTIONAL role does not make the connection fail: AlarmOps is connected, that role is not working
+  if (lines.some((l) => l.tone === "fail" && l.required)) return "FAILED";
   if (lines.filter((l) => l.required).every((l) => l.tone === "ok")) return "CONNECTED";
   return "PARTIAL";
+}
+/** The headline after a check: "Connected. 1 optional role is not working." rather than "Check failed." when only optional roles failed */
+export function checkHeadline(s: AccountStatus): string {
+  const c = connectionOf(s);
+  const optFail = roleLines(s).filter((l) => l.tone === "fail" && !l.required).length;
+  if (c === "CONNECTED" && optFail > 0) return `Connected. ${optFail} optional role${optFail === 1 ? " is" : "s are"} not working.`;
+  return `${CONNECTION_LABEL[c]}.`;
 }
 export const CONNECTION_LABEL: Record<Connection, string> = { CONNECTED: "Connected", PARTIAL: "Waiting for events", FAILED: "Check failed", NOT_CHECKED: "Not checked yet" };
 

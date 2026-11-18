@@ -39,7 +39,7 @@ export async function ConnectionCard({ customerId, slug, name }: { customerId: s
             })}
           </ul>
         )}
-      <p className="sm mut" style={{ marginBottom: 0, marginTop: 12 }}><Link href={`${base}?step=people`}>People and verification</Link> · <Link href={`${base}?step=organization`}>Organization</Link></p>
+      <p className="sm mut ob-links" style={{ marginBottom: 0, marginTop: 12 }}><Link href={`${base}?step=people`}>People and verification</Link><span aria-hidden="true">·</span><Link href={`${base}?step=organization`}>Organization</Link></p>
     </Card>
   );
 }

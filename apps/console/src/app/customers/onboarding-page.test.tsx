@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { ConsoleApi } from "@/lib/api/client";
 import { MOCK_USERS, createMockApi, createStore } from "@/lib/api/mock/mock-api";
 
 const state = vi.hoisted(() => ({ sub: "usr-haeun" }));

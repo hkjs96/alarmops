@@ -6,7 +6,7 @@ import { callAction } from "@/lib/session-ended";
 import { accountStatusAction, checkAccountAction, setCapabilityAction } from "@/app/customers/onboarding-actions";
 import { pollUntilChecked, POLL_INTERVAL_MS, POLL_MAX } from "@/lib/onboarding-poll";
 import {
-  CAP_KEY, CONNECTION_LABEL, REMEDIATOR_WARNING, ROLE_ABOUT, ROLE_NAME, ROLE_OFF, connectionOf, kitMissing, kitParams, kitText, SOURCE_WORDS, onboardingError, roleLines, type CentralValues, type RoleLine,
+  CAP_KEY, checkHeadline, REMEDIATOR_WARNING, ROLE_ABOUT, ROLE_NAME, ROLE_OFF, kitMissing, kitParams, kitText, SOURCE_WORDS, onboardingError, roleLines, type CentralValues, type RoleLine,
 } from "@/lib/onboarding";
 import { kstDateTime } from "@/lib/format";
 import { CopyValue, ErrorLine, StateChip } from "./ui";
@@ -66,7 +66,7 @@ export function ConnectionPanel({ customerName, account, status, central, canWri
   const blank: AccountStatus = { accountId: account.id, customerId: account.customerId, awsAccountId: account.awsAccountId, lastCheckedAt: null, firstEventAt: null, lastEventAt: null, stackVersion: null, disabled: false,
     roles: (["reader", "eventForwarder", "alarmWriter", "tagWriter", "remediator"] as const).map((key) => ({ key, required: key === "reader" || key === "eventForwarder", enabled: key === "reader" || key === "eventForwarder" || account[CAP_KEY[key as "alarmWriter"]], status: "UNKNOWN" as const, basis: "CHECK" as const })) };
   const lines: RoleLine[] = status || checking ? roleLines(status ?? blank) : [];
-  const conn = connectionOf(status);
+  
   const failing = lines.filter((l) => l.tone === "fail");
 
   return (
@@ -151,12 +151,12 @@ export function ConnectionPanel({ customerName, account, status, central, canWri
         <div id="check-status" role="status" data-testid="check-status" className="sm" style={{ marginTop: 10, minHeight: 20 }} data-phase={phase}>
           {phase === "queuing" ? "Queuing the check…" : phase === "checking" ? `Checking… this usually takes a few seconds (up to ${Math.round((POLL_INTERVAL_MS * POLL_MAX) / 1000)} s).`
             : phase === "timeout" ? "The check was queued but no result has arrived yet. Wait a little and check again, or ask the platform team if the alarm engine is running."
-            : status?.lastCheckedAt ? `${CONNECTION_LABEL[conn]}.` : ""}
+            : status?.lastCheckedAt ? checkHeadline(status) : ""}
         </div>
         {checkErr ? <ErrorLine testid="check-error">{checkErr}</ErrorLine> : null}
 
         {status || checking ? (
-          <table className="rr-table" data-testid="role-table" style={{ marginTop: 12 }}>
+          <table className="rr-table ob-roles" data-testid="role-table" style={{ marginTop: 12 }}>
             <caption className="sr-only">Result per role for account {account.awsAccountId}</caption>
             <thead><tr><th scope="col">Role</th><th scope="col">Needed</th><th scope="col">Result</th><th scope="col">Next step</th></tr></thead>
             <tbody>

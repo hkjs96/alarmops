@@ -1,11 +1,11 @@
 "use client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Card } from "@alarmops/design-system";
 import type { AccountRecord, AccountStatus, ContactRecord } from "@/lib/api/types";
 import { CONNECTION_LABEL, connectionOf, type CentralValues } from "@/lib/onboarding";
-import { Stepper, type StepKey } from "./Stepper";
+import { Stepper, STEPS, type StepKey } from "./Stepper";
 import { AccountStep, OrganizationStep, type OrgNode } from "./OrgAndAccountSteps";
 import { ConnectionPanel } from "./ConnectionPanel";
 import { PeopleStep } from "./PeopleStep";
@@ -28,6 +28,12 @@ export function OnboardingWizard(p: {
   const [contacts, setContacts] = useState(p.initialContacts);
   const [sel, setSel] = useState<string | null>(p.initialAccounts[0]?.id ?? null);
   const name = p.customer.name;
+  const heading = useRef<HTMLHeadingElement>(null);
+  const [announce, setAnnounce] = useState("");
+  const stepNo = STEPS.findIndex((s) => s.key === step) + 1;
+  const stepLabel = STEPS[stepNo - 1]!.label;
+  // after every step change (and on arrival from the customer step) the focus is on the step heading and the step is announced
+  useEffect(() => { heading.current?.focus({ preventScroll: true }); setAnnounce(`Step ${stepNo} of ${STEPS.length}: ${stepLabel}`); }, [step, stepNo, stepLabel]);
 
   const setStep = (k: StepKey) => { setStepState(k); router.replace(`/customers/${p.customer.slug}/onboarding?step=${k}`, { scroll: false }); };
   const account = accounts.find((a) => a.id === sel) ?? null;
@@ -36,7 +42,8 @@ export function OnboardingWizard(p: {
   return (
     <div className="stack">
       <Stepper current={step} onSelect={setStep} enabled={() => true} />
-      <h2 className="sr-only" tabIndex={-1}>{name}</h2>
+      <h2 className="sr-only" tabIndex={-1} ref={heading} data-testid="step-heading">{name} · Step {stepNo} of {STEPS.length}: {stepLabel}</h2>
+      <div className="sr-only" role="status" data-testid="step-announce">{announce}</div>
       {step === "organization" ? (
         <OrganizationStep customerId={p.customer.id} customerName={name} org={org} onOrg={setOrg} onNext={() => setStep("account")} canWrite={p.canWrite} />
       ) : null}

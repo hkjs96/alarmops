@@ -678,7 +678,17 @@ div.co-refused { margin-top: 6px; }
 .pub { max-width: 520px; margin: 0 auto; padding: 48px 20px; }
 .pub h1 { font-size: 24px; margin: 0 0 12px; }
 .pub p { font-size: 16px; line-height: 1.5; }
+/* buttons of the wizard: not the 32px of dense tables (Copy, Send, Mark, Save are the main actions here) */
+.ob-btn, .ob-form .btn, .ob-actions .btn, .ob-item .btn, .ob-verify .btn { min-height: 38px; }
+/* the role table keeps its words whole at desktop widths */
+@media (min-width: 761px) {
+  .ob-roles th:nth-child(-n+2), .ob-roles td:nth-child(-n+2) { white-space: nowrap; }
+  .ob-roles th, .ob-roles td { padding-right: 20px; }
+}
 @media (max-width: 760px) {
+  .ob-btn, .ob-form .btn, .ob-actions .btn, .ob-item .btn, .ob-verify .btn { min-height: 44px; }
+  .ph .desc a, .ob-links a, .ob-err a, .ob-info a { display: inline-flex; align-items: center; min-height: 44px; }
+  .ob-links { display: flex; flex-wrap: wrap; gap: 0 16px; }
   .ob-kit li { grid-template-columns: 1fr; }
   .ob-kit .btn { justify-self: start; }
   .ob-steps li, .ob-step { width: 100%; }

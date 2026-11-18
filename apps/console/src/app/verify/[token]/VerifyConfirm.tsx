@@ -19,10 +19,11 @@ export function VerifyConfirm({ token, channel }: { token: string; channel: Veri
     }
   }
   if (state === "done") return <p role="status" data-testid="verify-done"><b>Thank you. Your {WHAT[channel]} is confirmed.</b> You can close this page.</p>;
-  if (state === "expired") return <p role="status" data-testid="verify-expired">This link has expired or was already used. If you still need to confirm, ask the person who invited you to send a new one.</p>;
+  if (state === "expired") return <p role="status" data-testid="verify-expired">This link has expired or was already used. If you still need to confirm, ask the person who sent you this link to send a new one.</p>;
   return (
     <div data-testid="verify-pending">
-      <p>You were asked to confirm your {WHAT[channel]} for AlarmOps alerts. Press the button to confirm that it is yours.</p>
+      <p>Someone at an organisation that uses AlarmOps asked you to confirm your {WHAT[channel]}. After you confirm, AlarmOps can use this {WHAT[channel]} to reach you about alerts for your organisation.</p>
+      <p>Press the button only if it is yours.</p>
       <p className="sm mut">If you did not expect this, close the page. Nothing changes unless you press the button.</p>
       <button type="button" className="btn pri lg" style={{ minHeight: 44 }} data-testid="verify-confirm" disabled={state === "busy"} onClick={() => { void confirm(); }}>{state === "busy" ? "Confirming…" : "Confirm"}</button>
       <div role="alert" data-testid="verify-error" style={{ marginTop: 12 }}>{state === "error" ? "We could not confirm this just now. Nothing was changed. Please try again." : null}</div>

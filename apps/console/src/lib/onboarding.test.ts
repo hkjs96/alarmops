@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConsoleApi } from "./api/client";
 import { MOCK_USERS, createMockApi, createStore } from "./api/mock/mock-api";
 import { ApiError } from "./api/client";
-import { parseLoginDomains, kitMissing, kitParams, kitText, roleLine, connectionOf, onboardingError, retryTime } from "./onboarding";
+import { checkHeadline, parseLoginDomains, kitMissing, kitParams, kitText, roleLine, connectionOf, onboardingError, retryTime } from "./onboarding";
 import { pollUntilChecked } from "./onboarding-poll";
 import { isVerifyToken, loggablePath, VERIFY_PATH } from "./verify-token";
 import { verificationSecret } from "./server/wiring";
@@ -61,6 +61,17 @@ describe("pure helpers", () => {
     expect(loggablePath("/verify/vf_secret?x=1")).toBe("/verify/[token]?x=1");
     expect(VERIFY_PATH.test("/verify/vf_abc")).toBe(true);
     expect(VERIFY_PATH.test("/verify/vf_abc/extra")).toBe(false);
+  });
+  it("login domains are split on commas and lines, and the whole entry is judged; the check headline names optional failures", () => {
+    expect(parseLoginDomains("a.example\nb.example")).toEqual({ ok: true, domains: ["a.example", "b.example"] });
+    expect(parseLoginDomains("not a domain!")).toMatchObject({ ok: false, message: expect.stringContaining("“not a domain!” is not a domain") });
+    const roles = (alarm: "OK" | "DENIED", reader: "OK" | "DENIED" = "OK") => ({ accountId: "a", customerId: "c", awsAccountId: "1", lastCheckedAt: "2026-11-18T00:00:00Z", firstEventAt: "2026-11-18T00:00:00Z", lastEventAt: null, stackVersion: null, disabled: false,
+      roles: [{ key: "reader" as const, required: true, enabled: true, status: reader, basis: "CHECK" as const }, { key: "eventForwarder" as const, required: true, enabled: true, status: "OK" as const, basis: "EVENTS" as const },
+        { key: "alarmWriter" as const, required: false, enabled: true, status: alarm, basis: "CHECK" as const }] });
+    expect(checkHeadline(roles("DENIED"))).toBe("Connected. 1 optional role is not working.");
+    expect(checkHeadline(roles("OK"))).toBe("Connected.");
+    expect(checkHeadline(roles("OK", "DENIED"))).toBe("Check failed.");
+    expect(onboardingError({ code: "COMMANDS_UNAVAILABLE", message: "" }, "check")).not.toMatch(/queue/i);
   });
   it("central values: valid ARNs are used, invalid ones are missing (one warning, never the value), the kit counts what is missing", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});

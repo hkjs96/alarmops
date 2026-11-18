@@ -30,7 +30,7 @@ export default async function Page({ params }: { params: Promise<{ token: string
       <h1 tabIndex={-1}>Confirm your contact</h1>
       {channel ? <VerifyConfirm token={token} channel={channel} />
         : unavailable ? <p role="status" data-testid="verify-unavailable">We cannot check this link right now. Please try again in a few minutes.</p>
-        : <p role="status" data-testid="verify-expired">This link has expired or was already used. If you still need to confirm, ask the person who invited you to send a new one.</p>}
+        : <p role="status" data-testid="verify-expired">This link has expired or was already used. If you still need to confirm, ask the person who sent you this link to send a new one.</p>}
     </div>
   );
 }

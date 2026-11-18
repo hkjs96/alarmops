@@ -102,7 +102,12 @@ test.describe("wizard, 1440", () => {
     await expect(page.getByTestId("last-checked")).toContainText("Last checked 2026-");
 
     // people: add, masked values, e-mail link, SMS has no sender (503) -> manual
+    // words stay whole in the table at 1440
+    for (const k of ["reader", "eventForwarder", "alarmWriter", "remediator"]) expect(await page.getByTestId(`role-${k}`).locator("td").first().evaluate((el) => getComputedStyle(el).whiteSpace), k).toBe("nowrap");
     await page.getByTestId("conn-next").click();
+    // after a step change the focus is on the step heading, and the step is announced
+    await expect(page.getByTestId("step-heading")).toBeFocused();
+    await expect(page.getByTestId("step-announce")).toHaveText("Step 5 of 5: People");
     await page.getByTestId("ct-name").fill("Yuna Seo");
     await page.getByTestId("ct-email").fill("yuna.seo@oak.example");
     await page.getByTestId("ct-phone").fill("010-1234-4821");
@@ -228,7 +233,7 @@ test.describe("wizard, 1440", () => {
     await expect(page.getByTestId("role-alarmWriter")).toContainText("Enable AlarmWriter".replace(" ", "") + "=true");
     await expect(page.getByTestId("role-tagWriter")).toContainText("OK");
     await expect(page.getByTestId("fail-summary")).toContainText("1 role failed");
-    await expect(page.getByTestId("check-status")).toContainText("Check failed");
+    await expect(page.getByTestId("check-status")).toContainText("Connected. 1 optional role is not working.");
 
     // a second check inside 30 s: 429, said as a time, no countdown
     await page.getByTestId("check-btn").click();
@@ -264,7 +269,7 @@ test.describe("wizard, 1440", () => {
     await page.getByTestId("ob-step-account").click();
     await addAccount(page, "123456789503");
     await page.getByTestId("check-btn").click();
-    await expect(page.getByTestId("check-error")).toContainText("command queue is not configured");
+    await expect(page.getByTestId("check-error")).toContainText("Connection checks are not available yet");
     await expect(page.getByTestId("check-btn")).toBeEnabled();
   });
 });
@@ -337,6 +342,7 @@ test.describe("phone 390", () => {
     await noHScroll(page, "account");
     await addAccount(page, "123456789412", ["alarmWriter", "remediator"]);
     await noHScroll(page, "kit");
+    expect((await page.getByRole("link", { name: "Back to the customer" }).boundingBox())!.height, "Back link").toBeGreaterThanOrEqual(44);
     await checkNow(page);
     await expect(page.getByTestId("check-btn")).toHaveText("Check connection", { timeout: 20_000 });
     await noHScroll(page, "check result");
