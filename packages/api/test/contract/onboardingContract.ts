@@ -418,6 +418,44 @@ export function onboardingContract(make: MakeApiFixture): void {
     });
   });
 
+  describe('B-1: staff contacts belong to every customer they serve', () => {
+    it('a customer-scoped ADMIN lists only the staff who serve its customers, read-only; every write on any staff contact is a 404 and changes nothing', async () => {
+      await open();
+      const staff = await listed(admin, { kind: 'INTERNAL' });
+      const id = (n: string) => staff.find((x) => x.name === n).id;
+      const seen = await w.call(HANBIT_ADMIN, 'GET', '/contacts', { query: { kind: 'INTERNAL' } });
+      expect(body(seen).items.map((x: any) => x.name)).toEqual(['Minjae Lee']); // Mirae's engineers are not visible
+      expect(JSON.stringify(seen.body)).not.toMatch(/Haeun|Junho/);
+      const before = JSON.stringify([await listed(admin, { kind: 'INTERNAL' }), (await w.fx.audits()).length]);
+      for (const name of ['Haeun Kim', 'Minjae Lee']) { // another customer's engineer, and one who serves this customer (read-only)
+        const calls = [
+          await w.call(HANBIT_ADMIN, 'PATCH', `/contacts/${id(name)}`, { body: { phone: '+821000000001' }, requestId: 'req_same' }),
+          await w.call(HANBIT_ADMIN, 'POST', `/contacts/${id(name)}/verify`, { body: { channel: 'SMS', method: 'manual' }, requestId: 'req_same' }),
+          await w.call(HANBIT_ADMIN, 'POST', `/contacts/${id(name)}/verify`, { body: { channel: 'EMAIL', method: 'link' }, requestId: 'req_same' }),
+          await w.call(HANBIT_ADMIN, 'DELETE', `/contacts/${id(name)}`, { requestId: 'req_same' }),
+          await w.call(HANBIT_ADMIN, 'POST', '/contacts/verify-bulk', { body: { contactIds: [id(name)] }, requestId: 'req_same' }),
+        ];
+        const miss = await w.call(HANBIT_ADMIN, 'PATCH', '/contacts/ct_nope', { body: { phone: '+821000000001' }, requestId: 'req_same' });
+        for (const c of calls) { expect([name, c.status]).toEqual([name, 404]); }
+        expect(wire(calls[0]!)).toBe(wire(miss));
+      }
+      expect((await w.call(HANBIT_ADMIN, 'POST', '/contacts', { body: { kind: 'INTERNAL', name: 'Fake Engineer', email: 'f@x.example' } })).status).toBe(404);
+      const bulk = await w.call(HANBIT_ADMIN, 'POST', '/contacts/verify-bulk', { body: { filter: 'needsAction', kind: 'INTERNAL' } });
+      expect(sender.sent).toEqual([]);
+      expect(bulk.status === 200 ? body(bulk).sent : 0).toBe(0);
+      expect(JSON.stringify([await listed(admin, { kind: 'INTERNAL' }), (await w.fx.audits()).length])).toBe(before);
+      expect((await w.fx.audits()).filter((a) => a.action.startsWith('contact.'))).toEqual([]);
+    });
+
+    it('an all-customer ADMIN’s staff-contact changes are audited with actor and contact id (customerId stays null)', async () => {
+      await open();
+      const lead = body(await w.call(admin, 'POST', '/contacts', { body: { kind: 'INTERNAL', name: 'Lead', email: 'lead@msp.example' } }));
+      await w.call(admin, 'PATCH', `/contacts/${lead.id}`, { body: { name: 'Lead 2' } });
+      const a = (await w.fx.audits()).filter((x) => x.action.startsWith('contact.'));
+      expect(a.map((x) => [x.action, x.customerId, x.actorId, x.targetId])).toEqual([['contact.create', null, 'usr_minjae', lead.id], ['contact.update', null, 'usr_minjae', lead.id]]);
+    });
+  });
+
   // ───────────────────────────── verification ─────────────────────────────
   describe('verification', () => {
     it('TODAY (no sender configured): a link request is 503 VERIFICATION_UNAVAILABLE; no token, no row, no state change; manual still works', async () => {

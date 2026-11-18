@@ -219,7 +219,7 @@ export async function createContact(req: ApiRequest, deps: Deps): Promise<ApiRes
   if (!v.email && !v.phone && !v.slackUserId) throw invalid('email', 'An e-mail, a phone number or a Slack id is required.');
   let customerId: string | null = null;
   if (kind === 'INTERNAL') {
-    if (!adminStaff(a)) throw notFound(); // a portal user: no such thing as creating MSP staff
+    if (!adminStaff(a) || a.ids !== '*') throw notFound(); // portal users and staff with a narrower range: no such thing as creating MSP staff (B-1)
     if (b.customerId !== undefined && b.customerId !== null) throw invalid('customerId', 'An MSP staff contact has no customer.');
   } else {
     const wanted = b.customerId === undefined || b.customerId === null ? (a.ids !== '*' && a.ids.length === 1 ? a.ids[0]! : undefined) : b.customerId;
@@ -253,7 +253,7 @@ async function viewOf(deps: Deps, a: Actor, c: ContactRow) {
 
 export async function patchContact(req: ApiRequest, deps: Deps, contactId: string): Promise<ApiResponse> {
   const a = await actorOf(req, deps, true);
-  const found = await deps.repo.findContact(a.ids, a.staff, contactId);
+  const found = await deps.repo.findContact(a.ids, a.staff, contactId, true);
   if (!found) throw notFound();
   await requireGrant(deps, a, found.contact.customerId);
   if (!isRecord(req.body)) throw invalid('body', 'Body must be a JSON object.');
@@ -282,7 +282,7 @@ export async function patchContact(req: ApiRequest, deps: Deps, contactId: strin
 
 export async function deleteContact(req: ApiRequest, deps: Deps, contactId: string): Promise<ApiResponse> {
   const a = await actorOf(req, deps, true);
-  const found = await deps.repo.findContact(a.ids, a.staff, contactId);
+  const found = await deps.repo.findContact(a.ids, a.staff, contactId, true);
   if (!found) throw notFound();
   await requireGrant(deps, a, found.contact.customerId);
   const c = found.contact;
@@ -321,7 +321,7 @@ const senderMissing = (): ApiError => new ApiError(503, 'VERIFICATION_UNAVAILABL
 
 export async function verifyContact(req: ApiRequest, deps: Deps, contactId: string): Promise<ApiResponse> {
   const a = await actorOf(req, deps, true);
-  const found = await deps.repo.findContact(a.ids, a.staff, contactId);
+  const found = await deps.repo.findContact(a.ids, a.staff, contactId, true);
   if (!found) throw notFound();
   await requireGrant(deps, a, found.contact.customerId);
   const c = found.contact;
@@ -378,7 +378,7 @@ export async function verifyBulk(req: ApiRequest, deps: Deps): Promise<ApiRespon
     if (b.contactIds.some((i) => typeof i !== 'string' || !isCleanId(i))) throw invalid('contactIds', 'contactIds must be contact ids.');
     targets = [];
     for (const id of new Set(b.contactIds as string[])) {
-      const f = await deps.repo.findContact(a.ids, a.staff, id);
+      const f = await deps.repo.findContact(a.ids, a.staff, id, true);
       if (!f) throw notFound(); // one id out of range = the one 404 for the whole request, nothing sent
       targets.push(f.contact);
     }
@@ -390,7 +390,7 @@ export async function verifyBulk(req: ApiRequest, deps: Deps): Promise<ApiRespon
       if (typeof b.customerId !== 'string' || !isCleanId(b.customerId) || !inIds(a.ids, b.customerId)) throw notFound();
       ids = [b.customerId];
     }
-    const world = await deps.repo.contactsWorld(ids, a.staff && b.kind !== 'CUSTOMER' && b.customerId === undefined);
+    const world = await deps.repo.contactsWorld(ids, a.staff && a.ids === '*' && b.kind !== 'CUSTOMER' && b.customerId === undefined);
     const x = await viewCtx(deps, a, world);
     targets = world.contacts.filter((c) => (!b.kind || c.kind === b.kind) && contactView(c, x).needsAction);
     if (targets.length > BULK_MAX) throw invalid('filter', `More than ${BULK_MAX} contacts match. Narrow it down.`);
@@ -408,7 +408,7 @@ export async function verifyBulk(req: ApiRequest, deps: Deps): Promise<ApiRespon
       if (r === 'SENT') sent++; else if (r === 'COOLING') throttled++; else failed++;
     }
   }
-  await deps.repo.recordAudit({ at: now, customerId: null, actorType: 'USER', actorId: auth.userId, action: 'contact.verify.bulk', targetType: 'Contact', targetId: 'bulk', before: null, after: { contacts: targets.length, sent, throttled, failed, notSet: notSet.length }, requestId: req.requestId });
+  if (targets.length) await deps.repo.recordAudit({ at: now, customerId: null, actorType: 'USER', actorId: auth.userId, action: 'contact.verify.bulk', targetType: 'Contact', targetId: 'bulk', before: null, after: { contacts: targets.length, sent, throttled, failed, notSet: notSet.length }, requestId: req.requestId });
   return ok({ sent, notSet, throttled, failed }, { 'cache-control': 'no-store' });
 }
 

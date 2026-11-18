@@ -804,7 +804,7 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
     const all = customerIds === '*';
     const ids = all ? [] : [...customerIds];
     const [cRows, sRows, rRows] = await Promise.all([
-      this.sql.query(`SELECT ${CONTACT_COLS} FROM "Contact" WHERE ("kind" = 'CUSTOMER' AND ($1::boolean OR "customerId" = ANY($2::text[]))) OR ("kind" = 'INTERNAL' AND $3::boolean) ORDER BY "name", "id"`, [all, ids, staff]),
+      this.sql.query(`SELECT ${CONTACT_COLS} FROM "Contact" WHERE ("kind" = 'CUSTOMER' AND ($1::boolean OR "customerId" = ANY($2::text[]))) OR ("kind" = 'INTERNAL' AND $3::boolean AND ($1::boolean OR EXISTS (SELECT 1 FROM "Responder" r WHERE r."contactId" = "Contact"."id" AND r."customerId" = ANY($2::text[])))) ORDER BY "name", "id"`, [all, ids, staff]),
       this.sql.query(`SELECT "contactId", "scopeType", "scopeId", "role" FROM "ContactScope" WHERE $1::boolean OR "customerId" = ANY($2::text[])`, [all, ids]),
       this.sql.query(`SELECT "customerId", "contactId", "role" FROM "Responder" WHERE $1::boolean OR "customerId" = ANY($2::text[])`, [all, ids]),
     ]);
@@ -814,11 +814,13 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
     const responders = rRows.filter((r) => have.has(r.contactId)).map((r) => ({ customerId: r.customerId, contactId: r.contactId, role: r.role }));
     return { contacts, scopes, responders, links: await this.linksOf(this.sql, [...have]) };
   }
-  async findContact(customerIds: readonly string[] | '*', staff: boolean, contactId: string) {
+  async findContact(customerIds: readonly string[] | '*', staff: boolean, contactId: string, forWrite = false) {
     const all = customerIds === '*';
+    // B-1: an INTERNAL contact belongs to every customer it serves. Writing it needs the whole range; a narrower caller only reads those it shares a customer with.
     const [r] = await this.sql.query(
-      `SELECT ${CONTACT_COLS} FROM "Contact" WHERE "id" = $1 AND (("kind" = 'CUSTOMER' AND ($2::boolean OR "customerId" = ANY($3::text[]))) OR ("kind" = 'INTERNAL' AND $4::boolean))`,
-      [contactId, all, all ? [] : [...customerIds], staff]);
+      `SELECT ${CONTACT_COLS} FROM "Contact" WHERE "id" = $1 AND (("kind" = 'CUSTOMER' AND ($2::boolean OR "customerId" = ANY($3::text[])))
+         OR ("kind" = 'INTERNAL' AND $4::boolean AND ($2::boolean OR (NOT $5::boolean AND EXISTS (SELECT 1 FROM "Responder" r WHERE r."contactId" = "Contact"."id" AND r."customerId" = ANY($3::text[]))))))`,
+      [contactId, all, all ? [] : [...customerIds], staff, forWrite]);
     if (!r) return null;
     const resp = await this.sql.query(`SELECT DISTINCT "customerId" FROM "Responder" WHERE "contactId" = $1 AND ($2::boolean OR "customerId" = ANY($3::text[])) ORDER BY 1`, [contactId, all, all ? [] : [...customerIds]]);
     return { contact: toContact(r), links: await this.linksOf(this.sql, [contactId]), responderCustomerIds: resp.map((x) => x.customerId as string) };

@@ -369,10 +369,14 @@ export interface ApiRepository {
   // ── onboarding: contacts and verification (D-29, D-37) ──
   /** `Customer.portalGrants` (`contacts`, `silences`, `channels`): what a portal user of this customer may write. */
   portalGrants(customerId: string): Promise<string[]>;
-  /** Contacts the caller may list: CUSTOMER contacts of `customerIds` ('*' = every customer) and, when `staff`, INTERNAL ones — plus their scopes, responder rows and latest verification links. */
+  /** Contacts the caller may list: CUSTOMER contacts of `customerIds` ('*' = every customer) and, when `staff`, INTERNAL ones (all of them for '*', else only those who are Responders of `customerIds`) — plus their scopes, responder rows and latest verification links. */
   contactsWorld(customerIds: readonly string[] | '*', staff: boolean): Promise<ContactsWorld>;
-  /** One contact inside the caller's range (customer in scope, or INTERNAL when `staff`); the range is in the query. */
-  findContact(customerIds: readonly string[] | '*', staff: boolean, contactId: string): Promise<{ contact: ContactRow; links: VerificationLink[]; responderCustomerIds: string[] } | null>;
+  /**
+   * One contact inside the caller's range; the range is in the query. A CUSTOMER contact: its customer is in `customerIds`.
+   * An INTERNAL (staff) contact: `staff` and either `customerIds` is '*' or the contact is a Responder of one of `customerIds`
+   * (read-only: `forWrite` makes an INTERNAL contact visible only when `customerIds` is '*').
+   */
+  findContact(customerIds: readonly string[] | '*', staff: boolean, contactId: string, forWrite?: boolean): Promise<{ contact: ContactRow; links: VerificationLink[]; responderCustomerIds: string[] } | null>;
   createContact(c: NewContact, audit: AuditTemplate): Promise<ContactWriteOutcome>;
   /** `WHERE id = ? AND customerId IS NOT DISTINCT FROM ?` (the customer of the contact as the caller saw it). */
   updateContact(contactId: string, customerId: string | null, patch: ContactPatch, audit: AuditTemplate): Promise<ContactWriteOutcome>;

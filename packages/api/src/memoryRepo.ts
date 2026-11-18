@@ -437,15 +437,17 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     return [...latest.values()].map((v) => ({ contactId: v.contactId, channel: v.channel, sentAt: v.sentAt, expiresAt: v.expiresAt, usedAt: v.usedAt }));
   }
   async contactsWorld(customerIds: readonly string[] | '*', staff: boolean): Promise<ContactsWorld> {
-    const contacts = [...this.contacts.values()].filter((c) => (c.kind === 'CUSTOMER' ? inRange(customerIds, c.customerId) : staff)).map((c) => structuredClone(c));
+    const linked = (id: string): boolean => customerIds === '*' || this.responders.some((r) => r.contactId === id && customerIds.includes(r.customerId));
+    const contacts = [...this.contacts.values()].filter((c) => (c.kind === 'CUSTOMER' ? inRange(customerIds, c.customerId) : staff && linked(c.id))).map((c) => structuredClone(c));
     const ids = new Set(contacts.map((c) => c.id));
     const scopes: ContactScopeInfo[] = this.contactScopes.filter((s) => ids.has(s.contactId) && inRange(customerIds, s.customerId)).map(({ contactId, scopeType, scopeId, role }) => ({ contactId, scopeType, scopeId, role }));
     const responders = this.responders.filter((r) => ids.has(r.contactId) && inRange(customerIds, r.customerId)).map((r) => ({ customerId: r.customerId, contactId: r.contactId, role: r.role }));
     return { contacts, scopes, responders, links: this.linksFor(ids) };
   }
-  async findContact(customerIds: readonly string[] | '*', staff: boolean, contactId: string) {
+  async findContact(customerIds: readonly string[] | '*', staff: boolean, contactId: string, forWrite = false) {
     const c = this.contacts.get(contactId);
-    if (!c || !(c.kind === 'CUSTOMER' ? inRange(customerIds, c.customerId) : staff)) return null;
+    const staffOk = (): boolean => staff && (customerIds === '*' || (!forWrite && this.responders.some((r) => r.contactId === contactId && customerIds.includes(r.customerId))));
+    if (!c || !(c.kind === 'CUSTOMER' ? inRange(customerIds, c.customerId) : staffOk())) return null;
     return { contact: structuredClone(c), links: this.linksFor(new Set([c.id])), responderCustomerIds: [...new Set(this.responders.filter((r) => r.contactId === c.id && inRange(customerIds, r.customerId)).map((r) => r.customerId))] };
   }
   async createContact(n: NewContact, audit: AuditTemplate): Promise<ContactWriteOutcome> {
