@@ -4,7 +4,7 @@ import { authFromPrincipal, createApi, normalizeAuth, loadApiConfig, type ApiReq
 import { SqlApiStore, pgClient } from "@alarmops/store-sql";
 import { NotConfiguredError } from "../mode";
 import { databaseConfig } from "./db-config";
-import { commands, retention } from "./wiring";
+import { commands, retention, verificationSecret } from "./wiring";
 import { toResponse } from "./response";
 
 export { toResponse };
@@ -42,7 +42,7 @@ export function backend(env: Record<string, string | undefined> = process.env): 
   const { config, warnings } = loadApiConfig(env);
   for (const w of warnings) console.warn(`[api config] ${w}`);
   const api = createApi({
-    repo, config, retention: retention(env), commands: commands(env),
+    repo, config, retention: retention(env), commands: commands(env), verificationSecret: verificationSecret(env),
     log: (level, msg, data) => console[level === "error" ? "error" : "warn"](`[api] ${msg}`, data ?? {}),
   });
   g.__aoBackend = { repo, api, close: () => client.close?.() ?? Promise.resolve() };

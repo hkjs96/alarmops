@@ -105,7 +105,9 @@ describe("every server action goes through callAction", () => {
 
   it("finds the actions (ack, resolve, escalate, bulk, undo, call-order save, own steps, Responders, customer status, offboarding)", () => {
     expect(names.sort()).toEqual([
-      "ackIncident", "addResponder", "changeCustomerStatus", "escalateIncident", "executeBulk", "markOffboardingStep", "previewBulk", "removeOwnSteps", "removeResponder", "resolveIncident", "revealContact", "saveCallOrder", "setLegalHold", "setResponderRole", "undoBulk",
+      "accountStatusAction", "ackIncident", "addResponder", "changeCustomerStatus", "checkAccountAction", "confirmVerificationAction", "createAccountAction", "createContactAction", "createCustomerAction",
+      "createProjectAction", "createServiceAction", "escalateIncident", "executeBulk", "listAccountsAction", "listContactsAction", "markOffboardingStep", "previewBulk", "removeOwnSteps", "removeResponder",
+      "resolveIncident", "revealContact", "saveCallOrder", "setCapabilityAction", "setLegalHold", "setResponderRole", "undoBulk", "verifyBulkAction", "verifyContactAction",
     ]);
   });
   it("no client file calls one of them outside callAction(() => …)", () => {
@@ -117,6 +119,9 @@ describe("every server action goes through callAction", () => {
       text.split("\n").forEach((line, n) => {
         if (/^\s*(import|export)\b/.test(line) || /^\s*(\/\/|\*|\/\*)/.test(line)) return;
         for (const name of names) {
+          // the one action of a page that has no session by design (the public verification link): callAction would
+          // probe /auth/session, find none and announce "session ended" to someone who never had one
+          if (name === "confirmVerificationAction") continue;
           if (new RegExp(`\\b${name}\\(`).test(line) && !/callAction\(\(\) => /.test(line)) bare.push(`${f.slice(SRC.length + 1)}:${n + 1} ${name}`);
         }
       });

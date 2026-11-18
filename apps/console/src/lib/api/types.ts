@@ -622,3 +622,46 @@ export interface Digest {
 }
 /** The one number of "Business-hours summary: N": incidents of suspended customers plus terminated customers still sending events. */
 export const digestCount = (d: Digest): number => d.totals.suspendedIncidents + d.totals.residualCustomers;
+
+/* ----------------------------------------------------------------------------------------------------------------
+ * Customer onboarding (API-CONTRACT 8.4 "구현 메모 #62 / #69", D-07, D-29, D-30, D-47, D-55)
+ * ---------------------------------------------------------------------------------------------------------------- */
+/** POST / GET /customers, GET /customers/{id} */
+export interface CustomerRecord { id: string; name: string; slug: string; status: CustomerStatusValue; loginDomains: string[]; createdAt: string }
+export interface ProjectRecord { id: string; customerId: string; name: string; slug: string; serviceCount: number }
+export interface ServiceRecord { id: string; customerId: string; projectId: string; name: string; slug: string }
+export type AccountEnvironment = "PRD" | "STG" | "DEV";
+export type AccountRoleKey = "reader" | "eventForwarder" | "alarmWriter" | "tagWriter" | "remediator";
+/** The three optional capabilities (D-15: all off by default) */
+export interface AccountCapabilities { alarmWriterEnabled: boolean; tagWriterEnabled: boolean; remediatorEnabled: boolean }
+/** POST body of /customers/{id}/accounts. The ExternalId and the role ARNs are made by the server (400 when sent). */
+export interface NewAccountInput extends Partial<AccountCapabilities> {
+  awsAccountId: string; alias?: string; environment?: AccountEnvironment; regions?: string[]; serviceId?: string;
+}
+/** Account as the API answers an ADMIN: `externalId` is there only for ADMIN and only in these responses (Cache-Control: no-store). */
+export interface AccountRecord extends AccountCapabilities {
+  id: string; customerId: string; serviceId: string | null; awsAccountId: string; alias: string | null; environment: AccountEnvironment | null; regions: string[];
+  externalId?: string; stackVersion: string | null; disabled: boolean; lastCheckedAt: string | null; createdAt: string;
+}
+export type RoleCheckStatus = "UNKNOWN" | "OK" | "DENIED" | "MISSING";
+export interface AccountRoleStatus { key: AccountRoleKey; required: boolean; enabled: boolean; status: RoleCheckStatus; basis: "CHECK" | "EVENTS" }
+/** GET /accounts/{id}/status */
+export interface AccountStatus {
+  accountId: string; customerId: string; awsAccountId: string; roles: AccountRoleStatus[];
+  lastCheckedAt: string | null; firstEventAt: string | null; lastEventAt: string | null; stackVersion: string | null; disabled: boolean;
+}
+export type VerifyChannel = "EMAIL" | "SMS" | "SLACK";
+export interface ContactChannelInfo { status: ChannelState; via: string | null; at: string | null; expiresAt: string | null }
+/** GET /contacts item. Phone and e-mail are always masked; the full value only through /contacts/{id}/reveal (D-35). */
+export interface ContactRecord {
+  id: string; kind: "INTERNAL" | "CUSTOMER"; name: string; active: boolean; emailMasked: string | null; phoneMasked: string | null; hasSlack: boolean;
+  channels: Record<ContactChannelKey, ContactChannelInfo>; needsAction: boolean; canReveal: boolean; revealRequiresReason: boolean;
+}
+export interface NewContactInput { customerId: string; name: string; email?: string; phone?: string }
+export interface VerifyContactInput { channel: VerifyChannel; method: "link" | "manual"; note?: string }
+/** 202 (link) or 200 (manual) */
+export interface VerifyContactResult { status?: "LINK_SENT"; verified?: boolean; channel: VerifyChannel; method: "link" | "manual"; expiresAt?: string }
+export interface VerifyBulkResult { sent: number; notSet: { contactId: string; channel: VerifyChannel }[]; throttled: number; failed: number }
+/** GET /verify/{token}: channel only, never the address */
+export interface VerifyPeek { pending: true; channel: VerifyChannel }
+export interface VerifyDone { verified: true; channel: VerifyChannel }

@@ -19,6 +19,18 @@ export const isMock = () => mockMode();
  * this same process, through the same typed HTTP client the browser-facing `/api/v1/*` route uses: the request never
  * leaves the server, and the AuthContext is built here from the session's user id (D-09, never from the client).
  */
+/**
+ * The API without a session, for the one public page (GET/POST /verify/{token}, API-CONTRACT 8.4): the credential is the
+ * token in the path. Live: the same in-process handler with no AuthContext, so every other route still answers 401.
+ */
+export function getPublicApi(): ConsoleApi {
+  if (isMock()) {
+    g.__aoMockStore ??= createStore({ customers: process.env.MOCK_CUSTOMERS === "34" ? 34 : 14 });
+    return createMockApi(g.__aoMockStore, undefined, { id: "", contactId: "", name: "", email: "", role: "VIEWER" });
+  }
+  return createHttpApi({ baseUrl: "http://in-process.invalid", fetch: inProcessFetch(async () => null) });
+}
+
 export async function getApi(): Promise<ConsoleApi> {
   const session = await requireSession();
   if (isMock()) {

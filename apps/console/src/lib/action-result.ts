@@ -7,7 +7,7 @@ export type ActionResult<T = null> = { ok: true; data: T } | ActionFailure;
 /** Only plain, known values cross to the browser: numbers, strings, booleans and one level of field lists. */
 function safeDetails(d: Record<string, unknown>): Record<string, unknown> | undefined {
   const out: Record<string, unknown> = {};
-  for (const k of ["field", "role", "perCycle", "perHour", "responders", "limit", "retryAfterSec", "currentVersion", "mutedUntil"]) {
+  for (const k of ["field", "role", "perCycle", "perHour", "responders", "limit", "retryAfterSec", "currentVersion", "mutedUntil", "existingCustomerId"]) {
     const v = d[k];
     if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") out[k] = v;
   }
