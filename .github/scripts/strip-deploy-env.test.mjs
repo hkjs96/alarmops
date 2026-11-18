@@ -40,3 +40,9 @@ test('cli rewrites the file in place and prints names only', () => {
   assert.ok(!r.stdout.includes('topsecret') && !r.stdout.includes('s3cr3t'));
   assert.equal(readFileSync(f, 'utf8'), 'CONSOLE_ORIGIN="https://x.vercel.app"\nTRUSTED_PROXY="1"\nNEXT_PUBLIC_FOO="bar"\n');
 });
+
+test('the Google client secret and the SSO lists are never passed to the build', () => {
+  const r = stripEnv(['CONSOLE_ORIGIN="https://x.vercel.app"', 'GOOGLE_CLIENT_SECRET="gs3cret"', 'GOOGLE_CLIENT_ID="id"', 'SSO_ALLOWED_DOMAINS="mz.co.kr"', 'SSO_ALLOWED_EMAILS="a@example.com"', ''].join('\n'));
+  assert.deepEqual(r.kept, ['CONSOLE_ORIGIN']);
+  for (const bad of ['GOOGLE_CLIENT_SECRET', 'gs3cret', 'GOOGLE_CLIENT_ID', 'SSO_ALLOWED']) assert.ok(!r.text.includes(bad), bad);
+});

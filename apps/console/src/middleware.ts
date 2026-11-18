@@ -6,7 +6,7 @@ import { buildCsp, newNonce } from "@/lib/csp";
 import { consoleOrigin } from "@/lib/auth/origin";
 
 /** Default deny (security review C-2): everything except /login and static assets needs a valid session. */
-const PUBLIC = [/^\/login(\/|$)/, /^\/auth\/dev-login$/, /^\/auth\/sign-out$/, /^\/auth\/session$/, /^\/auth\/ended$/,
+const PUBLIC = [/^\/login(\/|$)/, /^\/auth\/dev-login$/, /^\/auth\/google\/(start|callback)$/,/^\/auth\/sign-out$/, /^\/auth\/session$/, /^\/auth\/ended$/,
   // the 1-minute tick: no session, its own shared secret (app/api/internal/tick, fail closed without TICK_SECRET)
   /^\/api\/internal\/tick$/];
 

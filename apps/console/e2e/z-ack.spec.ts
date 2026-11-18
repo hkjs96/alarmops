@@ -825,9 +825,9 @@ test("S-3 dev sign-in only ever redirects to a path on this origin", async ({ re
 
 test("S-3 the login page does not pass a hostile next on to the dev sign-in link", async ({ page }) => {
   await page.goto("/login?next=/%09/evil.example");
-  await expect(page.getByRole("link", { name: /sign in as Haeun Kim/ })).toHaveAttribute("href", "/auth/dev-login");
+  await expect(page.getByRole("link", { name: /sign in as Haeun Kim/i })).toHaveAttribute("href", "/auth/dev-login");
   await page.goto(`/login?next=${encodeURIComponent("/people?customer=bora")}`);
-  await expect(page.getByRole("link", { name: /sign in as Haeun Kim/ })).toHaveAttribute("href", "/auth/dev-login?next=%2Fpeople%3Fcustomer%3Dbora");
+  await expect(page.getByRole("link", { name: /sign in as Haeun Kim/i })).toHaveAttribute("href", "/auth/dev-login?next=%2Fpeople%3Fcustomer%3Dbora");
 });
 
 test("D-26 Customers is in the menu and lives in the shell; P3-B the tree's problem count is explained; the panel path wraps after ›", async ({ page }) => {

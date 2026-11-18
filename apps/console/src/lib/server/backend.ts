@@ -1,6 +1,6 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { authFromPrincipal, createApi, loadApiConfig, type ApiRequest, type ApiResponse, type AuthContext } from "@alarmops/api";
+import { authFromPrincipal, createApi, normalizeAuth, loadApiConfig, type ApiRequest, type ApiResponse, type AuthContext } from "@alarmops/api";
 import { SqlApiStore, pgClient } from "@alarmops/store-sql";
 import { NotConfiguredError } from "../mode";
 import { databaseConfig } from "./db-config";
@@ -18,7 +18,19 @@ export { toResponse };
  * for a transaction-mode pooler (Supabase/Supavisor port 6543, what a serverless runtime should use — db/README.md
  * "Connecting"); anything else is a direct / session-mode connection.
  */
-interface Backend { repo: SqlApiStore; api: ReturnType<typeof createApi>; close(): Promise<void> }
+/**
+ * SqlApiStore plus the one lookup the sign-in needs and the API does not have: user id by e-mail (User.email is citext, so
+ * the match is case-insensitive). It only finds the id of an ACTIVE user; everything else (customer status, contact link,
+ * role, scope) is decided by `sessionPrincipal` afterwards, the same path every request takes.
+ */
+class ConsoleStore extends SqlApiStore {
+  async activeUserIdByEmail(email: string): Promise<string | null> {
+    const [r] = await this.sql.query(`SELECT "id" FROM "User" WHERE "email" = $1 AND "status" = 'ACTIVE'`, [email]);
+    return (r?.id as string | undefined) ?? null;
+  }
+}
+
+interface Backend { repo: ConsoleStore; api: ReturnType<typeof createApi>; close(): Promise<void> }
 const g = globalThis as unknown as { __aoBackend?: Backend };
 
 export function backend(env: Record<string, string | undefined> = process.env): Backend {
@@ -26,7 +38,7 @@ export function backend(env: Record<string, string | undefined> = process.env): 
   const cfg = databaseConfig(env);
   if (!cfg) throw new NotConfiguredError("DATABASE_URL");
   const client = pgClient({ connectionString: cfg.url, pooler: cfg.pooler, max: cfg.max });
-  const repo = new SqlApiStore(client);
+  const repo = new ConsoleStore(client);
   const { config, warnings } = loadApiConfig(env);
   for (const w of warnings) console.warn(`[api config] ${w}`);
   const api = createApi({
@@ -46,6 +58,17 @@ export async function authForSession(sub: string | null | undefined): Promise<Au
   if (!sub) return null;
   const p = await backend().repo.sessionPrincipal(sub);
   return p ? authFromPrincipal(p) : null;
+}
+
+/**
+ * Google sign-in: the id of the pre-registered, active user with this verified e-mail whose principal the API would also
+ * accept (ACTIVE customer for a portal user, consistent contact link), else null. Throws when the store does not answer.
+ */
+export async function signInUserByEmail(email: string): Promise<{ id: string; name: string; kind: "INTERNAL" | "CUSTOMER" } | null> {
+  const id = await backend().repo.activeUserIdByEmail(email);
+  if (!id) return null;
+  const auth = await authForSession(id);
+  return auth && normalizeAuth(auth) ? { id, name: auth.name ?? id, kind: auth.kind } : null;
 }
 
 /** Hand one request to packages/api. `auth` is the server-side AuthContext (or null = not signed in). */

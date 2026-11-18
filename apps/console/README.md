@@ -47,9 +47,29 @@
 `LIVE_DATABASE_URL` = admin URL of a LOCAL Postgres (≥ 15). `e2e-live/prepare.mjs` drops and creates `alarmops_live`, applies every migration and runs the db seed, then `next dev` starts on 3117 (`.next-live/`). Without `LIVE_DATABASE_URL` the tests are skipped with that reason. CI: job `e2e-live` on a `postgres:16` service. Locally without Docker, e.g. the Postgres binaries in `/opt/pglocal` (run as a non-root user):
 `initdb -D /tmp/pg/data -U postgres --auth=trust && pg_ctl -D /tmp/pg/data -o "-p 55432 -k /tmp/pg" start`, then `LIVE_DATABASE_URL=postgresql://postgres@localhost:55432/postgres`.
 
+## Google sign-in (issue #64, D-55)
+
+Routes: `/auth/google/start` (public) → Google → `/auth/google/callback` (public). Setup for a person: `docs/SETUP-GOOGLE-SSO.md`.
+
+| Variable | Meaning |
+|---|---|
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | the OAuth client (Web application). The secret is Sensitive and never reaches the build (`strip-deploy-env.mjs` is an allowlist). |
+| `SSO_ALLOWED_DOMAINS` | comma-separated domains whose addresses MSP staff may sign in with (initial: `mz.co.kr`, `megazone.com`). Plain Vercel variable (the deploy check reads it). |
+| `SSO_ALLOWED_EMAILS` | optional, comma-separated exact addresses outside those domains. Values only in configuration, never in the repo. |
+
+- **Fail closed** (`lib/auth/sso-config.ts`): missing client id/secret/`SESSION_SECRET`, or no valid list entry → `/login?sso=unavailable`, never "allow all". Entries are trimmed and lowercased; wildcards, spaces, `@`, non-ASCII, single labels are dropped with one warning (no values in it).
+- **Flow** (`lib/auth/google-oidc.ts`, Node crypto + fetch, no dependency): authorization code + PKCE (S256). `state`, `nonce` and the PKCE verifier are sealed (HMAC, key derived from `SESSION_SECRET` with a purpose label) into the HttpOnly, SameSite=Lax, `Secure` (https), 10-minute `ao_sso` cookie scoped to `/auth/google`; it is single use (cleared on every callback outcome). The redirect URI is `<CONSOLE_ORIGIN>/auth/google/callback`, never from request headers (production without `CONSOLE_ORIGIN` → unavailable; the middleware already answers 503).
+- **ID token**: header `alg` must be RS256 with a `kid`; signature checked against Google's JWKS (cached by `Cache-Control: max-age`, one refetch per minute on an unknown `kid`); `iss` is `https://accounts.google.com` or `accounts.google.com`; `aud` is the client id (a list also needs `azp`); `exp` (60 s skew) and `iat`; `nonce` equal (constant time); `email_verified === true`. `hd` is never read.
+- **Who gets in** (`lib/auth/sso-signin.ts`): the user row decides. An active, pre-registered user whose principal the API accepts (`signInUserByEmail` → `sessionPrincipal`, so a suspended customer's portal user is refused as everywhere else). MSP staff (INTERNAL, any role) must also be inside the fence: exact domain in `SSO_ALLOWED_DOMAINS` (no suffix match, ASCII only) or exact address in `SSO_ALLOWED_EMAILS`. A portal (CUSTOMER) user needs no domain: an ADMIN registering them is the approval. Every refusal is the same `/login?sso=refused`; the reason code (`no_user`, `staff_outside_fence`, …) goes to the server log without the address.
+- **Per-customer login domain (`Customer.loginDomains`, R4-3) is NOT wired**: nothing reads `loginDomains` at sign-in and no portal user is auto-created. `decideSignIn` has the `enrolByDomain` hook with all rules and tests (staff rule wins, free-mail list refused, one customer only, VIEWER portal user); the route does not pass it until the store has the method (see the issue report).
+- **Google `sub` binding is not wired** (backend #69 adds `User.googleSub`): `decideSignIn` takes an optional `bindGoogleSub(userId, sub)` hook (`ok` | `mismatch` → refused, reason `sub_mismatch`); the callback already passes the verified `sub`, the route passes no hook until #69. Until then a user row is matched by e-mail only.
+- Before any lookup an address that is not plain printable ASCII with exactly one `@` is refused (customer rows have no domain fence and `User.email` is citext).
+- Session: the same `ao_session` cookie as dev login (`sub` = `User.id`, no e-mail in the cookie; `Secure` follows `CONSOLE_ORIGIN`). `next` goes through `safeNextPath` at start and again at the callback.
+- Tests: `lib/auth/{sso-config,sso-signin,google-oidc}.test.ts`, `app/auth/google/route.test.ts` (stubbed Google, no network), `app/login/page.test.tsx`. No e2e: it would need Google.
+
 ## Deploy environment, retention, commands (D-45, D-46, D-49)
 
-Production deploys only through `.github/workflows/deploy-console.yml` (D-53; setup in `docs/GO-LIVE.md` step 3). It checks the pulled Vercel production environment with `.github/scripts/check-console-deploy-env.mjs` (`CONSOLE_ORIGIN` and `TRUSTED_PROXY` must be Plain, not Sensitive, Vercel variables or the pull omits them), then smoke-checks `/login`, the nonce CSP and the unauthenticated tick (`.github/scripts/smoke-console.mjs`).
+Production deploys only through `.github/workflows/deploy-console.yml` (D-53; setup in `docs/GO-LIVE.md` step 3). It checks the pulled Vercel production environment with `.github/scripts/check-console-deploy-env.mjs` (`CONSOLE_ORIGIN`, `TRUSTED_PROXY`, `GOOGLE_CLIENT_ID` and `SSO_ALLOWED_DOMAINS` must be Plain, not Sensitive, Vercel variables or the pull omits them), then smoke-checks `/login`, the nonce CSP and the unauthenticated tick (`.github/scripts/smoke-console.mjs`).
 
 | Variable | Meaning |
 |---|---|
