@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Card } from "@alarmops/design-system";
-import { getApi } from "@/lib/api";
+import { getApi, isMock } from "@/lib/api";
 import { ApiError, isHidden } from "@/lib/api/client";
 import type { AccountRecord, AccountStatus, ContactRecord } from "@/lib/api/types";
 import { errorLine } from "@/lib/errors";
 import { NO_CENTRAL } from "@/lib/onboarding";
+import { MOCK_CENTRAL, centralValues } from "@/lib/server/central";
 import { roleAtLeast } from "@/lib/roles";
 import { SubNav } from "@/components/SubNav";
 import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard";
@@ -68,7 +69,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
         <>
           {canWrite ? null : <div className="ob-note" role="status" style={{ marginBottom: 16 }} data-testid="ob-role-note">Onboarding needs the Admin role. You can read the organization here; the accounts, kit and people are for Admins.</div>}
           <OnboardingWizard customer={{ id: c.id, name: c.name, slug: c.slug }} initialOrg={org} initialAccounts={accounts} initialStatuses={statuses} initialContacts={contacts}
-            initialStep={initialStep} central={NO_CENTRAL} canWrite={canWrite} />
+            initialStep={initialStep} central={isMock() ? (c.slug.startsWith("no-central") ? NO_CENTRAL : MOCK_CENTRAL) : centralValues()} canWrite={canWrite} />
         </>
       )}
     </div>

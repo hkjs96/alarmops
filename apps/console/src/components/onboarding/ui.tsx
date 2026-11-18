@@ -10,12 +10,16 @@ export function StateChip({ tone, label, testid }: { tone: RoleTone; label: stri
 }
 
 /**
- * One value with its Copy button. The clipboard is written inside the click handler (a user gesture, synchronously started);
- * when the browser refuses (insecure context, permission) the text is selected so Ctrl+C / long-press works, and the status says so.
- * The value is only in this component's props and in the DOM: never in an address, storage or a log line.
+ * One value with its Copy button. The clipboard is written inside the click handler (a user gesture); when the browser
+ * refuses (insecure context, permission) the text is selected so Ctrl+C / long-press works. What happened is told through
+ * `announce`: the screen has ONE live region for all copy buttons (no empty status region per button), the button itself
+ * says "Copied" for a few seconds. The value lives only in props and the DOM: never in an address, storage or a log line.
+ * `disabled` (with the reason shown by the caller) is for a value that is not there yet.
  */
-export function CopyValue({ label, value, testid, mono = true }: { label: string; value: string; testid?: string; mono?: boolean }) {
-  const [state, setState] = useState<"idle" | "copied" | "select">("idle");
+export function CopyValue({ label, value, testid, mono = true, announce, disabled }: {
+  label: string; value: string; testid?: string; mono?: boolean; announce: (message: string) => void; disabled?: boolean;
+}) {
+  const [copied, setCopied] = useState(false);
   const code = useRef<HTMLElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
@@ -27,22 +31,19 @@ export function CopyValue({ label, value, testid, mono = true }: { label: string
     const s = window.getSelection();
     s?.removeAllRanges();
     s?.addRange(r);
-    setState("select");
+    announce(`Could not copy ${label} automatically. It is selected: press Ctrl+C, or long-press to copy.`);
   };
   const copy = () => {
     if (timer.current) clearTimeout(timer.current);
     let p: Promise<void> | undefined;
     try { p = navigator.clipboard?.writeText(value); } catch { p = undefined; }
     if (!p) { selectText(); return; }
-    p.then(() => { setState("copied"); timer.current = setTimeout(() => setState("idle"), 4000); }, selectText);
+    p.then(() => { setCopied(true); announce(`Copied ${label}`); timer.current = setTimeout(() => setCopied(false), 4000); }, selectText);
   };
   return (
     <>
       {mono ? <code ref={code} data-testid={testid ? `${testid}-value` : undefined}>{value}</code> : <span ref={code} data-testid={testid ? `${testid}-value` : undefined} className="ob-code">{value}</span>}
-      <span className="row" style={{ gap: 8 }}>
-        <button type="button" className="btn sm" onClick={copy} aria-label={`Copy ${label}`} data-testid={testid ? `${testid}-copy` : undefined}>Copy</button>
-        <span className="sm mut" role="status" data-testid={testid ? `${testid}-state` : undefined}>{state === "copied" ? "Copied" : state === "select" ? "Selected. Press Ctrl+C (or Copy on your phone)." : ""}</span>
-      </span>
+      <button type="button" className="btn ob-btn" onClick={copy} disabled={disabled} aria-label={`Copy ${label}`} data-testid={testid ? `${testid}-copy` : undefined}>{copied ? "Copied" : "Copy"}</button>
     </>
   );
 }

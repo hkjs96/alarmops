@@ -125,23 +125,27 @@ export const CONNECTION_LABEL: Record<Connection, string> = { CONNECTED: "Connec
 
 /* ------------------------------------------------------------------------------------------------ the connection kit */
 export interface CentralValues { centralRoleArn: string | null; centralBusArn: string | null; remediatorCallerRoleArn: string | null }
-/** The console has no source for these today: placeholders, labelled, until the deploy-central outputs are configured (see the issue report). */
+/** Nothing configured: every central value is missing (the kit says so). Real values come from centralValues() (CENTRAL_ROLE_ARN, CENTRAL_EVENT_BUS_ARN, REMEDIATOR_CALLER_ROLE_ARN). */
 export const NO_CENTRAL: CentralValues = { centralRoleArn: null, centralBusArn: null, remediatorCallerRoleArn: null };
 export interface KitParam { name: string; value: string; placeholder: boolean; note: string }
 
 /** Parameters of infra/customer-stack/template.yaml, in the order the customer fills them. */
 export function kitParams(a: Pick<AccountRecord, "externalId" | "alarmWriterEnabled" | "tagWriterEnabled" | "remediatorEnabled">, c: CentralValues = NO_CENTRAL): KitParam[] {
   const out: KitParam[] = [
-    { name: "CentralRoleArn", value: c.centralRoleArn ?? "<from the deploy-central output CentralRoleArn>", placeholder: !c.centralRoleArn, note: "The one AlarmOps role the stack trusts." },
+    { name: "CentralRoleArn", value: c.centralRoleArn ?? "<missing: ask whoever ran the central deployment (deploy-central) for CentralRoleArn>", placeholder: !c.centralRoleArn, note: "The one AlarmOps role the stack trusts." },
     { name: "ExternalId", value: a.externalId ?? "", placeholder: false, note: "Made for this connection. Give it to the customer only." },
-    { name: "CentralEventBusArn", value: c.centralBusArn ?? "<from the deploy-central output CentralBusArn>", placeholder: !c.centralBusArn, note: "Where the stack sends events (ap-northeast-2)." },
+    { name: "CentralEventBusArn", value: c.centralBusArn ?? "<missing: ask whoever ran the central deployment (deploy-central) for CentralBusArn>", placeholder: !c.centralBusArn, note: "Where the stack sends events (ap-northeast-2)." },
     { name: "EnableAlarmWriter", value: String(a.alarmWriterEnabled), placeholder: false, note: "" },
     { name: "EnableTagWriter", value: String(a.tagWriterEnabled), placeholder: false, note: "" },
     { name: "EnableRemediator", value: String(a.remediatorEnabled), placeholder: false, note: "" },
   ];
-  if (a.remediatorEnabled) out.push({ name: "RemediatorCallerRoleArn", value: c.remediatorCallerRoleArn ?? "<from the deploy-central output RemediatorCallerRoleArn>", placeholder: !c.remediatorCallerRoleArn, note: "Required when EnableRemediator is true: the separate role that runs approved actions." });
+  if (a.remediatorEnabled) out.push({ name: "RemediatorCallerRoleArn", value: c.remediatorCallerRoleArn ?? "<missing: ask whoever ran the central deployment (deploy-central) for RemediatorCallerRoleArn>", placeholder: !c.remediatorCallerRoleArn, note: "Required when EnableRemediator is true: the separate role that runs approved actions." });
   return out;
 }
+/** How many values of the kit are still missing (placeholders). The kit is not to be sent while this is above 0. */
+export const kitMissing = (p: KitParam[]): number => p.filter((x) => x.placeholder).length;
+/** Where the central values come from, in plain words */
+export const SOURCE_WORDS = "the outputs of the central deployment (deploy-central) — ask whoever ran it";
 /** All parameters as `Name=value` lines, for one copy */
 export const kitText = (p: KitParam[]): string => p.map((x) => `${x.name}=${x.value}`).join("\n");
 

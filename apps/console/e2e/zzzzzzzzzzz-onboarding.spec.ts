@@ -76,10 +76,11 @@ test.describe("wizard, 1440", () => {
     await expect(page.getByTestId("kit-EnableAlarmWriter-value")).toHaveText("true");
     await expect(page.getByTestId("kit-EnableTagWriter-value")).toHaveText("false");
     await expect(page.getByTestId("kit-RemediatorCallerRoleArn")).toHaveCount(0);
-    await expect(page.getByTestId("kit-CentralRoleArn-placeholder")).toContainText("deploy-central output");
-    await expect(page.getByTestId("kit-CentralEventBusArn-placeholder")).toContainText("deploy-central output");
+    await expect(page.getByTestId("kit-CentralRoleArn-value")).toHaveText(/^arn:aws:iam::\d{12}:role\//);
+    await expect(page.getByTestId("kit-incomplete")).toHaveCount(0);
+    await expect(page.getByTestId("kit-CentralEventBusArn-value")).toHaveText(/^arn:aws:events:ap-northeast-2:\d{12}:event-bus\//);
     await page.getByTestId("kit-ExternalId-copy").click();
-    await expect(page.getByTestId("kit-ExternalId-state")).toHaveText("Copied");
+    await expect(page.getByTestId("kit-copy-state")).toHaveText("Copied ExternalId");
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(ext);
     await expect(page.getByTestId("al-account_id-value")).toHaveText("123456789401");
     await expect(page.getByTestId("al-action-value")).toHaveText("add");
@@ -164,8 +165,27 @@ test.describe("wizard, 1440", () => {
     await page.addInitScript(() => { Object.defineProperty(navigator, "clipboard", { value: { writeText: () => Promise.reject(new Error("denied")) }, configurable: true }); });
     await signIn(page, "/customers/oak-systems/onboarding?step=connection");
     await page.getByTestId("kit-ExternalId-copy").click();
-    await expect(page.getByTestId("kit-ExternalId-state")).toContainText("Selected");
+    await expect(page.getByTestId("kit-copy-state")).toContainText("It is selected");
     expect(await page.evaluate(() => window.getSelection()?.toString())).toMatch(/^ao-[0-9a-f]{64}$/);
+  });
+
+  test("a kit with missing central values says so and cannot be copied whole", async ({ page }) => {
+    await signIn(page, "/customers/new");
+    await newCustomer(page, "No Central Co");
+    await expect(page).toHaveURL(/no-central-co\/onboarding$/);
+    await page.getByTestId("org-next").click();
+    await addAccount(page, "123456789421");
+    await expect(page.getByTestId("kit-incomplete")).toContainText("This kit is not complete: 2 values are still missing. Fill them in before you send it.");
+    await expect(page.getByTestId("kit-incomplete")).toContainText("deploy-central");
+    await expect(page.getByTestId("kit-CentralRoleArn-copy")).toBeDisabled();
+    await expect(page.getByTestId("kit-CentralEventBusArn-copy")).toBeDisabled();
+    await expect(page.getByTestId("kit-CentralRoleArn-placeholder")).toContainText("Missing");
+    await expect(page.getByTestId("kit-all-copy")).toBeDisabled();
+    await expect(page.getByTestId("kit-all-why")).toContainText("2 values are missing");
+    await expect(page.getByTestId("kit-ExternalId-copy")).toBeEnabled();
+    await page.getByTestId("cap-remediator").locator("input").click();
+    await page.getByTestId("confirm-dialog").locator('button[data-role="confirm"]').click();
+    await expect(page.getByTestId("kit-incomplete")).toContainText("3 values are still missing");
   });
 
   test("duplicate customer links to the existing one; a free-mail login domain is refused; a bad domain is caught first", async ({ page }) => {

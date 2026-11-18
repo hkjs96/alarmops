@@ -9,7 +9,7 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push() {}, replace() {}, refresh() {} }), usePathname: () => "/customers/mirae/onboarding", notFound: () => { throw new Error("notFound"); } }));
 vi.mock("@/lib/auth", () => ({ requireSession: async () => ({ sub: state.sub }) }));
 const store = createStore();
-vi.mock("@/lib/api", () => ({ getApi: async () => createMockApi(store, undefined, MOCK_USERS[state.sub]!) }));
+vi.mock("@/lib/api", () => ({ isMock: () => true, getApi: async () => createMockApi(store, undefined, MOCK_USERS[state.sub]!) }));
 
 import Page from "./[id]/onboarding/page";
 

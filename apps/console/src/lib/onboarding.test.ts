@@ -2,10 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConsoleApi } from "./api/client";
 import { MOCK_USERS, createMockApi, createStore } from "./api/mock/mock-api";
 import { ApiError } from "./api/client";
-import { parseLoginDomains, kitParams, kitText, roleLine, connectionOf, onboardingError, retryTime } from "./onboarding";
+import { parseLoginDomains, kitMissing, kitParams, kitText, roleLine, connectionOf, onboardingError, retryTime } from "./onboarding";
 import { pollUntilChecked } from "./onboarding-poll";
 import { isVerifyToken, loggablePath, VERIFY_PATH } from "./verify-token";
 import { verificationSecret } from "./server/wiring";
+import { centralValues } from "./server/central";
 
 const state = vi.hoisted(() => ({ sub: "usr-haeun" as string | null, api: null as unknown }));
 vi.mock("server-only", () => ({}));
@@ -38,7 +39,7 @@ describe("pure helpers", () => {
   it("kit: placeholders are labelled, Remediator adds its caller role, ExternalId is carried", () => {
     const p = kitParams({ externalId: "ao-x", alarmWriterEnabled: true, tagWriterEnabled: false, remediatorEnabled: false });
     expect(p.map((x) => x.name)).toEqual(["CentralRoleArn", "ExternalId", "CentralEventBusArn", "EnableAlarmWriter", "EnableTagWriter", "EnableRemediator"]);
-    expect(p[0]!.placeholder && p[0]!.value).toContain("deploy-central output");
+    expect(p[0]!.placeholder && p[0]!.value).toContain("central deployment (deploy-central)");
     expect(kitText(p)).toContain("ExternalId=ao-x");
     expect(kitParams({ externalId: "x", alarmWriterEnabled: false, tagWriterEnabled: false, remediatorEnabled: true }).at(-1)!.name).toBe("RemediatorCallerRoleArn");
   });
@@ -60,6 +61,19 @@ describe("pure helpers", () => {
     expect(loggablePath("/verify/vf_secret?x=1")).toBe("/verify/[token]?x=1");
     expect(VERIFY_PATH.test("/verify/vf_abc")).toBe(true);
     expect(VERIFY_PATH.test("/verify/vf_abc/extra")).toBe(false);
+  });
+  it("central values: valid ARNs are used, invalid ones are missing (one warning, never the value), the kit counts what is missing", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const ok = centralValues({ CENTRAL_ROLE_ARN: "arn:aws:iam::111122223333:role/AlarmOpsCentral-Engine", CENTRAL_EVENT_BUS_ARN: "arn:aws:events:ap-northeast-2:111122223333:event-bus/alarmops-central" });
+    expect(ok).toMatchObject({ centralRoleArn: expect.any(String), centralBusArn: expect.any(String), remediatorCallerRoleArn: null });
+    const bad = centralValues({ CENTRAL_ROLE_ARN: "arn:aws:iam::111122223333:root", CENTRAL_EVENT_BUS_ARN: "arn:aws:events:us-east-1:111122223333:event-bus/x", REMEDIATOR_CALLER_ROLE_ARN: "secret-looking-value" });
+    expect(bad).toEqual({ centralRoleArn: null, centralBusArn: null, remediatorCallerRoleArn: null });
+    expect(warn.mock.calls.flat().join(" ")).not.toContain("secret-looking-value");
+    warn.mockRestore();
+    const a = { externalId: "ao-x", alarmWriterEnabled: false, tagWriterEnabled: false, remediatorEnabled: false };
+    expect(kitMissing(kitParams(a, ok))).toBe(0);
+    expect(kitMissing(kitParams(a))).toBe(2);
+    expect(kitMissing(kitParams({ ...a, remediatorEnabled: true }, ok))).toBe(1);
   });
   it("VERIFY_HASH_SECRET: unset or short -> undefined, >= 32 -> used", () => {
     expect(verificationSecret({})).toBeUndefined();

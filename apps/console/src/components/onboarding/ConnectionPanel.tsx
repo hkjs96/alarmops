@@ -6,7 +6,7 @@ import { callAction } from "@/lib/session-ended";
 import { accountStatusAction, checkAccountAction, setCapabilityAction } from "@/app/customers/onboarding-actions";
 import { pollUntilChecked, POLL_INTERVAL_MS, POLL_MAX } from "@/lib/onboarding-poll";
 import {
-  CAP_KEY, CONNECTION_LABEL, REMEDIATOR_WARNING, ROLE_ABOUT, ROLE_NAME, ROLE_OFF, connectionOf, kitParams, kitText, onboardingError, roleLines, type CentralValues, type RoleLine,
+  CAP_KEY, CONNECTION_LABEL, REMEDIATOR_WARNING, ROLE_ABOUT, ROLE_NAME, ROLE_OFF, connectionOf, kitMissing, kitParams, kitText, SOURCE_WORDS, onboardingError, roleLines, type CentralValues, type RoleLine,
 } from "@/lib/onboarding";
 import { kstDateTime } from "@/lib/format";
 import { CopyValue, ErrorLine, StateChip } from "./ui";
@@ -23,6 +23,8 @@ export function ConnectionPanel({ customerName, account, status, central, canWri
   onAccount: (a: AccountRecord) => void; onStatus: (s: AccountStatus) => void;
 }) {
   const params = kitParams(account, central);
+  const missing = kitMissing(params);
+  const [copyMsg, setCopyMsg] = useState("");
   const [capBusy, setCapBusy] = useState<string | null>(null);
   const [capErr, setCapErr] = useState<string | null>(null);
   const [capNote, setCapNote] = useState<string | null>(null);
@@ -73,22 +75,33 @@ export function ConnectionPanel({ customerName, account, status, central, canWri
         <p className="sm" style={{ marginTop: 0 }}>
           Give these values to {customerName}’s AWS administrator. They create the stack from <code>infra/customer-stack/template.yaml</code> in account <b className="mono">{account.awsAccountId}</b>, region <b className="mono">ap-northeast-2</b> (Seoul).
         </p>
+        {missing > 0 ? (
+          <div className="ob-note" role="status" style={{ marginBottom: 12 }} data-testid="kit-incomplete">
+            This kit is not complete: {missing} value{missing === 1 ? " is" : "s are"} still missing. Fill {missing === 1 ? "it" : "them"} in before you send it. They come from {SOURCE_WORDS}.
+          </div>
+        ) : null}
         {!account.externalId ? <div className="ob-note" role="status">The ExternalId is shown to Admins only.</div> : null}
         <ul className="ob-kit" data-testid="kit-params">
           {params.map((p) => (
             <li key={p.name} data-testid={`kit-${p.name}`}>
               <span className="k">{p.name}</span>
-              {p.value ? <CopyValue label={p.name} value={p.value} testid={`kit-${p.name}`} /> : <span className="sm mut">Not available to your role.</span>}
-              {p.placeholder ? <span className="why ph-tag" data-testid={`kit-${p.name}-placeholder`}>Placeholder: take the real value from the deploy-central output (docs/GO-LIVE.md step 4). The console does not have it yet.</span> : null}
+              {p.value ? <CopyValue label={p.name} value={p.value} testid={`kit-${p.name}`} announce={setCopyMsg} disabled={p.placeholder} /> : <span className="sm mut">Not available to your role.</span>}
+              {p.placeholder ? <span className="why ph-tag" data-testid={`kit-${p.name}-placeholder`}>Missing: this value is not set up in the console. Get it from {SOURCE_WORDS}. It cannot be copied until it is set.</span> : null}
               {p.note ? <span className="why">{p.note}</span> : null}
             </li>
           ))}
         </ul>
         {account.externalId ? (
           <div className="ob-actions" style={{ marginTop: 12 }}>
-            <CopyAll text={kitText(params)} />
+            {missing > 0 ? (
+              <>
+                <button type="button" className="btn ob-btn" disabled data-testid="kit-all-copy" aria-describedby="kit-all-why">Copy all parameters</button>
+                <span className="sm" id="kit-all-why" data-testid="kit-all-why">Not available: {missing} value{missing === 1 ? " is" : "s are"} missing.</span>
+              </>
+            ) : <ul className="ob-kit" style={{ width: "100%" }}><li data-testid="kit-all"><span className="k">All parameters</span><CopyValue label="all parameters" value={kitText(params)} testid="kit-all" mono={false} announce={setCopyMsg} /></li></ul>}
           </div>
         ) : null}
+        <div role="status" className="sm" data-testid="kit-copy-state" style={{ minHeight: 20, marginTop: 8 }}>{copyMsg}</div>
         <p className="sm mut" style={{ marginBottom: 0 }}>Send the ExternalId to the customer only. Do not paste it into an issue, a pull request or a chat room.</p>
       </Card>
 
@@ -119,7 +132,7 @@ export function ConnectionPanel({ customerName, account, status, central, canWri
           <li><b>Add the account to the bus allow-list, before the customer creates the stack.</b> Events sent before that are refused. In GitHub, open Actions › <code>bus-allowlist</code> › Run workflow on <code>main</code> and enter:
             <ul className="ob-kit" style={{ marginTop: 8 }} data-testid="allowlist-inputs">
               {([["action", "add"], ["account_id", account.awsAccountId], ["reference", account.id], ["confirm", account.awsAccountId]] as const).map(([k, v]) => (
-                <li key={k}><span className="k">{k}</span><CopyValue label={k} value={v} testid={`al-${k}`} /></li>
+                <li key={k}><span className="k">{k}</span><CopyValue label={k} value={v} testid={`al-${k}`} announce={setCopyMsg} /></li>
               ))}
             </ul>
             <span className="sm mut">The first choice in the action list is <code>remove</code>: change it to <code>add</code>. This console does not start the workflow; a person does, and approves the <code>central</code> environment.</span>
@@ -175,16 +188,5 @@ export function ConnectionPanel({ customerName, account, status, central, canWri
         <p>The customer also has to update the stack with <code>EnableRemediator=true</code> and <code>RemediatorCallerRoleArn</code>. Nothing is stopped or deleted without a person’s approval in Slack.</p>
       </ConfirmDialog>
     </div>
-  );
-}
-
-function CopyAll({ text }: { text: string }) {
-  return (
-    <ul className="ob-kit" style={{ width: "100%" }}>
-      <li data-testid="kit-all">
-        <span className="k">All parameters</span>
-        <CopyValue label="all parameters" value={text} testid="kit-all" mono={false} />
-      </li>
-    </ul>
   );
 }
