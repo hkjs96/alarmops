@@ -5,7 +5,7 @@
  */
 import { createHash } from 'node:crypto';
 import { incidentMute, type DigestData, type PurgeLogEntry, type Contact, type Leave, type Override, type Rotation, type AuditInput, type DeliveryLog, type IncidentEventInput, type IncidentRow, type MaintenanceWindow, type PagingConfig } from '@alarmops/core';
-import { nodeVisible, type ApiRepository, type AlertMemberRow, type IdempotentEntry, type IncidentFilter, type IncidentPage, type NodeFilter, type NotifiedPerson, type OpenCounts, type OrgTree, type ScopeFilter, type StatusCounts, type UndoRecord, type UserInfo, type Principal, type ResponderOp, type ResponderWriteOutcome, type RespondersState, type RotationsWorld, type ChangeStatusOutcome, type CustomerStatusState, type CustomerStatusValue, type ExportIncidentRow, type RetentionView, type MarkStepOutcome, type OffboardStep, type OffboardStepKey, type OffboardingState, type RevealLogFilter, type RevealLogRow, type RevealWrite, type RevealWriteOutcome, type AccountPatch, type AccountWriteOutcome, type AuditTemplate, type CloudAccountRecord, type ContactPatch, type ContactScopeInfo, type ContactWriteOutcome, type ContactsWorld, type NewAccount, type NewContact, type VerificationIssue, type VerificationLimits, type IssueOutcome, type VerificationLink, type VerificationTaken, type VerifyChannelValue, OFFBOARD_STEP_KEYS } from '@alarmops/api';
+import { nodeVisible, type ApiRepository, type AlertMemberRow, type IdempotentEntry, type IncidentFilter, type IncidentPage, type NodeFilter, type NotifiedPerson, type OpenCounts, type OrgTree, type ScopeFilter, type StatusCounts, type UndoRecord, type UserInfo, type Principal, type ResponderOp, type ResponderWriteOutcome, type RespondersState, type RotationsWorld, type ChangeStatusOutcome, type CustomerStatusState, type CustomerStatusValue, type ExportIncidentRow, type RetentionView, type MarkStepOutcome, type OffboardStep, type OffboardStepKey, type OffboardingState, type RevealLogFilter, type RevealLogRow, type RevealWrite, type RevealWriteOutcome, type AccountPatch, type AccountWriteOutcome, type AuditTemplate, type CloudAccountRecord, type ContactPatch, type ContactScopeInfo, type ContactWriteOutcome, type ContactsWorld, type NewAccount, type NewContact, type VerificationIssue, type VerificationLimits, type IssueOutcome, type VerificationLink, type VerificationTaken, type VerifyChannelValue, type CustomerProfile, type CustomerProfilePatch, type CustomerUpdateOutcome, type OrgWriteOutcome, type ProjectRecord, type ServiceRecord, type BindGoogleOutcome, type EnrolOutcome, type NewUser, type UserFilter, type UserPatch, type UserRecord, type UserWriteOutcome, OFFBOARD_STEP_KEYS, normalizeEmail, emailDomain, isFreeMail } from '@alarmops/api';
 import { PG, pgCode, type SqlExecutor } from './client.js';
 import { purgeLogOf } from './retentionSql.js';
 import { CONTACT_COLS, toContact, Params, d, dReq, incidentCols, iso, js, newId, num, toEvent, toIncident, toLog } from './rows.js';
@@ -369,6 +369,275 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
     return { userId: u.id, email: u.email, name: u.name, customerId, role: u.role, contactId: (u.contactId ?? null) as string | null, subScopes };
   }
 
+  // ───────────────────────────── wizard: customer profile, projects, services (#69) ─────────────────────────────
+
+  /**
+   * A login domain belongs to one customer, and there is no unique index over the array column: two requests claiming the same domain
+   * would both pass the `&&` check. A transaction-level advisory lock per domain (sorted order, so no deadlock) makes the second wait
+   * for the first to commit, then see its row. Taken by customer create and by PATCH /customers/{id}.
+   */
+  private static async lockLoginDomains(tx: SqlExecutor, domains: readonly string[]): Promise<void> {
+    for (const dom of [...new Set(domains)].sort()) await tx.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`alarmops:loginDomain:${dom}`]);
+  }
+  private static toProfile(r: Record<string, any>): CustomerProfile { // eslint-disable-line @typescript-eslint/no-explicit-any
+    return { id: r.id, name: r.name, slug: r.slug, status: r.status, loginDomains: r.loginDomains ?? [], createdAt: dReq(r.createdAt) };
+  }
+  private static readonly PROFILE_SELECT = `SELECT "id", "name", "slug", "status", "loginDomains", "createdAt" FROM "Customer"`;
+  async listCustomers(scope: ScopeFilter): Promise<CustomerProfile[]> {
+    const all = scope.customerIds === '*';
+    return (await this.sql.query(`${SqlApiStore.PROFILE_SELECT} WHERE $1::boolean OR "id" = ANY($2::text[]) ORDER BY "createdAt", "id"`, [all, all ? [] : [...scope.customerIds]])).map(SqlApiStore.toProfile);
+  }
+  async findCustomer(scope: ScopeFilter, customerId: string): Promise<CustomerProfile | null> {
+    const all = scope.customerIds === '*';
+    const [r] = await this.sql.query(`${SqlApiStore.PROFILE_SELECT} WHERE "id" = $1 AND ($2::boolean OR "id" = ANY($3::text[]))`, [customerId, all, all ? [] : [...scope.customerIds]]);
+    return r ? SqlApiStore.toProfile(r) : null;
+  }
+  async updateCustomer(customerId: string, patch: CustomerProfilePatch, audit: AuditTemplate): Promise<CustomerUpdateOutcome> {
+    try {
+      return await this.sql.transaction(async (tx) => {
+        await SqlApiStore.lockLoginDomains(tx, patch.loginDomains ?? []);
+        // the same row lock a status change takes: no edit slips in behind a termination
+        const [cur] = await tx.query(`SELECT "status" FROM "Customer" WHERE "id" = $1 FOR UPDATE`, [customerId]);
+        if (!cur) return 'NOT_FOUND' as const;
+        if (cur.status === 'TERMINATED') return 'CUSTOMER_TERMINATED' as const;
+        if (patch.name !== undefined && (await tx.query(`SELECT 1 FROM "Customer" WHERE lower("name") = lower($1) AND "id" <> $2`, [patch.name, customerId])).length) return 'NAME_EXISTS' as const;
+        if (patch.loginDomains?.length && (await tx.query(`SELECT 1 FROM "Customer" WHERE "loginDomains" && $1::text[] AND "id" <> $2`, [patch.loginDomains, customerId])).length) return 'DOMAIN_EXISTS' as const;
+        await tx.query(`UPDATE "Customer" SET "name" = COALESCE($2, "name"), "loginDomains" = COALESCE($3::text[], "loginDomains"), "updatedAt" = ${this.sql.now()} WHERE "id" = $1`, [customerId, patch.name ?? null, patch.loginDomains ?? null]);
+        await insertAudit(tx, { ...audit, customerId, targetId: customerId });
+        const [r] = await tx.query(`${SqlApiStore.PROFILE_SELECT} WHERE "id" = $1`, [customerId]);
+        return SqlApiStore.toProfile(r!);
+      });
+    } catch (err) {
+      if (pgCode(err) === PG.UNIQUE) return 'NAME_EXISTS';
+      throw err;
+    }
+  }
+  async countPortalUsersInDomains(customerId: string, domains: readonly string[]): Promise<number> {
+    if (!domains.length) return 0;
+    const [r] = await this.sql.query(`SELECT count(*)::int AS "n" FROM "User" WHERE "customerId" = $1 AND "status" = 'ACTIVE' AND lower(substring("email"::text from '@([^@]*)$')) = ANY($2::text[])`, [customerId, [...domains]]);
+    return (r?.n as number) ?? 0;
+  }
+  private static readonly PROJECT_SELECT = `SELECT p."id", p."customerId", p."name", p."slug", (SELECT count(*)::int FROM "Service" s WHERE s."projectId" = p."id") AS "serviceCount" FROM "Project" p`;
+  private static toProject(r: Record<string, any>): ProjectRecord { // eslint-disable-line @typescript-eslint/no-explicit-any
+    return { id: r.id, customerId: r.customerId, name: r.name, slug: r.slug, serviceCount: r.serviceCount };
+  }
+  private static toService(r: Record<string, any>): ServiceRecord { // eslint-disable-line @typescript-eslint/no-explicit-any
+    return { id: r.id, customerId: r.customerId, projectId: r.projectId, name: r.name, slug: r.slug };
+  }
+  async listProjects(customerId: string): Promise<ProjectRecord[]> {
+    return (await this.sql.query(`${SqlApiStore.PROJECT_SELECT} WHERE p."customerId" = $1 ORDER BY p."name" COLLATE "C", p."id"`, [customerId])).map(SqlApiStore.toProject);
+  }
+  async findProject(scope: ScopeFilter, projectId: string): Promise<ProjectRecord | null> {
+    const all = scope.customerIds === '*';
+    const [r] = await this.sql.query(`${SqlApiStore.PROJECT_SELECT} WHERE p."id" = $1 AND ($2::boolean OR p."customerId" = ANY($3::text[]))`, [projectId, all, all ? [] : [...scope.customerIds]]);
+    return r ? SqlApiStore.toProject(r) : null;
+  }
+  /** FOR SHARE on the customer conflicts with the FOR UPDATE of a status change. */
+  private async liveCustomer(tx: SqlExecutor, customerId: string): Promise<'OK' | 'NOT_FOUND' | 'CUSTOMER_TERMINATED'> {
+    const [c] = await tx.query(`SELECT "status" FROM "Customer" WHERE "id" = $1 FOR SHARE`, [customerId]);
+    return !c ? 'NOT_FOUND' : c.status === 'TERMINATED' ? 'CUSTOMER_TERMINATED' : 'OK';
+  }
+  private static uniqueOutcome(err: unknown): 'NAME_EXISTS' | 'SLUG_EXISTS' {
+    return /slug/i.test(String((err as { constraint?: unknown }).constraint ?? '')) ? 'SLUG_EXISTS' : 'NAME_EXISTS';
+  }
+  async createProject(customerId: string, n: { name: string; slug: string }, audit: AuditTemplate): Promise<OrgWriteOutcome<ProjectRecord>> {
+    try {
+      return await this.sql.transaction(async (tx) => {
+        const live = await this.liveCustomer(tx, customerId);
+        if (live !== 'OK') return live;
+        if ((await tx.query(`SELECT 1 FROM "Project" WHERE "customerId" = $1 AND lower("name") = lower($2)`, [customerId, n.name])).length) return 'NAME_EXISTS' as const;
+        const id = newId('prj');
+        await tx.query(`INSERT INTO "Project"("id", "customerId", "name", "slug") VALUES ($1, $2, $3, $4)`, [id, customerId, n.name, n.slug]);
+        await insertAudit(tx, { ...audit, customerId, targetId: id });
+        const [r] = await tx.query(`${SqlApiStore.PROJECT_SELECT} WHERE p."id" = $1`, [id]);
+        return SqlApiStore.toProject(r!);
+      });
+    } catch (err) {
+      if (pgCode(err) === PG.UNIQUE) return SqlApiStore.uniqueOutcome(err);
+      throw err;
+    }
+  }
+  async updateProject(customerId: string, projectId: string, patch: { name: string }, audit: AuditTemplate): Promise<OrgWriteOutcome<ProjectRecord>> {
+    try {
+      return await this.sql.transaction(async (tx) => {
+        const live = await this.liveCustomer(tx, customerId);
+        if (live !== 'OK') return live;
+        if (!(await tx.query(`SELECT 1 FROM "Project" WHERE "id" = $1 AND "customerId" = $2 FOR UPDATE`, [projectId, customerId])).length) return 'NOT_FOUND' as const;
+        if ((await tx.query(`SELECT 1 FROM "Project" WHERE "customerId" = $1 AND "id" <> $2 AND lower("name") = lower($3)`, [customerId, projectId, patch.name])).length) return 'NAME_EXISTS' as const;
+        await tx.query(`UPDATE "Project" SET "name" = $3 WHERE "id" = $1 AND "customerId" = $2`, [projectId, customerId, patch.name]);
+        await insertAudit(tx, { ...audit, customerId, targetId: projectId });
+        const [r] = await tx.query(`${SqlApiStore.PROJECT_SELECT} WHERE p."id" = $1`, [projectId]);
+        return SqlApiStore.toProject(r!);
+      });
+    } catch (err) {
+      if (pgCode(err) === PG.UNIQUE) return SqlApiStore.uniqueOutcome(err);
+      throw err;
+    }
+  }
+  async listServices(customerId: string, projectId: string): Promise<ServiceRecord[]> {
+    return (await this.sql.query(`SELECT "id", "customerId", "projectId", "name", "slug" FROM "Service" WHERE "customerId" = $1 AND "projectId" = $2 ORDER BY "name" COLLATE "C", "id"`, [customerId, projectId])).map(SqlApiStore.toService);
+  }
+  async findService(scope: ScopeFilter, serviceId: string): Promise<ServiceRecord | null> {
+    const all = scope.customerIds === '*';
+    const [r] = await this.sql.query(`SELECT "id", "customerId", "projectId", "name", "slug" FROM "Service" WHERE "id" = $1 AND ($2::boolean OR "customerId" = ANY($3::text[]))`, [serviceId, all, all ? [] : [...scope.customerIds]]);
+    return r ? SqlApiStore.toService(r) : null;
+  }
+  async createService(customerId: string, projectId: string, n: { name: string; slug: string }, audit: AuditTemplate): Promise<OrgWriteOutcome<ServiceRecord>> {
+    try {
+      return await this.sql.transaction(async (tx) => {
+        const live = await this.liveCustomer(tx, customerId);
+        if (live !== 'OK') return live;
+        if (!(await tx.query(`SELECT 1 FROM "Project" WHERE "id" = $1 AND "customerId" = $2 FOR SHARE`, [projectId, customerId])).length) return 'NOT_FOUND' as const;
+        if ((await tx.query(`SELECT 1 FROM "Service" WHERE "projectId" = $1 AND lower("name") = lower($2)`, [projectId, n.name])).length) return 'NAME_EXISTS' as const;
+        const id = newId('svc');
+        await tx.query(`INSERT INTO "Service"("id", "customerId", "projectId", "name", "slug") VALUES ($1, $2, $3, $4, $5)`, [id, customerId, projectId, n.name, n.slug]);
+        await insertAudit(tx, { ...audit, customerId, targetId: id });
+        return { id, customerId, projectId, name: n.name, slug: n.slug };
+      });
+    } catch (err) {
+      if (pgCode(err) === PG.UNIQUE) return SqlApiStore.uniqueOutcome(err);
+      throw err;
+    }
+  }
+  async updateService(customerId: string, serviceId: string, patch: { name: string }, audit: AuditTemplate): Promise<OrgWriteOutcome<ServiceRecord>> {
+    try {
+      return await this.sql.transaction(async (tx) => {
+        const live = await this.liveCustomer(tx, customerId);
+        if (live !== 'OK') return live;
+        const [cur] = await tx.query(`SELECT "projectId" FROM "Service" WHERE "id" = $1 AND "customerId" = $2 FOR UPDATE`, [serviceId, customerId]);
+        if (!cur) return 'NOT_FOUND' as const;
+        if ((await tx.query(`SELECT 1 FROM "Service" WHERE "projectId" = $1 AND "id" <> $2 AND lower("name") = lower($3)`, [cur.projectId, serviceId, patch.name])).length) return 'NAME_EXISTS' as const;
+        await tx.query(`UPDATE "Service" SET "name" = $3 WHERE "id" = $1 AND "customerId" = $2`, [serviceId, customerId, patch.name]);
+        await insertAudit(tx, { ...audit, customerId, targetId: serviceId });
+        const [r] = await tx.query(`SELECT "id", "customerId", "projectId", "name", "slug" FROM "Service" WHERE "id" = $1`, [serviceId]);
+        return SqlApiStore.toService(r!);
+      });
+    } catch (err) {
+      if (pgCode(err) === PG.UNIQUE) return SqlApiStore.uniqueOutcome(err);
+      throw err;
+    }
+  }
+
+  // ───────────────────────────── users (#69, D-55) ─────────────────────────────
+
+  private static readonly USER_SELECT = `SELECT u."id", u."email"::text AS "email", u."name", u."customerId", u."role", u."status", (u."googleSub" IS NOT NULL) AS "googleBound", u."lastLoginAt", u."createdAt" FROM "User" u`;
+  private static toUser(r: Record<string, any>): UserRecord { // eslint-disable-line @typescript-eslint/no-explicit-any
+    return { id: r.id, email: String(r.email).toLowerCase(), name: r.name, kind: r.customerId ? 'CUSTOMER' : 'INTERNAL', customerId: r.customerId ?? null, role: r.role, status: r.status, googleBound: !!r.googleBound, lastLoginAt: d(r.lastLoginAt), createdAt: dReq(r.createdAt) };
+  }
+  async listUsers(f: UserFilter): Promise<UserRecord[]> {
+    const p = new Params();
+    const w: string[] = [];
+    if (f.kind) w.push(f.kind === 'CUSTOMER' ? `u."customerId" IS NOT NULL` : `u."customerId" IS NULL`);
+    if (f.customerId) w.push(`u."customerId" = ${p.add(f.customerId)}`);
+    if (f.status) w.push(`u."status" = ${p.add(f.status)}::"UserStatus"`);
+    if (f.role) w.push(`u."role" = ${p.add(f.role)}::"ConsoleRole"`);
+    if (f.q) { const like = p.add(`%${f.q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`); w.push(`(u."name" ILIKE ${like} OR u."email"::text ILIKE ${like})`); }
+    const rows = await this.sql.query(`${SqlApiStore.USER_SELECT}${w.length ? ` WHERE ${w.join(' AND ')}` : ''} ORDER BY u."name" COLLATE "C", u."id"`, p.values);
+    return rows.map(SqlApiStore.toUser);
+  }
+  async findUser(userId: string): Promise<UserRecord | null> {
+    const [r] = await this.sql.query(`${SqlApiStore.USER_SELECT} WHERE u."id" = $1`, [userId]);
+    return r ? SqlApiStore.toUser(r) : null;
+  }
+  async createUser(n: NewUser, audit: AuditTemplate): Promise<UserRecord | 'EMAIL_EXISTS' | 'NO_SUCH_CUSTOMER'> {
+    try {
+      return await this.sql.transaction(async (tx) => {
+        if (n.customerId !== null && !(await tx.query(`SELECT 1 FROM "Customer" WHERE "id" = $1 AND "status" <> 'TERMINATED' FOR SHARE`, [n.customerId])).length) return 'NO_SUCH_CUSTOMER' as const;
+        const id = newId('usr');
+        const [r] = await tx.query(
+          `INSERT INTO "User"("id", "email", "name", "customerId", "role", "status", "createdAt", "updatedAt") VALUES ($1, $2, $3, $4, $5::"ConsoleRole", $6::"UserStatus", ${this.sql.now()}, ${this.sql.now()})
+           ON CONFLICT ("email") DO NOTHING RETURNING "id"`, [id, n.email, n.name, n.customerId, n.role, n.status]);
+        if (!r) return 'EMAIL_EXISTS' as const;
+        await insertAudit(tx, { ...audit, customerId: n.customerId, targetId: id });
+        const [u] = await tx.query(`${SqlApiStore.USER_SELECT} WHERE u."id" = $1`, [id]);
+        return SqlApiStore.toUser(u!);
+      });
+    } catch (err) {
+      if (pgCode(err) === PG.UNIQUE) return 'EMAIL_EXISTS';
+      throw err;
+    }
+  }
+  async updateUser(userId: string, patch: UserPatch, audit: AuditTemplate): Promise<UserWriteOutcome> {
+    return this.sql.transaction(async (tx) => {
+      // Lock every ACTIVE all-range ADMIN (id order, so two demotions cannot deadlock) BEFORE reading the target: the last-admin rule is
+      // then checked on rows nobody else can change until this transaction ends.
+      const admins = (await tx.query(`SELECT "id" FROM "User" WHERE "customerId" IS NULL AND "role" = 'ADMIN' AND "status" = 'ACTIVE' ORDER BY "id" FOR UPDATE`)).map((r) => r.id as string);
+      const [cur] = await tx.query(`SELECT "id", "customerId", "role", "status" FROM "User" WHERE "id" = $1 FOR UPDATE`, [userId]);
+      if (!cur) return 'NOT_FOUND' as const;
+      const role = patch.role ?? cur.role; const status = patch.status ?? cur.status;
+      if (!cur.customerId && admins.includes(userId) && !(role === 'ADMIN' && status === 'ACTIVE') && admins.filter((a) => a !== userId).length === 0) return 'LAST_ADMIN' as const;
+      let customerId = (cur.customerId ?? null) as string | null;
+      if (patch.customerId !== undefined) {
+        if (!cur.customerId) return 'NO_SUCH_CUSTOMER' as const;
+        if (!(await tx.query(`SELECT 1 FROM "Customer" WHERE "id" = $1 AND "status" <> 'TERMINATED' FOR SHARE`, [patch.customerId])).length) return 'NO_SUCH_CUSTOMER' as const;
+        if ((await tx.query(`SELECT 1 FROM "Contact" WHERE "userId" = $1`, [userId])).length) return 'CONTACT_LINKED' as const;
+        customerId = patch.customerId;
+      }
+      await tx.query(
+        `UPDATE "User" SET "role" = $2::"ConsoleRole", "status" = $3::"UserStatus", "customerId" = $4, "googleSub" = CASE WHEN $5::boolean THEN NULL ELSE "googleSub" END, "updatedAt" = ${this.sql.now()} WHERE "id" = $1`,
+        [userId, role, status, customerId, patch.clearGoogleSub === true]);
+      await insertAudit(tx, { ...audit, customerId, targetId: userId });
+      const [u] = await tx.query(`${SqlApiStore.USER_SELECT} WHERE u."id" = $1`, [userId]);
+      return SqlApiStore.toUser(u!);
+    });
+  }
+  async touchLastLogin(userId: string, at: Date): Promise<void> {
+    await this.sql.query(`UPDATE "User" SET "lastLoginAt" = $2::timestamptz WHERE "id" = $1`, [userId, iso(at)]);
+  }
+  async enrolPortalUserByDomain(rawEmail: string, at: Date): Promise<EnrolOutcome> {
+    const email = normalizeEmail(rawEmail);
+    if (!email) return { refused: 'INVALID_EMAIL' };
+    const domain = emailDomain(email);
+    if (isFreeMail(domain)) return { refused: 'FREE_MAIL' };
+    return this.sql.transaction(async (tx) => {
+      const owners = await tx.query(`SELECT "id", "status" FROM "Customer" WHERE $1 = ANY("loginDomains") ORDER BY "id"`, [domain]);
+      if (owners.length === 0) return { refused: 'DOMAIN_UNKNOWN' as const };
+      if (owners.length > 1) return { refused: 'AMBIGUOUS' as const };
+      const customerId = owners[0]!.id as string;
+      if (owners[0]!.status !== 'ACTIVE') return { refused: 'CUSTOMER_INACTIVE' as const };
+      // The unique index on e-mail decides a race: the loser inserts nothing and reads the winner's row.
+      const [ins] = await tx.query(
+        `INSERT INTO "User"("id", "email", "name", "customerId", "role", "status", "createdAt", "updatedAt") VALUES ($1, $2, $3, $4, 'VIEWER', 'ACTIVE', $5::timestamptz, $5::timestamptz)
+         ON CONFLICT ("email") DO NOTHING RETURNING "id"`, [newId('usr'), email, email.slice(0, email.indexOf('@')).slice(0, 80), customerId, iso(at)]);
+      const [u] = await tx.query(`${SqlApiStore.USER_SELECT} WHERE u."email" = $1`, [email]);
+      if (!u) return { refused: 'DOMAIN_UNKNOWN' as const };
+      const user = SqlApiStore.toUser(u);
+      if (ins) {
+        await insertAudit(tx, { at, customerId, actorType: 'SYSTEM', actorId: null, action: 'user.enrol_domain', targetType: 'User', targetId: user.id, before: null, after: { kind: 'CUSTOMER', role: 'VIEWER', status: 'ACTIVE', reason: 'LOGIN_DOMAIN' } });
+        return { user, created: true };
+      }
+      if (user.kind === 'INTERNAL') return { refused: 'STAFF_EMAIL' as const };
+      if (user.customerId !== customerId) return { refused: 'OTHER_CUSTOMER' as const };
+      return user.status === 'ACTIVE' ? { user, created: false } : { refused: 'USER_INACTIVE' as const };
+    });
+  }
+  async bindGoogleSub(userId: string, sub: string, at: Date): Promise<BindGoogleOutcome> {
+    if (typeof sub !== 'string' || !sub || sub.length > 255 || /[\u0000-\u001f\u007f]/.test(sub)) throw new Error('bindGoogleSub: invalid sub');
+    const mismatch = async (tx: SqlExecutor, customerId: string | null, reason: string): Promise<'mismatch'> => {
+      await insertAudit(tx, { at, customerId, actorType: 'SYSTEM', actorId: null, action: 'user.google_mismatch', targetType: 'User', targetId: userId, before: null, after: { reason } });
+      return 'mismatch';
+    };
+    try {
+      return await this.sql.transaction(async (tx) => {
+        // The row lock makes "was null, now set" one winner: a parallel bind waits, then sees the value.
+        const [cur] = await tx.query(`SELECT "customerId", "googleSub" FROM "User" WHERE "id" = $1 FOR UPDATE`, [userId]);
+        if (!cur) return 'NOT_FOUND' as const;
+        const customerId = (cur.customerId ?? null) as string | null;
+        if (cur.googleSub === sub) return 'ok' as const;
+        if (cur.googleSub) return mismatch(tx, customerId, 'GOOGLE_SUB_MISMATCH');
+        if ((await tx.query(`SELECT 1 FROM "User" WHERE "googleSub" = $1 AND "id" <> $2`, [sub, userId])).length) return mismatch(tx, customerId, 'GOOGLE_SUB_IN_USE');
+        await tx.query(`UPDATE "User" SET "googleSub" = $2, "updatedAt" = ${this.sql.now()} WHERE "id" = $1`, [userId, sub]);
+        await insertAudit(tx, { at, customerId, actorType: 'SYSTEM', actorId: null, action: 'user.google_bind', targetType: 'User', targetId: userId, before: null, after: { reason: 'FIRST_SIGN_IN' } });
+        return 'bound' as const;
+      });
+    } catch (err) {
+      if (pgCode(err) !== PG.UNIQUE) throw err;
+      // the same Google account was bound to another user a moment ago (unique index): refuse, and say so
+      await this.sql.transaction((tx) => mismatch(tx, null, 'GOOGLE_SUB_IN_USE'));
+      return 'mismatch';
+    }
+  }
+
   /** Responders version = number of Responders audit rows of the customer (written in the same transaction as each change). */
   private async respondersVersionOf(q: SqlExecutor, customerId: string): Promise<number> {
     const [r] = await q.query(`SELECT count(*)::int AS "n" FROM "AuditLog" WHERE "customerId" = $1 AND "targetType" = 'Responders'`, [customerId]);
@@ -688,6 +957,7 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
   async createCustomer(c: { name: string; slug: string; loginDomains: string[] }, audit: AuditTemplate) {
     try {
       return await this.sql.transaction(async (tx) => {
+        await SqlApiStore.lockLoginDomains(tx, c.loginDomains);
         if ((await tx.query(`SELECT 1 FROM "Customer" WHERE lower("name") = lower($1)`, [c.name])).length) return 'NAME_EXISTS' as const;
         if ((await tx.query(`SELECT 1 FROM "Customer" WHERE "slug" = $1`, [c.slug])).length) return 'SLUG_EXISTS' as const;
         if (c.loginDomains.length && (await tx.query(`SELECT 1 FROM "Customer" WHERE "loginDomains" && $1::text[]`, [c.loginDomains])).length) return 'DOMAIN_EXISTS' as const;

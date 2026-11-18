@@ -479,6 +479,8 @@ model User {
   role        ConsoleRole @default(OPERATOR) // Q-DM-02 pending
   seeAll      Boolean     @default(false)
   status      UserStatus  @default(PENDING)
+  /// Google account id (`sub`) bound at the first SSO sign-in: e-mail addresses get reassigned, the sub does not. Cleared only by an ADMIN (users API).
+  googleSub   String?     @unique
   lastLoginAt DateTime?   @db.Timestamptz(3)
   createdAt   DateTime    @default(now()) @db.Timestamptz(3)
   updatedAt   DateTime    @updatedAt @db.Timestamptz(3)

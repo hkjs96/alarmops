@@ -140,8 +140,8 @@ export async function sqlFixture(db: TestDb, seed: MemoryTickStore): Promise<Sql
   for (const u of api.users?.values() ?? []) {
     // as stored: never derived from the contact (sessionPrincipal fails closed on a mismatch, memory and SQL alike)
     const customerId = u.customerId ?? null;
-    await q(`INSERT INTO "User"("id", "email", "name", "status", "customerId", "role", "updatedAt") VALUES ($1, $2, $3, $4::"UserStatus", $5, $6::"ConsoleRole", now())`,
-      [u.id, u.email ?? `${u.id}@example.test`, u.name, u.status ?? 'ACTIVE', customerId, u.role ?? (customerId ? 'VIEWER' : 'OPERATOR')]);
+    await q(`INSERT INTO "User"("id", "email", "name", "status", "customerId", "role", "googleSub", "updatedAt") VALUES ($1, $2, $3, $4::"UserStatus", $5, $6::"ConsoleRole", $7, now())`,
+      [u.id, u.email ?? `${u.id}@example.test`, u.name, u.status ?? 'ACTIVE', customerId, u.role ?? (customerId ? 'VIEWER' : 'OPERATOR'), u.googleSub ?? null]);
     if (u.contactId) await q(`UPDATE "Contact" SET "userId" = $1 WHERE "id" = $2`, [u.id, u.contactId]);
   }
   for (const [i, s] of (api.contactScopes ?? []).entries()) {

@@ -43,6 +43,7 @@
 | role | enum `ConsoleRole` | **미결**(Q-DM-02). 이식 후보: `VIEWER < OPERATOR < ADMIN`, 기본 OPERATOR, 고객사 담당자는 VIEWER 강제(org-tenant R4-1, R4-3) |
 | seeAll | bool default false | 내부 인원 전체 범위(R3-1). 고객사 담당자는 항상 false |
 | status | enum `PENDING, ACTIVE, DISABLED` | 첫 SSO는 PENDING, 관리자 사전 등록은 ACTIVE(R4-2) |
+| googleSub | text? UQ | 첫 SSO에서 묶는 Google 계정 id(`sub`). 이메일은 재배정될 수 있어 로그인은 이 값을 대조한다. 지우는 것은 ADMIN뿐(`PATCH /users/{id}`, 감사) |
 | lastLoginAt | timestamptz? | |
 | createdAt, updatedAt | | |
 
@@ -564,6 +565,7 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 | version | int | 승인 이중 클릭 방지 |
 
 - UQ(customerId, resourceId, action) where status in (`PENDING_APPROVAL`,`APPROVED`,`EXECUTING`) — 같은 리소스에 동시 요청 하나.
+- **전이 가드(마이그레이션 `0007`, 트리거 `RemediationRequest_guard`, #69):** UPDATE로만 상태가 바뀌고, 허용되는 전이는 `PENDING_APPROVAL`→`APPROVED`·`REJECTED`·`EXPIRED`, `APPROVED`→`EXECUTING`·`EXPIRED`, `EXECUTING`→`SUCCEEDED`·`FAILED`뿐이다(`NOTIFIED`와 `REJECTED`·`EXPIRED`·`SUCCEEDED`·`FAILED`는 나가는 전이 없음). 따라서 거절·만료된 요청은 어떤 역할로도 승인·실행으로 되돌릴 수 없다. `decidedBy`·`decidedAt`·`decisionVia`는 한 번 채워지면 바뀌지 않는다(예외: Contact 삭제의 FK `SET NULL` 동작이 `decidedBy`를 NULL로 만드는 것만, 직접 UPDATE는 거부). INSERT 가드: 새 요청은 `NOTIFIED`·`PENDING_APPROVAL`이고 `decidedBy`·`decidedAt`·`decisionVia`·`executedAt`이 NULL이어야 한다. `PENDING_APPROVAL`→`APPROVED` 위조는 트리거가 아니라 컬럼 권한·DB 역할(feat/prod-db roles.sql)이 막는다.
 
 ## 5. 온콜 · 에스컬레이션 (D-11, D-30·D-31 개정)
 

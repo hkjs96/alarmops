@@ -36,16 +36,16 @@ export const FREE_MAIL_DOMAINS: readonly string[] = [
   'gmail.com', 'googlemail.com', 'naver.com', 'daum.net', 'hanmail.net', 'kakao.com', 'outlook.com', 'hotmail.com', 'live.com', 'yahoo.com', 'icloud.com', 'proton.me', 'protonmail.com',
   'nate.com', 'msn.com', 'aol.com', 'gmx.com', 'gmx.net', 'mail.com', 'yandex.com', 'yandex.ru', 'qq.com', '163.com', 'me.com', 'pm.me',
 ];
-const isFreeMail = (d: string): boolean => FREE_MAIL_DOMAINS.some((f) => d === f || d.endsWith(`.${f}`));
+export const isFreeMail = (d: string): boolean => FREE_MAIL_DOMAINS.some((f) => d === f || d.endsWith(`.${f}`));
 
 const internalOnly = (auth: AuthContext): void => { if (auth.kind !== 'INTERNAL') throw notFound(); };
 
 // ───────────────────────────── POST /customers ─────────────────────────────
 
 /** The slug a name makes (DATA-MODEL "slug 규칙"): lowercase, other characters become `-`; empty (e.g. Korean only) -> `customer`. */
-export function slugFromName(name: string): string {
+export function slugFromName(name: string, fallback = 'customer'): string {
   const base = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 56);
-  return base || 'customer';
+  return base || fallback;
 }
 /** `base`, then `base-2`, `base-3`… until it is free and not reserved. */
 export function freeSlug(base: string, taken: ReadonlySet<string>): string {
@@ -53,6 +53,21 @@ export function freeSlug(base: string, taken: ReadonlySet<string>): string {
   if (ok_(base)) return base;
   for (let n = 2; n < 10_000; n++) { const s = `${base}-${n}`; if (ok_(s)) return s; }
   throw new Error('no free slug');
+}
+
+/** A customer / project / service name: 1-80 characters, no control characters (400 otherwise). */
+export function readName(v: unknown): string {
+  const name = typeof v === 'string' ? v.trim() : '';
+  if (!name || name.length > NAME_MAX || CONTROL.test(name)) throw invalid('name', `name is required (1-${NAME_MAX} characters).`);
+  return name;
+}
+/** `loginDomains` of POST and PATCH /customers: at most 10, strict syntax (400), lower-case, no public mail domain (422). */
+export function readLoginDomains(v: unknown): string[] {
+  if (!Array.isArray(v) || v.length > 10) throw invalid('loginDomains', 'loginDomains must be a list of at most 10 domains.');
+  const loginDomains = [...new Set(v.map((d) => (typeof d === 'string' ? d.trim().toLowerCase() : '')))];
+  if (loginDomains.some((d) => !DOMAIN_RE.test(d))) throw invalid('loginDomains', 'Each login domain must look like example.com.');
+  if (loginDomains.some(isFreeMail)) throw new ApiError(422, 'VALIDATION_FAILED', 'A public mail domain cannot be a login domain. Use the customer’s own company domain.', { fields: [{ field: 'loginDomains', message: 'Public mail domain.' }] });
+  return loginDomains;
 }
 
 export async function createCustomer(req: ApiRequest, deps: Deps): Promise<ApiResponse> {
@@ -65,21 +80,13 @@ export async function createCustomer(req: ApiRequest, deps: Deps): Promise<ApiRe
   const b = withoutUndefined(req.body);
   const unknown = Object.keys(b).filter((k) => !['name', 'slug', 'loginDomains'].includes(k));
   if (unknown.length) throw validation(unknown.map((field) => ({ field, message: 'Not accepted here.' })));
-  const name = typeof b.name === 'string' ? b.name.trim() : '';
-  if (!name || name.length > NAME_MAX || CONTROL.test(name)) throw invalid('name', `name is required (1-${NAME_MAX} characters).`);
+  const name = readName(b.name);
   if (b.slug !== undefined) {
     const p = slugProblem(b.slug);
     if (p === 'FORMAT') throw invalid('slug', 'slug must be lowercase letters, digits and "-" (1-64 characters, not starting with "-").');
     if (p === 'RESERVED') throw invalid('slug', 'That slug is reserved.');
   }
-  let loginDomains: string[] = [];
-  if (b.loginDomains !== undefined) {
-    if (!Array.isArray(b.loginDomains) || b.loginDomains.length > 10) throw invalid('loginDomains', 'loginDomains must be a list of at most 10 domains.');
-    loginDomains = [...new Set(b.loginDomains.map((d) => (typeof d === 'string' ? d.trim().toLowerCase() : '')))];
-    if (loginDomains.some((d) => !DOMAIN_RE.test(d))) throw invalid('loginDomains', 'Each login domain must look like example.com.');
-    const free = loginDomains.find(isFreeMail);
-    if (free) throw new ApiError(422, 'VALIDATION_FAILED', 'A public mail domain cannot be a login domain. Use the customer’s own company domain.', { fields: [{ field: 'loginDomains', message: 'Public mail domain.' }] });
-  }
+  const loginDomains = b.loginDomains !== undefined ? readLoginDomains(b.loginDomains) : [];
 
   const tree = await deps.repo.orgTree({ customerIds: '*', unmapped: false, subScopes: [] });
   const dup = tree.customers.find((c) => c.name.toLowerCase() === name.toLowerCase());
