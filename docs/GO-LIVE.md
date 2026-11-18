@@ -525,10 +525,10 @@ http://localhost:3107/auth/dev-login?as=admin
 > **주의** 배포는 이미 production에 올라가 있다. 바로 되돌린다.
 
 1. 되돌린다. 둘 중 하나를 한다.
-   - Vercel 대시보드 → Deployments에서 직전의 정상 배포 → **Promote to Production**(Instant Rollback)
-   - 본인 터미널에서 직전 production 배포로 되돌린다.
+   - Vercel 대시보드 → 프로젝트 개요의 Production Deployment → **Instant Rollback** → **Continue** → **Confirm Rollback**(자세한 화면은 `docs/SETUP-VERCEL.md` 11단계)
+   - 본인 터미널에서 되돌릴 배포를 지정해 되돌린다.
      ```bash
-     vercel rollback
+     vercel rollback <배포 URL 또는 ID>
      ```
    - 첫 배포라 직전 배포가 없으면 되돌릴 것이 없다. 3번으로 가서 원인을 고친다.
 2. 확인한다.
@@ -542,6 +542,8 @@ http://localhost:3107/auth/dev-login?as=admin
    - 배포 보호 401
    - mock 표식
    - CSP
+
+> **주의** 되돌리기(Instant Rollback)를 하면 Vercel은 그 뒤의 새 production 배포에 production 주소를 **자동으로 붙이지 않는다**. 고친 코드를 다시 배포해도 `CONSOLE_ORIGIN`은 계속 예전 배포를 가리키고, 스모크 검사도 예전 배포를 보고 통과할 수 있다. 다시 배포한 뒤에는 프로젝트 개요의 Production Deployment → **Manage** → 새 배포 선택 → **Confirm**으로 되돌리기를 풀거나, 본인 터미널에서 `vercel promote <새 배포 URL>`을 실행한다(`docs/SETUP-VERCEL.md` 11-4). 확인: 프로젝트 개요의 Production Deployment가 새 배포다.
 
 > **주의** 되돌린 동안 1분 틱이 멈출 수 있다(pg_cron은 같은 주소를 부른다). 틱 표시를 확인한다. 확인하는 법은 3-5의 4번이다.
 
