@@ -1035,3 +1035,13 @@ mock 모드(MOCK_API=1 E2E_ALLOW_MOCK=1 next build 후 next start -p 3191), Chro
 
 판정: P0·P1 없음, 이전 P1(Apply 404) 해소. 새 권고: 포털 인시던트 목록에 미매핑 계정 행·계정 번호가 남음(실제 백엔드 범위 필터로 걸러지는지 security 확인 필요). 참고: Told "—" 범례가 응답자 없는 긴급 공개를 설명하지 못함, 직원 행에 Show email 버튼도 없는 것은 안내문이 "numbers"만 언급.
 - 허브 확인(11/16): 포털 인시던트 목록의 미매핑 계정 행은 mock 한계다. 실제 API는 포털 scope가 `unmapped: false`라 `customerId == null` 인시던트를 주지 않는다(packages/api/src/auth.ts:43-46, 63).
+
+### 2026-11-18 로그인 화면 Google SSO (#64) (feat/google-sso @ 59c4753)
+
+| 날짜 | 시나리오 | 버전(커밋) | 페르소나 | 측정값 | 판정 | 캡처 |
+|---|---|---|---|---|---|---|
+| 2026-11-18 | 로그인 화면 Google SSO (#64) | 59c4753 | P2 준호·P4 민재(MSP 첫 로그인), P3 소연(미등록 포털 사용자) (1440×900·390×844, 라이트·다크) | 5개 상태(plain, ended=1, sso=refused, failed, unavailable) × 설정됨/미설정. 가로 스크롤 0, 말줄임 0, CSP 위반 0. "Sign in with Google" 링크 314×44/300×44, 미설정은 같은 크기 disabled 버튼 + 설명. ended=role status, 나머지=role alert. 390에서 refused 3줄 줄바꿈·겹침 없음. href=/auth/google/start, next는 안전한 경로만 유지(`//evil.com`·`https://evil.com` 제거). 클릭→302 accounts.google.com. 미설정 start→/login?sso=unavailable. Tab 순서 Skip→Google→dev 링크, 포커스 링 2px. dev 링크 노출 조건 변화 없음 | 통과 (권고 3, 참고 2) | (콘솔 출력) |
+
+권고: (1) refused 문구의 "your administrator"가 포털 사용자에게 모호 (2) 알림이 버튼 위 안내문 앞에 있고 실패가 중립 톤 (3) dev 링크 탭 영역 14px. 참고: 미설정+unavailable 중복 문구; 운영형 화면은 코드로만 확인.
+
+수정(console, 다음 커밋): 권고 1~3과 중복 문구를 반영함. refused 문구를 "contact the person who gave you access."로, 알림을 "Use your Google account." 아래 버튼 바로 위로 옮기고 오류 톤(banner red, role alert), 미설정+unavailable은 한 문구만, dev 링크는 줄마다 최소 44px.
