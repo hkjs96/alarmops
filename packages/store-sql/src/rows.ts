@@ -73,11 +73,12 @@ export function toJob(r: SqlRow): NotificationJob {
   };
 }
 
-export const CONTACT_COLS = '"id", "kind", "customerId", "name", "active", "email", "phone", "slackUserId", "emailVerifiedAt", "phoneVerifiedAt", "slackVerifiedAt", "phoneVerifiedVia"';
+export const CONTACT_COLS = '"id", "kind", "customerId", "name", "active", "email", "phone", "slackUserId", "emailVerifiedAt", "phoneVerifiedAt", "slackVerifiedAt", "phoneVerifiedVia", "emailVerifiedVia", "slackVerifiedVia"';
 export function toContact(r: SqlRow): Contact {
   return {
     id: r.id, kind: r.kind, customerId: r.customerId ?? null, name: r.name, active: r.active, email: r.email ?? null, phone: r.phone ?? null,
     slackUserId: r.slackUserId ?? null, emailVerifiedAt: d(r.emailVerifiedAt), phoneVerifiedAt: d(r.phoneVerifiedAt), slackVerifiedAt: d(r.slackVerifiedAt), phoneVerifiedVia: r.phoneVerifiedVia ?? null,
+    emailVerifiedVia: r.emailVerifiedVia ?? null, slackVerifiedVia: r.slackVerifiedVia ?? null,
   };
 }
 

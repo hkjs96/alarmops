@@ -108,6 +108,8 @@ export function limitOf(req: ApiRequest, dflt = 50, max = 200): number {
   return Math.min(max, Number(raw));
 }
 
+/** A JSON body as a client sends it: a key whose value is `undefined` does not exist in JSON, so it does not exist here either. */
+export const withoutUndefined = (v: Record<string, unknown>): Record<string, unknown> => Object.fromEntries(Object.entries(v).filter(([, x]) => x !== undefined));
 export const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
 // ───────────────────────────── input hygiene (security review SQL, R-5) ─────────────────────────────
