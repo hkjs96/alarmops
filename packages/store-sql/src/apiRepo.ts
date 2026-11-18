@@ -5,7 +5,7 @@
  */
 import { createHash } from 'node:crypto';
 import { incidentMute, type DigestData, type PurgeLogEntry, type Contact, type Leave, type Override, type Rotation, type AuditInput, type DeliveryLog, type IncidentEventInput, type IncidentRow, type MaintenanceWindow, type PagingConfig } from '@alarmops/core';
-import { nodeVisible, type ApiRepository, type AlertMemberRow, type IdempotentEntry, type IncidentFilter, type IncidentPage, type NodeFilter, type NotifiedPerson, type OpenCounts, type OrgTree, type ScopeFilter, type StatusCounts, type UndoRecord, type UserInfo, type Principal, type ResponderOp, type ResponderWriteOutcome, type RespondersState, type RotationsWorld, type ChangeStatusOutcome, type CustomerStatusState, type CustomerStatusValue, type ExportIncidentRow, type RetentionView, type MarkStepOutcome, type OffboardStep, type OffboardStepKey, type OffboardingState, type RevealLogFilter, type RevealLogRow, type RevealWrite, type RevealWriteOutcome, type AccountPatch, type AccountWriteOutcome, type AuditTemplate, type CloudAccountRecord, type ContactPatch, type ContactScopeInfo, type ContactWriteOutcome, type ContactsWorld, type NewAccount, type NewContact, type VerificationIssue, type VerificationLimits, type IssueOutcome, type VerificationLink, type VerificationTaken, type VerifyChannelValue, type BindGoogleOutcome, type EnrolOutcome, type NewUser, type UserFilter, type UserPatch, type UserRecord, type UserWriteOutcome, OFFBOARD_STEP_KEYS, normalizeEmail, emailDomain, isFreeMail } from '@alarmops/api';
+import { nodeVisible, type ApiRepository, type AlertMemberRow, type IdempotentEntry, type IncidentFilter, type IncidentPage, type NodeFilter, type NotifiedPerson, type OpenCounts, type OrgTree, type ScopeFilter, type StatusCounts, type UndoRecord, type UserInfo, type Principal, type ResponderOp, type ResponderWriteOutcome, type RespondersState, type RotationsWorld, type ChangeStatusOutcome, type CustomerStatusState, type CustomerStatusValue, type ExportIncidentRow, type RetentionView, type MarkStepOutcome, type OffboardStep, type OffboardStepKey, type OffboardingState, type RevealLogFilter, type RevealLogRow, type RevealWrite, type RevealWriteOutcome, type AccountPatch, type AccountWriteOutcome, type AuditTemplate, type CloudAccountRecord, type ContactPatch, type ContactScopeInfo, type ContactWriteOutcome, type ContactsWorld, type NewAccount, type NewContact, type VerificationIssue, type VerificationLimits, type IssueOutcome, type VerificationLink, type VerificationTaken, type VerifyChannelValue, type CustomerProfile, type CustomerProfilePatch, type CustomerUpdateOutcome, type OrgWriteOutcome, type ProjectRecord, type ServiceRecord, type BindGoogleOutcome, type EnrolOutcome, type NewUser, type UserFilter, type UserPatch, type UserRecord, type UserWriteOutcome, OFFBOARD_STEP_KEYS, normalizeEmail, emailDomain, isFreeMail } from '@alarmops/api';
 import { PG, pgCode, type SqlExecutor } from './client.js';
 import { purgeLogOf } from './retentionSql.js';
 import { CONTACT_COLS, toContact, Params, d, dReq, incidentCols, iso, js, newId, num, toEvent, toIncident, toLog } from './rows.js';
@@ -367,6 +367,141 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
         : r.projectId ? { customerId, projectId: r.projectId as string, serviceId: r.scopeId as string } : { customerId, serviceId: r.scopeId as string }));
     }
     return { userId: u.id, email: u.email, name: u.name, customerId, role: u.role, contactId: (u.contactId ?? null) as string | null, subScopes };
+  }
+
+  // ───────────────────────────── wizard: customer profile, projects, services (#69) ─────────────────────────────
+
+  private static toProfile(r: Record<string, any>): CustomerProfile { // eslint-disable-line @typescript-eslint/no-explicit-any
+    return { id: r.id, name: r.name, slug: r.slug, status: r.status, loginDomains: r.loginDomains ?? [], createdAt: dReq(r.createdAt) };
+  }
+  private static readonly PROFILE_SELECT = `SELECT "id", "name", "slug", "status", "loginDomains", "createdAt" FROM "Customer"`;
+  async listCustomers(scope: ScopeFilter): Promise<CustomerProfile[]> {
+    const all = scope.customerIds === '*';
+    return (await this.sql.query(`${SqlApiStore.PROFILE_SELECT} WHERE $1::boolean OR "id" = ANY($2::text[]) ORDER BY "createdAt", "id"`, [all, all ? [] : [...scope.customerIds]])).map(SqlApiStore.toProfile);
+  }
+  async findCustomer(scope: ScopeFilter, customerId: string): Promise<CustomerProfile | null> {
+    const all = scope.customerIds === '*';
+    const [r] = await this.sql.query(`${SqlApiStore.PROFILE_SELECT} WHERE "id" = $1 AND ($2::boolean OR "id" = ANY($3::text[]))`, [customerId, all, all ? [] : [...scope.customerIds]]);
+    return r ? SqlApiStore.toProfile(r) : null;
+  }
+  async updateCustomer(customerId: string, patch: CustomerProfilePatch, audit: AuditTemplate): Promise<CustomerUpdateOutcome> {
+    try {
+      return await this.sql.transaction(async (tx) => {
+        // the same row lock a status change takes: no edit slips in behind a termination
+        const [cur] = await tx.query(`SELECT "status" FROM "Customer" WHERE "id" = $1 FOR UPDATE`, [customerId]);
+        if (!cur) return 'NOT_FOUND' as const;
+        if (cur.status === 'TERMINATED') return 'CUSTOMER_TERMINATED' as const;
+        if (patch.name !== undefined && (await tx.query(`SELECT 1 FROM "Customer" WHERE lower("name") = lower($1) AND "id" <> $2`, [patch.name, customerId])).length) return 'NAME_EXISTS' as const;
+        if (patch.loginDomains?.length && (await tx.query(`SELECT 1 FROM "Customer" WHERE "loginDomains" && $1::text[] AND "id" <> $2`, [patch.loginDomains, customerId])).length) return 'DOMAIN_EXISTS' as const;
+        await tx.query(`UPDATE "Customer" SET "name" = COALESCE($2, "name"), "loginDomains" = COALESCE($3::text[], "loginDomains"), "updatedAt" = ${this.sql.now()} WHERE "id" = $1`, [customerId, patch.name ?? null, patch.loginDomains ?? null]);
+        await insertAudit(tx, { ...audit, customerId, targetId: customerId });
+        const [r] = await tx.query(`${SqlApiStore.PROFILE_SELECT} WHERE "id" = $1`, [customerId]);
+        return SqlApiStore.toProfile(r!);
+      });
+    } catch (err) {
+      if (pgCode(err) === PG.UNIQUE) return 'NAME_EXISTS';
+      throw err;
+    }
+  }
+  private static readonly PROJECT_SELECT = `SELECT p."id", p."customerId", p."name", p."slug", (SELECT count(*)::int FROM "Service" s WHERE s."projectId" = p."id") AS "serviceCount" FROM "Project" p`;
+  private static toProject(r: Record<string, any>): ProjectRecord { // eslint-disable-line @typescript-eslint/no-explicit-any
+    return { id: r.id, customerId: r.customerId, name: r.name, slug: r.slug, serviceCount: r.serviceCount };
+  }
+  private static toService(r: Record<string, any>): ServiceRecord { // eslint-disable-line @typescript-eslint/no-explicit-any
+    return { id: r.id, customerId: r.customerId, projectId: r.projectId, name: r.name, slug: r.slug };
+  }
+  async listProjects(customerId: string): Promise<ProjectRecord[]> {
+    return (await this.sql.query(`${SqlApiStore.PROJECT_SELECT} WHERE p."customerId" = $1 ORDER BY p."name", p."id"`, [customerId])).map(SqlApiStore.toProject);
+  }
+  async findProject(scope: ScopeFilter, projectId: string): Promise<ProjectRecord | null> {
+    const all = scope.customerIds === '*';
+    const [r] = await this.sql.query(`${SqlApiStore.PROJECT_SELECT} WHERE p."id" = $1 AND ($2::boolean OR p."customerId" = ANY($3::text[]))`, [projectId, all, all ? [] : [...scope.customerIds]]);
+    return r ? SqlApiStore.toProject(r) : null;
+  }
+  /** FOR SHARE on the customer conflicts with the FOR UPDATE of a status change. */
+  private async liveCustomer(tx: SqlExecutor, customerId: string): Promise<'OK' | 'NOT_FOUND' | 'CUSTOMER_TERMINATED'> {
+    const [c] = await tx.query(`SELECT "status" FROM "Customer" WHERE "id" = $1 FOR SHARE`, [customerId]);
+    return !c ? 'NOT_FOUND' : c.status === 'TERMINATED' ? 'CUSTOMER_TERMINATED' : 'OK';
+  }
+  private static uniqueOutcome(err: unknown): 'NAME_EXISTS' | 'SLUG_EXISTS' {
+    return /slug/i.test(String((err as { constraint?: unknown }).constraint ?? '')) ? 'SLUG_EXISTS' : 'NAME_EXISTS';
+  }
+  async createProject(customerId: string, n: { name: string; slug: string }, audit: AuditTemplate): Promise<OrgWriteOutcome<ProjectRecord>> {
+    try {
+      return await this.sql.transaction(async (tx) => {
+        const live = await this.liveCustomer(tx, customerId);
+        if (live !== 'OK') return live;
+        if ((await tx.query(`SELECT 1 FROM "Project" WHERE "customerId" = $1 AND lower("name") = lower($2)`, [customerId, n.name])).length) return 'NAME_EXISTS' as const;
+        const id = newId('prj');
+        await tx.query(`INSERT INTO "Project"("id", "customerId", "name", "slug") VALUES ($1, $2, $3, $4)`, [id, customerId, n.name, n.slug]);
+        await insertAudit(tx, { ...audit, customerId, targetId: id });
+        const [r] = await tx.query(`${SqlApiStore.PROJECT_SELECT} WHERE p."id" = $1`, [id]);
+        return SqlApiStore.toProject(r!);
+      });
+    } catch (err) {
+      if (pgCode(err) === PG.UNIQUE) return SqlApiStore.uniqueOutcome(err);
+      throw err;
+    }
+  }
+  async updateProject(customerId: string, projectId: string, patch: { name: string }, audit: AuditTemplate): Promise<OrgWriteOutcome<ProjectRecord>> {
+    try {
+      return await this.sql.transaction(async (tx) => {
+        const live = await this.liveCustomer(tx, customerId);
+        if (live !== 'OK') return live;
+        if (!(await tx.query(`SELECT 1 FROM "Project" WHERE "id" = $1 AND "customerId" = $2 FOR UPDATE`, [projectId, customerId])).length) return 'NOT_FOUND' as const;
+        if ((await tx.query(`SELECT 1 FROM "Project" WHERE "customerId" = $1 AND "id" <> $2 AND lower("name") = lower($3)`, [customerId, projectId, patch.name])).length) return 'NAME_EXISTS' as const;
+        await tx.query(`UPDATE "Project" SET "name" = $3 WHERE "id" = $1 AND "customerId" = $2`, [projectId, customerId, patch.name]);
+        await insertAudit(tx, { ...audit, customerId, targetId: projectId });
+        const [r] = await tx.query(`${SqlApiStore.PROJECT_SELECT} WHERE p."id" = $1`, [projectId]);
+        return SqlApiStore.toProject(r!);
+      });
+    } catch (err) {
+      if (pgCode(err) === PG.UNIQUE) return SqlApiStore.uniqueOutcome(err);
+      throw err;
+    }
+  }
+  async listServices(customerId: string, projectId: string): Promise<ServiceRecord[]> {
+    return (await this.sql.query(`SELECT "id", "customerId", "projectId", "name", "slug" FROM "Service" WHERE "customerId" = $1 AND "projectId" = $2 ORDER BY "name", "id"`, [customerId, projectId])).map(SqlApiStore.toService);
+  }
+  async findService(scope: ScopeFilter, serviceId: string): Promise<ServiceRecord | null> {
+    const all = scope.customerIds === '*';
+    const [r] = await this.sql.query(`SELECT "id", "customerId", "projectId", "name", "slug" FROM "Service" WHERE "id" = $1 AND ($2::boolean OR "customerId" = ANY($3::text[]))`, [serviceId, all, all ? [] : [...scope.customerIds]]);
+    return r ? SqlApiStore.toService(r) : null;
+  }
+  async createService(customerId: string, projectId: string, n: { name: string; slug: string }, audit: AuditTemplate): Promise<OrgWriteOutcome<ServiceRecord>> {
+    try {
+      return await this.sql.transaction(async (tx) => {
+        const live = await this.liveCustomer(tx, customerId);
+        if (live !== 'OK') return live;
+        if (!(await tx.query(`SELECT 1 FROM "Project" WHERE "id" = $1 AND "customerId" = $2 FOR SHARE`, [projectId, customerId])).length) return 'NOT_FOUND' as const;
+        if ((await tx.query(`SELECT 1 FROM "Service" WHERE "projectId" = $1 AND lower("name") = lower($2)`, [projectId, n.name])).length) return 'NAME_EXISTS' as const;
+        const id = newId('svc');
+        await tx.query(`INSERT INTO "Service"("id", "customerId", "projectId", "name", "slug") VALUES ($1, $2, $3, $4, $5)`, [id, customerId, projectId, n.name, n.slug]);
+        await insertAudit(tx, { ...audit, customerId, targetId: id });
+        return { id, customerId, projectId, name: n.name, slug: n.slug };
+      });
+    } catch (err) {
+      if (pgCode(err) === PG.UNIQUE) return SqlApiStore.uniqueOutcome(err);
+      throw err;
+    }
+  }
+  async updateService(customerId: string, serviceId: string, patch: { name: string }, audit: AuditTemplate): Promise<OrgWriteOutcome<ServiceRecord>> {
+    try {
+      return await this.sql.transaction(async (tx) => {
+        const live = await this.liveCustomer(tx, customerId);
+        if (live !== 'OK') return live;
+        const [cur] = await tx.query(`SELECT "projectId" FROM "Service" WHERE "id" = $1 AND "customerId" = $2 FOR UPDATE`, [serviceId, customerId]);
+        if (!cur) return 'NOT_FOUND' as const;
+        if ((await tx.query(`SELECT 1 FROM "Service" WHERE "projectId" = $1 AND "id" <> $2 AND lower("name") = lower($3)`, [cur.projectId, serviceId, patch.name])).length) return 'NAME_EXISTS' as const;
+        await tx.query(`UPDATE "Service" SET "name" = $3 WHERE "id" = $1 AND "customerId" = $2`, [serviceId, customerId, patch.name]);
+        await insertAudit(tx, { ...audit, customerId, targetId: serviceId });
+        const [r] = await tx.query(`SELECT "id", "customerId", "projectId", "name", "slug" FROM "Service" WHERE "id" = $1`, [serviceId]);
+        return SqlApiStore.toService(r!);
+      });
+    } catch (err) {
+      if (pgCode(err) === PG.UNIQUE) return SqlApiStore.uniqueOutcome(err);
+      throw err;
+    }
   }
 
   // ───────────────────────────── users (#69, D-55) ─────────────────────────────

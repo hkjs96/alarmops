@@ -258,6 +258,15 @@ export type EnrolOutcome =
 /** 'bound': the user had no Google account, now has (audited). 'ok': the same one. 'mismatch': another one is bound; nothing changed, a `user.google_mismatch` audit row (reason code, no e-mail) was written. */
 export type BindGoogleOutcome = 'bound' | 'ok' | 'mismatch' | 'NOT_FOUND';
 
+// ── wizard: customer profile, projects, services (API-CONTRACT §8.4, #69) ──
+export interface CustomerProfile { id: string; name: string; slug: string; status: CustomerStatusValue; loginDomains: string[]; createdAt: Date }
+export interface ProjectRecord { id: string; customerId: string; name: string; slug: string; serviceCount: number }
+export interface ServiceRecord { id: string; customerId: string; projectId: string; name: string; slug: string }
+/** `undefined` = unchanged. The slug never changes (D-33). */
+export interface CustomerProfilePatch { name?: string; loginDomains?: string[] }
+export type OrgWriteOutcome<T> = T | 'NOT_FOUND' | 'NAME_EXISTS' | 'SLUG_EXISTS' | 'CUSTOMER_TERMINATED';
+export type CustomerUpdateOutcome = CustomerProfile | 'NOT_FOUND' | 'NAME_EXISTS' | 'DOMAIN_EXISTS' | 'CUSTOMER_TERMINATED';
+
 export interface ApiRepository {
   // ── org / scope ──
   orgTree(scope: ScopeFilter): Promise<OrgTree>;
@@ -430,6 +439,23 @@ export interface ApiRepository {
   takeVerification(tokenHash: string, now: Date, audit: AuditTemplate): Promise<VerificationTaken | null>;
   /** Read-only: is a link with this hash pending (unused, not expired, contact active)? Changes nothing. */
   peekVerification(tokenHash: string, now: Date): Promise<{ channel: VerifyChannelValue } | null>;
+
+  // ── wizard: customer profile, projects, services (#69). Reads take the scope and apply it inside the query; writes are `WHERE customerId = ?`. ──
+  listCustomers(scope: ScopeFilter): Promise<CustomerProfile[]>;
+  findCustomer(scope: ScopeFilter, customerId: string): Promise<CustomerProfile | null>;
+  /** ONE transaction: row + audit. Name unique case-insensitively; a login domain may belong to one customer only. Refused for a TERMINATED customer. */
+  updateCustomer(customerId: string, patch: CustomerProfilePatch, audit: AuditTemplate): Promise<CustomerUpdateOutcome>;
+  /** Caller has checked the customer is visible and customer-wide. */
+  listProjects(customerId: string): Promise<ProjectRecord[]>;
+  /** The project if its customer is inside `scope` (in the query). */
+  findProject(scope: ScopeFilter, projectId: string): Promise<ProjectRecord | null>;
+  createProject(customerId: string, p: { name: string; slug: string }, audit: AuditTemplate): Promise<OrgWriteOutcome<ProjectRecord>>;
+  updateProject(customerId: string, projectId: string, patch: { name: string }, audit: AuditTemplate): Promise<OrgWriteOutcome<ProjectRecord>>;
+  /** Caller has found the project through `findProject` (scope checked). */
+  listServices(customerId: string, projectId: string): Promise<ServiceRecord[]>;
+  findService(scope: ScopeFilter, serviceId: string): Promise<ServiceRecord | null>;
+  createService(customerId: string, projectId: string, sv: { name: string; slug: string }, audit: AuditTemplate): Promise<OrgWriteOutcome<ServiceRecord>>;
+  updateService(customerId: string, serviceId: string, patch: { name: string }, audit: AuditTemplate): Promise<OrgWriteOutcome<ServiceRecord>>;
 
   // ── users (D-55) ──
   /** All users matching the filter (ADMIN with the all-customer range only: the caller checked), name order. */

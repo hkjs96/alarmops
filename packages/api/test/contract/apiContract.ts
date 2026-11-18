@@ -777,9 +777,9 @@ export function apiContract(make: MakeApiFixture): void {
       expect(body(await w.call(USERS.haeun, 'GET', `/incidents/${w.ids.hanbit}`)).pagingSuppressed).toBeNull();
     });
 
-    it('there is no status door besides PATCH /customers/{id}/status', async () => {
+    it('there is no status door besides PATCH /customers/{id}/status (PATCH /customers/{id} refuses the field, #69)', async () => {
       await open();
-      expect((await w.call(USERS.minjae, 'PATCH', '/customers/cus_mirae', { body: { status: 'TERMINATED' } })).status).toBe(404);
+      expect((await w.call(USERS.minjae, 'PATCH', '/customers/cus_mirae', { body: { status: 'TERMINATED' } })).status).toBe(400);
       expect(body(await w.call(USERS.minjae, 'GET', '/customers/cus_mirae/status')).status).toBe('ACTIVE');
     });
   });

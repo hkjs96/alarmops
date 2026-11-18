@@ -16,6 +16,7 @@ import { getScopeTree } from './scope.js';
 import { listContactReveals, revealContact } from './revealApi.js';
 import { createCustomer, listAccounts, createAccount, patchAccount, deleteAccount, checkAccount, getAccountStatus } from './onboardingApi.js';
 import { listContacts, createContact, patchContact, deleteContact, verifyContact, verifyBulk, useVerifyLink, peekVerifyLink, type VerificationSender } from './contactsApi.js';
+import { createProject, createService, getCustomer, listCustomers, listProjects, listServices, patchCustomer, patchProject, patchService } from './orgApi.js';
 import { createUser, getUser, listUsers, patchUser } from './usersApi.js';
 import { deleteResponder, getMe, getOncallNow, getPagingHealth, getResponders, listRotations, listStaff, patchResponder, postResponder } from './peopleApi.js';
 
@@ -97,6 +98,16 @@ export const ROUTES: Route[] = [
   route('GET', '/contact-reveals', (r, d) => listContactReveals(r, d)),
   // ── onboarding (#62): customer, AWS accounts, contacts, verification ──
   route('POST', '/customers', (r, d) => createCustomer(r, d)),
+  // wizard (#69): customer profile, projects, services — MSP staff only
+  route('GET', '/customers', (r, d) => listCustomers(r, d)),
+  route('GET', '/customers/:id', (r, d, p) => getCustomer(r, d, p[0]!)),
+  route('PATCH', '/customers/:id', (r, d, p) => patchCustomer(r, d, p[0]!)),
+  route('GET', '/customers/:id/projects', (r, d, p) => listProjects(r, d, p[0]!)),
+  route('POST', '/customers/:id/projects', (r, d, p) => createProject(r, d, p[0]!)),
+  route('PATCH', '/projects/:id', (r, d, p) => patchProject(r, d, p[0]!)),
+  route('GET', '/projects/:id/services', (r, d, p) => listServices(r, d, p[0]!)),
+  route('POST', '/projects/:id/services', (r, d, p) => createService(r, d, p[0]!)),
+  route('PATCH', '/services/:id', (r, d, p) => patchService(r, d, p[0]!)),
   // An account response carries the ExternalId: never kept for replay (a second call with the same Idempotency-Key runs again).
   route('GET', '/customers/:id/accounts', (r, d, p) => listAccounts(r, d, p[0]!)),
   route('POST', '/customers/:id/accounts', (r, d, p) => createAccount(r, d, p[0]!), () => false),
