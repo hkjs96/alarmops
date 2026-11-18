@@ -15,7 +15,7 @@ import { dirname, join, relative, resolve, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { Marked } from 'marked';
-import { architecture, incidentFlow, customerRoles, roadmap } from './figures.mjs';
+import { architecture, incidentFlow, customerRoles, signIn, dbAccounts, roadmap, ROADMAP } from './figures.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '../..');
@@ -24,7 +24,7 @@ const out = resolve(process.argv[2] ?? join(here, 'out', 'alarmops-docs.html'));
 
 // Sidebar groups, in order. First matching rule wins; paths are relative to docs/.
 const GROUPS = [
-  { key: 'start', title: '시작하기', blurb: '실운영까지의 순서와 설정 가이드', match: (p) => ['GO-LIVE.md', 'SETUP-SUPABASE.md', 'SETUP-WINDOWS.md', 'HANDOFF.md'].includes(p) },
+  { key: 'start', title: '시작하기', blurb: '실운영까지의 순서와 설정 가이드', match: (p) => ['GO-LIVE.md', 'SETUP-SUPABASE.md', 'SETUP-PROD-DB.md', 'SETUP-GOOGLE-SSO.md', 'SETUP-WINDOWS.md', 'HANDOFF.md'].includes(p) },
   { key: 'decide', title: '결정·기준', blurb: '확정된 결정 D-01~ 과 검증 페르소나', match: (p) => p.startsWith('decisions/') || p === 'PERSONAS.md' },
   { key: 'design', title: '설계', blurb: 'API 계약, 데이터 모델, 이전 계획', match: (p) => ['API-CONTRACT.md', 'DATA-MODEL.md'].includes(p) || p.startsWith('migration/') || p.startsWith('infra-todo/') },
   { key: 'spec', title: '동작 명세', blurb: '기존 두 저장소에서 뽑은 규칙', match: (p) => p.startsWith('specs/') },
@@ -33,10 +33,13 @@ const GROUPS = [
   { key: 'qa', title: 'QA 기록', blurb: '페르소나 점검과 화면 평가', match: (p) => p.startsWith('qa/') },
   { key: 'etc', title: '기타', blurb: '', match: () => true },
 ];
-const PIN = ['GO-LIVE.md', 'SETUP-SUPABASE.md', 'SETUP-WINDOWS.md', 'HANDOFF.md', 'decisions/DECISIONS.md', 'PERSONAS.md', 'API-CONTRACT.md', 'DATA-MODEL.md', 'specs/README.md', 'ui/README.md', 'ui/IA.md', 'qa/results.md'];
+const PIN = ['GO-LIVE.md', 'SETUP-SUPABASE.md', 'SETUP-PROD-DB.md', 'SETUP-GOOGLE-SSO.md', 'SETUP-WINDOWS.md', 'HANDOFF.md', 'decisions/DECISIONS.md', 'PERSONAS.md', 'API-CONTRACT.md', 'DATA-MODEL.md', 'specs/README.md', 'ui/README.md', 'ui/IA.md', 'qa/results.md'];
 // Figures shown at the top of a document, full width above the text.
 const INSERT = {
   'GO-LIVE.md': ['roadmap', 'architecture'],
+  'SETUP-GOOGLE-SSO.md': ['signin'],
+  'SETUP-PROD-DB.md': ['dbaccounts'],
+  'specs/org-tenant.md': ['signin'],
   'specs/oncall-escalation.md': ['flow'],
   'specs/grouping-incident.md': ['flow'],
   'specs/suppression.md': ['flow'],
@@ -147,7 +150,7 @@ const goliveLink = (prefix) => {
   const t = golive?.toc.find((x) => x.text.startsWith(prefix));
   return t ? `#${t.hid}` : `#${golive?.id ?? ''}`;
 };
-const FIG = { roadmap: () => roadmap(goliveLink), architecture, flow: incidentFlow, roles: customerRoles };
+const FIG = { roadmap: () => roadmap(goliveLink), architecture, flow: incidentFlow, roles: customerRoles, signin: signIn, dbaccounts: dbAccounts };
 for (const d of docs) {
   const figs = INSERT[d.rel];
   if (!figs) continue;
@@ -159,14 +162,15 @@ const decisionCount = decisionsDoc ? (decisionsDoc.html.match(/<h3 [^>]*>.*?<spa
 const link = (rel) => `#${docId(rel)}`;
 const READ = [
   { who: '처음 왔다면', what: '파일럿까지 무엇이 남았는지, 누가 하는지', rel: 'GO-LIVE.md' },
-  { who: '직접 설정할 사람', what: 'Supabase 개발 DB, 회사 PC 준비', rel: 'SETUP-SUPABASE.md', rel2: 'SETUP-WINDOWS.md' },
+  { who: '직접 설정할 사람', what: '개발 DB와 회사 PC, 그다음 운영 DB', rel: 'SETUP-SUPABASE.md', rel2: 'SETUP-PROD-DB.md' },
+  { who: '로그인을 붙일 사람', what: 'Google 클라이언트, 허용 도메인, 첫 ADMIN', rel: 'SETUP-GOOGLE-SSO.md' },
   { who: '결정을 찾을 때', what: `확정된 결정 ${decisionCount}개, 주제별 색인`, rel: 'decisions/DECISIONS.md' },
   { who: '화면을 만들 때', what: '메뉴 구성, 화면 명세, 페르소나', rel: 'ui/README.md', rel2: 'PERSONAS.md' },
   { who: '백엔드를 만들 때', what: '콘솔과 백엔드의 경계, 테이블', rel: 'API-CONTRACT.md', rel2: 'DATA-MODEL.md' },
   { who: '규칙이 헷갈릴 때', what: '억제·그룹·에스컬레이션 동작 명세', rel: 'specs/README.md' },
 ];
 const titleOf = (rel) => docs.find((d) => d.rel === rel)?.title ?? rel;
-const doneCount = 1;
+const doneCount = ROADMAP.filter((s) => s.state === 'done').length;
 const home = `<article id="home" class="view home">
 <header class="hero">
  <p class="eyebrow">AlarmOps PoC · 서울 리전 · 파일럿 1곳</p>
@@ -184,6 +188,7 @@ const home = `<article id="home" class="view home">
 </section>
 <section class="band">${architecture()}</section>
 <section class="band two">${incidentFlow()}${customerRoles()}</section>
+<section class="band two">${signIn()}${dbAccounts()}</section>
 <section class="band">
  <div class="band-h"><h2>어디서부터 읽을까</h2></div>
  <ul class="read">${READ.map((r) => `<li><p class="rw-who">${esc(r.who)}</p><p class="rw-what">${esc(r.what)}</p><p class="rw-links"><a href="${link(r.rel)}">${esc(titleOf(r.rel))}</a>${r.rel2 ? `<a href="${link(r.rel2)}">${esc(titleOf(r.rel2))}</a>` : ''}</p></li>`).join('')}</ul>

@@ -162,13 +162,13 @@ export function customerRoles() {
 // ---- 4. go-live roadmap (HTML, not SVG) -------------------------------------------------------------------------
 // state: done | human | wait | blocked
 export const ROADMAP = [
-  { n: 1, title: '결정', who: '사람', state: 'human', note: 'SES·도메인 확정. Slack 앱, Google SSO 시점, 파일럿 고객이 남음', anchor: '1단계' },
-  { n: 2, title: 'GitHub·DB 기반', who: '사람', state: 'human', note: 'main 보호, 회사 PC .env, 실제 DB로 콘솔 확인', anchor: '2단계' },
-  { n: 3, title: '콘솔 배포', who: '에이전트 → 사람', state: 'human', note: '배포 워크플로 완료(#54). Vercel 프로젝트·토큰·환경 만들기', anchor: '3단계' },
-  { n: 4, title: 'AWS 중앙 계정', who: '에이전트 → 사람', state: 'human', note: '템플릿·Lambda 묶음 완료(#52·#53). OIDC·배포 역할·승인 실행', anchor: '4단계' },
+  { n: 1, title: '결정', who: '사람', state: 'human', note: 'SES·도메인·로그인 규칙 확정. Slack 앱, 파일럿 고객이 남음', anchor: '1단계' },
+  { n: 2, title: 'GitHub·DB 기반', who: '사람', state: 'human', note: 'main 보호, 회사 PC .env, 실제 DB로 콘솔 확인, 운영 DB 만들기', anchor: '2단계' },
+  { n: 3, title: '콘솔 배포', who: '에이전트 → 사람', state: 'human', note: '배포 워크플로·Google 로그인 완료(#54·#70). Vercel 프로젝트, OAuth 클라이언트 만들기', anchor: '3단계' },
+  { n: 4, title: 'AWS 중앙 계정', who: '에이전트 → 사람', state: 'human', note: '템플릿·DB 사용자 완료(#52·#53·#72). OIDC·배포 역할·승인 실행', anchor: '4단계' },
   { n: 5, title: '알림 발송', who: '에이전트', state: 'blocked', note: 'Slack·SES 정보 대기(#39). 문자·전화는 보류(#10)', anchor: '5단계' },
   { n: 6, title: '알람 자동 생성', who: '에이전트', state: 'done', note: '수집기 29종, 태그 변경 즉시 동기화(#51)', anchor: '6단계' },
-  { n: 7, title: '파일럿 연결', who: '사람', state: 'wait', note: '고객 스택 설치 → 시험 알람 → 전화 → Ack까지', anchor: '7단계' },
+  { n: 7, title: '파일럿 연결', who: '에이전트 → 사람', state: 'wait', note: '온보딩 API 완료(#68·#71), 화면 작업 중(#63·#74). 그 뒤 고객 스택 설치 → 시험 알람', anchor: '7단계' },
 ];
 const STATE = { done: '완료', human: '사람 차례', wait: '앞 단계 대기', blocked: '정보 대기' };
 export function roadmap(linkFor) {
@@ -176,4 +176,60 @@ export function roadmap(linkFor) {
     `<li class="st-${s.state}"><a href="${linkFor(s.anchor)}"><span class="rn">${s.n}</span>` +
     `<span class="rt">${esc(s.title)}</span><span class="pill">${STATE[s.state]}</span>` +
     `<span class="rw">${esc(s.who)}</span><span class="rd">${esc(s.note)}</span></a></li>`).join('') + '</ol></section>';
+}
+
+// ---- 5. who can sign in (D-55) ------------------------------------------------------------------------------------
+export function signIn() {
+  const y = 96, h = 58;
+  const body = [
+    box({ x: 16, y, w: 150, h, title: 'Google 로그인', sub: '이메일 인증된 계정' }),
+    box({ x: 206, y, w: 170, h, title: 'DB에 등록된 사용자?', sub: '활성 상태' }),
+    box({ x: 446, y: 30, w: 190, h, title: 'MSP 직원', sub: '허용 도메인 또는 예외 주소' }),
+    box({ x: 446, y: 162, w: 190, h, title: '고객사 포털 사용자', sub: '도메인 검사 없음' }),
+    box({ x: 206, y: 250, w: 170, h, title: '고객 로그인 도메인?', sub: '한 고객에만 등록됨' }),
+    box({ x: 706, y: 30, w: 150, h, title: '역할대로', sub: 'ADMIN·OPERATOR·VIEWER', kind: 'ok' }),
+    box({ x: 706, y: 162, w: 150, h, title: '읽기 전용', sub: '자기 고객만', kind: 'ok' }),
+    box({ x: 446, y: 250, w: 190, h, title: '포털 사용자 자동 생성', sub: '무료 메일 도메인은 불가' }),
+    box({ x: 706, y: 340, w: 150, h: 52, title: '거절', sub: '사유는 알려 주지 않음', kind: 'muted' }),
+    arrow([[166, y + 29], [206, y + 29]], { kind: 'hot' }),
+    arrow([[376, y + 15], [410, y + 15], [410, 59], [446, 59]], { label: '직원 행', at: 1, dx: -6, dy: 4, anchor: 'end', kind: 'hot' }),
+    arrow([[376, y + 43], [410, y + 43], [410, 191], [446, 191]], { label: '고객 행', at: 1, dx: -6, dy: 4, anchor: 'end', kind: 'hot' }),
+    arrow([[636, 59], [706, 59]], { label: '통과', kind: 'hot' }),
+    arrow([[636, 191], [706, 191]], { kind: 'hot' }),
+    arrow([[291, y + h], [291, 250]], { label: '행이 없음', dx: 8, dy: 4, anchor: 'start', dashed: true }),
+    arrow([[376, 279], [446, 279]], { label: '있음' }),
+    arrow([[636, 279], [670, 279], [670, 205], [706, 205]], {}),
+    arrow([[291, 308], [291, 366], [706, 366]], { label: '없음 · 직원 도메인 밖 · 비활성', at: 1, dy: -8, dashed: true }),
+    `<text x="541" y="${30 + h + 16}" text-anchor="middle" class="al">울타리 밖이면 거절</text>`,
+  ].join('');
+  return figure('fig-signin', '누가 로그인할 수 있나',
+    'Google이 확인해 준 이메일로 DB의 사용자를 찾는다. 직원은 허용 도메인(또는 예외 주소) 안이어야 하고, 고객사 사람은 ADMIN이 등록했으면 도메인과 상관없이 읽기 전용으로 들어온다. 등록이 없어도 고객사에 로그인 도메인이 등록돼 있으면 읽기 전용 사용자가 자동으로 만들어진다. 첫 로그인 때 Google 계정이 사용자에 묶이고, 이후 다른 계정이면 거절한다. (D-55)',
+    svg(880, 410, 'Google 로그인 뒤 직원, 고객 포털 사용자, 고객 로그인 도메인, 거절로 갈라지는 판정 흐름', body));
+}
+
+// ---- 6. database accounts (D-40, D-56) ----------------------------------------------------------------------------
+export function dbAccounts() {
+  const rows = [
+    ['콘솔 (Vercel)', '사용자 로그인 뒤 요청', '소유자 계정', '모든 테이블', ''],
+    ['수집 Lambda', '인터넷에서 알람을 받음', 'alarmops_ingest', '알람·이벤트 기록만', 'queue'],
+    ['알람 엔진 Lambda', '고객 AWS에 알람을 만듦', 'alarmops_engine', '리소스·알람 설정, 자동 조치 실행 결과', 'queue'],
+  ];
+  const y0 = 56, rh = 78;
+  const body = [
+    zone({ x: 16, y: 16, w: 250, h: 300, title: '프로그램' }),
+    zone({ x: 330, y: 16, w: 240, h: 300, title: 'DB 계정', kind: 'z-host' }),
+    zone({ x: 634, y: 16, w: 390, h: 300, title: 'Supabase Postgres — 모든 테이블에 RLS', kind: 'z-aws' }),
+    ...rows.map(([who, why, acct, can, kind], i) => {
+      const y = y0 + i * rh;
+      return box({ x: 36, y, w: 210, h: 54, title: who, sub: why }) +
+        box({ x: 350, y, w: 200, h: 54, title: acct, sub: i === 0 ? 'RLS를 건너뜀(소유자)' : '칸 단위 권한만', kind }) +
+        box({ x: 654, y, w: 350, h: 54, title: can, sub: i === 0 ? '고객 구분은 쿼리의 customer 조건' : i === 1 ? 'ExternalId·연락처·사용자는 읽지 못함' : '승인 칸은 쓰지 못함', kind: i === 0 ? 'store' : '' }) +
+        arrow([[246, y + 27], [350, y + 27]], { kind: i === 0 ? '' : 'hot' }) +
+        arrow([[550, y + 27], [654, y + 27]], { kind: i === 0 ? '' : 'hot' });
+    }),
+  ].join('');
+  return figure('fig-dbaccounts', 'DB에는 누가 어떤 계정으로 들어가나',
+    '콘솔은 테이블 소유자 계정으로 접속한다. AWS의 Lambda는 소유자 계정을 쓰지 않고, 하는 일에 필요한 테이블과 칸에만 권한이 있는 계정을 따로 쓴다. 수집기는 인터넷에 열려 있어서, 뚫려도 ExternalId나 연락처에 닿지 못하게 한 것이다. 사람이 내린 자동 조치 결정은 DB 규칙이 뒤집지 못하게 막는다. (D-40, D-56)',
+    svg(1040, 332, '콘솔은 소유자 계정, 수집 Lambda와 알람 엔진 Lambda는 각자의 제한된 DB 계정으로 Postgres에 접속하는 구성', body),
+    `<ul class="legend"><li><span class="sw hot"></span>제한된 계정</li><li><span class="sw base"></span>소유자 계정</li></ul>`);
 }
