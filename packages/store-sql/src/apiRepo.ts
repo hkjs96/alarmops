@@ -704,13 +704,12 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
     }
   }
 
-  /** The columns of a CloudAccount record. First / last event: the stored column, else the customer's RawEvent rows of this account. */
+  /** The columns of a CloudAccount record. First / last event: the stored columns, written by the ingest path (SqlIngestStore.insertRawEvent). */
   private static readonly ACCOUNT_SELECT = `SELECT a."id", a."customerId", a."serviceId", a."awsAccountId", a."alias", a."environment", a."regions", a."externalId",
       a."readerRoleArn", a."eventForwarderRoleArn", a."alarmWriterRoleArn", a."tagWriterRoleArn", a."remediatorRoleArn",
       a."alarmWriterEnabled", a."tagWriterEnabled", a."remediatorEnabled",
       a."readerStatus", a."eventForwarderStatus", a."alarmWriterStatus", a."tagWriterStatus", a."remediatorStatus", a."lastCheckedAt",
-      LEAST(a."firstEventAt", (SELECT min(e."receivedAt") FROM "RawEvent" e WHERE e."customerId" = a."customerId" AND e."awsAccountId" = a."awsAccountId")) AS "firstEventAt",
-      GREATEST(a."lastEventAt", (SELECT max(e."receivedAt") FROM "RawEvent" e WHERE e."customerId" = a."customerId" AND e."awsAccountId" = a."awsAccountId")) AS "lastEventAt",
+      a."firstEventAt", a."lastEventAt",
       a."stackVersion", a."disabled", (a."connectionPurgedAt" IS NOT NULL) AS "connectionPurged", a."createdAt" FROM "CloudAccount" a`;
   private static toAccount(r: Record<string, any>): CloudAccountRecord { // eslint-disable-line @typescript-eslint/no-explicit-any
     return {

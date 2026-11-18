@@ -24,6 +24,8 @@ export interface IngestFixture {
   counts(): Promise<{ rawEvents: number; alerts: number; groups: number; rejections: number }>;
   rawEvent(id: string): Promise<{ decision: string | null; decisionReason: string | null; groupId: string | null; alertId: string } | null>;
   sourceLastReceivedAt(id: string): Promise<Date | null>;
+  /** #62: first / last event time kept on the account (SQL store only; the memory store has no such column). */
+  accountEventTimes?(awsAccountId: string): Promise<{ first: Date | null; last: Date | null }>;
   /** D-43 */
   residual(customerId: string, sourceKey: string): Promise<{ firstAt: Date; lastAt: Date; count: number } | null>;
   close(): Promise<void>;
@@ -139,6 +141,22 @@ export function ingestContract(make: MakeIngestFixture): void {
       expect(read?.episodeStartedAt?.toISOString()).toBe(ep.toISOString());
       // B-4: an update cannot move an alert to another customer
       expect(await fx.repo.updateAlert({ ...read!, customerId: 'cus_2' }, 1)).toBe('CONFLICT');
+    });
+
+    it('the account remembers its first and last event, written at most once a minute (onboarding status, #62)', async () => {
+      fx = await make(SEED);
+      if (!fx.accountEventTimes) return;
+      const ev = cw();
+      expect(await fx.accountEventTimes('123456789012')).toEqual({ first: null, last: null });
+      await fx.repo.createAlert(alertOf(ev, 'al_t'));
+      await fx.repo.insertRawEvent(ev, 'al_t');
+      const t1 = await fx.accountEventTimes('123456789012');
+      expect(t1.first).toBeInstanceOf(Date);
+      expect(t1.last).toEqual(t1.first);
+      const ev2 = { ...cw(), dedupKey: 'other-key', receivedAt: new Date(Date.parse(String(ev.receivedAt)) + 10_000).toISOString() };
+      await fx.repo.insertRawEvent(ev2, 'al_t');
+      expect(await fx.accountEventTimes('123456789012')).toEqual(t1); // within a minute: no write
+      expect(await fx.accountEventTimes('999999999999')).toEqual({ first: null, last: null });
     });
 
     it('raw events are inserted once per dedup key; decisions are recorded', async () => {

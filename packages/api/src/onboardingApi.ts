@@ -31,6 +31,12 @@ const NAME_MAX = 80;
 const CONTROL = /[\u0000-\u001f\u007f]/;
 const DOMAIN_RE = /^(?=.{3,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/;
 
+/** Portal login is granted by e-mail domain: a public mail provider would let anyone sign up as the customer (security review R-7). */
+export const FREE_MAIL_DOMAINS: readonly string[] = [
+  'gmail.com', 'googlemail.com', 'naver.com', 'daum.net', 'hanmail.net', 'kakao.com', 'outlook.com', 'hotmail.com', 'live.com', 'yahoo.com', 'icloud.com', 'proton.me', 'protonmail.com',
+];
+const isFreeMail = (d: string): boolean => FREE_MAIL_DOMAINS.some((f) => d === f || d.endsWith(`.${f}`));
+
 const internalOnly = (auth: AuthContext): void => { if (auth.kind !== 'INTERNAL') throw notFound(); };
 
 // ───────────────────────────── POST /customers ─────────────────────────────
@@ -70,6 +76,8 @@ export async function createCustomer(req: ApiRequest, deps: Deps): Promise<ApiRe
     if (!Array.isArray(b.loginDomains) || b.loginDomains.length > 10) throw invalid('loginDomains', 'loginDomains must be a list of at most 10 domains.');
     loginDomains = [...new Set(b.loginDomains.map((d) => (typeof d === 'string' ? d.trim().toLowerCase() : '')))];
     if (loginDomains.some((d) => !DOMAIN_RE.test(d))) throw invalid('loginDomains', 'Each login domain must look like example.com.');
+    const free = loginDomains.find(isFreeMail);
+    if (free) throw new ApiError(422, 'VALIDATION_FAILED', 'A public mail domain cannot be a login domain. Use the customer’s own company domain.', { fields: [{ field: 'loginDomains', message: 'Public mail domain.' }] });
   }
 
   const tree = await deps.repo.orgTree({ customerIds: '*', unmapped: false, subScopes: [] });
@@ -129,7 +137,7 @@ async function accountOf(req: ApiRequest, deps: Deps, accountId: string, admin: 
 
 export async function listAccounts(req: ApiRequest, deps: Deps, customerId: string): Promise<ApiResponse> {
   const { customer } = await adminCustomer(req, deps, customerId, true);
-  return ok({ items: (await deps.repo.listAccounts(customer.id)).map(accountView) });
+  return ok({ items: (await deps.repo.listAccounts(customer.id)).map(accountView) }, { 'cache-control': 'no-store' }); // carries the ExternalId
 }
 
 const CAPS = ['alarmWriterEnabled', 'tagWriterEnabled', 'remediatorEnabled'] as const;

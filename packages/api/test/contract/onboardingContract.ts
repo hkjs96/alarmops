@@ -93,6 +93,20 @@ export function onboardingContract(make: MakeApiFixture): void {
       }
     });
 
+    it('public mail domains (and their subdomains) cannot be login domains: 422; syntax is strict and the domain is stored lower-case', async () => {
+      await open();
+      for (const d of ['gmail.com', 'GMAIL.COM', 'naver.com', 'daum.net', 'hanmail.net', 'kakao.com', 'outlook.com', 'hotmail.com', 'live.com', 'yahoo.com', 'icloud.com', 'proton.me', 'protonmail.com', 'googlemail.com', 'mail.gmail.com']) {
+        const r = await w.call(admin, 'POST', '/customers', { body: { name: `Free ${d}`, loginDomains: ['ok.example', d] } });
+        expect([d, r.status]).toEqual([d, 422]);
+      }
+      for (const d of ['-bad.example', 'bad-.example', 'a..example', 'localhost', 'a b.example', 'x.example.', 'https://x.example', 'ex@mple.com', '.example.com']) {
+        expect([d, (await w.call(admin, 'POST', '/customers', { body: { name: `Syn ${d}`, loginDomains: [d] } })).status]).toEqual([d, 400]);
+      }
+      expect(body(await w.call(admin, 'GET', '/scope-tree')).customers.map((c: any) => c.name).filter((n: string) => /^(Free|Syn)/.test(n))).toEqual([]);
+      const ok = await w.call(admin, 'POST', '/customers', { body: { name: 'Own Domain', loginDomains: ['Corp.Example.CO.KR'] } });
+      expect(body(ok).loginDomains).toEqual(['corp.example.co.kr']);
+    });
+
     it('roles: OPERATOR/VIEWER 403, staff narrowed to some customers 403, portal user 404 (no such route), no session 401', async () => {
       await open();
       const b = { name: 'Nope Co' };

@@ -85,7 +85,17 @@ export class SqlIngestStore implements AlertRepository, SourceRepository {
        ON CONFLICT ("dedupKey") DO NOTHING RETURNING "id"`,
       [id, ev.dedupKey, ev.customerId, ev.sourceId, ev.source, ev.awsAccountId, ev.region, ev.fingerprint, ev.fingerprintVersion, ev.state, ev.previousState,
         ev.severity, ev.severityRaw, ev.occurredAt, ev.receivedAt, alertId, js(ev.raw ?? {}) ?? '{}', ev.parseError]);
-    return rows.length ? { id } : 'DUPLICATE';
+    if (!rows.length) return 'DUPLICATE';
+    // First / last event received per account (onboarding status, #62). At most one write a minute per account, so a noisy account is not a hot row.
+    // The customer condition keeps an event from touching an account of another customer.
+    if (ev.customerId && ev.awsAccountId) {
+      await this.sql.query(
+        `UPDATE "CloudAccount" SET "firstEventAt" = COALESCE("firstEventAt", t.at), "lastEventAt" = GREATEST(COALESCE("lastEventAt", t.at), t.at)
+           FROM (SELECT LEAST($3::timestamptz, ${this.sql.now()}) AS at) t
+          WHERE "awsAccountId" = $1 AND "customerId" = $2 AND ("firstEventAt" IS NULL OR "lastEventAt" IS NULL OR "lastEventAt" < t.at - interval '60 seconds')`,
+        [ev.awsAccountId, ev.customerId, ev.receivedAt]);
+    }
+    return { id };
   }
   async setRawEventDecision(rawEventId: string, x: RawEventDecision): Promise<void> {
     await this.sql.query(`UPDATE "RawEvent" SET "decision" = $2::"Decision", "decisionReason" = $3, "groupId" = $4 WHERE "id" = $1`, [rawEventId, x.decision, x.decisionReason, x.groupId ?? null]);

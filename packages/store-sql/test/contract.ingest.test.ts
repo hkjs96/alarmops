@@ -34,6 +34,7 @@ describe(`ingest store contract: sql (${process.env.TEST_DATABASE_URL ? 'postgre
       counts: async () => ({ rawEvents: await n('RawEvent'), alerts: await n('Alert'), groups: await n('AlertGroup'), rejections: await n('IngestRejection') }),
       rawEvent: async (id) => { const [r] = await q(`SELECT "decision", "decisionReason", "groupId", "alertId" FROM "RawEvent" WHERE "id" = $1`, [id]); return r ? { decision: r.decision ?? null, decisionReason: r.decisionReason ?? null, groupId: r.groupId ?? null, alertId: r.alertId } : null; },
       sourceLastReceivedAt: async (id) => { const [r] = await q(`SELECT "lastReceivedAt" FROM "IntegrationSource" WHERE "id" = $1`, [id]); return r?.lastReceivedAt ? new Date(r.lastReceivedAt) : null; },
+      accountEventTimes: async (a) => { const [r] = await q(`SELECT "firstEventAt", "lastEventAt" FROM "CloudAccount" WHERE "awsAccountId" = $1`, [a]); return { first: r?.firstEventAt ? new Date(r.firstEventAt) : null, last: r?.lastEventAt ? new Date(r.lastEventAt) : null }; },
       residual: async (c, k) => { const [r] = await q(`SELECT "firstAt", "lastAt", "count" FROM "OffboardResidual" WHERE "customerId" = $1 AND "sourceKey" = $2`, [c, k]); return r ? { firstAt: new Date(r.firstAt), lastAt: new Date(r.lastAt), count: r.count } : null; },
       close: async () => undefined,
     };
