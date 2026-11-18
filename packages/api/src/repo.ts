@@ -234,6 +234,30 @@ export interface VerificationLimits { cooldownSec: number; perCustomerHour: numb
 export type IssueOutcome = 'OK' | { cooling: number } | { capped: 'CUSTOMER' | 'DESTINATION'; retryAfterSec: number };
 export interface VerificationTaken { contactId: string; customerId: string | null; channel: VerifyChannelValue; tokenHash: string }
 
+// ── users (API-CONTRACT §8.4 /users, D-55) ──
+export type UserStatusValue = 'PENDING' | 'ACTIVE' | 'DISABLED';
+/** A console user as the users API reads it. `kind` follows from `customerId` (null = MSP staff, all customers; set = portal user of that customer). The Google `sub` itself never leaves the store: only whether one is bound. */
+export interface UserRecord {
+  id: string; email: string; name: string; kind: 'INTERNAL' | 'CUSTOMER'; customerId: string | null; role: Role; status: UserStatusValue;
+  googleBound: boolean; lastLoginAt: Date | null; createdAt: Date;
+}
+export interface UserFilter { kind?: 'INTERNAL' | 'CUSTOMER'; customerId?: string; status?: UserStatusValue; role?: Role; q?: string }
+/** `email` is already trimmed and lower-case. A CUSTOMER user is always VIEWER. */
+export interface NewUser { email: string; name: string; customerId: string | null; role: Role; status: UserStatusValue }
+/** `undefined` = unchanged. `customerId` (CUSTOMER users only) moves a portal user to another customer. `clearGoogleSub`: the next sign-in binds again. */
+export interface UserPatch { role?: Role; status?: UserStatusValue; customerId?: string; clearGoogleSub?: boolean }
+/**
+ * 'LAST_ADMIN': the change would leave no ACTIVE ADMIN with the all-customer range. 'NO_SUCH_CUSTOMER': unknown or TERMINATED customer.
+ * 'CONTACT_LINKED': a portal user with a linked Contact cannot move to another customer. 'EMAIL_EXISTS': e-mail already used by another user.
+ */
+export type UserWriteOutcome = UserRecord | 'NOT_FOUND' | 'LAST_ADMIN' | 'NO_SUCH_CUSTOMER' | 'CONTACT_LINKED' | 'EMAIL_EXISTS';
+export type EnrolOutcome =
+  | { user: UserRecord; created: boolean }
+  /** Nothing created: DOMAIN_UNKNOWN (no customer has the domain), AMBIGUOUS (more than one), CUSTOMER_INACTIVE, FREE_MAIL, STAFF_EMAIL (an INTERNAL user has the address), OTHER_CUSTOMER (a portal user of another customer has it), INVALID_EMAIL. */
+  | { refused: 'DOMAIN_UNKNOWN' | 'AMBIGUOUS' | 'CUSTOMER_INACTIVE' | 'FREE_MAIL' | 'STAFF_EMAIL' | 'OTHER_CUSTOMER' | 'INVALID_EMAIL' };
+/** 'bound': the user had no Google account, now has (audited). 'ok': the same one. 'mismatch': another one is bound; nothing changed, a `user.google_mismatch` audit row (reason code, no e-mail) was written. */
+export type BindGoogleOutcome = 'bound' | 'ok' | 'mismatch' | 'NOT_FOUND';
+
 export interface ApiRepository {
   // ── org / scope ──
   orgTree(scope: ScopeFilter): Promise<OrgTree>;
@@ -406,6 +430,21 @@ export interface ApiRepository {
   takeVerification(tokenHash: string, now: Date, audit: AuditTemplate): Promise<VerificationTaken | null>;
   /** Read-only: is a link with this hash pending (unused, not expired, contact active)? Changes nothing. */
   peekVerification(tokenHash: string, now: Date): Promise<{ channel: VerifyChannelValue } | null>;
+
+  // ── users (D-55) ──
+  /** All users matching the filter (ADMIN with the all-customer range only: the caller checked), name order. */
+  listUsers(f: UserFilter): Promise<UserRecord[]>;
+  findUser(userId: string): Promise<UserRecord | null>;
+  /** ONE transaction: row + audit (`audit` without customerId/targetId: the store fills them). 'EMAIL_EXISTS' (unique, case-insensitive), 'NO_SUCH_CUSTOMER'. */
+  createUser(n: NewUser, audit: AuditTemplate): Promise<UserRecord | 'EMAIL_EXISTS' | 'NO_SUCH_CUSTOMER'>;
+  /** ONE transaction: the ACTIVE all-range ADMIN rows are locked, the last-admin rule is re-checked on the locked rows, the change and `audit` are written. */
+  updateUser(userId: string, patch: UserPatch, audit: AuditTemplate): Promise<UserWriteOutcome>;
+  /** Sets `lastLoginAt` (no audit row; the console calls it after a successful sign-in). No-op for an unknown id. */
+  touchLastLogin(userId: string, at: Date): Promise<void>;
+  /** Login-domain enrolment (D-55 b). See EnrolOutcome. Idempotent and safe under parallel calls: one row per e-mail. */
+  enrolPortalUserByDomain(email: string, at: Date): Promise<EnrolOutcome>;
+  /** Binds the Google account id of a sign-in to the user (atomic: the first binder wins). See BindGoogleOutcome. */
+  bindGoogleSub(userId: string, sub: string, at: Date): Promise<BindGoogleOutcome>;
 
   // ── idempotency (API-CONTRACT §2 "멱등", 24h) ──
   getIdempotent(key: string, now: Date): Promise<IdempotentEntry | null>;

@@ -5,7 +5,7 @@
  */
 import { createHash } from 'node:crypto';
 import { incidentMute, type DigestData, type PurgeLogEntry, type Contact, type Leave, type Override, type Rotation, type AuditInput, type DeliveryLog, type IncidentEventInput, type IncidentRow, type MaintenanceWindow, type PagingConfig } from '@alarmops/core';
-import { nodeVisible, type ApiRepository, type AlertMemberRow, type IdempotentEntry, type IncidentFilter, type IncidentPage, type NodeFilter, type NotifiedPerson, type OpenCounts, type OrgTree, type ScopeFilter, type StatusCounts, type UndoRecord, type UserInfo, type Principal, type ResponderOp, type ResponderWriteOutcome, type RespondersState, type RotationsWorld, type ChangeStatusOutcome, type CustomerStatusState, type CustomerStatusValue, type ExportIncidentRow, type RetentionView, type MarkStepOutcome, type OffboardStep, type OffboardStepKey, type OffboardingState, type RevealLogFilter, type RevealLogRow, type RevealWrite, type RevealWriteOutcome, type AccountPatch, type AccountWriteOutcome, type AuditTemplate, type CloudAccountRecord, type ContactPatch, type ContactScopeInfo, type ContactWriteOutcome, type ContactsWorld, type NewAccount, type NewContact, type VerificationIssue, type VerificationLimits, type IssueOutcome, type VerificationLink, type VerificationTaken, type VerifyChannelValue, OFFBOARD_STEP_KEYS } from '@alarmops/api';
+import { nodeVisible, type ApiRepository, type AlertMemberRow, type IdempotentEntry, type IncidentFilter, type IncidentPage, type NodeFilter, type NotifiedPerson, type OpenCounts, type OrgTree, type ScopeFilter, type StatusCounts, type UndoRecord, type UserInfo, type Principal, type ResponderOp, type ResponderWriteOutcome, type RespondersState, type RotationsWorld, type ChangeStatusOutcome, type CustomerStatusState, type CustomerStatusValue, type ExportIncidentRow, type RetentionView, type MarkStepOutcome, type OffboardStep, type OffboardStepKey, type OffboardingState, type RevealLogFilter, type RevealLogRow, type RevealWrite, type RevealWriteOutcome, type AccountPatch, type AccountWriteOutcome, type AuditTemplate, type CloudAccountRecord, type ContactPatch, type ContactScopeInfo, type ContactWriteOutcome, type ContactsWorld, type NewAccount, type NewContact, type VerificationIssue, type VerificationLimits, type IssueOutcome, type VerificationLink, type VerificationTaken, type VerifyChannelValue, type BindGoogleOutcome, type EnrolOutcome, type NewUser, type UserFilter, type UserPatch, type UserRecord, type UserWriteOutcome, OFFBOARD_STEP_KEYS, normalizeEmail, emailDomain, isFreeMail } from '@alarmops/api';
 import { PG, pgCode, type SqlExecutor } from './client.js';
 import { purgeLogOf } from './retentionSql.js';
 import { CONTACT_COLS, toContact, Params, d, dReq, incidentCols, iso, js, newId, num, toEvent, toIncident, toLog } from './rows.js';
@@ -367,6 +367,125 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
         : r.projectId ? { customerId, projectId: r.projectId as string, serviceId: r.scopeId as string } : { customerId, serviceId: r.scopeId as string }));
     }
     return { userId: u.id, email: u.email, name: u.name, customerId, role: u.role, contactId: (u.contactId ?? null) as string | null, subScopes };
+  }
+
+  // ───────────────────────────── users (#69, D-55) ─────────────────────────────
+
+  private static readonly USER_SELECT = `SELECT u."id", u."email"::text AS "email", u."name", u."customerId", u."role", u."status", (u."googleSub" IS NOT NULL) AS "googleBound", u."lastLoginAt", u."createdAt" FROM "User" u`;
+  private static toUser(r: Record<string, any>): UserRecord { // eslint-disable-line @typescript-eslint/no-explicit-any
+    return { id: r.id, email: String(r.email).toLowerCase(), name: r.name, kind: r.customerId ? 'CUSTOMER' : 'INTERNAL', customerId: r.customerId ?? null, role: r.role, status: r.status, googleBound: !!r.googleBound, lastLoginAt: d(r.lastLoginAt), createdAt: dReq(r.createdAt) };
+  }
+  async listUsers(f: UserFilter): Promise<UserRecord[]> {
+    const p = new Params();
+    const w: string[] = [];
+    if (f.kind) w.push(f.kind === 'CUSTOMER' ? `u."customerId" IS NOT NULL` : `u."customerId" IS NULL`);
+    if (f.customerId) w.push(`u."customerId" = ${p.add(f.customerId)}`);
+    if (f.status) w.push(`u."status" = ${p.add(f.status)}::"UserStatus"`);
+    if (f.role) w.push(`u."role" = ${p.add(f.role)}::"ConsoleRole"`);
+    if (f.q) { const like = p.add(`%${f.q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`); w.push(`(u."name" ILIKE ${like} OR u."email"::text ILIKE ${like})`); }
+    const rows = await this.sql.query(`${SqlApiStore.USER_SELECT}${w.length ? ` WHERE ${w.join(' AND ')}` : ''} ORDER BY u."name", u."id"`, p.values);
+    return rows.map(SqlApiStore.toUser);
+  }
+  async findUser(userId: string): Promise<UserRecord | null> {
+    const [r] = await this.sql.query(`${SqlApiStore.USER_SELECT} WHERE u."id" = $1`, [userId]);
+    return r ? SqlApiStore.toUser(r) : null;
+  }
+  async createUser(n: NewUser, audit: AuditTemplate): Promise<UserRecord | 'EMAIL_EXISTS' | 'NO_SUCH_CUSTOMER'> {
+    try {
+      return await this.sql.transaction(async (tx) => {
+        if (n.customerId !== null && !(await tx.query(`SELECT 1 FROM "Customer" WHERE "id" = $1 AND "status" <> 'TERMINATED' FOR SHARE`, [n.customerId])).length) return 'NO_SUCH_CUSTOMER' as const;
+        const id = newId('usr');
+        const [r] = await tx.query(
+          `INSERT INTO "User"("id", "email", "name", "customerId", "role", "status", "createdAt", "updatedAt") VALUES ($1, $2, $3, $4, $5::"ConsoleRole", $6::"UserStatus", ${this.sql.now()}, ${this.sql.now()})
+           ON CONFLICT ("email") DO NOTHING RETURNING "id"`, [id, n.email, n.name, n.customerId, n.role, n.status]);
+        if (!r) return 'EMAIL_EXISTS' as const;
+        await insertAudit(tx, { ...audit, customerId: n.customerId, targetId: id });
+        const [u] = await tx.query(`${SqlApiStore.USER_SELECT} WHERE u."id" = $1`, [id]);
+        return SqlApiStore.toUser(u!);
+      });
+    } catch (err) {
+      if (pgCode(err) === PG.UNIQUE) return 'EMAIL_EXISTS';
+      throw err;
+    }
+  }
+  async updateUser(userId: string, patch: UserPatch, audit: AuditTemplate): Promise<UserWriteOutcome> {
+    return this.sql.transaction(async (tx) => {
+      // Lock every ACTIVE all-range ADMIN (id order, so two demotions cannot deadlock) BEFORE reading the target: the last-admin rule is
+      // then checked on rows nobody else can change until this transaction ends.
+      const admins = (await tx.query(`SELECT "id" FROM "User" WHERE "customerId" IS NULL AND "role" = 'ADMIN' AND "status" = 'ACTIVE' ORDER BY "id" FOR UPDATE`)).map((r) => r.id as string);
+      const [cur] = await tx.query(`SELECT "id", "customerId", "role", "status" FROM "User" WHERE "id" = $1 FOR UPDATE`, [userId]);
+      if (!cur) return 'NOT_FOUND' as const;
+      const role = patch.role ?? cur.role; const status = patch.status ?? cur.status;
+      if (!cur.customerId && admins.includes(userId) && !(role === 'ADMIN' && status === 'ACTIVE') && admins.filter((a) => a !== userId).length === 0) return 'LAST_ADMIN' as const;
+      let customerId = (cur.customerId ?? null) as string | null;
+      if (patch.customerId !== undefined) {
+        if (!cur.customerId) return 'NO_SUCH_CUSTOMER' as const;
+        if (!(await tx.query(`SELECT 1 FROM "Customer" WHERE "id" = $1 AND "status" <> 'TERMINATED' FOR SHARE`, [patch.customerId])).length) return 'NO_SUCH_CUSTOMER' as const;
+        if ((await tx.query(`SELECT 1 FROM "Contact" WHERE "userId" = $1`, [userId])).length) return 'CONTACT_LINKED' as const;
+        customerId = patch.customerId;
+      }
+      await tx.query(
+        `UPDATE "User" SET "role" = $2::"ConsoleRole", "status" = $3::"UserStatus", "customerId" = $4, "googleSub" = CASE WHEN $5::boolean THEN NULL ELSE "googleSub" END, "updatedAt" = ${this.sql.now()} WHERE "id" = $1`,
+        [userId, role, status, customerId, patch.clearGoogleSub === true]);
+      await insertAudit(tx, { ...audit, customerId, targetId: userId });
+      const [u] = await tx.query(`${SqlApiStore.USER_SELECT} WHERE u."id" = $1`, [userId]);
+      return SqlApiStore.toUser(u!);
+    });
+  }
+  async touchLastLogin(userId: string, at: Date): Promise<void> {
+    await this.sql.query(`UPDATE "User" SET "lastLoginAt" = $2::timestamptz WHERE "id" = $1`, [userId, iso(at)]);
+  }
+  async enrolPortalUserByDomain(rawEmail: string, at: Date): Promise<EnrolOutcome> {
+    const email = normalizeEmail(rawEmail);
+    if (!email) return { refused: 'INVALID_EMAIL' };
+    const domain = emailDomain(email);
+    if (isFreeMail(domain)) return { refused: 'FREE_MAIL' };
+    return this.sql.transaction(async (tx) => {
+      const owners = await tx.query(`SELECT "id", "status" FROM "Customer" WHERE $1 = ANY("loginDomains") ORDER BY "id"`, [domain]);
+      if (owners.length === 0) return { refused: 'DOMAIN_UNKNOWN' as const };
+      if (owners.length > 1) return { refused: 'AMBIGUOUS' as const };
+      const customerId = owners[0]!.id as string;
+      if (owners[0]!.status !== 'ACTIVE') return { refused: 'CUSTOMER_INACTIVE' as const };
+      // The unique index on e-mail decides a race: the loser inserts nothing and reads the winner's row.
+      const [ins] = await tx.query(
+        `INSERT INTO "User"("id", "email", "name", "customerId", "role", "status", "createdAt", "updatedAt") VALUES ($1, $2, $3, $4, 'VIEWER', 'ACTIVE', $5::timestamptz, $5::timestamptz)
+         ON CONFLICT ("email") DO NOTHING RETURNING "id"`, [newId('usr'), email, email.slice(0, email.indexOf('@')).slice(0, 80), customerId, iso(at)]);
+      const [u] = await tx.query(`${SqlApiStore.USER_SELECT} WHERE u."email" = $1`, [email]);
+      if (!u) return { refused: 'DOMAIN_UNKNOWN' as const };
+      const user = SqlApiStore.toUser(u);
+      if (ins) {
+        await insertAudit(tx, { at, customerId, actorType: 'SYSTEM', actorId: null, action: 'user.enrol_domain', targetType: 'User', targetId: user.id, before: null, after: { kind: 'CUSTOMER', role: 'VIEWER', status: 'ACTIVE', reason: 'LOGIN_DOMAIN' } });
+        return { user, created: true };
+      }
+      if (user.kind === 'INTERNAL') return { refused: 'STAFF_EMAIL' as const };
+      return user.customerId === customerId ? { user, created: false } : { refused: 'OTHER_CUSTOMER' as const };
+    });
+  }
+  async bindGoogleSub(userId: string, sub: string, at: Date): Promise<BindGoogleOutcome> {
+    if (typeof sub !== 'string' || !sub || sub.length > 255 || /[\u0000-\u001f\u007f]/.test(sub)) throw new Error('bindGoogleSub: invalid sub');
+    const mismatch = async (tx: SqlExecutor, customerId: string | null, reason: string): Promise<'mismatch'> => {
+      await insertAudit(tx, { at, customerId, actorType: 'SYSTEM', actorId: null, action: 'user.google_mismatch', targetType: 'User', targetId: userId, before: null, after: { reason } });
+      return 'mismatch';
+    };
+    try {
+      return await this.sql.transaction(async (tx) => {
+        // The row lock makes "was null, now set" one winner: a parallel bind waits, then sees the value.
+        const [cur] = await tx.query(`SELECT "customerId", "googleSub" FROM "User" WHERE "id" = $1 FOR UPDATE`, [userId]);
+        if (!cur) return 'NOT_FOUND' as const;
+        const customerId = (cur.customerId ?? null) as string | null;
+        if (cur.googleSub === sub) return 'ok' as const;
+        if (cur.googleSub) return mismatch(tx, customerId, 'GOOGLE_SUB_MISMATCH');
+        if ((await tx.query(`SELECT 1 FROM "User" WHERE "googleSub" = $1 AND "id" <> $2`, [sub, userId])).length) return mismatch(tx, customerId, 'GOOGLE_SUB_IN_USE');
+        await tx.query(`UPDATE "User" SET "googleSub" = $2, "updatedAt" = ${this.sql.now()} WHERE "id" = $1`, [userId, sub]);
+        await insertAudit(tx, { at, customerId, actorType: 'SYSTEM', actorId: null, action: 'user.google_bind', targetType: 'User', targetId: userId, before: null, after: { reason: 'FIRST_SIGN_IN' } });
+        return 'bound' as const;
+      });
+    } catch (err) {
+      if (pgCode(err) !== PG.UNIQUE) throw err;
+      // the same Google account was bound to another user a moment ago (unique index): refuse, and say so
+      await this.sql.transaction((tx) => mismatch(tx, null, 'GOOGLE_SUB_IN_USE'));
+      return 'mismatch';
+    }
   }
 
   /** Responders version = number of Responders audit rows of the customer (written in the same transaction as each change). */

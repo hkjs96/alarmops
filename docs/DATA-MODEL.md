@@ -43,6 +43,7 @@
 | role | enum `ConsoleRole` | **미결**(Q-DM-02). 이식 후보: `VIEWER < OPERATOR < ADMIN`, 기본 OPERATOR, 고객사 담당자는 VIEWER 강제(org-tenant R4-1, R4-3) |
 | seeAll | bool default false | 내부 인원 전체 범위(R3-1). 고객사 담당자는 항상 false |
 | status | enum `PENDING, ACTIVE, DISABLED` | 첫 SSO는 PENDING, 관리자 사전 등록은 ACTIVE(R4-2) |
+| googleSub | text? UQ | 첫 SSO에서 묶는 Google 계정 id(`sub`). 이메일은 재배정될 수 있어 로그인은 이 값을 대조한다. 지우는 것은 ADMIN뿐(`PATCH /users/{id}`, 감사) |
 | lastLoginAt | timestamptz? | |
 | createdAt, updatedAt | | |
 

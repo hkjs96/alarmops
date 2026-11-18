@@ -5,6 +5,7 @@ import { apiContract } from '../../api/test/contract/apiContract.js';
 import { retentionContract } from '../../api/test/contract/retentionContract.js';
 import { revealContract } from '../../api/test/contract/revealContract.js';
 import { onboardingContract } from '../../api/test/contract/onboardingContract.js';
+import { usersContract } from '../../api/test/contract/usersContract.js';
 import { openTestDb, type TestDb } from './db.js';
 import { sqlFixture } from './sqlFixture.js';
 
@@ -18,4 +19,5 @@ describe(`api store contract: sql (${process.env.TEST_DATABASE_URL ? 'postgres' 
   peopleContract((seed) => sqlFixture(db, seed));
   revealContract((seed) => sqlFixture(db, seed));
   onboardingContract((seed) => sqlFixture(db, seed));
+  usersContract((seed) => sqlFixture(db, seed));
 });

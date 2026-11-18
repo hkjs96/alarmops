@@ -12,5 +12,7 @@ export { authFromPrincipal, channelStates, maskEmail, maskPhone } from './people
 export { InMemoryCommandPublisher, type AlarmCommand, type CommandPublisher } from './customerApi.js';
 export { SqsCommandPublisher, CommandPublishError, commandPublisherFromEnv, COMMANDS_REGION, type SqsSender } from './sqsCommandPublisher.js';
 export { destinationHash, normalizeDestination, type VerificationSender, VERIFY_TTL_MS, VERIFY_COOLDOWN_SEC, VERIFY_CAP_PER_CUSTOMER_HOUR, VERIFY_CAP_PER_DESTINATION_HOUR, PORTAL_CONTACTS_PER_DAY, BULK_MAX as CONTACT_BULK_MAX, hashToken as hashVerifyToken, newVerifyToken } from './contactsApi.js';
+export { normalizeEmail, emailDomain, userView } from './usersApi.js';
+export { isFreeMail } from './onboardingApi.js';
 export { slugFromName, freeSlug, roleArn, newExternalId } from './onboardingApi.js';
 export { revealStanding, revealFlags, REVEAL_LIMITS, REASON_MAX as REVEAL_REASON_MAX, VIEWER_RESPONDER_MAY_REVEAL } from './revealApi.js';

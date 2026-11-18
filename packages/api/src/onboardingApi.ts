@@ -36,7 +36,7 @@ export const FREE_MAIL_DOMAINS: readonly string[] = [
   'gmail.com', 'googlemail.com', 'naver.com', 'daum.net', 'hanmail.net', 'kakao.com', 'outlook.com', 'hotmail.com', 'live.com', 'yahoo.com', 'icloud.com', 'proton.me', 'protonmail.com',
   'nate.com', 'msn.com', 'aol.com', 'gmx.com', 'gmx.net', 'mail.com', 'yandex.com', 'yandex.ru', 'qq.com', '163.com', 'me.com', 'pm.me',
 ];
-const isFreeMail = (d: string): boolean => FREE_MAIL_DOMAINS.some((f) => d === f || d.endsWith(`.${f}`));
+export const isFreeMail = (d: string): boolean => FREE_MAIL_DOMAINS.some((f) => d === f || d.endsWith(`.${f}`));
 
 const internalOnly = (auth: AuthContext): void => { if (auth.kind !== 'INTERNAL') throw notFound(); };
 

@@ -16,6 +16,7 @@ import { getScopeTree } from './scope.js';
 import { listContactReveals, revealContact } from './revealApi.js';
 import { createCustomer, listAccounts, createAccount, patchAccount, deleteAccount, checkAccount, getAccountStatus } from './onboardingApi.js';
 import { listContacts, createContact, patchContact, deleteContact, verifyContact, verifyBulk, useVerifyLink, peekVerifyLink, type VerificationSender } from './contactsApi.js';
+import { createUser, getUser, listUsers, patchUser } from './usersApi.js';
 import { deleteResponder, getMe, getOncallNow, getPagingHealth, getResponders, listRotations, listStaff, patchResponder, postResponder } from './peopleApi.js';
 
 export interface ApiDeps {
@@ -110,6 +111,11 @@ export const ROUTES: Route[] = [
   route('PATCH', '/contacts/:id', (r, d, p) => patchContact(r, d, p[0]!), () => false),
   route('DELETE', '/contacts/:id', (r, d, p) => deleteContact(r, d, p[0]!)),
   route('POST', '/contacts/:id/verify', (r, d, p) => verifyContact(r, d, p[0]!)),
+  // ── users (#69, D-55): responses carry a masked e-mail only, so replay is fine ──
+  route('GET', '/users', (r, d) => listUsers(r, d)),
+  route('POST', '/users', (r, d) => createUser(r, d)),
+  route('GET', '/users/:id', (r, d, p) => getUser(r, d, p[0]!)),
+  route('PATCH', '/users/:id', (r, d, p) => patchUser(r, d, p[0]!)),
   route('GET', '/verify/:token', (r, d, p) => peekVerifyLink(r, d, p[0]!), undefined, true),
   route('POST', '/verify/:token', (r, d, p) => useVerifyLink(r, d, p[0]!), () => false, true),
 ];

@@ -4,7 +4,10 @@
  */
 import { MemoryTickStore, incidentMute, type DigestData, type PurgeLogEntry, type RetentionStage, parseSnapshot, type AuditInput, type Contact, type IncidentRow, type PagingConfig } from '@alarmops/core';
 import { inScope, nodeVisible, seesCustomer, type Role, type ScopeFilter } from './auth.js';
+import { emailDomain, normalizeEmail } from './usersApi.js';
+import { isFreeMail } from './onboardingApi.js';
 import type { UserInfo } from './audience.js';
+import type { BindGoogleOutcome, EnrolOutcome, NewUser, UserFilter, UserPatch, UserRecord, UserWriteOutcome } from './repo.js';
 import type { AccountPatch, AccountWriteOutcome, AuditTemplate, CloudAccountRecord, ContactPatch, ContactScopeInfo, ContactWriteOutcome, ContactsWorld, NewAccount, NewContact, VerificationIssue, VerificationLimits, IssueOutcome, VerificationLink, VerificationTaken, VerifyChannelValue, ExportIncidentRow, RetentionView, RevealLogFilter, RevealLogRow, RevealWrite, RevealWriteOutcome } from './repo.js';
 import { OFFBOARD_STEP_KEYS, type ChangeStatusOutcome, type CustomerStatusState, type CustomerStatusValue, type MarkStepOutcome, type OffboardStepKey, type OffboardingState, type Principal, ResponderOp, ResponderWriteOutcome, RespondersState, RotationsWorld, AlertMemberRow, ApiRepository, IdempotentEntry, IncidentFilter, IncidentPage, NodeFilter, NotifiedPerson, OpenCounts, StatusCounts, UndoRecord } from './repo.js';
 
@@ -32,7 +35,8 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
   portalGrantsOf = new Map<string, string[]>();
   /** Test hooks: this account has Resource / ManagedAlarm rows (the memory store keeps no such tables). */
   accountsWithResources = new Set<string>();
-  users = new Map<string, { id: string; name: string; contactId: string | null; email?: string; role?: Role; customerId?: string | null; status?: 'ACTIVE' | 'PENDING' | 'DISABLED' }>();
+  users = new Map<string, { id: string; name: string; contactId: string | null; email?: string; role?: Role; customerId?: string | null; status?: 'ACTIVE' | 'PENDING' | 'DISABLED'; googleSub?: string | null; lastLoginAt?: Date | null; createdAt?: Date }>();
+  private userSeq = 0;
   /** Responders list versions (never restart) and the source of each responder row (DIRECT unless set). */
   respondersVersion = new Map<string, number>();
   responderSource = new Map<string, { source: 'DIRECT' | 'TEMPLATE'; templateId: string; templateName: string }>();
@@ -556,6 +560,96 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     for (const [k] of live.slice(0, Math.max(0, live.length - (cap.maxPerOwner - 1)))) this.idempotent.delete(k);
     this.idempotent.delete(key);
     this.idempotent.set(key, { entry: structuredClone(entry), expiresAt, owner: cap.owner });
+  }
+
+  // ───────────── users (#69, D-55) ─────────────
+  private userRecord(u: MemoryApiStore['users'] extends Map<string, infer V> ? V : never): UserRecord {
+    const customerId = u.customerId ?? null;
+    return {
+      id: u.id, email: (u.email ?? `${u.id}@example.test`).toLowerCase(), name: u.name, kind: customerId ? 'CUSTOMER' : 'INTERNAL', customerId,
+      role: u.role ?? (customerId ? 'VIEWER' : 'OPERATOR'), status: u.status ?? 'ACTIVE', googleBound: !!u.googleSub, lastLoginAt: u.lastLoginAt ?? null, createdAt: u.createdAt ?? new Date(0),
+    };
+  }
+  private emailTaken(email: string, exceptId?: string): boolean {
+    return [...this.users.values()].some((u) => u.id !== exceptId && this.userRecord(u).email === email);
+  }
+  async listUsers(f: UserFilter): Promise<UserRecord[]> {
+    const needle = f.q?.toLowerCase();
+    return [...this.users.values()].map((u) => this.userRecord(u))
+      .filter((u) => (!f.kind || u.kind === f.kind) && (!f.customerId || u.customerId === f.customerId) && (!f.status || u.status === f.status) && (!f.role || u.role === f.role)
+        && (!needle || u.name.toLowerCase().includes(needle) || u.email.includes(needle)))
+      .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : a.id < b.id ? -1 : 1));
+  }
+  async findUser(userId: string): Promise<UserRecord | null> {
+    const u = this.users.get(userId);
+    return u ? this.userRecord(u) : null;
+  }
+  async createUser(n: NewUser, audit: AuditTemplate): Promise<UserRecord | 'EMAIL_EXISTS' | 'NO_SUCH_CUSTOMER'> {
+    if (n.customerId !== null && (!this.customers.has(n.customerId) || this.customers.get(n.customerId)!.status === 'TERMINATED')) return 'NO_SUCH_CUSTOMER';
+    if (this.emailTaken(n.email)) return 'EMAIL_EXISTS';
+    const id = `usr_${++this.userSeq}_${this.nextId('u')}`;
+    const u = { id, name: n.name, contactId: null, email: n.email, role: n.role, customerId: n.customerId, status: n.status, googleSub: null, lastLoginAt: null, createdAt: audit.at };
+    this.users.set(id, u);
+    this.audits.push({ ...audit, customerId: n.customerId, targetId: id });
+    return this.userRecord(u);
+  }
+  async updateUser(userId: string, patch: UserPatch, audit: AuditTemplate): Promise<UserWriteOutcome> {
+    const u = this.users.get(userId);
+    if (!u) return 'NOT_FOUND';
+    const cur = this.userRecord(u);
+    const role = patch.role ?? cur.role; const status = patch.status ?? cur.status;
+    if (cur.kind === 'INTERNAL' && cur.role === 'ADMIN' && cur.status === 'ACTIVE' && !(role === 'ADMIN' && status === 'ACTIVE')) {
+      const others = [...this.users.values()].map((x) => this.userRecord(x)).filter((x) => x.id !== userId && x.kind === 'INTERNAL' && x.role === 'ADMIN' && x.status === 'ACTIVE');
+      if (!others.length) return 'LAST_ADMIN';
+    }
+    if (patch.customerId !== undefined) {
+      const c = this.customers.get(patch.customerId);
+      if (!c || (c.status ?? 'ACTIVE') === 'TERMINATED') return 'NO_SUCH_CUSTOMER';
+      if (u.contactId) return 'CONTACT_LINKED';
+      u.customerId = patch.customerId;
+    }
+    u.role = role; u.status = status;
+    if (patch.clearGoogleSub) u.googleSub = null;
+    this.audits.push({ ...audit, customerId: u.customerId ?? null, targetId: userId });
+    return this.userRecord(u);
+  }
+  async touchLastLogin(userId: string, at: Date): Promise<void> {
+    const u = this.users.get(userId);
+    if (u) u.lastLoginAt = at;
+  }
+  async enrolPortalUserByDomain(rawEmail: string, at: Date): Promise<EnrolOutcome> {
+    const email = normalizeEmail(rawEmail);
+    if (!email) return { refused: 'INVALID_EMAIL' };
+    const domain = emailDomain(email);
+    if (isFreeMail(domain)) return { refused: 'FREE_MAIL' };
+    const owners = [...this.loginDomains].filter(([, ds]) => ds.includes(domain)).map(([id]) => id).filter((id) => this.customers.has(id));
+    if (owners.length === 0) return { refused: 'DOMAIN_UNKNOWN' };
+    if (owners.length > 1) return { refused: 'AMBIGUOUS' };
+    const customerId = owners[0]!;
+    if ((this.customers.get(customerId)!.status ?? 'ACTIVE') !== 'ACTIVE') return { refused: 'CUSTOMER_INACTIVE' };
+    const existing = [...this.users.values()].find((u) => this.userRecord(u).email === email);
+    if (existing) {
+      const r = this.userRecord(existing);
+      if (r.kind === 'INTERNAL') return { refused: 'STAFF_EMAIL' };
+      return r.customerId === customerId ? { user: r, created: false } : { refused: 'OTHER_CUSTOMER' };
+    }
+    const id = `usr_${++this.userSeq}_${this.nextId('u')}`;
+    const u = { id, name: email.slice(0, email.indexOf('@')).slice(0, 80), contactId: null, email, role: 'VIEWER' as const, customerId, status: 'ACTIVE' as const, googleSub: null, lastLoginAt: null, createdAt: at };
+    this.users.set(id, u);
+    this.audits.push({ at, customerId, actorType: 'SYSTEM', actorId: null, action: 'user.enrol_domain', targetType: 'User', targetId: id, before: null, after: { kind: 'CUSTOMER', role: 'VIEWER', status: 'ACTIVE', reason: 'LOGIN_DOMAIN' } });
+    return { user: this.userRecord(u), created: true };
+  }
+  async bindGoogleSub(userId: string, sub: string, at: Date): Promise<BindGoogleOutcome> {
+    if (typeof sub !== 'string' || !sub || sub.length > 255 || /[\u0000-\u001f\u007f]/.test(sub)) throw new Error('bindGoogleSub: invalid sub');
+    const u = this.users.get(userId);
+    if (!u) return 'NOT_FOUND';
+    const audit = (action: string, reason: string) => this.audits.push({ at, customerId: u.customerId ?? null, actorType: 'SYSTEM', actorId: null, action, targetType: 'User', targetId: userId, before: null, after: { reason } });
+    if (u.googleSub === sub) return 'ok';
+    if (u.googleSub) { audit('user.google_mismatch', 'GOOGLE_SUB_MISMATCH'); return 'mismatch'; }
+    if ([...this.users.values()].some((x) => x.id !== userId && x.googleSub === sub)) { audit('user.google_mismatch', 'GOOGLE_SUB_IN_USE'); return 'mismatch'; }
+    u.googleSub = sub;
+    audit('user.google_bind', 'FIRST_SIGN_IN');
+    return 'bound';
   }
 
   // ───────────── people ─────────────
