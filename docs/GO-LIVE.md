@@ -52,15 +52,90 @@
 
 ## 2단계 — GitHub·DB 기반 [사람, 30분]
 
-- [ ] main 브랜치 보호(Rulesets): PR 필수, 필수 검사 `test`, `e2e`, `e2e-live`, `db`, `engine`, `infra` (`docs/SETUP-SUPABASE.md` 9단계)
+끝나면: 검사를 통과하지 않은 변경은 main에 못 들어가고, 회사 PC에서 **실제 개발 DB**에 붙은 콘솔을 눈으로 볼 수 있다.
+
+세 가지를 순서대로 한다. 2-2가 끝나야 2-3을 할 수 있다.
+
+### 2-1. main 브랜치 보호 (5분)
+
+- [ ] main 브랜치 보호(Rulesets): PR 필수, 필수 검사 `test`, `e2e`, `e2e-live`, `db`, `engine`, `infra`
+
+1. GitHub 저장소의 **Settings > Rules > Rulesets**(또는 Branches)에서 `main` 규칙을 만든다.
+2. **Require a pull request before merging**을 켠다.
+3. **Require status checks to pass**를 켜고 여섯 개를 추가한다: `test`, `e2e`, `e2e-live`, `db`, `engine`, `infra`.
+4. 확인: 아무 PR이나 열면 병합 버튼 위에 여섯 검사가 "Required"로 보인다.
+
+화면별 설명은 `docs/SETUP-SUPABASE.md` 9단계에 있다.
+
+### 2-2. 회사 PC `.env` 채우기 (10분)
+
 - [ ] 회사 PC `.env`에 `DATABASE_URL`/`DIRECT_URL` (SETUP-SUPABASE 7단계) → 허브에 "채웠다"고만 알림
-- [ ] 회사 PC에서 실제 DB로 콘솔 확인 (순서는 허브가 그때 안내)
-  1. seed를 넣는다.
-  2. 콘솔을 띄운다.
-     ```bash
-     LIVE_DEV_LOGIN=1 SESSION_SECRET=<임의 32자> npm run dev -w @alarmops/console
-     ```
-  3. `/auth/dev-login?as=admin` 로 들어간다.
+
+1. 저장소 루트에서 Git Bash를 열고 `.env`를 만든다.
+   ```bash
+   cp .env.example .env
+   ```
+2. `.env`를 VS Code나 메모장으로 열어 아래 값을 넣는다.
+
+   | 키 | 값 |
+   |---|---|
+   | `DATABASE_URL` | 비밀번호 관리자에 저장해 둔 pooled 주소(포트 6543, 끝이 `?pgbouncer=true&connection_limit=1`) |
+   | `DIRECT_URL` | 비밀번호 관리자에 저장해 둔 session 주소(포트 5432) |
+   | `SESSION_SECRET` | 아무 글자 32자 이상(개발용. 운영 값과 다르게) |
+
+3. 저장하고, 허브에는 "채웠다"고만 말한다.
+
+> **주의** 값을 채팅·이슈·PR에 붙여 넣지 않는다. 에이전트는 `.env`를 읽지 못한다.
+
+### 2-3. 실제 DB로 콘솔 띄워 보기 (15분)
+
+- [ ] 회사 PC에서 실제 DB로 콘솔 확인
+
+모든 명령은 **저장소 루트**에서 **Git Bash**로 실행한다. Node 20 이상이 필요하다.
+
+1. 패키지를 설치한다. 처음 한 번, 그리고 main을 새로 받은 뒤에 한다.
+   ```bash
+   npm ci
+   ```
+2. 개발 DB에 seed(데모 데이터)를 넣는다.
+   ```bash
+   node --env-file=.env --import tsx db/prisma/seed.ts
+   ```
+   - 들어가는 것: 데모 고객 2곳, 데모 직원 3명(admin·operator·viewer), 열린 인시던트 3건.
+   - 확인: 오류 없이 끝난다. 여러 번 실행해도 데이터가 중복되지 않는다.
+   - `DATABASE_URL is not set.`이 나오면 `.env`가 비어 있거나 루트가 아닌 곳에서 실행한 것이다.
+
+   > **참고** seed는 가짜 이름·가짜 번호만 넣는다. 운영 환경(`NODE_ENV=production`)에서는 실행을 거부한다.
+3. 콘솔을 **실제 DB 모드**로 띄운다.
+   ```bash
+   MOCK_API= LIVE_DEV_LOGIN=1 DATABASE_POOLER=transaction node --env-file=.env node_modules/next/dist/bin/next dev apps/console -p 3107
+   ```
+   - `MOCK_API=`(빈 값): 가짜 데이터 모드를 끈다. `.env`에 `MOCK_API=1`이 있어도 이 값이 이긴다.
+   - `LIVE_DEV_LOGIN=1`: 개발용 로그인 주소를 연다. `next dev`에서만 동작한다.
+   - `DATABASE_POOLER=transaction`: 6543 포트(pooled 주소)로 붙을 때 필요하다.
+   - 확인: 터미널에 `Ready`가 나온다. 이 창은 닫지 않는다.
+
+   > **주의** `npm run dev -w @alarmops/console`은 쓰지 않는다. 그 명령은 항상 가짜 데이터 모드(`MOCK_API=1`)로 뜬다.
+4. 브라우저에서 개발용 로그인 주소를 연다.
+   ```
+   http://localhost:3107/auth/dev-login?as=admin
+   ```
+   - `as=` 뒤에는 `admin`, `operator`, `viewer` 중 하나를 쓴다. seed가 만든 데모 직원으로 로그인된다.
+5. 화면을 확인한다.
+   - Incidents에 열린 인시던트 3건이 보인다.
+   - 고객 목록에 `Acme Demo`, `Birch Retail`이 보인다.
+   - 인시던트 하나를 Acknowledge 하고 새로 고침해도 상태가 남아 있다. DB에 저장됐다는 뜻이다.
+6. 끝나면 터미널에서 `Ctrl+C`로 콘솔을 끈다.
+
+막혔을 때:
+
+| 증상 | 원인과 할 일 |
+|---|---|
+| 로그인 주소가 500, 터미널에 `ECONNREFUSED`나 timeout | DB에 붙지 못했다. `.env`의 `DATABASE_URL`을 다시 확인한다 |
+| 화면에 `NOT_CONFIGURED`(503) | `DATABASE_URL`이 비어 있다. 2-2를 다시 본다 |
+| 로그인 주소가 404 | `LIVE_DEV_LOGIN=1`이 빠졌거나 `.env`에 `SESSION_SECRET`이 없다 |
+| 인시던트가 0건 | 2번 seed를 건너뛰었다 |
+| `Module not found` | 1번 `npm ci`를 다시 실행한다 |
 
 ## 3단계 — 콘솔 배포(Vercel) [사람 + 에이전트]
 
