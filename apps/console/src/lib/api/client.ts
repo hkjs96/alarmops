@@ -5,6 +5,7 @@ import type {
   RespondersResponse, RotationSummary, StaffSummary, ResponderWriteOptions, RespondersWriteResult, UndoResult,
   CustomerStatusChange, CustomerStatusInput, CustomerStatusResponse, Offboarding, OffboardStepKey,
   Digest, LegalHold, PurgeLog, RevealChannel, RevealResult, ContactRevealEntry, ContactRevealQuery,
+  NewUserInput, UserItem, UserListQuery, UserPatchInput,
 } from "./types";
 
 export class ApiError extends Error {
@@ -103,6 +104,14 @@ export interface ConsoleApi {
   listContactReveals(q?: ContactRevealQuery): Promise<Paginated<ContactRevealEntry>>;
   /** GET /digests/latest (MSP staff; a portal user gets 404) */
   getLatestDigest(): Promise<Digest>;
+
+  /* ---- Users (API-CONTRACT 8.4 #69): ADMIN with all customers only; a portal user gets 404 ---- */
+  /** GET /users (filters kind, customerId, status, role, q). 403 for other staff and for an ADMIN with a narrower range. */
+  listUsers(q?: UserListQuery): Promise<{ items: UserItem[] }>;
+  /** POST /users → 201. 409 ALREADY_EXISTS (e-mail), 400 VALIDATION_FAILED. */
+  createUser(body: NewUserInput): Promise<UserItem>;
+  /** PATCH /users/{id}. 409 LAST_ADMIN / CONTACT_LINKED, 403 FORBIDDEN (yourself), 404. */
+  patchUser(id: string, body: UserPatchInput): Promise<UserItem>;
 }
 
 /** Empty params are dropped (known-bugs 9-6). */
@@ -187,5 +196,8 @@ export function createHttpApi(opts: { baseUrl: string; fetch?: typeof fetch; hea
     revealContact: (id, body) => call("POST", `/contacts/${enc(id)}/reveal`, body),
     listContactReveals: (q = {}) => call("GET", "/contact-reveals" + toQuery({ ...q })),
     getLatestDigest: () => call("GET", "/digests/latest"),
+    listUsers: (q = {}) => call("GET", "/users" + toQuery({ ...q })),
+    createUser: (body) => call("POST", "/users", body),
+    patchUser: (id, body) => call("PATCH", `/users/${enc(id)}`, body),
   };
 }

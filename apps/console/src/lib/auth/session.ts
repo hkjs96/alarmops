@@ -63,6 +63,8 @@ export const DEV_USERS: Record<string, typeof DEV_USER> = {
   admin: DEV_USER,
   operator: { sub: "usr-minjae", email: "minjae.lee@example.com", name: "Minjae Lee" },
   viewer: { sub: "usr-sora", email: "sora.yoon@example.com", name: "Sora Yoon" },
+  /** a second admin, mock only (Settings › Users: two admins at once) */
+  admin2: { sub: "usr-junho", email: "junho.park@example.com", name: "Junho Park" },
   /** a portal (customer) user, mock only */
   portal: { sub: "usr-portal", email: "yuna@mirae.example", name: "Yuna Seo" },
 };

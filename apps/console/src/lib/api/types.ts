@@ -622,3 +622,17 @@ export interface Digest {
 }
 /** The one number of "Business-hours summary: N": incidents of suspended customers plus terminated customers still sending events. */
 export const digestCount = (d: Digest): number => d.totals.suspendedIncidents + d.totals.residualCustomers;
+
+/* ---- Settings › Users (API-CONTRACT §8.4 "구현 메모 #69", D-55) ---- */
+export type UserKind = "INTERNAL" | "CUSTOMER";
+export type UserStatus = "PENDING" | "ACTIVE" | "DISABLED";
+/** One row of GET /users. The e-mail is always masked; the Google account id is never sent (only whether one is bound). */
+export interface UserItem {
+  id: string; name: string; kind: UserKind; customerId: string | null; role: Role; status: UserStatus;
+  emailMasked: string; googleBound: boolean; lastLoginAt: string | null; createdAt: string;
+}
+export interface UserListQuery { kind?: UserKind; customerId?: string; status?: UserStatus; role?: Role; q?: string }
+/** POST /users: staff = kind INTERNAL + role; portal user = kind CUSTOMER + customerId (role is always VIEWER). */
+export interface NewUserInput { email: string; name: string; kind: UserKind; role?: Role; customerId?: string }
+/** PATCH /users/{id}: at least one field. `clearGoogleSub` can only be true. */
+export interface UserPatchInput { role?: Role; status?: "ACTIVE" | "DISABLED"; customerId?: string; clearGoogleSub?: true }

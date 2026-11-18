@@ -21,7 +21,8 @@ export default defineConfig({
     command: `npx next start -p ${PORT}`,
     url: `http://localhost:${PORT}/login`,
     reuseExistingServer: REUSE,
-    env: { MOCK_API: "1", E2E_ALLOW_MOCK: "1" },
+    // SSO_ALLOWED_DOMAINS: the staff fence the Users screen warns about (no sign-in happens in the mock run)
+    env: { MOCK_API: "1", E2E_ALLOW_MOCK: "1", SSO_ALLOWED_DOMAINS: "msp.example" },
     timeout: 120_000,
   },
 });
