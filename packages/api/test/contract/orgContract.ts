@@ -69,6 +69,45 @@ export function orgContract(make: MakeApiFixture): void {
       expect(body(await call(admin, 'GET', '/customers/cus_mirae')).loginDomains).toEqual([]);
     });
 
+    it('removing a login domain: affectedUsers (ACTIVE portal users in it) in the response and the audit; they stay ACTIVE with a session; new sign-ins by that domain are refused', async () => {
+      await open();
+      expect((await call(admin, 'PATCH', '/customers/cus_mirae', { loginDomains: ['mirae.example', 'mirae.co.kr'] })).status).toBe(200);
+      const repo = w.fx.repo;
+      const T = new Date('2026-11-18T01:00:00Z');
+      await repo.enrolPortalUserByDomain('a@mirae.example', T);
+      await repo.enrolPortalUserByDomain('b@mirae.example', T);
+      const c = await repo.enrolPortalUserByDomain('c@mirae.co.kr', T);
+      const dis = await repo.enrolPortalUserByDomain('d@mirae.example', T);
+      expect((await call(admin, 'PATCH', `/users/${(dis as any).user.id}`, { status: 'DISABLED' })).status).toBe(200);
+      const r = await call(admin, 'PATCH', '/customers/cus_mirae', { loginDomains: ['mirae.co.kr'] });
+      expect(r.status).toBe(200);
+      expect(body(r)).toMatchObject({ loginDomains: ['mirae.co.kr'], affectedUsers: 2 }); // a and b — not the disabled d, not c (other domain), not usr_yuna (example.test)
+      expect((await w.fx.audits()).filter((x) => x.action === 'customer.update').at(-1)).toMatchObject({ before: { loginDomains: ['mirae.example', 'mirae.co.kr'] }, after: { loginDomains: ['mirae.co.kr'], affectedUsers: 2 } });
+      // they stay active until an ADMIN disables them
+      const users = body(await call(admin, 'GET', '/users')).items as any[];
+      expect(users.filter((u) => u.emailMasked.startsWith('a•') || u.emailMasked.startsWith('b•')).map((u) => u.status)).toEqual(['ACTIVE', 'ACTIVE']);
+      expect(await repo.sessionPrincipal('usr_yuna')).toMatchObject({ customerId: 'cus_mirae' });
+      // a new person of the removed domain cannot enrol any more; the remaining domain still works
+      expect(await repo.enrolPortalUserByDomain('new@mirae.example', T)).toEqual({ refused: 'DOMAIN_UNKNOWN' });
+      expect(await repo.enrolPortalUserByDomain('c@mirae.co.kr', T)).toMatchObject({ created: false, user: { id: (c as any).user.id } });
+      // adding a domain reports 0
+      expect(body(await call(admin, 'PATCH', '/customers/cus_mirae', { loginDomains: ['mirae.co.kr', 'mirae.kr'] })).affectedUsers).toBe(0);
+    });
+
+    it('two customers claiming the same login domain at the same moment (create or patch): exactly one succeeds, the others are 409', async () => {
+      await open();
+      const rs = await Promise.all([
+        call(admin, 'POST', '/customers', { name: 'Claim One', loginDomains: ['claim.example'] }),
+        call(admin, 'POST', '/customers', { name: 'Claim Two', loginDomains: ['claim.example', 'other.example'] }),
+        call(admin, 'PATCH', '/customers/cus_mirae', { loginDomains: ['claim.example'] }),
+        call(admin, 'PATCH', '/customers/cus_hanbit', { loginDomains: ['claim.example', 'hanbit.example'] }),
+      ]);
+      expect(rs.filter((r) => r.status === 409)).toHaveLength(3);
+      expect(rs.filter((r) => r.status === 200 || r.status === 201)).toHaveLength(1);
+      const owners = (body(await call(admin, 'GET', '/customers')).items as any[]).filter((c) => c.loginDomains.includes('claim.example'));
+      expect(owners).toHaveLength(1);
+    });
+
     it('PATCH roles: OPERATOR 403, staff narrowed to another customer 404, portal 404; a TERMINATED customer 409', async () => {
       await open();
       expect((await call(USERS.haeun, 'PATCH', '/customers/cus_mirae', { name: 'X' })).status).toBe(403);

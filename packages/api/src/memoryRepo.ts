@@ -586,6 +586,9 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     this.audits.push({ ...audit, customerId, targetId: customerId });
     return this.profile(customerId);
   }
+  async countPortalUsersInDomains(customerId: string, domains: readonly string[]): Promise<number> {
+    return [...this.users.values()].map((u) => this.userRecord(u)).filter((u) => u.customerId === customerId && u.status === 'ACTIVE' && domains.includes(emailDomain(u.email))).length;
+  }
   private projectRecord(p: { id: string; customerId: string; name: string; slug: string }): ProjectRecord {
     return { id: p.id, customerId: p.customerId, name: p.name, slug: p.slug, serviceCount: [...this.services.values()].filter((s) => s.projectId === p.id).length };
   }
@@ -715,7 +718,8 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     if (existing) {
       const r = this.userRecord(existing);
       if (r.kind === 'INTERNAL') return { refused: 'STAFF_EMAIL' };
-      return r.customerId === customerId ? { user: r, created: false } : { refused: 'OTHER_CUSTOMER' };
+      if (r.customerId !== customerId) return { refused: 'OTHER_CUSTOMER' };
+      return r.status === 'ACTIVE' ? { user: r, created: false } : { refused: 'USER_INACTIVE' };
     }
     const id = `usr_${++this.userSeq}_${this.nextId('u')}`;
     const u = { id, name: email.slice(0, email.indexOf('@')).slice(0, 80), contactId: null, email, role: 'VIEWER' as const, customerId, status: 'ACTIVE' as const, googleSub: null, lastLoginAt: null, createdAt: at };

@@ -371,6 +371,14 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
 
   // ───────────────────────────── wizard: customer profile, projects, services (#69) ─────────────────────────────
 
+  /**
+   * A login domain belongs to one customer, and there is no unique index over the array column: two requests claiming the same domain
+   * would both pass the `&&` check. A transaction-level advisory lock per domain (sorted order, so no deadlock) makes the second wait
+   * for the first to commit, then see its row. Taken by customer create and by PATCH /customers/{id}.
+   */
+  private static async lockLoginDomains(tx: SqlExecutor, domains: readonly string[]): Promise<void> {
+    for (const dom of [...new Set(domains)].sort()) await tx.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`alarmops:loginDomain:${dom}`]);
+  }
   private static toProfile(r: Record<string, any>): CustomerProfile { // eslint-disable-line @typescript-eslint/no-explicit-any
     return { id: r.id, name: r.name, slug: r.slug, status: r.status, loginDomains: r.loginDomains ?? [], createdAt: dReq(r.createdAt) };
   }
@@ -387,6 +395,7 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
   async updateCustomer(customerId: string, patch: CustomerProfilePatch, audit: AuditTemplate): Promise<CustomerUpdateOutcome> {
     try {
       return await this.sql.transaction(async (tx) => {
+        await SqlApiStore.lockLoginDomains(tx, patch.loginDomains ?? []);
         // the same row lock a status change takes: no edit slips in behind a termination
         const [cur] = await tx.query(`SELECT "status" FROM "Customer" WHERE "id" = $1 FOR UPDATE`, [customerId]);
         if (!cur) return 'NOT_FOUND' as const;
@@ -402,6 +411,11 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
       if (pgCode(err) === PG.UNIQUE) return 'NAME_EXISTS';
       throw err;
     }
+  }
+  async countPortalUsersInDomains(customerId: string, domains: readonly string[]): Promise<number> {
+    if (!domains.length) return 0;
+    const [r] = await this.sql.query(`SELECT count(*)::int AS "n" FROM "User" WHERE "customerId" = $1 AND "status" = 'ACTIVE' AND lower(substring("email"::text from '@([^@]*)$')) = ANY($2::text[])`, [customerId, [...domains]]);
+    return (r?.n as number) ?? 0;
   }
   private static readonly PROJECT_SELECT = `SELECT p."id", p."customerId", p."name", p."slug", (SELECT count(*)::int FROM "Service" s WHERE s."projectId" = p."id") AS "serviceCount" FROM "Project" p`;
   private static toProject(r: Record<string, any>): ProjectRecord { // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -593,7 +607,8 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
         return { user, created: true };
       }
       if (user.kind === 'INTERNAL') return { refused: 'STAFF_EMAIL' as const };
-      return user.customerId === customerId ? { user, created: false } : { refused: 'OTHER_CUSTOMER' as const };
+      if (user.customerId !== customerId) return { refused: 'OTHER_CUSTOMER' as const };
+      return user.status === 'ACTIVE' ? { user, created: false } : { refused: 'USER_INACTIVE' as const };
     });
   }
   async bindGoogleSub(userId: string, sub: string, at: Date): Promise<BindGoogleOutcome> {
@@ -942,6 +957,7 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
   async createCustomer(c: { name: string; slug: string; loginDomains: string[] }, audit: AuditTemplate) {
     try {
       return await this.sql.transaction(async (tx) => {
+        await SqlApiStore.lockLoginDomains(tx, c.loginDomains);
         if ((await tx.query(`SELECT 1 FROM "Customer" WHERE lower("name") = lower($1)`, [c.name])).length) return 'NAME_EXISTS' as const;
         if ((await tx.query(`SELECT 1 FROM "Customer" WHERE "slug" = $1`, [c.slug])).length) return 'SLUG_EXISTS' as const;
         if (c.loginDomains.length && (await tx.query(`SELECT 1 FROM "Customer" WHERE "loginDomains" && $1::text[]`, [c.loginDomains])).length) return 'DOMAIN_EXISTS' as const;

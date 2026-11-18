@@ -253,8 +253,8 @@ export interface UserPatch { role?: Role; status?: UserStatusValue; customerId?:
 export type UserWriteOutcome = UserRecord | 'NOT_FOUND' | 'LAST_ADMIN' | 'NO_SUCH_CUSTOMER' | 'CONTACT_LINKED' | 'EMAIL_EXISTS';
 export type EnrolOutcome =
   | { user: UserRecord; created: boolean }
-  /** Nothing created: DOMAIN_UNKNOWN (no customer has the domain), AMBIGUOUS (more than one), CUSTOMER_INACTIVE, FREE_MAIL, STAFF_EMAIL (an INTERNAL user has the address), OTHER_CUSTOMER (a portal user of another customer has it), INVALID_EMAIL. */
-  | { refused: 'DOMAIN_UNKNOWN' | 'AMBIGUOUS' | 'CUSTOMER_INACTIVE' | 'FREE_MAIL' | 'STAFF_EMAIL' | 'OTHER_CUSTOMER' | 'INVALID_EMAIL' };
+  /** Nothing created: DOMAIN_UNKNOWN (no customer has the domain), AMBIGUOUS (more than one), CUSTOMER_INACTIVE, FREE_MAIL, STAFF_EMAIL (an INTERNAL user has the address), OTHER_CUSTOMER (a portal user of another customer has it), USER_INACTIVE (a DISABLED or PENDING user of that customer has it: nothing is created or changed), INVALID_EMAIL. */
+  | { refused: 'DOMAIN_UNKNOWN' | 'AMBIGUOUS' | 'CUSTOMER_INACTIVE' | 'FREE_MAIL' | 'STAFF_EMAIL' | 'OTHER_CUSTOMER' | 'USER_INACTIVE' | 'INVALID_EMAIL' };
 /** 'bound': the user had no Google account, now has (audited). 'ok': the same one. 'mismatch': another one is bound; nothing changed, a `user.google_mismatch` audit row (reason code, no e-mail) was written. */
 export type BindGoogleOutcome = 'bound' | 'ok' | 'mismatch' | 'NOT_FOUND';
 
@@ -445,6 +445,8 @@ export interface ApiRepository {
   findCustomer(scope: ScopeFilter, customerId: string): Promise<CustomerProfile | null>;
   /** ONE transaction: row + audit. Name unique case-insensitively; a login domain may belong to one customer only. Refused for a TERMINATED customer. */
   updateCustomer(customerId: string, patch: CustomerProfilePatch, audit: AuditTemplate): Promise<CustomerUpdateOutcome>;
+  /** ACTIVE portal users of the customer whose e-mail address is in one of `domains` (exact domain). Counts only; read before a login domain is removed. */
+  countPortalUsersInDomains(customerId: string, domains: readonly string[]): Promise<number>;
   /** Caller has checked the customer is visible and customer-wide. */
   listProjects(customerId: string): Promise<ProjectRecord[]>;
   /** The project if its customer is inside `scope` (in the query). */

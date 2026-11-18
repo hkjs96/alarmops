@@ -244,10 +244,17 @@ export function usersContract(make: MakeApiFixture): void {
       expect((await w.fx.audits()).filter((a) => a.action === 'user.enrol_domain')).toHaveLength(0);
     });
 
-    it('a disabled user is returned as it is (the console refuses the sign-in), never re-activated', async () => {
+    it('an existing DISABLED or PENDING user is refused (USER_INACTIVE), nothing is created or changed; ACTIVE again -> returned', async () => {
       await open();
       await w.call(admin, 'PATCH', '/users/usr_yuna', { body: { status: 'DISABLED' } });
-      expect(await repo().enrolPortalUserByDomain('yuna@mirae.example', T)).toMatchObject({ created: false, user: { id: 'usr_yuna', status: 'DISABLED' } });
+      expect(await repo().enrolPortalUserByDomain('yuna@mirae.example', T)).toEqual({ refused: 'USER_INACTIVE' });
+      expect(await repo().createUser({ email: 'pend@mirae.example', name: 'Pend', customerId: 'cus_mirae', role: 'VIEWER', status: 'PENDING' }, { at: T, actorType: 'USER', actorId: 'x', action: 'user.create', targetType: 'User', before: null, after: null })).toMatchObject({ status: 'PENDING' });
+      expect(await repo().enrolPortalUserByDomain('Pend@mirae.example', T)).toEqual({ refused: 'USER_INACTIVE' });
+      expect(body(await w.call(admin, 'GET', '/users/usr_yuna')).status).toBe('DISABLED');
+      expect((await list({ q: 'pend@mirae.example' }))[0].status).toBe('PENDING');
+      expect((await w.fx.audits()).filter((a) => a.action === 'user.enrol_domain')).toHaveLength(0);
+      await w.call(admin, 'PATCH', '/users/usr_yuna', { body: { status: 'ACTIVE' } });
+      expect(await repo().enrolPortalUserByDomain('yuna@mirae.example', T)).toMatchObject({ created: false, user: { id: 'usr_yuna', status: 'ACTIVE' } });
     });
 
     it('parallel first sign-ins of one address: one user, one audit row, everybody gets the same user', async () => {

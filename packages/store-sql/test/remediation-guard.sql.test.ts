@@ -21,8 +21,19 @@ beforeEach(async () => {
 const ADD = async (id: string, status: string, extra: { by?: string; at?: boolean; via?: string } = {}) => {
   // one resource per request: at most one ACTIVE request per resource and action (partial unique index)
   await q(`INSERT INTO "Resource"("id", "customerId", "cloudAccountId", "region", "resourceType", "resourceArn", "resourceKey", "lastSeenAt", "updatedAt") VALUES ($1, 'cus_a', 'ca_a', 'ap-northeast-2', 'ec2', 'arn:x', $1, now(), now())`, [`res_${id}`]);
-  await q(`INSERT INTO "RemediationRequest"("id", "customerId", "cloudAccountId", "resourceId", "trigger", "action", "status", "requestedAt", "decidedBy", "decidedAt", "decisionVia")
-    VALUES ($1, 'cus_a', 'ca_a', 'res_' || $1, '{}'::jsonb, 'EC2_STOP', $2::"RemediationStatus", now(), $3, ${extra.at ? 'now()' : 'NULL'}, $4)`, [id, status, extra.by ?? null, extra.via ?? null]);
+  // rows are born NOTIFIED / PENDING_APPROVAL (the INSERT guard) and reach any other state through the allowed transitions
+  await q(`INSERT INTO "RemediationRequest"("id", "customerId", "cloudAccountId", "resourceId", "trigger", "action", "status", "requestedAt")
+    VALUES ($1, 'cus_a', 'ca_a', 'res_' || $1, '{}'::jsonb, 'EC2_STOP', $2::"RemediationStatus", now())`, [id, status === 'NOTIFIED' ? 'NOTIFIED' : 'PENDING_APPROVAL']);
+  const step = (to: string, decided: boolean) => q(`UPDATE "RemediationRequest" SET "status" = $2::"RemediationStatus"${decided ? `, "decidedBy" = $3, "decidedAt" = now(), "decisionVia" = $4` : ''} WHERE "id" = $1`,
+    decided ? [id, to, extra.by ?? 'ct_1', extra.via ?? null] : [id, to]);
+  const decided = extra.by !== undefined || extra.at === true;
+  if (status === 'NOTIFIED' || status === 'PENDING_APPROVAL') return;
+  if (status === 'REJECTED' || status === 'EXPIRED') await step(status, decided);
+  else {
+    await step('APPROVED', true);
+    if (status !== 'APPROVED') await step('EXECUTING', false);
+    if (status === 'SUCCEEDED' || status === 'FAILED') await step(status, false);
+  }
 };
 const set = (id: string, sql: string) => q(`UPDATE "RemediationRequest" SET ${sql} WHERE "id" = $1`, [id]);
 const status = async (id: string) => (await q(`SELECT "status" FROM "RemediationRequest" WHERE "id" = $1`, [id]))[0]!.status;
@@ -74,10 +85,28 @@ describe('RemediationRequest transition guard (0007)', () => {
     await expect(set('d2', `"decidedBy" = 'ct_2'`)).rejects.toThrow(/decision cannot be changed/);
   });
 
-  it('removing the approver\'s Contact (ON DELETE SET NULL) is not blocked for a decided request that is not subject to the decided-CHECK', async () => {
+  it('removing the approver\'s Contact (ON DELETE SET NULL, the foreign key action) still works; a direct UPDATE setting decidedBy NULL is rejected', async () => {
     await ADD('f1', 'REJECTED', { by: 'ct_2', at: true, via: 'SLACK' });
+    await expect(set('f1', `"decidedBy" = NULL`)).rejects.toThrow(/decision cannot be changed/);
     await q(`DELETE FROM "Contact" WHERE "id" = 'ct_2'`);
     expect((await q(`SELECT "decidedBy", "decidedAt" IS NOT NULL AS "at" FROM "RemediationRequest" WHERE "id" = 'f1'`))[0]).toEqual({ decidedBy: null, at: true });
     expect(await status('f1')).toBe('REJECTED');
+  });
+
+  it('INSERT guard: a request is born NOTIFIED or PENDING_APPROVAL with no decision and no execution time, whoever inserts it', async () => {
+    const ins = async (n: string, st: string, cols = '', vals = '') => {
+      await q(`INSERT INTO "Resource"("id", "customerId", "cloudAccountId", "region", "resourceType", "resourceArn", "resourceKey", "lastSeenAt", "updatedAt") VALUES ('res_${n}', 'cus_a', 'ca_a', 'ap-northeast-2', 'ec2', 'arn:x', 'k${n}', now(), now())`);
+      await q(`INSERT INTO "RemediationRequest"("id", "customerId", "cloudAccountId", "resourceId", "trigger", "action", "status", "requestedAt"${cols})
+        VALUES ('${n}', 'cus_a', 'ca_a', 'res_${n}', '{}'::jsonb, 'EC2_STOP', '${st}', now()${vals})`);
+    };
+    const bad: Array<[string, string, string, string]> = [
+      ['i1', 'APPROVED', `, "decidedBy", "decidedAt"`, `, 'ct_1', now()`], ['i2', 'EXECUTING', `, "decidedBy", "decidedAt"`, `, 'ct_1', now()`], ['i3', 'REJECTED', '', ''], ['i4', 'EXPIRED', '', ''],
+      ['i5', 'SUCCEEDED', `, "decidedBy", "decidedAt", "executedAt"`, `, 'ct_1', now(), now()`], ['i6', 'FAILED', '', ''],
+      ['i7', 'PENDING_APPROVAL', `, "decidedBy"`, `, 'ct_1'`], ['i8', 'NOTIFIED', `, "decidedAt"`, `, now()`], ['i9', 'PENDING_APPROVAL', `, "decisionVia"`, `, 'SLACK'`], ['i10', 'NOTIFIED', `, "executedAt"`, `, now()`],
+    ];
+    for (const [n, st, c, v] of bad) await expect(ins(n, st, c, v), `${st} ${c}`).rejects.toThrow(/a new request is NOTIFIED or PENDING_APPROVAL|decided_chk/);
+    await ins('ok1', 'PENDING_APPROVAL');
+    await ins('ok2', 'NOTIFIED');
+    expect((await q(`SELECT count(*)::int AS "n" FROM "RemediationRequest"`))[0]!.n).toBe(2);
   });
 });

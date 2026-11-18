@@ -61,13 +61,18 @@ export async function patchCustomer(req: ApiRequest, deps: Deps, customerId: str
   const before: Record<string, unknown> = {}; const after: Record<string, unknown> = {};
   if (patch.name !== undefined && patch.name !== cur.name) { before.name = cur.name; after.name = patch.name; } else delete patch.name;
   if (patch.loginDomains !== undefined && JSON.stringify([...patch.loginDomains].sort()) !== JSON.stringify([...cur.loginDomains].sort())) { before.loginDomains = cur.loginDomains; after.loginDomains = patch.loginDomains; } else delete patch.loginDomains;
-  if (Object.keys(patch).length === 0) return ok(customerView(cur)); // nothing differs: no write, no audit row
+  if (Object.keys(patch).length === 0) return ok({ ...customerView(cur), affectedUsers: 0 }); // nothing differs: no write, no audit row
+  // Removing a login domain does NOT sign anybody out: users already enrolled through it stay ACTIVE until an ADMIN disables them
+  // (PATCH /users/{id}). `affectedUsers` = how many ACTIVE portal users have an address in a removed domain.
+  const removed = patch.loginDomains ? cur.loginDomains.filter((d) => !patch.loginDomains!.includes(d)) : [];
+  const affectedUsers = removed.length ? await deps.repo.countPortalUsersInDomains(cur.id, removed) : 0;
+  if (removed.length) after.affectedUsers = affectedUsers;
   const r = await deps.repo.updateCustomer(cur.id, patch, { at: deps.now(), actorType: 'USER', actorId: auth.userId, action: 'customer.update', targetType: 'Customer', before, after, requestId: req.requestId });
   if (r === 'NOT_FOUND') throw notFound();
   if (r === 'NAME_EXISTS') throw new ApiError(409, 'ALREADY_EXISTS', 'A customer with this name already exists.');
   if (r === 'DOMAIN_EXISTS') throw new ApiError(409, 'ALREADY_EXISTS', 'A login domain already belongs to another customer.', { field: 'loginDomains' });
   if (r === 'CUSTOMER_TERMINATED') throw new ApiError(409, 'CUSTOMER_TERMINATED', 'A terminated customer cannot be changed.');
-  return ok(customerView(r));
+  return ok({ ...customerView(r), affectedUsers });
 }
 
 // ───────────────────────────── projects ─────────────────────────────

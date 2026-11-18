@@ -12,12 +12,18 @@
 --   REJECTED, EXPIRED, SUCCEEDED, FAILED -> (nothing: terminal)
 --
 -- Therefore: nothing reaches APPROVED except from PENDING_APPROVAL, nothing reaches EXECUTING except from APPROVED, and a
--- REJECTED / EXPIRED / finished request can never be approved or executed. Not guarded here: INSERT (the engine only creates
--- NOTIFIED / PENDING_APPROVAL rows; the existing CHECK "RemediationRequest_decided_chk" already requires a decider for
--- APPROVED / EXECUTING / SUCCEEDED / FAILED).
+-- REJECTED / EXPIRED / finished request can never be approved or executed.
 --
--- decidedBy, decidedAt, decisionVia: once set they never change. The one exception is decidedBy -> NULL with everything else
--- about the decision unchanged: that is what the foreign key (ON DELETE SET NULL, a contact removed by retention) does.
+-- INSERT guard: a new request is NOTIFIED or PENDING_APPROVAL with decidedBy, decidedAt, decisionVia and executedAt all NULL
+-- (what the engine's create_remediation_request writes), so no row can be born already approved. Every role, owner included.
+--
+-- decidedBy, decidedAt, decisionVia: once set they never change. The one exception is decidedBy -> NULL when the change is made
+-- by the foreign key action (ON DELETE SET NULL of a removed Contact, e.g. retention): that update runs nested inside the
+-- Contact's referential trigger (pg_trigger_depth() > 1). A direct UPDATE setting decidedBy to NULL is rejected.
+--
+-- NOT what this trigger does: it does not stop a role that may UPDATE the table from forging PENDING_APPROVAL -> APPROVED with
+-- a made-up decider (that transition is legal). Who may write decidedBy / decidedAt / status is a matter of column grants and
+-- database roles (feat/prod-db roles.sql); this trigger only makes the allowed path one-way.
 
 CREATE FUNCTION "remediation_request_guard"() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
@@ -33,14 +39,27 @@ BEGIN
   END IF;
   IF OLD."decidedAt" IS NOT NULL AND NEW."decidedAt" IS DISTINCT FROM OLD."decidedAt"
      OR OLD."decisionVia" IS NOT NULL AND NEW."decisionVia" IS DISTINCT FROM OLD."decisionVia"
-     OR OLD."decidedBy" IS NOT NULL AND NEW."decidedBy" IS DISTINCT FROM OLD."decidedBy" AND NEW."decidedBy" IS NOT NULL THEN
+     OR OLD."decidedBy" IS NOT NULL AND NEW."decidedBy" IS DISTINCT FROM OLD."decidedBy" AND (NEW."decidedBy" IS NOT NULL OR pg_trigger_depth() <= 1) THEN
     RAISE EXCEPTION 'RemediationRequest %: a recorded decision cannot be changed', OLD."id"
       USING ERRCODE = 'check_violation', CONSTRAINT = 'RemediationRequest_decision_immutable';
   END IF;
   RETURN NEW;
 END $$;
 
+CREATE FUNCTION "remediation_request_insert_guard"() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW."status" NOT IN ('NOTIFIED', 'PENDING_APPROVAL')
+     OR NEW."decidedBy" IS NOT NULL OR NEW."decidedAt" IS NOT NULL OR NEW."decisionVia" IS NOT NULL OR NEW."executedAt" IS NOT NULL THEN
+    RAISE EXCEPTION 'RemediationRequest %: a new request is NOTIFIED or PENDING_APPROVAL and carries no decision', NEW."id"
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'RemediationRequest_insert_guard';
+  END IF;
+  RETURN NEW;
+END $$;
+
 REVOKE ALL ON FUNCTION "remediation_request_guard"() FROM PUBLIC;
+REVOKE ALL ON FUNCTION "remediation_request_insert_guard"() FROM PUBLIC;
 
 CREATE TRIGGER "RemediationRequest_guard" BEFORE UPDATE ON "RemediationRequest"
   FOR EACH ROW EXECUTE FUNCTION "remediation_request_guard"();
+CREATE TRIGGER "RemediationRequest_insert_guard" BEFORE INSERT ON "RemediationRequest"
+  FOR EACH ROW EXECUTE FUNCTION "remediation_request_insert_guard"();
