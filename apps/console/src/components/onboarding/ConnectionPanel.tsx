@@ -60,8 +60,10 @@ export function ConnectionPanel({ customerName, account, status, central, canWri
     setCheckErr(onboardingError(res.failure, "check"));
   }
 
-  const lines: RoleLine[] = status ? roleLines(status) : [];
   const checking = phase === "queuing" || phase === "checking";
+  const blank: AccountStatus = { accountId: account.id, customerId: account.customerId, awsAccountId: account.awsAccountId, lastCheckedAt: null, firstEventAt: null, lastEventAt: null, stackVersion: null, disabled: false,
+    roles: (["reader", "eventForwarder", "alarmWriter", "tagWriter", "remediator"] as const).map((key) => ({ key, required: key === "reader" || key === "eventForwarder", enabled: key === "reader" || key === "eventForwarder" || account[CAP_KEY[key as "alarmWriter"]], status: "UNKNOWN" as const, basis: "CHECK" as const })) };
+  const lines: RoleLine[] = status || checking ? roleLines(status ?? blank) : [];
   const conn = connectionOf(status);
   const failing = lines.filter((l) => l.tone === "fail");
 
@@ -140,7 +142,7 @@ export function ConnectionPanel({ customerName, account, status, central, canWri
         </div>
         {checkErr ? <ErrorLine testid="check-error">{checkErr}</ErrorLine> : null}
 
-        {status ? (
+        {status || checking ? (
           <table className="rr-table" data-testid="role-table" style={{ marginTop: 12 }}>
             <caption className="sr-only">Result per role for account {account.awsAccountId}</caption>
             <thead><tr><th scope="col">Role</th><th scope="col">Needed</th><th scope="col">Result</th><th scope="col">Next step</th></tr></thead>
