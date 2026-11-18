@@ -5,8 +5,17 @@
 // masked then, and a later Prisma error message could print one of them (security review of 2026-11-11, 권고 5).
 // The whole value is masked first, before anything is parsed.
 // Prints nothing but ::add-mask:: commands and messages that contain no part of a URL.
+//
+// Names used in the messages (defaults = the dev database, so dev-db.yml needs no change; prod-db.yml sets all three):
+//   DB_SECRET_PREFIX  prefix of the two GitHub secret names          (default DEV_,  prod: PROD_)
+//   DB_ENVIRONMENT    name of the GitHub environment holding them    (default dev,   prod: production-db)
+//   DB_SETUP_DOC      guide to point at; without it the dev guide's step numbers are quoted (prod: docs/SETUP-PROD-DB.md)
 // Tests: node --test .github/scripts/mask-db-urls.test.mjs
-const SECRET = { DATABASE_URL: 'DEV_DATABASE_URL', DIRECT_URL: 'DEV_DIRECT_URL' };
+const PREFIX = process.env.DB_SECRET_PREFIX || 'DEV_';
+const ENVIRONMENT = process.env.DB_ENVIRONMENT || 'dev';
+const DOC = process.env.DB_SETUP_DOC || 'docs/SETUP-SUPABASE.md';
+const ref = (step) => (process.env.DB_SETUP_DOC ? `(${DOC})` : `(${DOC}, step ${step})`);
+const SECRET = { DATABASE_URL: `${PREFIX}DATABASE_URL`, DIRECT_URL: `${PREFIX}DIRECT_URL` };
 const SHAPE = 'postgresql://user:password@host:port/postgres';
 const out = [];
 const problems = [];
@@ -19,7 +28,7 @@ for (const name of Object.keys(SECRET)) {
 for (const [name, secret] of Object.entries(SECRET)) {
   const raw = process.env[name];
   if (!raw) {
-    problems.push(`Missing secret ${secret} in the GitHub environment 'dev'. Add it under Settings > Environments > dev (docs/SETUP-SUPABASE.md, step 4).`);
+    problems.push(`Missing secret ${secret} in the GitHub environment '${ENVIRONMENT}'. Add it under Settings > Environments > ${ENVIRONMENT} ${ref(4)}.`);
     continue;
   }
   let u = null;
@@ -33,21 +42,21 @@ for (const [name, secret] of Object.entries(SECRET)) {
   }
   const port = u && u.port ? Number(u.port) : 5432;
   if (!u || !['postgresql:', 'postgres:'].includes(u.protocol) || !u.hostname || !u.username || !u.password || !(port > 0 && port < 65536) || u.pathname.length < 2) {
-    problems.push(`${secret} is not a valid connection string (expected ${SHAPE}, with no spaces or line breaks). Nothing was run. Save the secret again (docs/SETUP-SUPABASE.md, step 3).`);
+    problems.push(`${secret} is not a valid connection string (expected ${SHAPE}, with no spaces or line breaks). Nothing was run. Save the secret again ${ref(3)}.`);
     continue;
   }
   if (/YOUR-PASSWORD/i.test(safeDecode(u.password))) {
-    problems.push(`${secret} still has the [YOUR-PASSWORD] placeholder. Nothing was run. Put the database password in its place (docs/SETUP-SUPABASE.md, step 3).`);
+    problems.push(`${secret} still has the [YOUR-PASSWORD] placeholder. Nothing was run. Put the database password in its place ${ref(3)}.`);
     continue;
   }
   for (const part of [u.password, safeDecode(u.password), u.hostname, u.host]) if (part) mask.add(part);
   // The pooled user name carries the project id (postgres.<id>); a bare "postgres" is left readable.
   if (u.username !== 'postgres') { mask.add(u.username); mask.add(safeDecode(u.username)); }
   if (name === 'DATABASE_URL') {
-    if (port !== 6543) out.push('::warning::DEV_DATABASE_URL should be the pooled (transaction) connection, port 6543.');
-    if (u.searchParams.get('pgbouncer') !== 'true') out.push('::warning::DEV_DATABASE_URL should end with ?pgbouncer=true&connection_limit=1 (needed by Prisma on the pooled connection).');
+    if (port !== 6543) out.push(`::warning::${secret} should be the pooled (transaction) connection, port 6543.`);
+    if (u.searchParams.get('pgbouncer') !== 'true') out.push(`::warning::${secret} should end with ?pgbouncer=true&connection_limit=1 (needed by Prisma on the pooled connection).`);
   }
-  if (name === 'DIRECT_URL' && port !== 5432) out.push('::warning::DEV_DIRECT_URL should be the session connection, port 5432. Migrations do not work through port 6543.');
+  if (name === 'DIRECT_URL' && port !== 5432) out.push(`::warning::${secret} should be the session connection, port 5432. Migrations do not work through port 6543.`);
 }
 
 // masks first: whatever follows in the log is already covered

@@ -66,3 +66,33 @@ test('swapped ports only warn', () => {
   assert.equal(r.status, 0);
   assert.equal(r.rest.filter((l) => l.startsWith('::warning::')).length, 3);
 });
+
+const PROD = { DB_SECRET_PREFIX: 'PROD_', DB_ENVIRONMENT: 'production-db', DB_SETUP_DOC: 'docs/SETUP-PROD-DB.md' };
+
+test('production names: messages name PROD_ secrets, the production-db environment and the prod guide; nothing says DEV or dev', () => {
+  const missing = run({ ...PROD, DIRECT_URL: SESSION });
+  assert.equal(missing.status, 1);
+  assert.deepEqual(missing.rest, ["::error::Missing secret PROD_DATABASE_URL in the GitHub environment 'production-db'. Add it under Settings > Environments > production-db (docs/SETUP-PROD-DB.md)."]);
+
+  const malformed = run({ ...PROD, DATABASE_URL: 'not a url at all', DIRECT_URL: SESSION });
+  assert.equal(malformed.status, 1);
+  assert.ok(malformed.rest.some((l) => l.startsWith('::error::PROD_DATABASE_URL is not a valid connection string') && l.includes('(docs/SETUP-PROD-DB.md)')));
+
+  const placeholder = run({ ...PROD, DATABASE_URL: POOLED.replace('s3cr%40t-Pw0rd', '[YOUR-PASSWORD]'), DIRECT_URL: SESSION });
+  assert.equal(placeholder.status, 1);
+  assert.ok(placeholder.rest.some((l) => l.includes('PROD_DATABASE_URL still has the [YOUR-PASSWORD] placeholder')));
+
+  const swapped = run({ ...PROD, DATABASE_URL: SESSION, DIRECT_URL: POOLED });
+  assert.equal(swapped.status, 0);
+  assert.equal(swapped.rest.filter((l) => l.startsWith('::warning::PROD_')).length, 3);
+
+  for (const r of [missing, malformed, placeholder, swapped]) {
+    for (const l of r.rest) assert.ok(!/DEV_|SETUP-SUPABASE|'dev'/.test(l), l);
+  }
+});
+
+test('without the new variables the dev messages are unchanged (dev-db.yml sets none)', () => {
+  const r = run({ DIRECT_URL: SESSION });
+  assert.deepEqual(r.rest, ["::error::Missing secret DEV_DATABASE_URL in the GitHub environment 'dev'. Add it under Settings > Environments > dev (docs/SETUP-SUPABASE.md, step 4)."]);
+  assert.ok(run({ DATABASE_URL: 'x y', DIRECT_URL: SESSION }).rest.some((l) => l.includes('(docs/SETUP-SUPABASE.md, step 3)')));
+});
