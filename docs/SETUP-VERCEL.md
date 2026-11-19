@@ -136,8 +136,8 @@
 
 ## 5. Vercel 토큰 만들기
 
-1. **어디서:** https://vercel.com/account/tokens (계정 Settings의 **Account Tokens** 페이지).
-2. **입력할 것:**
+1. **어디서:** https://vercel.com/account/tokens (열면 `vercel.com/account/settings/tokens`로 바뀐다. 계정 **Settings** → **Tokens**의 **Create Token** 칸).
+2. **입력할 것:** (11/19 실제 화면: **TOKEN NAME**, **SCOPE**, **EXPIRATION** 세 칸. 개인 Hobby 범위를 고르면 프로젝트 목록은 따로 나오지 않는다.)
    - 토큰 이름: `alarmops-deploy-console`처럼 용도를 알 수 있게
    - **Scope**: 2-4에서 고른 범위(회사 팀 `<팀>`, PoC 동안은 개인 Hobby 범위)를 고른다. **Full Account**를 고르지 않는다. 팀을 고르면 프로젝트 목록이 열린다. **All Projects**를 고른다.
    - 만료(expiration): 기한을 둔다(예: 90일).
