@@ -47,7 +47,7 @@
 3. 클라이언트를 만든다.
    - 어디서: APIs & Services › Credentials › Create credentials › OAuth client ID
    - 값: 유형 **Web application**, 이름 `alarmops-console`
-   - 값: **Authorized redirect URIs**에 `<CONSOLE_ORIGIN>/auth/google/callback` 한 줄. 예: `https://console.example.com/auth/google/callback`
+   - 값: **Authorized redirect URIs**에 `<CONSOLE_ORIGIN>/auth/google/callback` 한 줄. 예: `https://console.example.com/auth/google/callback`. PoC(D-57)는 `https://alarmops.vercel.app/auth/google/callback`
 
    > **주의** 주소는 글자 하나까지 같아야 한다(`https`, 끝에 `/` 없음, 콜백 경로까지). 틀리면 Google이 `redirect_uri_mismatch`를 보여 준다.
    - 값: Authorized JavaScript origins는 비워 둔다.
@@ -61,12 +61,12 @@
 
 | 이름 | 값 | 종류 |
 |---|---|---|
-| `GOOGLE_CLIENT_ID` | 1단계의 Client ID | **Plain** |
-| `GOOGLE_CLIENT_SECRET` | 1단계의 Client secret | **Sensitive** |
-| `SSO_ALLOWED_DOMAINS` | `mz.co.kr,megazone.com` (쉼표로 구분, 공백 있어도 됨) | **Plain** |
-| `SSO_ALLOWED_EMAILS` | 예외 주소, 쉼표로 구분. 없으면 이 변수를 만들지 않는다 | **Sensitive** 권장 |
+| `GOOGLE_CLIENT_ID` | 1단계의 Client ID | **Config** |
+| `GOOGLE_CLIENT_SECRET` | 1단계의 Client secret | **Secret** |
+| `SSO_ALLOWED_DOMAINS` | `mz.co.kr,megazone.com` (쉼표로 구분, 공백 있어도 됨) | **Config** |
+| `SSO_ALLOWED_EMAILS` | 예외 주소, 쉼표로 구분. 없으면 이 변수를 만들지 않는다 | **Secret** 권장 |
 
-> **참고** 배포 점검(`check-console-deploy-env.mjs`)은 Vercel이 내려 주는 값을 읽는다. Sensitive 값은 내려오지 않으므로, 점검해야 하는 `GOOGLE_CLIENT_ID`와 `SSO_ALLOWED_DOMAINS`는 Plain으로 둔다. 비밀 값(`GOOGLE_CLIENT_SECRET`)과 개인 주소는 Sensitive로 둔다. 비밀은 어느 경우에도 빌드에 전달되지 않는다.
+> **참고** Vercel 화면의 **Type**은 이제 **Config**(예전 Plain)/**Secret**(예전 Sensitive)이다. 배포 점검(`check-console-deploy-env.mjs`)은 Vercel이 내려 주는 값을 읽는다. Sensitive 값은 내려오지 않으므로, 점검해야 하는 `GOOGLE_CLIENT_ID`와 `SSO_ALLOWED_DOMAINS`는 Plain으로 둔다. 비밀 값(`GOOGLE_CLIENT_SECRET`)과 개인 주소는 Sensitive로 둔다. 비밀은 어느 경우에도 빌드에 전달되지 않는다.
 
 > **주의** 도메인에는 `*`, `*.mz.co.kr`, `@mz.co.kr`, 공백 섞인 값을 쓰지 않는다. 그런 항목은 무시되고(경고 로그), 유효한 항목이 하나도 없으면 로그인이 꺼진다. "모두 허용"은 없다.
 
