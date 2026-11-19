@@ -54,7 +54,7 @@ function walk(dir) {
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const slugText = (s) =>
   s.toLowerCase().replace(/<[^>]+>/g, '').replace(/&[a-z#0-9]+;/g, '').trim()
-    .replace(/[^\p{L}\p{N}\s-]/gu, '').replace(/\s+/g, '-');
+    .replace(/[^\p{L}\p{N}\s-]/gu, '').replace(/\s/g, '-');
 const INCLUDE = /^<!--\s*include:\s*docs\/([A-Za-z0-9/_.-]+\.md)\s+(\d+)(?:~(\d+))?\s*-->$/;
 const docId = (rel) => 'doc-' + rel.replace(/\.md$/, '').replace(/[^A-Za-z0-9]+/g, '-').toLowerCase();
 const git = (args) => { try { return execFileSync('git', ['-C', root, ...args], { encoding: 'utf8' }).trim(); } catch { return ''; } };
