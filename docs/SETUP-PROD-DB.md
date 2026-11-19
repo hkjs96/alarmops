@@ -222,6 +222,8 @@ D-40은 `public`의 모든 테이블에 RLS(행 단위 보안)를 켜고 **정�
 
 엔진이 5432(Session)를 쓰는 이유: 엔진의 Python 드라이버(psycopg)는 같은 문장이 반복되면 서버 쪽 준비된 문장을 쓰는데, 트랜잭션 풀러(6543)는 이를 처리하지 못해 `prepared statement does not exist` 오류가 날 수 있다. 수집 쪽은 풀러 모드로 접속하도록 만들어져 있어(포트 6543이면 자동) 6543이 맞다. **엔진의 풀러 호환은 아직 검증하지 않았다**: 첫 실행에서 오류가 나면 허브에 알린다.
 
+주소에 이미 `?`가 있으면 `?sslmode=require` 대신 `&sslmode=require`로 이어 붙인다. Lambda는 `sslmode`가 `require`·`verify-ca`·`verify-full`이 아니면 시작을 거부한다.
+
 `sslmode=require`는 암호화만 하고 **서버 인증서를 검증하지 않는다**(엔진의 psycopg/libpq). 엔진 코드는 `require`·`verify-ca`·`verify-full`을 받아들이지만(`pg_repository.py`), `verify-full`에 필요한 CA 파일(`sslrootcert`)을 Lambda 묶음에 넣는 부분은 아직 없다. 그래서 지금은 `require`로 시작하고, `verify-full` 전환은 backend 후속 작업(CA 파일 묶기)이 끝난 뒤에 한다. Supabase CA 파일을 어디서 받는지는 확인 필요(Supabase 문서에서 직접 확인한 뒤 적는다).
 
 1. **어디서:** AWS 콘솔(중앙 계정, SSO·MFA 로그인) > Secrets Manager > `EngineDbSecretArn` 비밀 > **Retrieve secret value** > **Edit** > **Plaintext**. (권장: 파일도 셸 기록도 남지 않는다.)
@@ -230,7 +232,7 @@ D-40은 `public`의 모든 테이블에 RLS(행 단위 보안)를 켜고 **정�
    postgresql://alarmops_engine.<프로젝트ID>:<엔진용 비밀번호>@aws-0-ap-northeast-2.pooler.supabase.com:5432/postgres?sslmode=require
    ```
    호스트는 3단계에서 본 주소의 호스트 그대로 쓴다. 저장한다. 이어서 `IngestDbSecretArn` 비밀에는 수집용 한 줄을 같은 방식으로 넣는다(사용자 `alarmops_ingest.<프로젝트ID>`, 포트 `6543`).
-   **확인:** 두 비밀 모두 새 버전이 생겼고, 값에 `[YOUR-PASSWORD]`나 `<`가 남아 있지 않다. 엔진 비밀에 수집용 주소(또는 반대)를 넣지 않았는지 사용자 이름을 다시 읽는다. `docs/GO-LIVE.md` 4단계 9번과 같은 작업이다.
+   **확인:** 두 비밀 모두 새 버전이 생겼고, 값에 `[YOUR-PASSWORD]`나 `<`가 남아 있지 않다. 엔진 비밀에 수집용 주소(또는 반대)를 넣지 않았는지 사용자 이름을 다시 읽는다. 값을 화면에 띄워 확인할 때는 화면 공유를 끈다. `docs/GO-LIVE.md` 4-4가 이 단계를 그대로 쓴다.
 2. **어디서(콘솔을 쓸 수 없을 때만):** 본인 터미널(SSO·MFA로 로그인한 중앙 계정 세션. 에이전트가 쓰는 세션이 아니다).
    **값:** 주소를 임시 파일에 한 줄로 저장해 `file://`로 준다. 파일은 **OneDrive·바탕화면·문서처럼 동기화되는 폴더에 두지 않는다**. 동기화되지 않는 임시 폴더(예: `C:/Temp/<무작위 이름>/`)를 쓴다.
    ```
@@ -240,7 +242,7 @@ D-40은 `public`의 모든 테이블에 RLS(행 단위 보안)를 켜고 **정�
    **확인:** 두 번 모두 `VersionId`가 출력된다. 그 즉시 파일과 폴더를 **삭제**하고 휴지통도 비운다.
    > **주의** `--secret-string`에 주소를 직접 쓰지 않는다. 직접 쓰면 셸 기록에 비밀번호가 남는다.
 3. **어디서:** Vercel 프로젝트 > Settings > Environment Variables (Production).
-   **값:** `DATABASE_URL`에 3단계의 `DATABASE_URL`(소유자, 6543, `?pgbouncer=true&connection_limit=1`), `DATABASE_POOLER`에 `transaction`. 나머지 변수는 `docs/GO-LIVE.md` 3단계 표를 따른다.
+   **값:** `DATABASE_URL`에 3단계의 `DATABASE_URL`(소유자, 6543, `?pgbouncer=true&connection_limit=1`), `DATABASE_POOLER`에 `transaction`. 나머지 변수는 `docs/SETUP-VERCEL.md` 8단계 표를 따른다.
    **확인:** 변수 목록에 두 이름이 Production 범위로 있다.
    > **주의** 콘솔에는 `alarmops_engine`·`alarmops_ingest` 주소를 넣지 않는다. 콘솔은 사용자·연락처·인시던트 등 모든 테이블을 읽고 써야 해서 소유자로 접속한다. 소유자가 아니면 BYPASSRLS가 있어도 이 권한 목록 밖의 테이블에서 `permission denied`가 난다.
 
@@ -289,4 +291,4 @@ D-40은 `public`의 모든 테이블에 RLS(행 단위 보안)를 켜고 **정�
 | 엔진 로그에 `prepared statement ... does not exist` | 엔진이 6543(Transaction)에 붙었다 | 엔진 비밀의 포트를 5432로 |
 | 엔진을 `sslmode=verify-full`로 바꾸고 싶다 | 코드는 받지만 CA 파일(`sslrootcert`)을 묶는 부분이 없고 Supabase CA의 출처도 **확인 필요** | backend 후속 작업 전에는 `require`를 유지하고 허브에 알린다 |
 | Lambda가 시작하지 않고 `sslmode` 언급 | 주소 끝에 `?sslmode=require`가 없다 | 7단계 1번 |
-| 수집 Lambda가 `self-signed certificate` 류의 TLS 오류 | Node가 Supabase 인증서 체인을 믿지 못한다 | 허브에 알린다(`sslrootcert`를 번들에 넣는 방법이 있다, `docs/GO-LIVE.md` 4단계 9번) |
+| 수집 Lambda가 `self-signed certificate` 류의 TLS 오류 | Node가 Supabase 인증서 체인을 믿지 못한다 | 허브에 알린다(`sslrootcert`를 번들에 넣는 방법이 있다, 7단계의 `sslmode` 설명) |

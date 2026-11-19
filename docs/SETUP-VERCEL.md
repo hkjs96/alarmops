@@ -1,6 +1,6 @@
 # Vercel 콘솔 배포 따라 하기
 
-이 문서는 AlarmOps 콘솔을 Vercel에 처음 배포하는 사람을 위한 화면별 순서다. `docs/GO-LIVE.md` 3-1~3-4가 **무엇을** 하는지 적었다면, 이 문서는 **어디를 누르고 무엇을 적는지** 적는다.
+이 문서는 AlarmOps 콘솔을 Vercel에 처음 배포하는 사람을 위한 화면별 순서다. `docs/GO-LIVE.md` 3-1~3-4·3-6은 체크 항목만 두고 이 문서의 단계를 그대로 가져다 쓴다(문서 포털에서는 그 자리에 펼쳐 보인다). 화면별 순서는 이 문서 한 곳에서만 고친다.
 
 - 처음 한 번만 하면 된다.
 - 1시간쯤 걸린다.
@@ -115,7 +115,7 @@
 
    > **주의** 배포마다 생기는 긴 주소(`<프로젝트>-<글자>-<팀>.vercel.app`)가 아니다. Domains에 있는 짧은 production 주소를 쓴다. 긴 주소는 10단계의 보호를 받는다.
 
-출처: `docs/GO-LIVE.md` 3-1의 6번, D-54, https://vercel.com/docs/project-configuration/project-settings
+출처: D-54, https://vercel.com/docs/project-configuration/project-settings
 
 ## 5. Vercel 토큰 만들기
 
@@ -232,23 +232,23 @@
 | `DATABASE_URL` | 운영 DB Transaction pooler(6543) 주소 | Secret | 지금 |
 | `DATABASE_POOLER` | `transaction` | Config | 지금 |
 | `SESSION_SECRET` | 8-1의 값 | Secret | 지금 |
-| `TICK_SECRET` | 8-1의 값 | Secret | 지금 |
-| `VERIFY_HASH_SECRET` | 8-1의 값 | Secret | 지금 |
+| `TICK_SECRET` | 8-1의 값. GO-LIVE 3-5에서 Supabase Vault `tick_secret`에 같은 값을 넣는다 | Secret | 지금 |
+| `VERIFY_HASH_SECRET` | 8-1의 값. 연락처 확인 링크 한도 계산에 쓴다(#63에서 연결) | Secret | 지금 |
 | `GOOGLE_CLIENT_ID` | `docs/SETUP-GOOGLE-SSO.md` | **Config 필수** | 지금 |
 | `GOOGLE_CLIENT_SECRET` | 같은 가이드 | Secret | 지금 |
 | `SSO_ALLOWED_DOMAINS` | 같은 가이드 | **Config 필수** | 지금 |
 | `SSO_ALLOWED_EMAILS` | 예외 주소(없으면 만들지 않음) | Secret 권장 | 선택 |
 | `ALARM_COMMANDS_QUEUE_URL` | GO-LIVE 4-5 | Config | 4단계 후 |
 | `ALARM_COMMANDS_EXPECTED_ACCOUNT` | GO-LIVE 4-5 | Config | 4단계 후 |
-| `AWS_ROLE_ARN` | GO-LIVE 4-5 | Config | 4단계 후 |
-| `CENTRAL_ROLE_ARN` | 중앙 배포 출력 `CentralRoleArn` | Config | 4단계 후 |
-| `CENTRAL_EVENT_BUS_ARN` | 중앙 배포 출력 `CentralBusArn` | Config | 4단계 후 |
+| `AWS_ROLE_ARN` | GO-LIVE 4-5(Vercel OIDC 역할, D-49) | Config | 4단계 후 |
+| `CENTRAL_ROLE_ARN` | 중앙 배포 출력 `CentralRoleArn`. 고객 연결 키트에 쓴다(`apps/console/README.md`) | Config | 4단계 후 |
+| `CENTRAL_EVENT_BUS_ARN` | 중앙 배포 출력 `CentralBusArn`. 고객 연결 키트에 쓴다 | Config | 4단계 후 |
 | `REMEDIATOR_CALLER_ROLE_ARN` | 중앙 배포 출력 | Config | 4단계 후, Remediator 쓸 때만 |
 | `MOCK_API`, `E2E_ALLOW_MOCK` | — | — | **절대 넣지 않는다** |
 
 값 규칙:
 
-- `CONSOLE_ORIGIN`: `https://호스트`까지만 쓴다. 끝의 `/`, 경로, `?`, `#`, 사용자 정보가 있으면 검사가 실패한다. `http://`도 안 된다.
+- `CONSOLE_ORIGIN`: 우선 `https://<프로젝트>.vercel.app`(D-54). 파일럿 전에 `https://console.<도메인>`으로 바꾼다(GO-LIVE 1-4). `https://호스트`까지만 쓴다. 끝의 `/`, 경로, `?`, `#`, 사용자 정보가 있으면 검사가 실패한다. `http://`도 안 된다.
 - `TRUSTED_PROXY`: 정확히 `1`. `true`나 ` 1`(공백)은 안 된다.
 - `DATABASE_URL`: 끝에 `?pgbouncer=true&connection_limit=1`. 만드는 법은 `docs/SETUP-PROD-DB.md` 3단계.
 - `SSO_ALLOWED_DOMAINS`: 쉼표 구분 도메인. `*`, 공백 섞인 항목, `@`가 든 항목은 안 된다.
@@ -261,6 +261,8 @@
 출처: https://vercel.com/docs/environment-variables/sensitive-environment-variables, https://vercel.com/docs/environment-variables/managing-environment-variables, `.github/scripts/check-console-deploy-env.mjs`, `.github/scripts/strip-deploy-env.mjs`, `docs/SETUP-GOOGLE-SSO.md`, `apps/console/README.md`
 
 ## 9. 첫 배포
+
+> **참고** 시작 전에 4단계에서 적어 둔 주소와 8단계에 넣은 `CONSOLE_ORIGIN`이 같은지 본다. 스모크 검사는 이 주소를 부른다.
 
 1. **어디서:** GitHub 저장소 → **Actions** 탭 → 왼쪽 목록 **deploy-console**.
    **누를 것:** 실행 목록 위의 **Run workflow**.
@@ -347,7 +349,7 @@
 
    > **주의** 되돌린 동안 1분 틱이 멈출 수 있다. GO-LIVE 3-5의 4번으로 확인한다.
 
-출처: https://vercel.com/docs/instant-rollback, https://vercel.com/docs/deployments/rollback-production-deployment, `docs/GO-LIVE.md` 3-6
+출처: https://vercel.com/docs/instant-rollback, https://vercel.com/docs/deployments/rollback-production-deployment, `docs/security/reviews/deploy-workflows.md` N4
 
 ## 막혔을 때
 
