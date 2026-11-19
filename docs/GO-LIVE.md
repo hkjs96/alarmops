@@ -540,6 +540,7 @@ http://localhost:3107/auth/dev-login?as=admin
 준비물:
 
 - 중앙 AWS 계정에 SSO·MFA로 들어갈 수 있는 관리자 권한. 리전은 **서울(ap-northeast-2)**.
+  - PoC 동안은 회사 SSO의 **시험용 계정**(`dev` 프로필)을 중앙 계정으로 쓴다(사용자 결정 11/19, D-57). 등록 방법: `docs/SETUP-WINDOWS.md` 4-1. 파일럿 전에 전용 중앙 계정으로 옮긴다.
 - 3단계가 끝난 Vercel 프로젝트(팀 슬러그와 프로젝트 이름을 안다)
 - GitHub 저장소 관리자 권한
 
