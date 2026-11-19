@@ -72,13 +72,13 @@
 
 7. **어디서:** 앱 목록의 **console**(Next.js) 줄.
    **누를 것:** **Import single project →**.
-   **확인:** console 하나만 가져오는 설정 화면으로 바뀐다. Root Directory가 `apps/console`, 프레임워크가 Next.js로 잡힌다 **(바뀐 화면의 이름 확인 필요)**.
+   **확인:** console 하나만 가져오는 설정 화면으로 바뀐다. 맨 위가 "Importing from GitHub `hkjs96/alarmops` `main` `apps/console`"로 바뀌고, **Root Directory**가 `apps/console`, **Application Preset**이 **Next.js**다. 아래에 **Build and Output Settings**, **Environment Variables**(둘 다 접힘)와 **Deploy** 버튼이 있다(11/19 실제 화면 확인). **Project Name**이 `alarmops`로 바뀌어 있으면 `alarmops-console`로 다시 고친다.
 
    > **주의** **alarm-engine** 줄은 누르지 않는다. 알람 엔진은 Vercel이 아니라 AWS Lambda로 배포한다(D-09, GO-LIVE 4단계).
 
    > **주의** 아래의 **Import multi-service project**와 **Copy prompt**는 쓰지 않는다. `vercel.json`을 만들어 여러 앱을 한 프로젝트로 묶으라는 제안인데, 이 저장소는 콘솔 하나만 Vercel에 올린다. `vercel.json`도 만들지 않는다.
 
-8. **어디서:** 바뀐 화면의 빌드·설치 설정 **(화면 이름 확인 필요)**.
+8. **어디서:** 바뀐 화면의 **Build and Output Settings**(접힌 칸, 펼쳐서 확인).
    **입력할 것:** 아무것도 바꾸지 않는다. Build Command, Install Command, Output Directory 모두 기본값으로 둔다.
    - 이유: 저장소는 루트 `package.json`의 npm workspaces(`apps/*`, `packages/*`, `services/*`, `db`)다. Vercel은 npm workspaces를 지원한다. 저장소에는 `vercel.json`이 없다.
    - 실제 빌드는 Vercel이 아니라 GitHub Actions가 한다. 워크플로가 저장소 루트에서 `npm ci --ignore-scripts`를 먼저 돌리고 `vercel build --prod`를 실행한다.
