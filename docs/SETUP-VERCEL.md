@@ -277,6 +277,14 @@
 
 출처: https://vercel.com/docs/environment-variables/sensitive-environment-variables, https://vercel.com/docs/environment-variables/managing-environment-variables, `.github/scripts/check-console-deploy-env.mjs`, `.github/scripts/strip-deploy-env.mjs`, `docs/SETUP-GOOGLE-SSO.md`, `apps/console/README.md`
 
+### 8-4. 함수 지역을 서울로
+
+DB가 서울이라 함수도 서울에 둔다. 기본값(`iad1`, 미국 동부)이면 요청마다 태평양을 왕복한다.
+
+1. **어디서:** 프로젝트 **Settings**에서 **Find**에 `region` → **Function Region**(Infrastructure → Functions → Settings).
+2. **입력할 것:** **Asia Pacific** → **Seoul, South Korea (Northeast) - ap-northeast-2 - icn1**만 체크. 다른 지역은 끈다(Hobby는 1곳만).
+3. **누를 것:** **Save**. 다음 배포부터 적용된다(11/19 실제 화면 확인).
+
 ## 9. 첫 배포
 
 > **참고** 시작 전에 4단계에서 적어 둔 주소와 8단계에 넣은 `CONSOLE_ORIGIN`이 같은지 본다. 스모크 검사는 이 주소를 부른다.
