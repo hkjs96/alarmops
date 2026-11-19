@@ -169,7 +169,12 @@ describe("exchangeCode (stubbed token endpoint)", () => {
       expect(await detailOf(() => Response.json({ error: 7 }, { status: 400 }))).toBe("other");
     });
     it("the error message carries no detail", async () => {
-      await expect(exchangeCode({ ...args, fetch: (async () => Response.json({ error: "invalid_client", error_description: "s3cret" }, { status: 401 })) as never })).rejects.toThrow(/^token_rejected$/);
+      let caught: unknown;
+      try { await exchangeCode({ ...args, fetch: (async () => Response.json({ error: "invalid_client", error_description: "s3cret" }, { status: 401 })) as never }); } catch (e) { caught = e; }
+      expect(caught).toBeInstanceOf(SsoError);
+      expect((caught as SsoError).message).toBe("token_rejected");
+      expect((caught as SsoError).detail).toBe("invalid_client");
+      expect(String(caught)).not.toContain("s3cret");
     });
   });
 });
