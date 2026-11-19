@@ -88,6 +88,8 @@
 
 10. **누를 것:** **Deploy**.
     **확인:** 첫 자동 배포가 시작된다.
+    - **Verify Your Identity** 창이 뜨면 Vercel 계정 메일로 온 6자리 코드를 넣고 **Verify Code**를 누른다. 정상 본인 확인이다.
+    - 1~2분 뒤 **Deployed to Production**이 나오고 미리보기에 `Misconfigured: CONSOLE_ORIGIN is required in production.`이 보이면 **예상된 결과**다(환경변수가 아직 없음). 8단계 뒤에 사라진다. **Onboard Your Agent**, **Add Domain**, **Enable Speed Insights**는 누르지 않는다. **Continue to Project**로 넘어간다(11/19 실제 화면 확인).
 
 11. **어디서:** 배포 진행 화면 또는 프로젝트 → **Deployments** → 진행 중인 배포의 `⋮` 메뉴.
     **누를 것:** 취소(Cancel) **(화면 이름 확인 필요)**.
