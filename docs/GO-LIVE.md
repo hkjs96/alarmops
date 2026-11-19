@@ -414,7 +414,7 @@ http://localhost:3107/auth/dev-login?as=admin
 틱은 DB가 1분마다 콘솔의 `POST /api/internal/tick`을 부르는 것이다. 이게 돌아야 에스컬레이션과 발송 대기열이 움직인다.
 
 1. Supabase에서 확장 `pg_cron`과 `pg_net`이 켜져 있는지 확인한다. 꺼져 있으면 확장(Extensions) 설정을 찾아 켠다.
-2. Supabase Vault에 `tick_secret`을 저장한다.
+2. Supabase Vault에 `tick_secret`을 저장한다. (Vercel이 아니라 **Supabase** 대시보드다. 왼쪽 **Integrations** → **Vault** → **Secrets** 탭 → **Add new secret**. 11/19 실제 화면 확인)
    - 이름: 정확히 `tick_secret`
    - 값: 3-3에서 만든 `TICK_SECRET`과 **같은 값**
 3. SQL Editor에서 `docs/API-CONTRACT.md` §5의 `cron.schedule('alarmops-tick', ...)`을 실행한다. 아래가 그 SQL이다. `<console-host>` 한 곳만 바꾼다.
