@@ -154,10 +154,10 @@
 
 ## 6. Team ID와 Project ID 찾기
 
-1. **어디서:** 프로젝트 → **Settings** → **General**.
-   **확인:** **Project ID** 칸. 복사해 둔다.
-2. **어디서:** 팀 대시보드 → **Settings** → **General** → 아래로 내려 **Team ID**.
-   **확인:** Team ID 칸. 복사해 둔다. 이 값이 `VERCEL_ORG_ID`다.
+1. **어디서:** 프로젝트 → **Settings** → **Project Basics**(예전 이름 General).
+   **확인:** **Project ID** 칸(`prj_…`). 복사해 둔다.
+2. **어디서:** 왼쪽 위 팀 이름 → 팀 **Settings** → **Team Basics**(예전 이름 General) → 아래로 내려 **Team ID**. Hobby 개인 범위에도 있다.
+   **확인:** Team ID 칸(`team_…`). 복사해 둔다. 이 값이 `VERCEL_ORG_ID`다.
    - 바로 가는 주소: `https://vercel.com/teams/<팀>/settings#team-id`
 3. 다른 방법: 본인 PC에서 `vercel link`를 한 뒤 생기는 `.vercel/project.json`의 `orgId`·`projectId`.
 
@@ -178,7 +178,7 @@
    **누를 것:** **Configure environment**.
    **확인:** `production` 환경 설정 화면이 열린다.
 
-   > **주의** `production-db`(운영 DB), `dev`(개발 DB)를 재사용하지 않는다. 각각 다른 환경이다.
+   > **주의** 목록에 이미 있는 `dev`(개발 DB 마이그레이션용, 시크릿 2개)는 건드리지 않는다. `production-db`(운영 DB)도 재사용하지 않는다. 각각 다른 환경이다.
 
 2. **어디서:** 같은 화면의 **Required reviewers**.
    **입력할 것:** 체크하고 본인 `<사용자명>`을 넣는다(최대 6명, 한 명만 승인하면 된다).
