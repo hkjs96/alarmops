@@ -72,22 +72,24 @@
 
 7. **어디서:** 앱 목록의 **console**(Next.js) 줄.
    **누를 것:** **Import single project →**.
-   **확인:** console 하나만 가져오는 설정 화면으로 바뀐다. Root Directory가 `apps/console`, 프레임워크가 Next.js로 잡힌다 **(바뀐 화면의 이름 확인 필요)**.
+   **확인:** console 하나만 가져오는 설정 화면으로 바뀐다. 맨 위가 "Importing from GitHub `hkjs96/alarmops` `main` `apps/console`"로 바뀌고, **Root Directory**가 `apps/console`, **Application Preset**이 **Next.js**다. 아래에 **Build and Output Settings**, **Environment Variables**(둘 다 접힘)와 **Deploy** 버튼이 있다(11/19 실제 화면 확인). **Project Name**이 `alarmops`로 바뀌어 있으면 `alarmops-console`로 다시 고친다.
 
    > **주의** **alarm-engine** 줄은 누르지 않는다. 알람 엔진은 Vercel이 아니라 AWS Lambda로 배포한다(D-09, GO-LIVE 4단계).
 
    > **주의** 아래의 **Import multi-service project**와 **Copy prompt**는 쓰지 않는다. `vercel.json`을 만들어 여러 앱을 한 프로젝트로 묶으라는 제안인데, 이 저장소는 콘솔 하나만 Vercel에 올린다. `vercel.json`도 만들지 않는다.
 
-8. **어디서:** 바뀐 화면의 빌드·설치 설정 **(화면 이름 확인 필요)**.
-   **입력할 것:** 아무것도 바꾸지 않는다. Build Command, Install Command, Output Directory 모두 기본값으로 둔다.
+8. **어디서:** 바뀐 화면의 **Build and Output Settings**(접힌 칸, 펼쳐서 확인).
+   **입력할 것:** 아무것도 바꾸지 않는다. **Build Command**, **Output Directory**, **Install Command** 세 칸 모두 회색 기본값이고 오른쪽 연필 스위치(Override)가 꺼져 있으면 된다(11/19 실제 화면 확인).
    - 이유: 저장소는 루트 `package.json`의 npm workspaces(`apps/*`, `packages/*`, `services/*`, `db`)다. Vercel은 npm workspaces를 지원한다. 저장소에는 `vercel.json`이 없다.
    - 실제 빌드는 Vercel이 아니라 GitHub Actions가 한다. 워크플로가 저장소 루트에서 `npm ci --ignore-scripts`를 먼저 돌리고 `vercel build --prod`를 실행한다.
 
 9. **어디서:** **Environment Variables**(접힌 칸).
-   **입력할 것:** 펼치지 않고 비워 둔다. 8단계에서 넣는다.
+   **입력할 것:** 비워 둔다. 펼쳐 봤다면 **Key**·**Value** 칸을 비운 채 두면 되고, **Import .env**·**Add More**도 누르지 않는다. 값은 8단계에서 넣는다.
 
 10. **누를 것:** **Deploy**.
     **확인:** 첫 자동 배포가 시작된다.
+    - **Verify Your Identity** 창이 뜨면 Vercel 계정 메일로 온 6자리 코드를 넣고 **Verify Code**를 누른다. 정상 본인 확인이다.
+    - 1~2분 뒤 **Deployed to Production**이 나오고 미리보기에 `Misconfigured: CONSOLE_ORIGIN is required in production.`이 보이면 **예상된 결과**다(환경변수가 아직 없음). 8단계 뒤에 사라진다. **Onboard Your Agent**, **Add Domain**, **Enable Speed Insights**는 누르지 않는다. **Continue to Project**로 넘어간다(11/19 실제 화면 확인).
 
 11. **어디서:** 배포 진행 화면 또는 프로젝트 → **Deployments** → 진행 중인 배포의 `⋮` 메뉴.
     **누를 것:** 취소(Cancel) **(화면 이름 확인 필요)**.
@@ -105,8 +107,8 @@
 이걸 끄지 않으면 main에 푸시할 때마다 승인·검사 없이 Vercel이 바로 배포한다. 아래 둘 중 **하나**를 한다.
 
 1. **방법 A(권장): Git 연결 해제.**
-   **어디서:** 프로젝트 → **Settings** → **Git**.
-   **누를 것:** **Connected Git Repository** 아래 **Disconnect**.
+   **어디서:** 프로젝트 → **Settings** → **Git**. 왼쪽 메뉴에 **Git**이 안 보이면 왼쪽 위 **Find**(단축키 `F`)에 `git`을 치고 **Git — `<프로젝트>` / Settings**를 고른다. 팀 이름(`… projects / Settings`)으로 된 항목은 팀 설정이라 고르지 않는다(11/19 실제 화면 확인).
+   **누를 것:** **Connected Git Repository** 칸의 `hkjs96/alarmops` 줄 오른쪽 **Disconnect** → **Remove Git Connection** 창에서 **Remove Connection**. 창의 "설정은 유지된다" 안내대로 프로젝트 설정·환경변수는 지워지지 않는다(11/19 실제 화면 확인).
    **확인:** 연결된 저장소가 없다고 나온다. 워크플로는 Git 연결 없이도 `vercel pull`·`vercel deploy`로 배포한다.
 
 2. **방법 B: 빌드 건너뛰기.**
@@ -134,8 +136,8 @@
 
 ## 5. Vercel 토큰 만들기
 
-1. **어디서:** https://vercel.com/account/tokens (계정 Settings의 **Account Tokens** 페이지).
-2. **입력할 것:**
+1. **어디서:** https://vercel.com/account/tokens (열면 `vercel.com/account/settings/tokens`로 바뀐다. 계정 **Settings** → **Tokens**의 **Create Token** 칸).
+2. **입력할 것:** (11/19 실제 화면: **TOKEN NAME**, **SCOPE**, **EXPIRATION** 세 칸. 개인 Hobby 범위를 고르면 프로젝트 목록은 따로 나오지 않는다.)
    - 토큰 이름: `alarmops-deploy-console`처럼 용도를 알 수 있게
    - **Scope**: 2-4에서 고른 범위(회사 팀 `<팀>`, PoC 동안은 개인 Hobby 범위)를 고른다. **Full Account**를 고르지 않는다. 팀을 고르면 프로젝트 목록이 열린다. **All Projects**를 고른다.
    - 만료(expiration): 기한을 둔다(예: 90일).
@@ -152,10 +154,10 @@
 
 ## 6. Team ID와 Project ID 찾기
 
-1. **어디서:** 프로젝트 → **Settings** → **General**.
-   **확인:** **Project ID** 칸. 복사해 둔다.
-2. **어디서:** 팀 대시보드 → **Settings** → **General** → 아래로 내려 **Team ID**.
-   **확인:** Team ID 칸. 복사해 둔다. 이 값이 `VERCEL_ORG_ID`다.
+1. **어디서:** 프로젝트 → **Settings** → **Project Basics**(예전 이름 General).
+   **확인:** **Project ID** 칸(`prj_…`). 복사해 둔다.
+2. **어디서:** 왼쪽 위 팀 이름 → 팀 **Settings** → **Team Basics**(예전 이름 General) → 아래로 내려 **Team ID**. Hobby 개인 범위에도 있다.
+   **확인:** Team ID 칸(`team_…`). 복사해 둔다. 이 값이 `VERCEL_ORG_ID`다.
    - 바로 가는 주소: `https://vercel.com/teams/<팀>/settings#team-id`
 3. 다른 방법: 본인 PC에서 `vercel link`를 한 뒤 생기는 `.vercel/project.json`의 `orgId`·`projectId`.
 
@@ -176,10 +178,10 @@
    **누를 것:** **Configure environment**.
    **확인:** `production` 환경 설정 화면이 열린다.
 
-   > **주의** `production-db`(운영 DB), `dev`(개발 DB)를 재사용하지 않는다. 각각 다른 환경이다.
+   > **주의** 목록에 이미 있는 `dev`(개발 DB 마이그레이션용, 시크릿 2개)는 건드리지 않는다. `production-db`(운영 DB)도 재사용하지 않는다. 각각 다른 환경이다.
 
 2. **어디서:** 같은 화면의 **Required reviewers**.
-   **입력할 것:** 체크하고 본인 `<사용자명>`을 넣는다(최대 6명, 한 명만 승인하면 된다).
+   **입력할 것:** 체크하고 **Search for people or teams…** 칸에 본인 `<사용자명>`을 넣는다(최대 6명, 한 명만 승인하면 된다).
    - **Prevent self-review**: 승인자가 본인 한 명뿐이면 **켜지 않는다.** 켜면 실행한 사람(본인)이 승인할 수 없어 배포가 멈춘다. 승인자가 두 명 이상이 되면 켠다.
    **누를 것:** **Save protection rules**.
 
@@ -193,7 +195,7 @@
 
    > **주의** 수동 실행은 고른 브랜치의 워크플로 파일로 돈다. 브랜치 제한이 없으면 다른 브랜치가 이 시크릿을 읽을 수 있다. 워크플로에도 `main`만 허용하는 조건이 있지만 이 제한이 첫 번째 관문이다.
 
-5. **어디서:** 같은 화면의 **Environment secrets** → **Add Secret**.
+5. **어디서:** 같은 화면의 **Environment secrets** → **Add environment secret**(11/19 실제 화면). 아래 **Environment variables** 칸이 아니다.
    **입력할 것:** 이름과 값을 넣고 **Add secret**. 세 개를 하나씩 넣는다. 이름은 글자 그대로.
 
    | 이름 | 값 |
@@ -244,7 +246,7 @@
 |---|---|---|---|
 | `CONSOLE_ORIGIN` | `https://<프로젝트>.vercel.app` (4단계) | **Config 필수** | 지금 |
 | `TRUSTED_PROXY` | `1` | **Config 필수** | 지금 |
-| `DATABASE_URL` | 운영 DB Transaction pooler(6543) 주소 | Secret | 지금 |
+| `DATABASE_URL` | 운영 DB Transaction pooler(6543) 주소. **PoC 동안(D-57)은 개발 DB 주소**(회사 PC 설정의 `DATABASE_URL`과 같은 값) | Secret | 지금 |
 | `DATABASE_POOLER` | `transaction` | Config | 지금 |
 | `SESSION_SECRET` | 8-1의 값 | Secret | 지금 |
 | `TICK_SECRET` | 8-1의 값. GO-LIVE 3-5에서 Supabase Vault `tick_secret`에 같은 값을 넣는다 | Secret | 지금 |
@@ -274,6 +276,14 @@
 6. **확인:** 목록에 `MOCK_API`, `E2E_ALLOW_MOCK`이 **없다**. 값이 비어 있어도 있으면 검사가 실패한다.
 
 출처: https://vercel.com/docs/environment-variables/sensitive-environment-variables, https://vercel.com/docs/environment-variables/managing-environment-variables, `.github/scripts/check-console-deploy-env.mjs`, `.github/scripts/strip-deploy-env.mjs`, `docs/SETUP-GOOGLE-SSO.md`, `apps/console/README.md`
+
+### 8-4. 함수 지역을 서울로
+
+DB가 서울이라 함수도 서울에 둔다. 기본값(`iad1`, 미국 동부)이면 요청마다 태평양을 왕복한다.
+
+1. **어디서:** 프로젝트 **Settings**에서 **Find**에 `region` → **Function Region**(Infrastructure → Functions → Settings).
+2. **입력할 것:** **Asia Pacific** → **Seoul, South Korea (Northeast) - ap-northeast-2 - icn1**만 체크. 다른 지역은 끈다(Hobby는 1곳만).
+3. **누를 것:** **Save**. 다음 배포부터 적용된다(11/19 실제 화면 확인).
 
 ## 9. 첫 배포
 

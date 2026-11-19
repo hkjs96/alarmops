@@ -44,10 +44,13 @@
    - 값: 사용자 유형 **Internal**(회사 Workspace 안에서만 쓸 때). 예외 주소(개인 Gmail)나 고객 담당자가 로그인해야 하면 Internal로는 안 되므로 **External**로 하고, 게시 상태를 **In production**으로 둔다(Testing 상태는 등록한 테스트 사용자만, 7일 뒤 만료).
    - 값: 앱 이름 `AlarmOps`, 지원 메일은 회사 주소
    - 확인: 요청 범위(scope)는 `openid`, `email`만 쓴다. 민감한 범위는 추가하지 않는다.
+   - 한국어 화면(11/19 확인): **Google 인증 플랫폼** → **개요** → **시작하기** → 프로젝트 구성 ① 앱 정보(앱 이름, 사용자 지원 이메일) ② 대상(**내부**/**외부**) ③ 연락처 정보 ④ 완료 → **만들기**.
+   - 범위: 왼쪽 **데이터 액세스** → **범위 추가 또는 삭제** → `.../auth/userinfo.email`과 `openid`만 체크 → **업데이트** → 아래 **Save**. 둘 다 "민감하지 않은 범위"라 앱 인증(검수)이 필요 없다.
+   - **외부**로 만들었으면 왼쪽 **대상** → 게시 상태 **앱 게시**(프로덕션으로 푸시)를 누른다. 테스트 상태로 두면 테스트 사용자로 등록한 주소만 로그인된다.
 3. 클라이언트를 만든다.
    - 어디서: APIs & Services › Credentials › Create credentials › OAuth client ID
    - 값: 유형 **Web application**, 이름 `alarmops-console`
-   - 값: **Authorized redirect URIs**에 `<CONSOLE_ORIGIN>/auth/google/callback` 한 줄. 예: `https://console.example.com/auth/google/callback`
+   - 값: **Authorized redirect URIs**에 `<CONSOLE_ORIGIN>/auth/google/callback` 한 줄. 예: `https://console.example.com/auth/google/callback`. PoC(D-57)는 `https://alarmops.vercel.app/auth/google/callback`
 
    > **주의** 주소는 글자 하나까지 같아야 한다(`https`, 끝에 `/` 없음, 콜백 경로까지). 틀리면 Google이 `redirect_uri_mismatch`를 보여 준다.
    - 값: Authorized JavaScript origins는 비워 둔다.
@@ -61,12 +64,12 @@
 
 | 이름 | 값 | 종류 |
 |---|---|---|
-| `GOOGLE_CLIENT_ID` | 1단계의 Client ID | **Plain** |
-| `GOOGLE_CLIENT_SECRET` | 1단계의 Client secret | **Sensitive** |
-| `SSO_ALLOWED_DOMAINS` | `mz.co.kr,megazone.com` (쉼표로 구분, 공백 있어도 됨) | **Plain** |
-| `SSO_ALLOWED_EMAILS` | 예외 주소, 쉼표로 구분. 없으면 이 변수를 만들지 않는다 | **Sensitive** 권장 |
+| `GOOGLE_CLIENT_ID` | 1단계의 Client ID | **Config** |
+| `GOOGLE_CLIENT_SECRET` | 1단계의 Client secret | **Secret** |
+| `SSO_ALLOWED_DOMAINS` | `mz.co.kr,megazone.com` (쉼표로 구분, 공백 있어도 됨) | **Config** |
+| `SSO_ALLOWED_EMAILS` | 예외 주소, 쉼표로 구분. 없으면 이 변수를 만들지 않는다 | **Secret** 권장 |
 
-> **참고** 배포 점검(`check-console-deploy-env.mjs`)은 Vercel이 내려 주는 값을 읽는다. Sensitive 값은 내려오지 않으므로, 점검해야 하는 `GOOGLE_CLIENT_ID`와 `SSO_ALLOWED_DOMAINS`는 Plain으로 둔다. 비밀 값(`GOOGLE_CLIENT_SECRET`)과 개인 주소는 Sensitive로 둔다. 비밀은 어느 경우에도 빌드에 전달되지 않는다.
+> **참고** Vercel 화면의 **Type**은 이제 **Config**(예전 Plain)/**Secret**(예전 Sensitive)이다. 배포 점검(`check-console-deploy-env.mjs`)은 Vercel이 내려 주는 값을 읽는다. Sensitive 값은 내려오지 않으므로, 점검해야 하는 `GOOGLE_CLIENT_ID`와 `SSO_ALLOWED_DOMAINS`는 Plain으로 둔다. 비밀 값(`GOOGLE_CLIENT_SECRET`)과 개인 주소는 Sensitive로 둔다. 비밀은 어느 경우에도 빌드에 전달되지 않는다.
 
 > **주의** 도메인에는 `*`, `*.mz.co.kr`, `@mz.co.kr`, 공백 섞인 값을 쓰지 않는다. 그런 항목은 무시되고(경고 로그), 유효한 항목이 하나도 없으면 로그인이 꺼진다. "모두 허용"은 없다.
 
@@ -131,6 +134,9 @@ VALUES ('usr_' || substr(md5(random()::text), 1, 12), 'you@mz.co.kr', 'Your Name
 |---|---|---|
 | Google 화면에 `redirect_uri_mismatch` | 1단계 3번의 주소가 `CONSOLE_ORIGIN`과 다르다 | 주소를 `<CONSOLE_ORIGIN>/auth/google/callback`과 한 글자도 다르지 않게 고친다 |
 | Google 화면에 `access_denied`, 또는 "앱이 확인되지 않음" | 동의 화면이 Testing이고 테스트 사용자가 아니다 | 게시 상태를 In production으로 하거나 Internal로 바꾼다 |
+| "Sign-in didn't complete"(`?sso=failed`), Vercel **Logs**에 `[sso] sign-in failed: token: token_rejected` | Google이 토큰 교환을 거절했다. 대개 `GOOGLE_CLIENT_SECRET` 값이 틀렸다(복사할 때 공백·일부 누락) | Vercel에서 `GOOGLE_CLIENT_SECRET`을 지우고 다시 넣는다(Secret, Production). `GOOGLE_CLIENT_ID`도 같은 클라이언트 것인지 본다. 그다음 GitHub Actions **deploy-console**로 다시 배포한다(11/19 실제로 겪음) |
+| "Google sign-in is unavailable", Vercel **Logs**에 `[sso] sign-in unavailable: user store did not answer` | 콘솔이 DB에 닿지 못했다. 대개 Vercel의 `DATABASE_URL` 값이 틀렸다(복사 공백·사용자 이름 `postgres.<프로젝트ID>` 누락·포트). Supabase Postgres 로그에 그 시각 줄이 없다 | `DATABASE_URL`을 지우고 회사 PC 설정의 값을 그대로 다시 넣는다(Secret, Production). **deploy-console**로 다시 배포한다. Supabase 로그의 `pg_pgrst_no_exposed_schemas`(3F000)는 Data API를 꺼서 나는 소음이라 무관하다(11/19 실제로 겪음) |
+| 위 문구인데 DB 값은 맞다 | 첫 관리자 행이 없다(개발 DB에는 시드 `admin@msp.example`뿐) | 3단계 SQL로 본인 행을 넣는다 |
 | 서버 로그에 `token: token_rejected (invalid_client)` | Client ID나 Secret이 Google에 등록된 것과 다르다 | Google Cloud에서 Secret을 확인하고 `GOOGLE_CLIENT_SECRET`을 다시 입력한다. `GOOGLE_CLIENT_ID`도 같이 본다 |
 | 서버 로그에 `token: token_rejected (redirect_uri_mismatch)` | 콘솔이 보낸 주소가 Google에 등록한 주소와 다르다 | 위 `redirect_uri_mismatch` 행과 같다. `CONSOLE_ORIGIN`과 1단계 3번의 주소를 맞춘다 |
 | 서버 로그에 `token: token_rejected (invalid_grant)` | 로그인 코드가 이미 쓰였거나 만료되었다. 뒤로 가기나 새로고침 때 생긴다 | 처음부터 다시 로그인한다. 계속되면 서버 시계를 확인한다 |
