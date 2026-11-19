@@ -31,12 +31,12 @@
 
 1. **어디서:** https://vercel.com 에 회사 계정으로 로그인한다.
    **누를 것:** 대시보드의 **team switcher**(팀 전환 메뉴).
-   **확인:** 회사 팀 `<팀>`이 선택되어 있다. 개인 계정 범위가 아니다.
+   **확인:** 쓸 범위가 선택되어 있다. 파일럿에는 회사 팀 `<팀>`(Pro), PoC 동안은 개인 Hobby 범위도 된다(D-57).
 
 2. **어디서:** 팀의 **Settings** → 요금제 화면 **(화면 이름 확인 필요)**.
    **확인:** 요금제가 **Pro**다. 운영 조건이 Vercel Pro이기 때문이다(D-10).
 
-   > **주의** 개인(Hobby) 범위에 프로젝트를 만들면 이후 토큰·Team ID가 모두 그 범위로 묶인다. 처음부터 회사 팀을 고른다. Hobby는 되돌리기도 바로 전 배포로만 된다.
+   > **주의** 개인(Hobby) 범위에 프로젝트를 만들면 이후 토큰·Team ID가 모두 그 범위로 묶인다. Hobby는 되돌리기도 바로 전 배포로만 된다. PoC 동안은 Hobby를 써도 되지만(D-57), 파일럿 전에 회사 Pro 팀으로 옮긴다.
 
 출처: `docs/decisions/DECISIONS.md` D-10, https://vercel.com/docs/monorepos, https://vercel.com/docs/instant-rollback
 
@@ -59,10 +59,10 @@
    **확인:** **New Project** 화면이 열리고, 맨 위에 "Importing from GitHub `hkjs96/alarmops` `main`"이 보인다.
 
 4. **어디서:** **New Project** 화면의 **Vercel Team**.
-   **입력할 것:** 회사 팀을 고른다(1단계).
-   **확인:** 팀 이름 옆 표시가 **Hobby**가 아니다.
+   **입력할 것:** PoC 동안은 개인 **Hobby** 범위를 써도 된다(D-57). 회사 Pro 팀이 생기면 그 팀을 고른다.
+   **확인:** 고른 범위를 메모해 둔다. 5단계 토큰의 Scope와 6단계 Team ID가 모두 이 범위다.
 
-   > **주의** 개인 이름의 팀에 **Hobby** 표시가 붙어 있으면 개인 무료 범위다. 여기에 만들면 토큰·Team ID·되돌리기 범위가 모두 개인 계정에 묶이고, 운영 조건(Vercel Pro, D-10)과도 맞지 않는다. 회사 팀이 없으면 **여기서 멈추고** 허브에 알린다.
+   > **주의 (Hobby로 진행할 때, D-57)** Hobby는 개인 무료 범위다. 실제 고객 데이터·실제 고객 연락처는 넣지 않는다(시험용 데이터만). 파일럿 전에 회사 Pro 팀으로 새 프로젝트를 만들어 옮긴다. 옮길 때는 5~8단계(토큰, ID, GitHub 시크릿, 환경변수)를 새 팀 기준으로 다시 한다.
 
 5. **어디서:** 같은 화면의 **Project Name**.
    **입력할 것:** `alarmops-console`처럼 콘솔임을 알 수 있는 이름. 이 이름이 production 주소(`<프로젝트>.vercel.app`, 4단계)가 된다.
@@ -137,7 +137,7 @@
 1. **어디서:** https://vercel.com/account/tokens (계정 Settings의 **Account Tokens** 페이지).
 2. **입력할 것:**
    - 토큰 이름: `alarmops-deploy-console`처럼 용도를 알 수 있게
-   - **Scope**: 회사 팀 `<팀>`을 고른다. **Full Account**를 고르지 않는다. 팀을 고르면 프로젝트 목록이 열린다. **All Projects**를 고른다.
+   - **Scope**: 2-4에서 고른 범위(회사 팀 `<팀>`, PoC 동안은 개인 Hobby 범위)를 고른다. **Full Account**를 고르지 않는다. 팀을 고르면 프로젝트 목록이 열린다. **All Projects**를 고른다.
    - 만료(expiration): 기한을 둔다(예: 90일).
 3. **누를 것:** **Create**.
    **확인:** 토큰 값이 화면에 **한 번만** 보인다. 복사해 바로 7단계 5번에서 GitHub에 넣는다. 다시 볼 수 없다.

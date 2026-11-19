@@ -344,7 +344,7 @@ http://localhost:3107/auth/dev-login?as=admin
 
 ### 3-1. [사람] Vercel 프로젝트 만들기 (10분)
 
-어디서: Vercel 대시보드(회사 팀)
+어디서: Vercel 대시보드(PoC 동안은 개인 Hobby 범위도 된다, D-57. 파일럿 전에 회사 Pro 팀으로 옮긴다)
 
 - [ ] **Vercel 프로젝트 만들기**(회사 팀, Root Directory `apps/console`)
 - [ ] **Git 자동 배포 끄기**(D-53, 우회 방지)
