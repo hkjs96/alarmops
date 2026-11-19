@@ -42,7 +42,9 @@
 
 ## 2. GitHub 저장소 가져오기(Import)
 
-1. **어디서:** Vercel 대시보드(회사 팀 선택된 상태).
+> **참고** 아래 화면 이름은 2026-11-19에 실제 **New Project** 화면으로 확인했다(사용자 캡처). 이 저장소는 앱이 둘(`apps/console` Next.js, `services/alarm-engine` Python)이라 Vercel이 "여러 앱"으로 알아본다. 그래서 일반적인 가져오기 화면과 다르다.
+
+1. **어디서:** Vercel 대시보드.
    **누를 것:** **Create New** → **Project**.
    **확인:** **Import Git Repository** 목록이 보인다.
 
@@ -54,36 +56,49 @@
 
 3. **어디서:** **Import Git Repository**의 `hkjs96/alarmops` 줄.
    **누를 것:** **Import**.
-   **확인:** 배포 전 설정 화면이 열린다.
+   **확인:** **New Project** 화면이 열리고, 맨 위에 "Importing from GitHub `hkjs96/alarmops` `main`"이 보인다.
 
-4. **어디서:** 같은 화면의 **Framework Preset**.
-   **입력할 것:** **Next.js**.
+4. **어디서:** **New Project** 화면의 **Vercel Team**.
+   **입력할 것:** 회사 팀을 고른다(1단계).
+   **확인:** 팀 이름 옆 표시가 **Hobby**가 아니다.
 
-5. **어디서:** 같은 화면의 **Root Directory** 옆 **Edit**.
-   **입력할 것:** `apps/console`을 고르고 확인.
-   **확인:** Root Directory 칸에 `apps/console`이 보인다.
+   > **주의** 개인 이름의 팀에 **Hobby** 표시가 붙어 있으면 개인 무료 범위다. 여기에 만들면 토큰·Team ID·되돌리기 범위가 모두 개인 계정에 묶이고, 운영 조건(Vercel Pro, D-10)과도 맞지 않는다. 회사 팀이 없으면 **여기서 멈추고** 허브에 알린다.
 
-6. **어디서:** 같은 화면의 빌드·설치 설정 **(화면 이름 확인 필요)**.
+5. **어디서:** 같은 화면의 **Project Name**.
+   **입력할 것:** `alarmops-console`처럼 콘솔임을 알 수 있는 이름. 이 이름이 production 주소(`<프로젝트>.vercel.app`, 4단계)가 된다.
+
+6. **어디서:** 같은 화면의 **Root Directory**(`./`)와 **Application Preset**(**Services**) 아래.
+   **확인:** "Multiple applications detected in this directory"라는 문장과, 앱 목록 `apps/console`(**console**, Next.js)과 `services/alarm-engine`(**alarm-engine**, Python)이 보인다.
+
+7. **어디서:** 앱 목록의 **console**(Next.js) 줄.
+   **누를 것:** **Import single project →**.
+   **확인:** console 하나만 가져오는 설정 화면으로 바뀐다. Root Directory가 `apps/console`, 프레임워크가 Next.js로 잡힌다 **(바뀐 화면의 이름 확인 필요)**.
+
+   > **주의** **alarm-engine** 줄은 누르지 않는다. 알람 엔진은 Vercel이 아니라 AWS Lambda로 배포한다(D-09, GO-LIVE 4단계).
+
+   > **주의** 아래의 **Import multi-service project**와 **Copy prompt**는 쓰지 않는다. `vercel.json`을 만들어 여러 앱을 한 프로젝트로 묶으라는 제안인데, 이 저장소는 콘솔 하나만 Vercel에 올린다. `vercel.json`도 만들지 않는다.
+
+8. **어디서:** 바뀐 화면의 빌드·설치 설정 **(화면 이름 확인 필요)**.
    **입력할 것:** 아무것도 바꾸지 않는다. Build Command, Install Command, Output Directory 모두 기본값으로 둔다.
-   - 이유: 저장소는 루트 `package.json`의 npm workspaces(`apps/*`, `packages/*`, `services/*`, `db`)다. Vercel은 npm workspaces를 지원한다. 설치 명령을 바꾸는 것은 설치를 빠르게 하는 선택 사항일 뿐이다. 저장소에는 `vercel.json`이 없다.
+   - 이유: 저장소는 루트 `package.json`의 npm workspaces(`apps/*`, `packages/*`, `services/*`, `db`)다. Vercel은 npm workspaces를 지원한다. 저장소에는 `vercel.json`이 없다.
    - 실제 빌드는 Vercel이 아니라 GitHub Actions가 한다. 워크플로가 저장소 루트에서 `npm ci --ignore-scripts`를 먼저 돌리고 `vercel build --prod`를 실행한다.
 
-7. **어디서:** 같은 화면의 Environment Variables 칸.
-   **입력할 것:** 지금은 비워 둔다. 8단계에서 넣는다.
+9. **어디서:** **Environment Variables**(접힌 칸).
+   **입력할 것:** 펼치지 않고 비워 둔다. 8단계에서 넣는다.
 
-8. **누를 것:** **Deploy**.
-   **확인:** 첫 자동 배포가 시작된다.
+10. **누를 것:** **Deploy**.
+    **확인:** 첫 자동 배포가 시작된다.
 
-9. **어디서:** 배포 진행 화면 또는 프로젝트 → **Deployments** → 진행 중인 배포의 `⋮` 메뉴.
-   **누를 것:** 취소(Cancel) **(화면 이름 확인 필요)**.
-   **확인:** 배포 상태가 Canceled다.
-   - 이미 실패(Error)로 끝났으면 그대로 둔다. 환경변수가 없어서 실패하는 것은 예상된 결과다. 프로젝트는 만들어졌고 해가 없다.
-   - 이미 성공(Ready)했으면 9단계 전까지 그 주소를 쓰지 않는다. 환경변수가 없는 콘솔은 production에서 모든 요청에 503을 준다(`CONSOLE_ORIGIN` 없음).
+11. **어디서:** 배포 진행 화면 또는 프로젝트 → **Deployments** → 진행 중인 배포의 `⋮` 메뉴.
+    **누를 것:** 취소(Cancel) **(화면 이름 확인 필요)**.
+    **확인:** 배포 상태가 Canceled다.
+    - 이미 실패(Error)로 끝났으면 그대로 둔다. 환경변수가 없어서 실패하는 것은 예상된 결과다. 프로젝트는 만들어졌고 해가 없다.
+    - 이미 성공(Ready)했으면 9단계 전까지 그 주소를 쓰지 않는다. 환경변수가 없는 콘솔은 production에서 모든 요청에 503을 준다(`CONSOLE_ORIGIN` 없음).
 
-10. **어디서:** 프로젝트 → **Settings** → **Build and Deployment** → **Root Directory**.
+12. **어디서:** 프로젝트 → **Settings** → **Build and Deployment** → **Root Directory**.
     **확인:** `apps/console`이다. **Include files outside the root directory in the Build Step**이 켜져 있다(기본값). 끄면 `packages/*`를 못 읽어 빌드가 실패한다.
 
-출처: https://vercel.com/docs/monorepos, https://vercel.com/docs/builds/configure-a-build, `.github/workflows/deploy-console.yml` 머리 주석, 루트 `package.json`
+출처: 실제 New Project 화면(2026-11-19), https://vercel.com/docs/monorepos, https://vercel.com/docs/builds/configure-a-build, `.github/workflows/deploy-console.yml` 머리 주석, 루트 `package.json`
 
 ## 3. Git 자동 배포 끄기 (D-53)
 
