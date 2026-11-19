@@ -79,12 +79,12 @@
    > **주의** 아래의 **Import multi-service project**와 **Copy prompt**는 쓰지 않는다. `vercel.json`을 만들어 여러 앱을 한 프로젝트로 묶으라는 제안인데, 이 저장소는 콘솔 하나만 Vercel에 올린다. `vercel.json`도 만들지 않는다.
 
 8. **어디서:** 바뀐 화면의 **Build and Output Settings**(접힌 칸, 펼쳐서 확인).
-   **입력할 것:** 아무것도 바꾸지 않는다. Build Command, Install Command, Output Directory 모두 기본값으로 둔다.
+   **입력할 것:** 아무것도 바꾸지 않는다. **Build Command**, **Output Directory**, **Install Command** 세 칸 모두 회색 기본값이고 오른쪽 연필 스위치(Override)가 꺼져 있으면 된다(11/19 실제 화면 확인).
    - 이유: 저장소는 루트 `package.json`의 npm workspaces(`apps/*`, `packages/*`, `services/*`, `db`)다. Vercel은 npm workspaces를 지원한다. 저장소에는 `vercel.json`이 없다.
    - 실제 빌드는 Vercel이 아니라 GitHub Actions가 한다. 워크플로가 저장소 루트에서 `npm ci --ignore-scripts`를 먼저 돌리고 `vercel build --prod`를 실행한다.
 
 9. **어디서:** **Environment Variables**(접힌 칸).
-   **입력할 것:** 펼치지 않고 비워 둔다. 8단계에서 넣는다.
+   **입력할 것:** 비워 둔다. 펼쳐 봤다면 **Key**·**Value** 칸을 비운 채 두면 되고, **Import .env**·**Add More**도 누르지 않는다. 값은 8단계에서 넣는다.
 
 10. **누를 것:** **Deploy**.
     **확인:** 첫 자동 배포가 시작된다.
