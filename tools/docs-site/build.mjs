@@ -157,6 +157,57 @@ for (const d of docs) {
   d.figs = `<div class="inserted">${figs.map((f) => FIG[f]()).join('')}</div>`;
 }
 
+// ---- cross-document references -----------------------------------------------------------------------------------
+// `docs/X.md` becomes a link to that document. `docs/X.md` N단계 / N~M단계 links to that numbered section, and when the
+// reference sits in a callout (> **참고** …), the referenced sections are also shown right there, folded, so a reader
+// following one guide never has to leave it.
+const byRel = new Map(docs.map((d) => [d.rel, d]));
+function sectionsOf(doc) {
+  // numbered ## sections: "## 3. …", "## 3단계 — …"; each runs to the next <h2
+  const out = new Map();
+  const re = /<h2 id="([^"]+)">(?:<a [^>]*>#<\/a>)?([\s\S]*?)<\/h2>/g;
+  const heads = [...doc.html.matchAll(re)];
+  heads.forEach((m, i) => {
+    const num = m[2].replace(/<[^>]+>/g, '').trim().match(/^(\d+)(?:\.|단계)/);
+    if (!num) return;
+    const end = i + 1 < heads.length ? heads[i + 1].index : doc.html.length;
+    out.set(Number(num[1]), { hid: m[1], title: m[2].replace(/<[^>]+>/g, '').trim(), html: doc.html.slice(m.index, end) });
+  });
+  return out;
+}
+const sectionCache = new Map();
+const docSections = (doc) => sectionCache.get(doc.rel) ?? (sectionCache.set(doc.rel, sectionsOf(doc)), sectionCache.get(doc.rel));
+// a copy for embedding: no duplicate ids, headings one level down
+const embedCopy = (html) => html.replace(/ id="[^"]*"/g, '').replace(/<a class="anchor"[^>]*>#<\/a>/g, '')
+  .replace(/<(\/?)h([2-4])/g, (_, s, n) => `<${s}h${Math.min(Number(n) + 1, 6)}`);
+const REF = /<code>docs\/([A-Za-z0-9/_.-]+\.md)<\/code>(\s*(\d+)(?:~(\d+))?단계)?/g;
+for (const d of docs) {
+  d.html = d.html.replace(/<blockquote class="bq-(\w+)">([\s\S]*?)<\/blockquote>/g, (whole, kind, inner) => {
+    const embeds = [];
+    const linked = inner.replace(REF, (m, rel, tail, a, b) => {
+      const target = byRel.get(rel);
+      if (!target) return m;
+      if (!a) return `<a href="#${target.id}"><code>docs/${rel}</code></a>`;
+      const from = Number(a), to = Number(b ?? a);
+      const secs = [...docSections(target)].filter(([n]) => n >= from && n <= to).map(([, s]) => s);
+      if (secs.length) embeds.push({ target, from, to, secs });
+      const href = secs[0] ? `#${secs[0].hid}` : `#${target.id}`;
+      return `<a href="${href}"><code>docs/${rel}</code>${tail}</a>`;
+    });
+    const folded = embeds.map(({ target, from, to, secs }) =>
+      `<details class="embed"><summary><span class="embed-k">화면별 순서 펼치기</span><span class="embed-t">${esc(target.title)} · ${from === to ? `${from}단계` : `${from}~${to}단계`}</span></summary>` +
+      `<div class="embed-b">${secs.map((s) => embedCopy(s.html)).join('')}<p class="embed-src"><a href="#${secs[0].hid}">원문 문서에서 보기 →</a></p></div></details>`).join('');
+    return `<blockquote class="bq-${kind}">${linked}</blockquote>${folded}`;
+  });
+  // plain mentions outside callouts: link only
+  d.html = d.html.replace(/(<(?:p|li|td)[^>]*>[\s\S]*?<\/(?:p|li|td)>)/g, (block) => block.includes('<a href="#doc-') && block.includes('<code>docs/') ? block : block.replace(REF, (m, rel, tail, a) => {
+    const target = byRel.get(rel);
+    if (!target) return m;
+    const sec = a ? docSections(target).get(Number(a)) : null;
+    return `<a href="#${sec ? sec.hid : target.id}"><code>docs/${rel}</code>${tail ?? ''}</a>`;
+  }));
+}
+
 const decisionsDoc = docs.find((d) => d.rel === 'decisions/DECISIONS.md');
 const decisionCount = decisionsDoc ? (decisionsDoc.html.match(/<h3 [^>]*>.*?<span class="did">D-\d+/g) || []).length : 0;
 const link = (rel) => `#${docId(rel)}`;
@@ -465,6 +516,18 @@ main{min-width:0;padding-left:max(16px,env(safe-area-inset-left,0px));padding-ri
 .md hr{border:0;border-top:1px solid var(--line);margin:36px 0}
 .md a.ext::after{content:"↗";font-size:.8em;margin-left:2px}
 .inserted{display:grid;gap:20px;margin:28px 0 0}
+.embed{margin:-6px 0 22px;border:1px solid color-mix(in srgb,var(--accent) 30%,transparent);border-radius:0 0 12px 12px;background:var(--surface)}
+.embed>summary{cursor:pointer;list-style:none;display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding:12px 16px;min-height:44px}
+.embed>summary::-webkit-details-marker{display:none}
+.embed>summary::before{content:"";width:7px;height:7px;border-right:2px solid var(--accent);border-bottom:2px solid var(--accent);transform:rotate(-45deg);transition:transform .15s}
+.embed[open]>summary::before{transform:rotate(45deg)}
+.embed-k{font-weight:700;color:var(--accent)}
+.embed-t{font-size:13.5px;color:var(--ink-3)}
+.embed[open]>summary{border-bottom:1px solid var(--line)}
+.embed-b{padding:4px 20px 16px}
+.embed-b h3{font-size:18px;margin:26px 0 8px}.embed-b h4{font-size:16px;margin:20px 0 6px}
+.embed-b>h3:first-child{margin-top:16px}
+.embed-src{font-size:13.5px;margin-top:18px!important}
 .inserted .fig-svg{min-width:640px}
 
 .pager{display:grid;grid-template-columns:1fr 1fr;gap:12px;max-width:76ch;margin-top:56px}
