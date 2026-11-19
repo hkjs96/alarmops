@@ -137,6 +137,13 @@ VALUES ('usr_' || substr(md5(random()::text), 1, 12), 'you@mz.co.kr', 'Your Name
 | "Sign-in didn't complete"(`?sso=failed`), Vercel **Logs**에 `[sso] sign-in failed: token: token_rejected` | Google이 토큰 교환을 거절했다. 대개 `GOOGLE_CLIENT_SECRET` 값이 틀렸다(복사할 때 공백·일부 누락) | Vercel에서 `GOOGLE_CLIENT_SECRET`을 지우고 다시 넣는다(Secret, Production). `GOOGLE_CLIENT_ID`도 같은 클라이언트 것인지 본다. 그다음 GitHub Actions **deploy-console**로 다시 배포한다(11/19 실제로 겪음) |
 | "Google sign-in is unavailable", Vercel **Logs**에 `[sso] sign-in unavailable: user store did not answer` | 콘솔이 DB에 닿지 못했다. 대개 Vercel의 `DATABASE_URL` 값이 틀렸다(복사 공백·사용자 이름 `postgres.<프로젝트ID>` 누락·포트). Supabase Postgres 로그에 그 시각 줄이 없다 | `DATABASE_URL`을 지우고 회사 PC 설정의 값을 그대로 다시 넣는다(Secret, Production). **deploy-console**로 다시 배포한다. Supabase 로그의 `pg_pgrst_no_exposed_schemas`(3F000)는 Data API를 꺼서 나는 소음이라 무관하다(11/19 실제로 겪음) |
 | 위 문구인데 DB 값은 맞다 | 첫 관리자 행이 없다(개발 DB에는 시드 `admin@msp.example`뿐) | 3단계 SQL로 본인 행을 넣는다 |
+| 서버 로그에 `token: token_rejected (invalid_client)` | Client ID나 Secret이 Google에 등록된 것과 다르다 | Google Cloud에서 Secret을 확인하고 `GOOGLE_CLIENT_SECRET`을 다시 입력한다. `GOOGLE_CLIENT_ID`도 같이 본다 |
+| 서버 로그에 `token: token_rejected (redirect_uri_mismatch)` | 콘솔이 보낸 주소가 Google에 등록한 주소와 다르다 | 위 `redirect_uri_mismatch` 행과 같다. `CONSOLE_ORIGIN`과 1단계 3번의 주소를 맞춘다 |
+| 서버 로그에 `token: token_rejected (invalid_grant)` | 로그인 코드가 이미 쓰였거나 만료되었다. 뒤로 가기나 새로고침 때 생긴다 | 처음부터 다시 로그인한다. 계속되면 서버 시계를 확인한다 |
+| 서버 로그에 `token: token_rejected (other)` | Google이 알 수 없는 응답을 줬다 | 잠시 뒤 다시 한다. 계속되면 Google Cloud 상태와 프록시 설정을 본다 |
+| `unavailable`이고 로그에 `user store did not answer at <lookup/enrol/bind> (sqlstate 28P01)` | DB 비밀번호가 틀렸다 | `DATABASE_URL`을 다시 입력하고 다시 배포한다 |
+| 같은 로그에 `sqlstate 42P01` 또는 `42703` | 테이블이나 열이 없다. dev-db 마이그레이션이 빠졌다 | dev-db에 마이그레이션을 적용한다 |
+| 같은 로그에 `(Error)` 같은 클래스 이름만 있고 sqlstate가 없다 | DB에 연결하지 못했다 | `DATABASE_URL`의 주소·포트·호스트를 확인한다. DB가 떠 있는지 본다 |
 | 버튼이 비활성이거나 "Google sign-in is unavailable" | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SSO_ALLOWED_*`, `SESSION_SECRET` 중 런타임에 없는 것이 있다 | 2단계 표를 확인하고 다시 배포한다. 서버 로그의 `[sso] … unavailable: <이유>`를 본다 |
 | 허용한 주소인데 "can't sign in" | DB에 그 주소의 활성 사용자 행이 없다. 고객이 중지된 포털 사용자도 같다 | Settings › Users에서 행과 상태를 본다(없으면 3단계의 확인 SELECT). 서버 로그에 `no_user` (로그인 도메인 자동 등록이 거절되었으면 `(enrol DOMAIN_UNKNOWN 등)`이 붙는다) |
 | 사용자는 있는데 거절되고 로그에 `sub_mismatch` | 그 행에 다른 Google 계정이 묶여 있다(또는 그 Google 계정이 다른 사용자에 묶여 있다) | 본인 계정이 맞으면 다른 ADMIN이 Users 화면에서 Clear Google link 후 다시 로그인한다 |
