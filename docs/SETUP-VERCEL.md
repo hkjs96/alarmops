@@ -246,7 +246,7 @@
 |---|---|---|---|
 | `CONSOLE_ORIGIN` | `https://<프로젝트>.vercel.app` (4단계) | **Config 필수** | 지금 |
 | `TRUSTED_PROXY` | `1` | **Config 필수** | 지금 |
-| `DATABASE_URL` | 운영 DB Transaction pooler(6543) 주소 | Secret | 지금 |
+| `DATABASE_URL` | 운영 DB Transaction pooler(6543) 주소. **PoC 동안(D-57)은 개발 DB 주소**(회사 PC 설정의 `DATABASE_URL`과 같은 값) | Secret | 지금 |
 | `DATABASE_POOLER` | `transaction` | Config | 지금 |
 | `SESSION_SECRET` | 8-1의 값 | Secret | 지금 |
 | `TICK_SECRET` | 8-1의 값. GO-LIVE 3-5에서 Supabase Vault `tick_secret`에 같은 값을 넣는다 | Secret | 지금 |
