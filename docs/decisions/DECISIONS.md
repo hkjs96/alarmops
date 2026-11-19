@@ -883,6 +883,7 @@ SEV 등급 매핑과 점검 창 동작.
   - **잠정(사용자 결정, 11/19). D-10(Vercel Pro)의 PoC 기간 예외.**
   - PoC 동안 콘솔은 사용자의 개인 Vercel **Hobby** 범위에 배포한다.
   - 시험용 데이터만 쓴다. 실제 고객 데이터·실제 고객 연락처는 넣지 않는다.
+  - PoC 동안 콘솔의 `DATABASE_URL`은 **개발 DB**(Supabase dev, Transaction pooler 6543)를 쓴다(사용자 결정, 11/19). 운영 DB는 파일럿 전에 `docs/SETUP-PROD-DB.md`로 만들고 옮길 때 바꾼다.
   - 파일럿 전에 회사 Vercel **Pro** 팀으로 새 프로젝트를 만들어 옮긴다. 토큰·Team ID·Project ID·GitHub `production` 시크릿·환경변수를 새 팀 기준으로 다시 넣는다(`docs/SETUP-VERCEL.md` 5~8단계).
 - **이유**
   - PoC는 빨리 띄워 보는 것이 먼저다(D-02). 회사 팀·결제는 아직 정해지지 않았다.
