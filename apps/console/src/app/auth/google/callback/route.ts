@@ -11,6 +11,14 @@ import { clientIp, hit } from "@/lib/server/rate-limit";
 
 export const dynamic = "force-dynamic";
 
+/** What may be logged about a store error: a pg SQLSTATE, else the class name, else "other". Never a message, address or URL. */
+function storeErrorTag(e: unknown): string {
+  const c = (e as { code?: unknown } | null)?.code;
+  if (typeof c === "string" && /^[0-9A-Z]{5}$/.test(c)) return `sqlstate ${c}`;
+  const n = (e as { constructor?: { name?: unknown } } | null)?.constructor?.name;
+  return typeof n === "string" && /^[A-Za-z]{1,40}$/.test(n) ? n : "other";
+}
+
 /**
  * Google redirects back here with ?code&state. In order: the flow cookie must verify and its state equal the query
  * state; the code is exchanged (PKCE verifier from the cookie); the ID token is verified (google-oidc.verifyIdToken);
@@ -55,18 +63,21 @@ export async function GET(req: NextRequest) {
   } catch (e) {
     const code2 = e instanceof SsoError ? e.code : "unexpected";
     // an unverified address is an identity reason (same calm refusal); the rest is the flow failing
-    return fail(`token: ${code2}`, code2 === "email_unverified" ? "refused" : code2.endsWith("_unreachable") ? "unavailable" : "failed");
+    const why = e instanceof SsoError && e.detail ? ` (${e.detail})` : "";
+    return fail(`token: ${code2}${why}`, code2 === "email_unverified" ? "refused" : code2.endsWith("_unreachable") ? "unavailable" : "failed");
   }
 
   let decision;
+  let stage: "lookup" | "enrol" | "bind" = "lookup";
   let enrolRefusal = null as string | null;
   let bound = null as string | null;
   try {
     decision = await decideSignIn(
-      claims.email, cfg.config, signInUserByEmail,
+      claims.email, cfg.config, (addr) => { stage = "lookup"; return signInUserByEmail(addr); },
       // asked only when there is no user row and the address is outside the staff fence (decideSignIn); the refusal code
       // (never an address) is kept for the log, the visitor sees the same refusal as for any identity reason
       async (_domain, addr) => {
+        stage = "enrol";
         const r = await enrolByLoginDomain(addr);
         if ("refused" in r) { enrolRefusal = r.refused; return null; }
         return r.user;
@@ -74,13 +85,14 @@ export async function GET(req: NextRequest) {
       {
         sub: claims.sub,
         bindGoogleSub: async (userId, sub) => {
+          stage = "bind";
           bound = await bindGoogleAccount(userId, sub);
           return bound === "bound" || bound === "ok" ? "ok" : "mismatch"; // mismatch and NOT_FOUND: no session
         },
       },
     );
-  } catch {
-    return fail("user store did not answer", "unavailable");
+  } catch (e) {
+    return fail(`user store did not answer at ${stage} (${storeErrorTag(e)})`, "unavailable");
   }
   if (!decision.ok) return fail(enrolRefusal ? `${decision.reason} (enrol ${enrolRefusal})` : bound === "NOT_FOUND" ? "sub_mismatch (user not found)" : decision.reason, "refused");
   // last sign-in is informational: a failure must not block the sign-in

@@ -155,4 +155,21 @@ describe("exchangeCode (stubbed token endpoint)", () => {
     expect(await code(exchangeCode({ ...args, fetch: (async () => Response.json({})) as never }))).toBe("token_malformed");
     expect(await code(exchangeCode({ ...args, fetch: (async () => { throw new Error("x"); }) as never }))).toBe("token_unreachable");
   });
+  describe("token_rejected detail", () => {
+    const detailOf = async (res: () => Response) => {
+      try { await exchangeCode({ ...args, fetch: (async () => res()) as never }); } catch (e) { return (e as SsoError).detail; }
+    };
+    it.each(["invalid_client", "redirect_uri_mismatch", "invalid_grant"])("reads %s", async (err) => {
+      expect(await detailOf(() => Response.json({ error: err, error_description: "secret s3cret" }, { status: 400 }))).toBe(err);
+    });
+    it("non-JSON, a weird value, a non-string: other", async () => {
+      expect(await detailOf(() => new Response("<html>oops</html>", { status: 502 }))).toBe("other");
+      expect(await detailOf(() => Response.json({ error: "Bad Value! s3cret" }, { status: 400 }))).toBe("other");
+      expect(await detailOf(() => Response.json({ error: "a".repeat(41) }, { status: 400 }))).toBe("other");
+      expect(await detailOf(() => Response.json({ error: 7 }, { status: 400 }))).toBe("other");
+    });
+    it("the error message carries no detail", async () => {
+      await expect(exchangeCode({ ...args, fetch: (async () => Response.json({ error: "invalid_client", error_description: "s3cret" }, { status: 401 })) as never })).rejects.toThrow(/^token_rejected$/);
+    });
+  });
 });

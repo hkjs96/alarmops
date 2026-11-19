@@ -218,6 +218,55 @@ describe("GET /auth/google/callback", () => {
     vi.mocked(fetch).mockImplementation((async () => new Response("{}", { status: 400 })) as never);
     expect(where(await cb({ code: "c", state: f.state }, f.cookie))).toBe("/login?sso=failed");
   });
+  describe("failure logs say why, without secrets (#83)", () => {
+    const logged = () => vi.mocked(console.warn).mock.calls.flat().join(" | ");
+    it.each([
+      [() => Response.json({ error: "invalid_client", error_description: "s3cret client" }, { status: 401 }), "token: token_rejected (invalid_client)"],
+      [() => Response.json({ error: "redirect_uri_mismatch" }, { status: 400 }), "token: token_rejected (redirect_uri_mismatch)"],
+      [() => new Response("<html>nope</html>", { status: 502 }), "token: token_rejected (other)"],
+      [() => Response.json({ error: "Weird Value s3cret" }, { status: 400 }), "token: token_rejected (other)"],
+    ])("token endpoint: %#", async (res, line) => {
+      const f = await begin();
+      vi.mocked(fetch).mockImplementation((async () => res()) as never);
+      expect(where(await cb({ code: "c", state: f.state }, f.cookie))).toBe("/login?sso=failed");
+      expect(logged()).toContain(line);
+      expect(logged()).not.toMatch(/s3cret|Weird|nope/);
+    });
+    const pgErr = (code: string) => Object.assign(new Error("password authentication failed for ops@mz.co.kr postgres://u:pw@h/db"), { code });
+    class PoolTimeout extends Error {}
+    const run = async () => { const f = await begin(); return where(await cb({ code: "c", state: f.state }, f.cookie)); };
+    const noLeak = () => expect(logged()).not.toMatch(/ops@|postgres:|password authentication|pw@/);
+    it("lookup with a SQLSTATE", async () => {
+      signInUserByEmail.mockRejectedValue(pgErr("28P01"));
+      expect(await run()).toBe("/login?sso=unavailable");
+      expect(logged()).toContain("user store did not answer at lookup (sqlstate 28P01)");
+      noLeak();
+    });
+    it("lookup without a SQLSTATE: the class name", async () => {
+      signInUserByEmail.mockRejectedValue(new PoolTimeout("connect ECONNREFUSED 10.0.0.1:5432"));
+      await run();
+      expect(logged()).toContain("user store did not answer at lookup (PoolTimeout)");
+      expect(logged()).not.toMatch(/ECONNREFUSED|10\.0/);
+    });
+    it("enrol with a SQLSTATE", async () => {
+      tokenBody = (n) => idToken(n, { email: "new.person@customer.example" });
+      signInUserByEmail.mockResolvedValue(null);
+      enrolByLoginDomain.mockRejectedValue(pgErr("42P01"));
+      expect(await run()).toBe("/login?sso=unavailable");
+      expect(logged()).toContain("user store did not answer at enrol (sqlstate 42P01)");
+      noLeak();
+    });
+    it("bind: a non-SQLSTATE code is ignored; odd throwables give the class name or other", async () => {
+      signInUserByEmail.mockResolvedValue({ id: "usr_1", name: "Ops", kind: "INTERNAL" });
+      bindGoogleAccount.mockRejectedValue(Object.assign(new Error("x"), { code: "ECONNREFUSED" }));
+      await run();
+      expect(logged()).toContain("user store did not answer at bind (Error)");
+      vi.mocked(console.warn).mockClear();
+      bindGoogleAccount.mockRejectedValue(null);
+      await run();
+      expect(logged()).toContain("user store did not answer at bind (other)");
+    });
+  });
   it("the user store not answering: unavailable, no session", async () => {
     signInUserByEmail.mockRejectedValue(new Error("db down"));
     const f = await begin();

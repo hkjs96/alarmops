@@ -66,7 +66,8 @@ export function authorizationUrl(o: { clientId: string; redirectUri: string; flo
 /* ── token endpoint ── */
 
 export class SsoError extends Error {
-  constructor(readonly code: string) { super(code); this.name = "SsoError"; }
+  /** `detail`: for token_rejected only, Google's short `error` value (e.g. invalid_client) or "other"; never a description or body */
+  constructor(readonly code: string, readonly detail?: string) { super(code); this.name = "SsoError"; }
 }
 
 export async function exchangeCode(o: { clientId: string; clientSecret: string; redirectUri: string; code: string; verifier: string; fetch?: typeof fetch }): Promise<string> {
@@ -81,7 +82,14 @@ export async function exchangeCode(o: { clientId: string; clientSecret: string; 
       cache: "no-store",
     });
   } catch { throw new SsoError("token_unreachable"); }
-  if (!res.ok) throw new SsoError("token_rejected");
+  if (!res.ok) {
+    let detail = "other";
+    try {
+      const err = ((await res.json()) as { error?: unknown } | null)?.error;
+      if (typeof err === "string" && /^[a-z_]{1,40}$/.test(err)) detail = err;
+    } catch { /* not JSON: "other" */ }
+    throw new SsoError("token_rejected", detail);
+  }
   let body: unknown;
   try { body = await res.json(); } catch { throw new SsoError("token_malformed"); }
   const id = (body as { id_token?: unknown } | null)?.id_token;
