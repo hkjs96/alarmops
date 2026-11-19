@@ -107,7 +107,7 @@
 이걸 끄지 않으면 main에 푸시할 때마다 승인·검사 없이 Vercel이 바로 배포한다. 아래 둘 중 **하나**를 한다.
 
 1. **방법 A(권장): Git 연결 해제.**
-   **어디서:** 프로젝트 → **Settings** → **Git**.
+   **어디서:** 프로젝트 → **Settings** → **Git**. 왼쪽 메뉴에 **Git**이 안 보이면 왼쪽 위 **Find**(단축키 `F`)에 `git`을 치고 **Git — `<프로젝트>` / Settings**를 고른다. 팀 이름(`… projects / Settings`)으로 된 항목은 팀 설정이라 고르지 않는다(11/19 실제 화면 확인).
    **누를 것:** **Connected Git Repository** 아래 **Disconnect**.
    **확인:** 연결된 저장소가 없다고 나온다. 워크플로는 Git 연결 없이도 `vercel pull`·`vercel deploy`로 배포한다.
 
