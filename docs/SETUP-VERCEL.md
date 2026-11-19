@@ -108,7 +108,7 @@
 
 1. **방법 A(권장): Git 연결 해제.**
    **어디서:** 프로젝트 → **Settings** → **Git**. 왼쪽 메뉴에 **Git**이 안 보이면 왼쪽 위 **Find**(단축키 `F`)에 `git`을 치고 **Git — `<프로젝트>` / Settings**를 고른다. 팀 이름(`… projects / Settings`)으로 된 항목은 팀 설정이라 고르지 않는다(11/19 실제 화면 확인).
-   **누를 것:** **Connected Git Repository** 아래 **Disconnect**.
+   **누를 것:** **Connected Git Repository** 칸의 `hkjs96/alarmops` 줄 오른쪽 **Disconnect** → **Remove Git Connection** 창에서 **Remove Connection**. 창의 "설정은 유지된다" 안내대로 프로젝트 설정·환경변수는 지워지지 않는다(11/19 실제 화면 확인).
    **확인:** 연결된 저장소가 없다고 나온다. 워크플로는 Git 연결 없이도 `vercel pull`·`vercel deploy`로 배포한다.
 
 2. **방법 B: 빌드 건너뛰기.**
