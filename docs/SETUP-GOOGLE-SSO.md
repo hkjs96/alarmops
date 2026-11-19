@@ -134,6 +134,7 @@ VALUES ('usr_' || substr(md5(random()::text), 1, 12), 'you@mz.co.kr', 'Your Name
 |---|---|---|
 | Google 화면에 `redirect_uri_mismatch` | 1단계 3번의 주소가 `CONSOLE_ORIGIN`과 다르다 | 주소를 `<CONSOLE_ORIGIN>/auth/google/callback`과 한 글자도 다르지 않게 고친다 |
 | Google 화면에 `access_denied`, 또는 "앱이 확인되지 않음" | 동의 화면이 Testing이고 테스트 사용자가 아니다 | 게시 상태를 In production으로 하거나 Internal로 바꾼다 |
+| "Sign-in didn't complete"(`?sso=failed`), Vercel **Logs**에 `[sso] sign-in failed: token: token_rejected` | Google이 토큰 교환을 거절했다. 대개 `GOOGLE_CLIENT_SECRET` 값이 틀렸다(복사할 때 공백·일부 누락) | Vercel에서 `GOOGLE_CLIENT_SECRET`을 지우고 다시 넣는다(Secret, Production). `GOOGLE_CLIENT_ID`도 같은 클라이언트 것인지 본다. 그다음 GitHub Actions **deploy-console**로 다시 배포한다(11/19 실제로 겪음) |
 | 버튼이 비활성이거나 "Google sign-in is unavailable" | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SSO_ALLOWED_*`, `SESSION_SECRET` 중 런타임에 없는 것이 있다 | 2단계 표를 확인하고 다시 배포한다. 서버 로그의 `[sso] … unavailable: <이유>`를 본다 |
 | 허용한 주소인데 "can't sign in" | DB에 그 주소의 활성 사용자 행이 없다. 고객이 중지된 포털 사용자도 같다 | Settings › Users에서 행과 상태를 본다(없으면 3단계의 확인 SELECT). 서버 로그에 `no_user` (로그인 도메인 자동 등록이 거절되었으면 `(enrol DOMAIN_UNKNOWN 등)`이 붙는다) |
 | 사용자는 있는데 거절되고 로그에 `sub_mismatch` | 그 행에 다른 Google 계정이 묶여 있다(또는 그 Google 계정이 다른 사용자에 묶여 있다) | 본인 계정이 맞으면 다른 ADMIN이 Users 화면에서 Clear Google link 후 다시 로그인한다 |
