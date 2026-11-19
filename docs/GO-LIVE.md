@@ -118,7 +118,7 @@
 1. 정해진 것(D-55)
    - MSP 직원: 허용 도메인(`mz.co.kr`, `megazone.com`)이나 예외 주소이고, DB에 등록된 사용자.
    - 고객사 사람: ADMIN이 등록한 포털 사용자(기본), 또는 고객사에 등록한 로그인 도메인.
-2. 사람이 할 일: Google OAuth 클라이언트를 만들고 Vercel에 값을 넣는다. 순서는 `docs/SETUP-GOOGLE-SSO.md`에 있다(3단계에서 한다).
+2. 사람이 할 일: Google OAuth 클라이언트를 만들고 Vercel에 값을 넣는다. 순서는 `docs/SETUP-GOOGLE-SSO.md`에 있다(3-3, 3-4에서 한다).
 3. 허브에 말하지 않을 것: 클라이언트 비밀값.
 
 > **참고** Google 계정이 없는 고객은 아직 로그인할 수 없다. 이메일 링크 로그인은 후속 작업이다.
@@ -147,12 +147,9 @@
 
 - [ ] main 브랜치 보호(Rulesets): PR 필수, 필수 검사 `test`, `e2e`, `e2e-live`, `db`, `engine`, `infra`
 
-1. GitHub 저장소의 **Settings > Rules > Rulesets**(또는 Branches)에서 `main` 규칙을 만든다.
-2. **Require a pull request before merging**을 켠다.
-3. **Require status checks to pass**를 켜고 여섯 개를 추가한다: `test`, `e2e`, `e2e-live`, `db`, `engine`, `infra`.
-4. 확인: 아무 PR이나 열면 병합 버튼 위에 여섯 검사가 "Required"로 보인다.
+> **참고** 화면별 설명은 `docs/SETUP-SUPABASE.md` 9단계
 
-화면별 설명은 `docs/SETUP-SUPABASE.md` 9단계에 있다.
+<!-- include: docs/SETUP-SUPABASE.md 9 -->
 
 ### 2-2. 회사 PC `.env` 채우기 (15분)
 
@@ -347,140 +344,68 @@ http://localhost:3107/auth/dev-login?as=admin
 
 ### 3-1. [사람] Vercel 프로젝트 만들기 (10분)
 
+어디서: Vercel 대시보드(PoC 동안은 개인 Hobby 범위도 된다, D-57. 파일럿 전에 회사 Pro 팀으로 옮긴다)
+
+- [ ] **Vercel 프로젝트 만들기**(회사 팀, Root Directory `apps/console`)
+- [ ] **Git 자동 배포 끄기**(D-53, 우회 방지)
+- [ ] **production 주소 적어 두기**(3-3의 `CONSOLE_ORIGIN`에 쓴다)
+
 > **참고** 화면별 클릭 순서는 `docs/SETUP-VERCEL.md` 1~4단계
 
-어디서: Vercel 대시보드
-
-- [ ] **Vercel 프로젝트 만들기**
-
-1. Vercel에서 이 저장소를 가져온다(Import).
-2. 설정 값을 넣는다.
-
-   | 항목 | 값 |
-   |---|---|
-   | Framework | Next.js |
-   | **Root Directory** | `apps/console` |
-   | "Include source files outside of the Root Directory" | 켬(기본) |
-
-3. 첫 자동 배포가 시작되면 취소한다.
-
-- [ ] **Git 자동 배포 끄기**(D-53, 우회 방지)
-
-4. Project → Settings → Git에서 Git 연결을 해제한다(**Disconnect**).
-5. 또는 Project → Settings → Build and Deployment의 **Ignored Build Step**을 **Don't build anything**(항상 건너뜀)으로 한다.
-   - 확인: main에 푸시해도 Vercel에 새 배포가 생기지 않는다.
-
-   > **주의** 이걸 끄지 않으면 승인·검사를 거치지 않은 코드가 Vercel에 바로 올라간다.
-6. 프로젝트 Domains에서 `*.vercel.app` 주소를 확인해 적어 둔다. 3-3의 `CONSOLE_ORIGIN`에 쓴다. 스모크 검사는 이 주소를 부른다.
+<!-- include: docs/SETUP-VERCEL.md 1~4 -->
 
 ### 3-2. [사람] Vercel 토큰·ID와 GitHub `production` 환경 (15분)
-
-> **참고** 화면별 클릭 순서는 `docs/SETUP-VERCEL.md` 5~7단계
 
 어디서: Vercel 대시보드 → GitHub 저장소
 
 - [ ] **Vercel 토큰과 ID 확인**
+- [ ] **GitHub `production` 환경**(승인자 본인, `main`만)
+- [ ] **환경 시크릿** 세 개(`VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`)
 
-1. Vercel의 Account Settings → Tokens에서 토큰을 만든다.
-   - 값: 이 팀 범위 토큰을 만든다. 만료일을 둔다.
-   - 토큰은 한 번만 보인다. 바로 다음 4~5번에서 GitHub에 넣는다.
+> **참고** 화면별 클릭 순서는 `docs/SETUP-VERCEL.md` 5~7단계
 
-   > **주의** 토큰 값은 GitHub 말고 어디에도 적지 않는다.
-2. **조직 ID·프로젝트 ID**를 확인한다. 비밀은 아니지만 시크릿으로 넣는다.
-   - 어디서: 프로젝트 Settings → General의 Project ID, 팀 Settings의 Team ID
-   - 다른 방법: 로컬에서 `vercel link` 후 `.vercel/project.json`의 `orgId`·`projectId`
-
-   > **주의** `.vercel/project.json`은 커밋하지 않는다.
-
-- [ ] **GitHub `production` 환경**
-
-3. GitHub 저장소의 Settings → Environments → New environment에서 이름을 정확히 `production`으로 만든다.
-   - 값: **Required reviewers**에 본인
-   - 값: **Deployment branches** = `main`만
-   - 확인: 승인 없이 실행되는 경로가 없다(관리자 우회 허용 끔 권장).
-
-- [ ] **환경 시크릿**
-
-4. 같은 화면 → Environment secrets에 세 개를 넣는다. 저장소 시크릿이 아니다.
-
-   | 이름 | 값 |
-   |---|---|
-   | `VERCEL_TOKEN` | 1번의 토큰 |
-   | `VERCEL_ORG_ID` | 2번의 Team ID(`orgId`) |
-   | `VERCEL_PROJECT_ID` | 2번의 Project ID(`projectId`) |
-
-5. 확인: `production` 환경 화면에 시크릿 이름 세 개가 보인다. 이름은 글자 그대로여야 한다. 하나라도 없으면 배포가 `Secret … is not set in the production environment`로 멈춘다.
+<!-- include: docs/SETUP-VERCEL.md 5~7 -->
 
 ### 3-3. [사람] Vercel 환경변수 넣기 (15분)
 
-> **참고** 화면별 클릭 순서는 `docs/SETUP-VERCEL.md` 8단계
+어디서: Google Cloud 콘솔 → 본인 터미널(Git Bash) → Vercel 프로젝트의 환경변수 설정(Production)
 
-어디서: 본인 터미널(Git Bash) → Vercel 프로젝트의 환경변수 설정(Production)
-
+- [ ] **Google OAuth 클라이언트**(`GOOGLE_CLIENT_ID`·`GOOGLE_CLIENT_SECRET`의 출처, 3-1에서 적어 둔 주소가 있어야 한다)
 - [ ] **Vercel 환경변수(Production)**
 
-1. 비밀 세 개를 만든다. Git Bash에서 아래 명령을 **세 번** 실행한다. `SESSION_SECRET`, `TICK_SECRET`, `VERIFY_HASH_SECRET`에 하나씩 쓴다.
-   ```bash
-   openssl rand -base64 48
-   ```
-   - 나온 글자(64자)를 비밀번호 관리자에 저장한다. 32자 이상이어야 한다.
-   - 개발용 `.env`의 `SESSION_SECRET`과 다른 값을 쓴다.
-2. Vercel 프로젝트의 환경변수 설정을 찾아, 환경을 **Production**으로 고르고 아래 [Vercel 환경변수 표](#vercel-환경변수-production)의 값을 넣는다.
-3. `CONSOLE_ORIGIN`과 `TRUSTED_PROXY`는 **일반(Plain) 변수**로 둔다.
+먼저 Google에서 클라이언트를 만든다. 리디렉션 주소에 3-1에서 적어 둔 `CONSOLE_ORIGIN`을 쓴다.
 
-   > **주의** Vercel의 Sensitive 변수는 `vercel pull`로 내려오지 않는다. 그러면 배포 전 검사가 "없음"으로 실패한다.
-4. 비밀 값(`DATABASE_URL`, `SESSION_SECRET`, `TICK_SECRET`, `VERIFY_HASH_SECRET`, `GOOGLE_CLIENT_SECRET`)은 Sensitive로 해도 된다. 런타임은 Vercel에 저장된 값을 쓴다.
-5. 주소는 우선 `*.vercel.app`(D-54).
-6. 확인: 변수 목록에 `MOCK_API`, `E2E_ALLOW_MOCK`이 **없다**. 값이 비어 있어도 있으면 배포 검사가 실패한다.
+> **참고** Google 화면 순서는 `docs/SETUP-GOOGLE-SSO.md` 1단계
+
+<!-- include: docs/SETUP-GOOGLE-SSO.md 1 -->
+
+그다음 Vercel에 변수를 넣는다. 넣을 변수 표는 아래 8-3 하나다.
+
+> **참고** 화면별 클릭 순서는 `docs/SETUP-VERCEL.md` 8단계
+
+<!-- include: docs/SETUP-VERCEL.md 8 -->
 
 남는 위험(R4)은 아래 [남는 위험(R4)](#남는-위험r4)에 따로 적었다.
 
-#### Vercel 환경변수 (Production)
-
-| 변수 | 값 |
-|---|---|
-| `DATABASE_URL` | Supabase Transaction pooler(6543) — 아래 참고 |
-| `DATABASE_POOLER` | `transaction`. 일반(Plain) 변수 |
-| `SESSION_SECRET` | 32자 이상 임의 값 |
-| `TICK_SECRET` | 32자 이상 임의 값(아래 pg_cron과 같은 값) |
-| `CONSOLE_ORIGIN` | 아래 참고 |
-| `TRUSTED_PROXY` | `1` |
-| `GOOGLE_CLIENT_ID`, `SSO_ALLOWED_DOMAINS` | 일반(Plain) 변수. `docs/SETUP-GOOGLE-SSO.md` |
-| `GOOGLE_CLIENT_SECRET` | Sensitive. 같은 가이드 |
-| `SSO_ALLOWED_EMAILS` | 선택. 도메인 밖 예외 주소(쉼표 구분). Sensitive 권장(Plain이면 배포 검사가 주소 모양을 본다) |
-| `VERIFY_HASH_SECRET` | 32자 이상 임의 값. Sensitive. 연락처 확인 링크 한도 계산에 쓴다(#63에서 연결) |
-| `ALARM_COMMANDS_QUEUE_URL`, `ALARM_COMMANDS_EXPECTED_ACCOUNT` | 4단계 후 |
-| `AWS_ROLE_ARN` | 4단계 후(Vercel OIDC 역할, D-49) |
-| `CENTRAL_ROLE_ARN`, `CENTRAL_EVENT_BUS_ARN`, `REMEDIATOR_CALLER_ROLE_ARN` | 4단계 후. 일반(Plain) 변수. 고객 연결 키트에 쓴다(`apps/console/README.md`) |
-| `MOCK_API`, `E2E_ALLOW_MOCK` | **넣지 않는다**(배포 검사가 막는다) |
-
-- `DATABASE_URL`: Supabase Transaction pooler(6543, `?pgbouncer=true&connection_limit=1`). 운영 DB는 개발과 별도 프로젝트 권장.
-- `CONSOLE_ORIGIN`: 우선 `https://<프로젝트>.vercel.app`(D-54). 파일럿 전에 `https://console.<도메인>`.
-  - 모양은 `https://호스트`까지만이다. 끝에 `/`나 경로를 붙이면 배포 검사가 실패한다.
-- `TRUSTED_PROXY`: 정확히 `1`이어야 한다.
-- "4단계 후"인 변수는 지금 넣지 않는다. 4-5에서 넣는다.
-
 ### 3-4. [사람] 첫 배포 (10분)
+
+어디서: GitHub 저장소의 Actions → Vercel 대시보드 → Supabase SQL Editor(운영 프로젝트)
+
+- [ ] **첫 배포**
+- [ ] **Deployment Protection 확인**
+- [ ] **첫 관리자(ADMIN)와 Google 로그인 확인**
 
 > **참고** 화면별 클릭 순서는 `docs/SETUP-VERCEL.md` 9~10단계
 
-어디서: GitHub 저장소의 Actions
-
-- [ ] **첫 배포**
-
-1. 먼저: `CONSOLE_ORIGIN`에 쓸 `*.vercel.app` 주소를 프로젝트 Domains에서 확인한다. 스모크 검사는 이 주소를 부른다. 3-1의 6번에서 적어 둔 주소와 3-3에 넣은 값이 같아야 한다.
-2. Actions → `deploy-console` 실행. 브랜치는 `main`을 고른다. 다른 브랜치에서는 작업이 건너뛰어진다.
-3. `production` 승인을 누른다.
-4. 확인: 로그에서 환경 검사·스모크 통과. 요약에 `Deployment: https://….vercel.app`이 나온다.
-5. 브라우저에서 `https://<프로젝트>.vercel.app/login`을 열어 로그인 화면이 보이는지 확인한다.
-
-- [ ] **Deployment Protection 확인**
-
-6. 언제: Vercel의 Deployment Protection이 production 주소를 막고 있을 때(스모크가 401로 실패)
-   - 값: Standard Protection으로 두어 production 도메인은 공개로 한다.
-   - 고친 뒤 2번부터 다시 한다.
+<!-- include: docs/SETUP-VERCEL.md 9~10 -->
 
 스모크 검사가 실패하면 바로 3-6으로 간다.
+
+배포가 됐으면 첫 관리자 행을 넣고 Google로 로그인해 본다. 배포된 콘솔에는 이 방법으로만 들어간다(1-5).
+
+> **참고** 순서는 `docs/SETUP-GOOGLE-SSO.md` 3~4단계
+
+<!-- include: docs/SETUP-GOOGLE-SSO.md 3~4 -->
 
 ### 3-5. [사람] 1분 틱 켜기 (10분)
 
@@ -521,31 +446,11 @@ http://localhost:3107/auth/dev-login?as=admin
 어디서: Vercel 대시보드 또는 본인 터미널
 
 - [ ] **스모크 검사가 실패했을 때(되돌리기, N4)**
+- [ ] **되돌린 뒤 새 배포로 되돌리기 해제**
 
-> **주의** 배포는 이미 production에 올라가 있다. 바로 되돌린다.
+> **참고** 화면별 클릭 순서는 `docs/SETUP-VERCEL.md` 11단계
 
-1. 되돌린다. 둘 중 하나를 한다.
-   - Vercel 대시보드 → 프로젝트 개요의 Production Deployment → **Instant Rollback** → **Continue** → **Confirm Rollback**(자세한 화면은 `docs/SETUP-VERCEL.md` 11단계)
-   - 본인 터미널에서 되돌릴 배포를 지정해 되돌린다.
-     ```bash
-     vercel rollback <배포 URL 또는 ID>
-     ```
-   - 첫 배포라 직전 배포가 없으면 되돌릴 것이 없다. 3번으로 가서 원인을 고친다.
-2. 확인한다.
-   ```bash
-   curl -s -o /dev/null -w "%{http_code}" https://<콘솔>/login
-   ```
-   - 결과 = 200
-   - `POST /api/internal/tick`(인증 없이) = 401
-3. 실패 원인을 고치고 다시 실행한다(3-4의 2번). 대개 원인은 다음 중 하나다.
-   - `TICK_SECRET` 미설정 503
-   - 배포 보호 401
-   - mock 표식
-   - CSP
-
-> **주의** 되돌리기(Instant Rollback)를 하면 Vercel은 그 뒤의 새 production 배포에 production 주소를 **자동으로 붙이지 않는다**. 고친 코드를 다시 배포해도 `CONSOLE_ORIGIN`은 계속 예전 배포를 가리키고, 스모크 검사도 예전 배포를 보고 통과할 수 있다. 다시 배포한 뒤에는 프로젝트 개요의 Production Deployment → **Manage** → 새 배포 선택 → **Confirm**으로 되돌리기를 풀거나, 본인 터미널에서 `vercel promote <새 배포 URL>`을 실행한다(`docs/SETUP-VERCEL.md` 11-4). 확인: 프로젝트 개요의 Production Deployment가 새 배포다.
-
-> **주의** 되돌린 동안 1분 틱이 멈출 수 있다(pg_cron은 같은 주소를 부른다). 틱 표시를 확인한다. 확인하는 법은 3-5의 4번이다.
+<!-- include: docs/SETUP-VERCEL.md 11 -->
 
 ### 3-7. [사람] CDN에서 HTML 캐시 끄기 (CDN을 둘 때만)
 
@@ -565,12 +470,12 @@ http://localhost:3107/auth/dev-login?as=admin
 | 증상 | 원인과 할 일 |
 |---|---|
 | `deploy-console` 작업이 시작도 안 하고 건너뛰어짐 | `main`이 아닌 브랜치에서 실행했다. `main`을 골라 다시 실행한다 |
-| `Secret VERCEL_… is not set in the production environment` | 시크릿을 저장소 시크릿에 넣었거나 이름이 다르다. 3-2의 4번을 다시 본다 |
-| 환경 검사에서 `CONSOLE_ORIGIN`·`TRUSTED_PROXY`가 "없음" | 두 변수를 Sensitive로 넣었다. Plain으로 다시 만든다(3-3의 3번) |
+| `Secret VERCEL_… is not set in the production environment` | 시크릿을 저장소 시크릿에 넣었거나 이름이 다르다. `docs/SETUP-VERCEL.md` 7단계 5번을 다시 본다 |
+| 환경 검사에서 `CONSOLE_ORIGIN`·`TRUSTED_PROXY`가 "없음" | 두 변수를 Sensitive로 넣었다. Config(Plain)로 다시 만든다(`docs/SETUP-VERCEL.md` 8-2) |
 | 환경 검사에서 `MOCK_API` 또는 `E2E_ALLOW_MOCK` | Vercel 변수 목록에서 지운다. 빈 값이어도 있으면 안 된다 |
 | 환경 검사에서 `CONSOLE_ORIGIN` 형식 오류 | `https://호스트`까지만 쓴다. 끝의 `/`와 경로를 지운다 |
 | 스모크: `/api/internal/tick`이 503 | Vercel에 `TICK_SECRET`이 없거나 32자 미만이다. 넣고 다시 배포한다 |
-| 스모크: 401인데 콘솔의 응답이 아님 | Deployment Protection이 막고 있다. 3-4의 6번 |
+| 스모크: 401인데 콘솔의 응답이 아님 | Deployment Protection이 막고 있다. `docs/SETUP-VERCEL.md` 10단계 |
 | 스모크: `/login`에 mock 표식 | `MOCK_API`가 들어갔다. 지우고 다시 배포한다 |
 | 모든 주소가 503 | `CONSOLE_ORIGIN`이 없거나 `https://…` 모양이 아니다 |
 | `TickHeartbeat`가 안 바뀜 | Vault의 `tick_secret`과 Vercel의 `TICK_SECRET`이 다르거나(401), SQL의 `<console-host>`를 안 바꿨다. 두 값을 맞추고 3-5를 다시 본다 |
@@ -781,27 +686,11 @@ http://localhost:3107/auth/dev-login?as=admin
 
 - [ ] **DB 비밀 값 넣기**
 
-1. 어디서: 본인 터미널에서 SSO·MFA로
-2. 대상: 출력의 `EngineDbSecretArn`, `IngestDbSecretArn` 비밀
-3. 값: 연결 문자열. **맨 문자열 그대로, 끝에 `?sslmode=require`를 붙인다.**
-   - 주소에 이미 `?`가 있으면 `&sslmode=require`로 이어 붙인다.
-   - 엔진용과 수집용은 서로 다른 DB 사용자다(D-56). 먼저 `docs/SETUP-PROD-DB.md` 6단계로 `alarmops_engine`·`alarmops_ingest` 사용자를 만든다(`db/sql/roles.sql`).
-   - 비밀에는 소유자 주소가 아니라 이 두 사용자의 주소를 넣는다. 엔진은 포트 5432(Session), 수집은 포트 6543이다. 자세한 것은 그 가이드 7단계.
-4. 넣는 방법: 콘솔 입력, 또는 AWS CLI의 secretsmanager 비밀 값 입력에 `file://`로 파일을 준다. 셸 기록에 남기지 않기 위해서다.
-   - 콘솔 입력: AWS 콘솔의 Secrets Manager에서 그 비밀을 열어 비밀 값을 일반 텍스트로 넣는다.
-   - CLI: 연결 문자열 한 줄만 든 파일을 만들고 아래를 실행한다. 비밀마다 한 번씩, 모두 두 번이다. 끝나면 파일을 지운다.
-     ```bash
-     aws secretsmanager put-secret-value --secret-id <EngineDbSecretArn> --secret-string file://<파일 경로>
-     ```
-5. 확인: 두 비밀 모두 값이 들어 있다. 값을 화면에 띄워 확인할 때 화면 공유를 끈다.
+엔진용과 수집용은 서로 다른 DB 사용자다(D-56). 먼저 두 사용자를 만들고(`db/sql/roles.sql`), 그 사용자의 주소를 4-3 출력의 `EngineDbSecretArn`, `IngestDbSecretArn` 비밀에 넣는다. 소유자 주소는 넣지 않는다.
 
-> **참고** 값은 템플릿·Actions에 없다. 엔진용과 수집용은 서로 다른 DB 사용자다.
+> **참고** 화면별 순서는 `docs/SETUP-PROD-DB.md` 6~7단계
 
-> **주의** Lambda는 `sslmode`가 `require`·`verify-ca`·`verify-full`이 아니면 시작을 거부한다.
-
-> **참고** 트랜잭션 풀러(포트 6543)면 수집 쪽이 자동으로 풀러 모드로 접속한다.
-
-> **참고** 인증서 검증에 DB의 CA가 필요하면 URL에 `sslrootcert=`로 번들 안 파일을 지정한다.
+<!-- include: docs/SETUP-PROD-DB.md 6~7 -->
 
 ### 4-5. [사람] 출력값 연결 (10분)
 

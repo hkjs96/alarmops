@@ -54,7 +54,8 @@ function walk(dir) {
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const slugText = (s) =>
   s.toLowerCase().replace(/<[^>]+>/g, '').replace(/&[a-z#0-9]+;/g, '').trim()
-    .replace(/[^\p{L}\p{N}\s-]/gu, '').replace(/\s+/g, '-');
+    .replace(/[^\p{L}\p{N}\s-]/gu, '').replace(/\s/g, '-');
+const INCLUDE = /^<!--\s*include:\s*docs\/([A-Za-z0-9/_.-]+\.md)\s+(\d+)(?:~(\d+))?\s*-->$/;
 const docId = (rel) => 'doc-' + rel.replace(/\.md$/, '').replace(/[^A-Za-z0-9]+/g, '-').toLowerCase();
 const git = (args) => { try { return execFileSync('git', ['-C', root, ...args], { encoding: 'utf8' }).trim(); } catch { return ''; } };
 
@@ -84,6 +85,9 @@ const docs = files.map((rel) => {
         return `<h${depth} id="${hid}"><a class="anchor" href="#${hid}" aria-label="이 제목 링크">#</a>${body}</h${depth}>\n`;
       },
       html({ text }) {
+        // <!-- include: docs/X.md N~M --> : expanded later (see "includes" below), invisible on GitHub
+        const inc = text.trim().match(INCLUDE);
+        if (inc) return `<div class="include-slot" data-rel="${esc(inc[1])}" data-from="${inc[2]}" data-to="${inc[3] ?? inc[2]}"></div>\n`;
         const lone = text.trim().match(/^<a\s+(?:id|name)="([A-Za-z0-9_-]+)"\s*>$/);
         if (lone) return `<span class="target" id="${id}--${lone[1]}"></span>`;
         if (/^<\/a>$/.test(text.trim())) return '';
@@ -155,6 +159,88 @@ for (const d of docs) {
   const figs = INSERT[d.rel];
   if (!figs) continue;
   d.figs = `<div class="inserted">${figs.map((f) => FIG[f]()).join('')}</div>`;
+}
+
+// ---- cross-document references -----------------------------------------------------------------------------------
+// `docs/X.md` becomes a link to that document. `docs/X.md` N단계 / N~M단계 links to that numbered section, and when the
+// reference sits in a callout (> **참고** …), the referenced sections are also shown right there, folded, so a reader
+// following one guide never has to leave it.
+const byRel = new Map(docs.map((d) => [d.rel, d]));
+function sectionsOf(doc) {
+  // numbered ## sections: "## 3. …", "## 3단계 — …"; each runs to the next <h2
+  const out = new Map();
+  const re = /<h2 id="([^"]+)">(?:<a [^>]*>#<\/a>)?([\s\S]*?)<\/h2>/g;
+  const heads = [...doc.html.matchAll(re)];
+  heads.forEach((m, i) => {
+    const num = m[2].replace(/<[^>]+>/g, '').trim().match(/^(\d+)(?:\.|단계)/);
+    if (!num) return;
+    const end = i + 1 < heads.length ? heads[i + 1].index : doc.html.length;
+    out.set(Number(num[1]), { hid: m[1], title: m[2].replace(/<[^>]+>/g, '').trim(), html: doc.html.slice(m.index, end) });
+  });
+  return out;
+}
+const sectionCache = new Map();
+const docSections = (doc) => sectionCache.get(doc.rel) ?? (sectionCache.set(doc.rel, sectionsOf(doc)), sectionCache.get(doc.rel));
+// a copy for embedding: no duplicate ids, headings one level down
+const embedCopy = (html) => html.replace(/ id="[^"]*"/g, '').replace(/<a class="anchor"[^>]*>#<\/a>/g, '')
+  .replace(/<(\/?)h([2-4])/g, (_, s, n) => `<${s}h${Math.min(Number(n) + 1, 6)}`);
+const REF = /<code>docs\/([A-Za-z0-9/_.-]+\.md)<\/code>(\s*(\d+)(?:~(\d+))?단계)?/g;
+for (const d of docs) {
+  d.html = d.html.replace(/<blockquote class="bq-(\w+)">([\s\S]*?)<\/blockquote>/g, (whole, kind, inner, at, all) => {
+    // a callout followed right away by an include of the same reference shows the steps expanded, not folded
+    const next = all.slice(at + whole.length).match(/^\s*<div class="include-slot" data-rel="([^"]+)" data-from="(\d+)" data-to="(\d+)">/);
+    const embeds = [];
+    const linked = inner.replace(REF, (m, rel, tail, a, b) => {
+      const target = byRel.get(rel);
+      if (!target) return m;
+      if (!a) return `<a href="#${target.id}"><code>docs/${rel}</code></a>`;
+      const from = Number(a), to = Number(b ?? a);
+      const secs = [...docSections(target)].filter(([n]) => n >= from && n <= to).map(([, s]) => s);
+      const included = next && next[1] === rel && Number(next[2]) === from && Number(next[3]) === to;
+      if (secs.length && !included) embeds.push({ target, from, to, secs });
+      const href = secs[0] ? `#${secs[0].hid}` : `#${target.id}`;
+      return `<a href="${href}"><code>docs/${rel}</code>${tail}</a>`;
+    });
+    const folded = embeds.map(({ target, from, to, secs }) =>
+      `<details class="embed"><summary><span class="embed-k">화면별 순서 펼치기</span><span class="embed-t">${esc(target.title)} · ${from === to ? `${from}단계` : `${from}~${to}단계`}</span></summary>` +
+      `<div class="embed-b">${secs.map((s) => embedCopy(s.html)).join('')}<p class="embed-src"><a href="#${secs[0].hid}">원문 문서에서 보기 →</a></p></div></details>`).join('');
+    return `<blockquote class="bq-${kind}">${linked}</blockquote>${folded}`;
+  });
+  // plain mentions outside callouts: link only
+  d.html = d.html.replace(/(<(?:p|li|td)[^>]*>[\s\S]*?<\/(?:p|li|td)>)/g, (block) => block.includes('<a href="#doc-') && block.includes('<code>docs/') ? block : block.replace(REF, (m, rel, tail, a) => {
+    const target = byRel.get(rel);
+    if (!target) return m;
+    const sec = a ? docSections(target).get(Number(a)) : null;
+    return `<a href="#${sec ? sec.hid : target.id}"><code>docs/${rel}</code>${tail ?? ''}</a>`;
+  }));
+}
+
+// ---- includes ----------------------------------------------------------------------------------------------------
+// <!-- include: docs/X.md N~M --> puts those numbered ## sections of X right here, expanded: headings sit one level
+// under the host heading, every id gets a host prefix (the page holds all documents, so ids must stay unique) and links
+// that pointed into the copied sections follow the copy. The host's outline keeps only its own headings.
+const relSlug = (rel) => rel.replace(/\.md$/, '').replace(/[^A-Za-z0-9]+/g, '-').toLowerCase();
+for (const d of docs) {
+  d.html = d.html.replace(/<div class="include-slot" data-rel="([^"]+)" data-from="(\d+)" data-to="(\d+)"><\/div>\n?/g, (m, rel, a, b, at, all) => {
+    const target = byRel.get(rel);
+    const from = Number(a), to = Number(b);
+    const secs = target ? [...sectionsOf(target)].filter(([n]) => n >= from && n <= to) : [];
+    if (!secs.length) throw new Error(`${d.rel}: include docs/${rel} ${a}~${b} matches no numbered section`);
+    const host = [...all.slice(0, at).matchAll(/<h([1-6]) /g)].pop();
+    const shift = (host ? Number(host[1]) : 2) - 1;
+    const ids = new Map();
+    let body = secs.map(([n, s]) => s.html.replace(/ id="([^"]+)"/g, (_, old) => {
+      const nid = `${d.id}--inc-${relSlug(rel)}-${n}-${old.replace(`${target.id}--`, '')}`;
+      ids.set(old, nid);
+      return ` id="${nid}"`;
+    })).join('');
+    body = body.replace(/href="#([^"]+)"/g, (h, old) => (ids.has(old) ? `href="#${ids.get(old)}"` : h))
+      .replace(/<(\/?)h([1-6])\b/g, (_, sl, n) => `<${sl}h${Math.min(Number(n) + shift, 6)}`)
+      .replace(/<div class="include-slot"[^>]*><\/div>\n?/g, '');
+    const range = from === to ? `${from}단계` : `${from}~${to}단계`;
+    const src = `#${secs[0][1].hid}`;
+    return `<div class="include"><p class="include-h">아래 순서는 <a href="${src}"><code>docs/${esc(rel)}</code> ${range}</a>와 같다 · <a href="${src}">원문 보기 →</a></p>${body}</div>\n`;
+  });
 }
 
 const decisionsDoc = docs.find((d) => d.rel === 'decisions/DECISIONS.md');
@@ -465,6 +551,22 @@ main{min-width:0;padding-left:max(16px,env(safe-area-inset-left,0px));padding-ri
 .md hr{border:0;border-top:1px solid var(--line);margin:36px 0}
 .md a.ext::after{content:"↗";font-size:.8em;margin-left:2px}
 .inserted{display:grid;gap:20px;margin:28px 0 0}
+.embed{margin:-6px 0 22px;border:1px solid color-mix(in srgb,var(--accent) 30%,transparent);border-radius:0 0 12px 12px;background:var(--surface)}
+.embed>summary{cursor:pointer;list-style:none;display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding:12px 16px;min-height:44px}
+.embed>summary::-webkit-details-marker{display:none}
+.embed>summary::before{content:"";width:7px;height:7px;border-right:2px solid var(--accent);border-bottom:2px solid var(--accent);transform:rotate(-45deg);transition:transform .15s}
+.embed[open]>summary::before{transform:rotate(45deg)}
+.embed-k{font-weight:700;color:var(--accent)}
+.embed-t{font-size:13.5px;color:var(--ink-3)}
+.embed[open]>summary{border-bottom:1px solid var(--line)}
+.embed-b{padding:4px 20px 16px}
+.embed-b h3{font-size:18px;margin:26px 0 8px}.embed-b h4{font-size:16px;margin:20px 0 6px}
+.embed-b>h3:first-child{margin-top:16px}
+.include{margin:8px 0 24px;padding:2px 0 4px 18px;border-left:3px solid color-mix(in srgb,var(--accent) 35%,transparent)}
+.include-h{font-size:13.5px;color:var(--ink-3);margin:0 0 4px!important}
+.include h4{font-size:18px;margin:26px 0 8px}.include h5{font-size:16px;margin:20px 0 6px}.include h6{font-size:15px;margin:16px 0 6px}
+.include>.include-h+h4,.include>.include-h+h3{margin-top:12px}
+.embed-src{font-size:13.5px;margin-top:18px!important}
 .inserted .fig-svg{min-width:640px}
 
 .pager{display:grid;grid-template-columns:1fr 1fr;gap:12px;max-width:76ch;margin-top:56px}

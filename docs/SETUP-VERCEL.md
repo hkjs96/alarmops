@@ -1,6 +1,6 @@
 # Vercel 콘솔 배포 따라 하기
 
-이 문서는 AlarmOps 콘솔을 Vercel에 처음 배포하는 사람을 위한 화면별 순서다. `docs/GO-LIVE.md` 3-1~3-4가 **무엇을** 하는지 적었다면, 이 문서는 **어디를 누르고 무엇을 적는지** 적는다.
+이 문서는 AlarmOps 콘솔을 Vercel에 처음 배포하는 사람을 위한 화면별 순서다. `docs/GO-LIVE.md` 3-1~3-4·3-6은 체크 항목만 두고 이 문서의 단계를 그대로 가져다 쓴다(문서 포털에서는 그 자리에 펼쳐 보인다). 화면별 순서는 이 문서 한 곳에서만 고친다.
 
 - 처음 한 번만 하면 된다.
 - 1시간쯤 걸린다.
@@ -29,20 +29,22 @@
 
 ## 1. Vercel 계정·팀 확인
 
-1. **어디서:** https://vercel.com 에 회사 계정으로 로그인한다.
+1. **어디서:** https://vercel.com 에 로그인한다(파일럿에는 회사 계정, PoC 동안은 개인 계정도 된다, D-57).
    **누를 것:** 대시보드의 **team switcher**(팀 전환 메뉴).
-   **확인:** 회사 팀 `<팀>`이 선택되어 있다. 개인 계정 범위가 아니다.
+   **확인:** 쓸 범위가 선택되어 있다. 파일럿에는 회사 팀 `<팀>`(Pro), PoC 동안은 개인 Hobby 범위도 된다(D-57).
 
 2. **어디서:** 팀의 **Settings** → 요금제 화면 **(화면 이름 확인 필요)**.
-   **확인:** 요금제가 **Pro**다. 운영 조건이 Vercel Pro이기 때문이다(D-10).
+   **확인:** 파일럿에서는 요금제가 **Pro**다. 운영 조건이 Vercel Pro이기 때문이다(D-10). PoC 동안 개인 Hobby를 쓰면 이 확인은 건너뛴다(D-57).
 
-   > **주의** 개인(Hobby) 범위에 프로젝트를 만들면 이후 토큰·Team ID가 모두 그 범위로 묶인다. 처음부터 회사 팀을 고른다. Hobby는 되돌리기도 바로 전 배포로만 된다.
+   > **주의** 개인(Hobby) 범위에 프로젝트를 만들면 이후 토큰·Team ID가 모두 그 범위로 묶인다. Hobby는 되돌리기도 바로 전 배포로만 된다. PoC 동안은 Hobby를 써도 되지만(D-57), 파일럿 전에 회사 Pro 팀으로 옮긴다.
 
 출처: `docs/decisions/DECISIONS.md` D-10, https://vercel.com/docs/monorepos, https://vercel.com/docs/instant-rollback
 
 ## 2. GitHub 저장소 가져오기(Import)
 
-1. **어디서:** Vercel 대시보드(회사 팀 선택된 상태).
+> **참고** 아래 화면 이름은 2026-11-19에 실제 **New Project** 화면으로 확인했다(사용자 캡처). 이 저장소는 앱이 둘(`apps/console` Next.js, `services/alarm-engine` Python)이라 Vercel이 "여러 앱"으로 알아본다. 그래서 일반적인 가져오기 화면과 다르다.
+
+1. **어디서:** Vercel 대시보드.
    **누를 것:** **Create New** → **Project**.
    **확인:** **Import Git Repository** 목록이 보인다.
 
@@ -54,36 +56,49 @@
 
 3. **어디서:** **Import Git Repository**의 `hkjs96/alarmops` 줄.
    **누를 것:** **Import**.
-   **확인:** 배포 전 설정 화면이 열린다.
+   **확인:** **New Project** 화면이 열리고, 맨 위에 "Importing from GitHub `hkjs96/alarmops` `main`"이 보인다.
 
-4. **어디서:** 같은 화면의 **Framework Preset**.
-   **입력할 것:** **Next.js**.
+4. **어디서:** **New Project** 화면의 **Vercel Team**.
+   **입력할 것:** PoC 동안은 개인 **Hobby** 범위를 써도 된다(D-57). 회사 Pro 팀이 생기면 그 팀을 고른다.
+   **확인:** 고른 범위를 메모해 둔다. 5단계 토큰의 Scope와 6단계 Team ID가 모두 이 범위다.
 
-5. **어디서:** 같은 화면의 **Root Directory** 옆 **Edit**.
-   **입력할 것:** `apps/console`을 고르고 확인.
-   **확인:** Root Directory 칸에 `apps/console`이 보인다.
+   > **주의 (Hobby로 진행할 때, D-57)** Hobby는 개인 무료 범위다. 실제 고객 데이터·실제 고객 연락처는 넣지 않는다(시험용 데이터만). 파일럿 전에 회사 Pro 팀으로 새 프로젝트를 만들어 옮긴다. 옮길 때는 5~8단계(토큰, ID, GitHub 시크릿, 환경변수)를 새 팀 기준으로 다시 한다.
 
-6. **어디서:** 같은 화면의 빌드·설치 설정 **(화면 이름 확인 필요)**.
+5. **어디서:** 같은 화면의 **Project Name**.
+   **입력할 것:** `alarmops-console`처럼 콘솔임을 알 수 있는 이름. 이 이름이 production 주소(`<프로젝트>.vercel.app`, 4단계)가 된다.
+
+6. **어디서:** 같은 화면의 **Root Directory**(`./`)와 **Application Preset**(**Services**) 아래.
+   **확인:** "Multiple applications detected in this directory"라는 문장과, 앱 목록 `apps/console`(**console**, Next.js)과 `services/alarm-engine`(**alarm-engine**, Python)이 보인다.
+
+7. **어디서:** 앱 목록의 **console**(Next.js) 줄.
+   **누를 것:** **Import single project →**.
+   **확인:** console 하나만 가져오는 설정 화면으로 바뀐다. Root Directory가 `apps/console`, 프레임워크가 Next.js로 잡힌다 **(바뀐 화면의 이름 확인 필요)**.
+
+   > **주의** **alarm-engine** 줄은 누르지 않는다. 알람 엔진은 Vercel이 아니라 AWS Lambda로 배포한다(D-09, GO-LIVE 4단계).
+
+   > **주의** 아래의 **Import multi-service project**와 **Copy prompt**는 쓰지 않는다. `vercel.json`을 만들어 여러 앱을 한 프로젝트로 묶으라는 제안인데, 이 저장소는 콘솔 하나만 Vercel에 올린다. `vercel.json`도 만들지 않는다.
+
+8. **어디서:** 바뀐 화면의 빌드·설치 설정 **(화면 이름 확인 필요)**.
    **입력할 것:** 아무것도 바꾸지 않는다. Build Command, Install Command, Output Directory 모두 기본값으로 둔다.
-   - 이유: 저장소는 루트 `package.json`의 npm workspaces(`apps/*`, `packages/*`, `services/*`, `db`)다. Vercel은 npm workspaces를 지원한다. 설치 명령을 바꾸는 것은 설치를 빠르게 하는 선택 사항일 뿐이다. 저장소에는 `vercel.json`이 없다.
+   - 이유: 저장소는 루트 `package.json`의 npm workspaces(`apps/*`, `packages/*`, `services/*`, `db`)다. Vercel은 npm workspaces를 지원한다. 저장소에는 `vercel.json`이 없다.
    - 실제 빌드는 Vercel이 아니라 GitHub Actions가 한다. 워크플로가 저장소 루트에서 `npm ci --ignore-scripts`를 먼저 돌리고 `vercel build --prod`를 실행한다.
 
-7. **어디서:** 같은 화면의 Environment Variables 칸.
-   **입력할 것:** 지금은 비워 둔다. 8단계에서 넣는다.
+9. **어디서:** **Environment Variables**(접힌 칸).
+   **입력할 것:** 펼치지 않고 비워 둔다. 8단계에서 넣는다.
 
-8. **누를 것:** **Deploy**.
-   **확인:** 첫 자동 배포가 시작된다.
+10. **누를 것:** **Deploy**.
+    **확인:** 첫 자동 배포가 시작된다.
 
-9. **어디서:** 배포 진행 화면 또는 프로젝트 → **Deployments** → 진행 중인 배포의 `⋮` 메뉴.
-   **누를 것:** 취소(Cancel) **(화면 이름 확인 필요)**.
-   **확인:** 배포 상태가 Canceled다.
-   - 이미 실패(Error)로 끝났으면 그대로 둔다. 환경변수가 없어서 실패하는 것은 예상된 결과다. 프로젝트는 만들어졌고 해가 없다.
-   - 이미 성공(Ready)했으면 9단계 전까지 그 주소를 쓰지 않는다. 환경변수가 없는 콘솔은 production에서 모든 요청에 503을 준다(`CONSOLE_ORIGIN` 없음).
+11. **어디서:** 배포 진행 화면 또는 프로젝트 → **Deployments** → 진행 중인 배포의 `⋮` 메뉴.
+    **누를 것:** 취소(Cancel) **(화면 이름 확인 필요)**.
+    **확인:** 배포 상태가 Canceled다.
+    - 이미 실패(Error)로 끝났으면 그대로 둔다. 환경변수가 없어서 실패하는 것은 예상된 결과다. 프로젝트는 만들어졌고 해가 없다.
+    - 이미 성공(Ready)했으면 9단계 전까지 그 주소를 쓰지 않는다. 환경변수가 없는 콘솔은 production에서 모든 요청에 503을 준다(`CONSOLE_ORIGIN` 없음).
 
-10. **어디서:** 프로젝트 → **Settings** → **Build and Deployment** → **Root Directory**.
+12. **어디서:** 프로젝트 → **Settings** → **Build and Deployment** → **Root Directory**.
     **확인:** `apps/console`이다. **Include files outside the root directory in the Build Step**이 켜져 있다(기본값). 끄면 `packages/*`를 못 읽어 빌드가 실패한다.
 
-출처: https://vercel.com/docs/monorepos, https://vercel.com/docs/builds/configure-a-build, `.github/workflows/deploy-console.yml` 머리 주석, 루트 `package.json`
+출처: 실제 New Project 화면(2026-11-19), https://vercel.com/docs/monorepos, https://vercel.com/docs/builds/configure-a-build, `.github/workflows/deploy-console.yml` 머리 주석, 루트 `package.json`
 
 ## 3. Git 자동 배포 끄기 (D-53)
 
@@ -115,14 +130,14 @@
 
    > **주의** 배포마다 생기는 긴 주소(`<프로젝트>-<글자>-<팀>.vercel.app`)가 아니다. Domains에 있는 짧은 production 주소를 쓴다. 긴 주소는 10단계의 보호를 받는다.
 
-출처: `docs/GO-LIVE.md` 3-1의 6번, D-54, https://vercel.com/docs/project-configuration/project-settings
+출처: D-54, https://vercel.com/docs/project-configuration/project-settings
 
 ## 5. Vercel 토큰 만들기
 
 1. **어디서:** https://vercel.com/account/tokens (계정 Settings의 **Account Tokens** 페이지).
 2. **입력할 것:**
    - 토큰 이름: `alarmops-deploy-console`처럼 용도를 알 수 있게
-   - **Scope**: 회사 팀 `<팀>`을 고른다. **Full Account**를 고르지 않는다. 팀을 고르면 프로젝트 목록이 열린다. **All Projects**를 고른다.
+   - **Scope**: 2-4에서 고른 범위(회사 팀 `<팀>`, PoC 동안은 개인 Hobby 범위)를 고른다. **Full Account**를 고르지 않는다. 팀을 고르면 프로젝트 목록이 열린다. **All Projects**를 고른다.
    - 만료(expiration): 기한을 둔다(예: 90일).
 3. **누를 것:** **Create**.
    **확인:** 토큰 값이 화면에 **한 번만** 보인다. 복사해 바로 7단계 5번에서 GitHub에 넣는다. 다시 볼 수 없다.
@@ -232,23 +247,23 @@
 | `DATABASE_URL` | 운영 DB Transaction pooler(6543) 주소 | Secret | 지금 |
 | `DATABASE_POOLER` | `transaction` | Config | 지금 |
 | `SESSION_SECRET` | 8-1의 값 | Secret | 지금 |
-| `TICK_SECRET` | 8-1의 값 | Secret | 지금 |
-| `VERIFY_HASH_SECRET` | 8-1의 값 | Secret | 지금 |
+| `TICK_SECRET` | 8-1의 값. GO-LIVE 3-5에서 Supabase Vault `tick_secret`에 같은 값을 넣는다 | Secret | 지금 |
+| `VERIFY_HASH_SECRET` | 8-1의 값. 연락처 확인 링크 한도 계산에 쓴다(#63에서 연결) | Secret | 지금 |
 | `GOOGLE_CLIENT_ID` | `docs/SETUP-GOOGLE-SSO.md` | **Config 필수** | 지금 |
 | `GOOGLE_CLIENT_SECRET` | 같은 가이드 | Secret | 지금 |
 | `SSO_ALLOWED_DOMAINS` | 같은 가이드 | **Config 필수** | 지금 |
 | `SSO_ALLOWED_EMAILS` | 예외 주소(없으면 만들지 않음) | Secret 권장 | 선택 |
 | `ALARM_COMMANDS_QUEUE_URL` | GO-LIVE 4-5 | Config | 4단계 후 |
 | `ALARM_COMMANDS_EXPECTED_ACCOUNT` | GO-LIVE 4-5 | Config | 4단계 후 |
-| `AWS_ROLE_ARN` | GO-LIVE 4-5 | Config | 4단계 후 |
-| `CENTRAL_ROLE_ARN` | 중앙 배포 출력 `CentralRoleArn` | Config | 4단계 후 |
-| `CENTRAL_EVENT_BUS_ARN` | 중앙 배포 출력 `CentralBusArn` | Config | 4단계 후 |
+| `AWS_ROLE_ARN` | GO-LIVE 4-5(Vercel OIDC 역할, D-49) | Config | 4단계 후 |
+| `CENTRAL_ROLE_ARN` | 중앙 배포 출력 `CentralRoleArn`. 고객 연결 키트에 쓴다(`apps/console/README.md`) | Config | 4단계 후 |
+| `CENTRAL_EVENT_BUS_ARN` | 중앙 배포 출력 `CentralBusArn`. 고객 연결 키트에 쓴다 | Config | 4단계 후 |
 | `REMEDIATOR_CALLER_ROLE_ARN` | 중앙 배포 출력 | Config | 4단계 후, Remediator 쓸 때만 |
 | `MOCK_API`, `E2E_ALLOW_MOCK` | — | — | **절대 넣지 않는다** |
 
 값 규칙:
 
-- `CONSOLE_ORIGIN`: `https://호스트`까지만 쓴다. 끝의 `/`, 경로, `?`, `#`, 사용자 정보가 있으면 검사가 실패한다. `http://`도 안 된다.
+- `CONSOLE_ORIGIN`: 우선 `https://<프로젝트>.vercel.app`(D-54). 파일럿 전에 `https://console.<도메인>`으로 바꾼다(GO-LIVE 1-4). `https://호스트`까지만 쓴다. 끝의 `/`, 경로, `?`, `#`, 사용자 정보가 있으면 검사가 실패한다. `http://`도 안 된다.
 - `TRUSTED_PROXY`: 정확히 `1`. `true`나 ` 1`(공백)은 안 된다.
 - `DATABASE_URL`: 끝에 `?pgbouncer=true&connection_limit=1`. 만드는 법은 `docs/SETUP-PROD-DB.md` 3단계.
 - `SSO_ALLOWED_DOMAINS`: 쉼표 구분 도메인. `*`, 공백 섞인 항목, `@`가 든 항목은 안 된다.
@@ -261,6 +276,8 @@
 출처: https://vercel.com/docs/environment-variables/sensitive-environment-variables, https://vercel.com/docs/environment-variables/managing-environment-variables, `.github/scripts/check-console-deploy-env.mjs`, `.github/scripts/strip-deploy-env.mjs`, `docs/SETUP-GOOGLE-SSO.md`, `apps/console/README.md`
 
 ## 9. 첫 배포
+
+> **참고** 시작 전에 4단계에서 적어 둔 주소와 8단계에 넣은 `CONSOLE_ORIGIN`이 같은지 본다. 스모크 검사는 이 주소를 부른다.
 
 1. **어디서:** GitHub 저장소 → **Actions** 탭 → 왼쪽 목록 **deploy-console**.
    **누를 것:** 실행 목록 위의 **Run workflow**.
@@ -347,7 +364,7 @@
 
    > **주의** 되돌린 동안 1분 틱이 멈출 수 있다. GO-LIVE 3-5의 4번으로 확인한다.
 
-출처: https://vercel.com/docs/instant-rollback, https://vercel.com/docs/deployments/rollback-production-deployment, `docs/GO-LIVE.md` 3-6
+출처: https://vercel.com/docs/instant-rollback, https://vercel.com/docs/deployments/rollback-production-deployment, `docs/security/reviews/deploy-workflows.md` N4
 
 ## 막혔을 때
 

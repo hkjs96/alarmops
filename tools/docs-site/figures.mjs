@@ -36,8 +36,11 @@ const svg = (w, h, label, body) => {
   const n = ++seq;
   return `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="${esc(label)}" class="fig-svg">${defsFor(n)}${body.replace(/url\(#ah-(\w+)\)/g, `url(#ah-$1-${n})`)}</svg>`;
 };
+// the same figure appears on the home page and inside documents: only the first copy keeps the plain id
+const figSeen = new Map();
+const figId = (id) => { const n = (figSeen.get(id) ?? 0) + 1; figSeen.set(id, n); return n === 1 ? id : `${id}-${n}`; };
 const figure = (id, title, caption, svgMarkup, legend = '') =>
-  `<figure class="fig" id="${id}"><figcaption class="fig-h">${esc(title)}</figcaption><div class="fig-scroll">${svgMarkup}</div>` +
+  `<figure class="fig" id="${figId(id)}"><figcaption class="fig-h">${esc(title)}</figcaption><div class="fig-scroll">${svgMarkup}</div>` +
   `${legend}<p class="fig-cap">${caption}</p></figure>`;
 
 // ---- 1. architecture ----------------------------------------------------------------------------------------------
