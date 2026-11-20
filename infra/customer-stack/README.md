@@ -67,8 +67,40 @@ EventBridge 규칙은 `events.amazonaws.com`이 역할을 맡아 중앙 버스�
 
 ### 전달하는 이벤트
 
-- `AlarmOps-AlarmStateChange`: `aws.cloudwatch` / `CloudWatch Alarm State Change`
-- `AlarmOps-TagChange`: CloudTrail 관리 이벤트 중 태그 추가·삭제 API(`CreateTags`, `DeleteTags`, `AddTagsToResource`, `RemoveTagsFromResource`, `AddTags`, `RemoveTags`, `TagResource`, `UntagResource`, `TagResources`, `UntagResources`, `TagQueue`, `UntagQueue`). 전역 서비스(IAM, CloudFront, Route 53)의 이벤트는 us-east-1에서 나오므로 서울 스택으로는 오지 않는다.
+- `AlarmOps-AlarmStateChange`: `aws.cloudwatch` / `CloudWatch Alarm State Change`. 기본은 **고객 계정의 모든 알람**이고, `AlarmScope=managed-prefix`면 AlarmOps 이름 접두사 알람만(아래 "`AlarmScope`").
+- `AlarmOps-TagChange`: CloudTrail 관리 이벤트 중 태그 추가·삭제 API(`CreateTags`, `DeleteTags`, `AddTagsToResource`, `RemoveTagsFromResource`, `AddTags`, `RemoveTags`, `TagResource`, `UntagResource`, `TagResources`, `UntagResources`, `TagQueue`, `UntagQueue`) 가운데, **요청에 태그 키 `Monitoring` 또는 `Threshold_*`가 들어 있는 것만** 보낸다. 전역 서비스(IAM, CloudFront, Route 53)의 이벤트는 us-east-1에서 나오므로 서울 스택으로는 오지 않는다.
+
+### 태그 규칙을 좁힌 방식 (#89)
+
+중앙이 쓰는 키는 `Monitoring`(D-16)과 `Threshold_*`(D-08)뿐이다(`alarm_engine.events`, `manual_change.route`). 그 밖의 키만 바뀐 이벤트는 중앙에서 `IGNORE`가 되므로, 고객 쪽에서 보내지 않아도 동작이 같다. Terraform `default_tags` 같은 일괄 태깅이 만드는 이벤트와 다른 태그 값(`Owner` 등)이 중앙으로 가지 않는다.
+
+CloudTrail `requestParameters`의 태그 위치는 서비스마다 달라서, 엔진이 읽을 수 있는 모양(`events.extract`의 `tags`, `tagSet`, `TagList`, `tagList`, `tagKeys`, `TagKeys`)을 `$or`로 모두 적었다. 엔진이 읽지 못하는 모양은 중앙에서도 키를 얻지 못해 무시되므로 패턴에서도 뺐다.
+
+| 요청 모양 | 대표 API | 매칭 |
+|---|---|---|
+| `tagSet.items[].key` | EC2 `CreateTags`·`DeleteTags` | `Monitoring` 또는 `Threshold_` 접두사 |
+| `tags[].key` / `tags[].Key` | RDS·ElastiCache `AddTagsToResource`, ELB(v2·Classic) `AddTags`·`RemoveTags`, SNS·DynamoDB·ECS `TagResource` | 같음 |
+| `tagList[].key`·`Key`, `TagList[].key`·`Key` | OpenSearch `AddTags` | 같음 |
+| `tagKeys[]`, `TagKeys[]` | 각 서비스의 제거 API(`RemoveTagsFromResource`, `RemoveTags`, `UntagResource`, `UntagQueue`, `UntagResources`) | 같음 |
+| `tags` 맵(`{"키": "값"}`) | Lambda·MSK `TagResource`, SQS `TagQueue`, `tag:TagResources` | **`Monitoring` 키만**(맵 키는 접두사 매칭이 안 된다) |
+
+**넓게 남긴 곳과 한계** (확인 못 한 것은 추정으로 표시)
+- 위 표의 서비스별 모양은 AWS 문서를 이 환경에서 조회하지 못해, 엔진 코드(`events.extract`)와 기억에 의존했다. 실제 CloudTrail 이벤트 샘플로 개발 계정에서 한 번 확인해야 한다(추정). 모양이 다르면 그 서비스의 태그 이벤트는 규칙에 걸리지 않지만, 엔진도 그 모양에서 키를 읽지 못했을 것이므로 기능 손실은 없고 시간당 TAG_RECONCILE이 메운다.
+- 맵 모양 API(Lambda, SQS, MSK, `tag:TagResources`)에서 `Threshold_*`만 바뀐 이벤트는 오지 않는다. 즉시 반영 대신 시간당 `TAG_RECONCILE` 실행이 반영한다.
+- `EC2 DeleteTags`에 태그 키 없이 모든 태그를 지우는 호출(`tagSet` 없음)은 오지 않는다. 시간당 실행이 `Monitoring` 제거를 확인한다.
+- Lambda의 실제 CloudTrail 이벤트 이름은 버전 접미사가 붙은 `TagResource20170331v2` 계열일 수 있다(추정). 이 규칙도 엔진도 원래 `TagResource`만 받으므로 이번 변경 범위 밖이다. 확인이 필요하다.
+- 값(`Monitoring=on` 여부)은 거르지 않는다. `off`로 바꾸거나 값만 바꾸는 이벤트도 NEEDS_REVIEW 판정에 필요하기 때문이다.
+
+### 알람 상태 규칙의 범위: `AlarmScope`
+
+EventBridge 이벤트의 `detail`에는 알람 태그가 없고 `alarmName`·`configuration.description`만 있다. 그래서 고객이 파라미터로 고른다.
+
+| 값 | 전달 | 결과 |
+|---|---|---|
+| `all`(기본) | 이 계정의 모든 CloudWatch 알람 상태 변경 | 고객이 직접 만든 알람도 중앙이 적재한다(`managed=false`, "unmanaged alarm format") |
+| `managed-prefix` | `detail.alarmName`이 `[{type}] `로 시작하는 알람만(29종: `naming.alarm_name`의 `[{resourceType}] ` 접두사, 이름이 길어도 접두사는 잘리지 않는다) | **고객이 직접 만든 알람은 인시던트가 되지 않는다.** 고객 데이터 전송이 최소가 된다 |
+
+이름 접두사는 소유 증명이 아니다. 고객 알람이 `[EC2] ...`로 시작하면 그대로 전달되고, 소유 판정은 `ManagedBy` 태그가 한다. 29종에 없는 유형 이름을 엔진이 새로 쓰면 이 목록(`template.yaml`의 `AlarmStateRule`)도 같이 고쳐야 한다. 중앙·엔진 코드는 바꾸지 않았다.
 
 ## 오프라인 검증
 
