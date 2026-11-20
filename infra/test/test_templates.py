@@ -796,21 +796,21 @@ class DbRolesSql(unittest.TestCase):
 
 
 class CustomerStackBoundary(unittest.TestCase):
-    """D-58: works in organizations that demand a permissions boundary or an IAM path (hkjs96/alarmops#86)."""
+    """D-58: works in organizations that demand a permissions boundary (hkjs96/alarmops#86); role paths are unsupported."""
 
-    def test_parameters_default_to_no_boundary_and_root_path(self):
+    def test_parameters_default_to_no_boundary_and_no_role_path_parameter(self):
         P = T["Parameters"]
         self.assertEqual(P["PermissionsBoundaryArn"]["Default"], "")
-        self.assertEqual(P["RolePath"]["Default"], "/")
+        self.assertNotIn("RolePath", P)
 
     def test_boundary_condition_is_false_when_empty(self):
         self.assertEqual(T["Conditions"]["HasPermissionsBoundary"],
                          {"Fn::Not": [{"Fn::Equals": [{"Ref": "PermissionsBoundaryArn"}, ""]}]})
 
-    def test_all_five_roles_use_path_and_optional_boundary(self):
+    def test_all_five_roles_use_default_path_and_optional_boundary(self):
         for role in ROLES:
             props = RES[role]["Properties"]
-            self.assertEqual(props["Path"], {"Ref": "RolePath"}, role)
+            self.assertNotIn("Path", props, role)  # default "/"; role ARNs are assumed path-less by central and backend
             self.assertEqual(props["PermissionsBoundary"],
                              {"Fn::If": ["HasPermissionsBoundary", {"Ref": "PermissionsBoundaryArn"},
                                          {"Ref": "AWS::NoValue"}]}, role)
@@ -823,14 +823,6 @@ class CustomerStackBoundary(unittest.TestCase):
                    "arn:aws-us-gov:iam::444455556666:policy/B"):
             self.assertTrue(pat.match(ok), ok)
         for bad in ("arn:aws:iam::444455556666:role/x", "arn:aws:iam::4444:policy/x", "policy/x", "arn:aws:s3:::b"):
-            self.assertFalse(pat.match(bad), bad)
-
-    def test_role_path_pattern(self):
-        import re
-        pat = re.compile(T["Parameters"]["RolePath"]["AllowedPattern"])
-        for ok in ("/", "/org/", "/org/security/"):
-            self.assertTrue(pat.match(ok), ok)
-        for bad in ("", "org/", "/org", "//", "/a b/"):
             self.assertFalse(pat.match(bad), bad)
 
     def test_no_hardcoded_partition_anywhere(self):

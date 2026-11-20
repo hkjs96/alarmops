@@ -11,7 +11,7 @@ Metadata:
       - Label: { default: "Connection (given by the MSP)" }
         Parameters: [CentralRoleArn, ExternalId, CentralEventBusArn]
       - Label: { default: "Customer organization constraints (SCP / permissions boundary)" }
-        Parameters: [PermissionsBoundaryArn, RolePath]
+        Parameters: [PermissionsBoundaryArn]
       - Label: { default: "Optional capabilities (all off by default)" }
         Parameters: [EnableAlarmWriter, EnableTagWriter, EnableRemediator, RemediatorCallerRoleArn]
 
@@ -47,15 +47,6 @@ Parameters:
       allow the actions of the enabled roles or the roles lose them (a boundary never adds permissions).
     AllowedPattern: '^$|^arn:aws[a-z-]*:iam::[0-9]{12}:policy/[A-Za-z0-9+=,.@_/-]+$'
     ConstraintDescription: Empty, or an IAM policy ARN such as arn:aws:iam::444455556666:policy/OrgBoundary
-  RolePath:
-    Type: String
-    Default: /
-    MaxLength: 512
-    Description: >-
-      IAM path of the five roles. Keep "/" unless the customer organization requires a path. The AlarmOps console
-      currently builds role ARNs without a path, so a value other than "/" is not yet supported end to end (see README).
-    AllowedPattern: '^/$|^/[A-Za-z0-9+=,.@_-]+(/[A-Za-z0-9+=,.@_-]+)*/$'
-    ConstraintDescription: Must start and end with "/", e.g. / or /org/security/
   EnableAlarmWriter:
     Type: String
     Default: "false"
@@ -91,7 +82,6 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       RoleName: AlarmOps-Reader
-      Path: !Ref RolePath
       PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
       Description: AlarmOps read-only discovery, metrics and graph images. No secret or data access.
       MaxSessionDuration: 3600
@@ -222,7 +212,6 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       RoleName: AlarmOps-EventForwarder
-      Path: !Ref RolePath
       PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
       Description: Lets this account's EventBridge rules put events on the central AlarmOps bus. Nothing else.
       MaxSessionDuration: 3600
@@ -293,7 +282,6 @@ Resources:
     Condition: UseAlarmWriter
     Properties:
       RoleName: AlarmOps-AlarmWriter
-      Path: !Ref RolePath
       PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
       Description: AlarmOps creates/updates CloudWatch alarms and deletes only alarms tagged ManagedBy=AlarmOps.
       MaxSessionDuration: 3600
@@ -354,7 +342,6 @@ Resources:
     Condition: UseTagWriter
     Properties:
       RoleName: AlarmOps-TagWriter
-      Path: !Ref RolePath
       PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
       Description: AlarmOps console adds the Monitoring tag. No other tag key, no S3 or Route 53.
       MaxSessionDuration: 3600
@@ -399,7 +386,6 @@ Resources:
     Condition: UseRemediator
     Properties:
       RoleName: AlarmOps-Remediator
-      Path: !Ref RolePath
       PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
       Description: Stop EC2/RDS and delete ELB, only on resources tagged Monitoring=on. Used only after Slack approval.
       MaxSessionDuration: 3600
