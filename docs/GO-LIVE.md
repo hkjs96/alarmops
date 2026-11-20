@@ -612,7 +612,7 @@ http://localhost:3107/auth/dev-login?as=admin
      - 만든 역할에는 경계 정책을 붙이게 한다. `iam:PermissionsBoundary` 조건으로 건다.
      - 경계 안에는 이 템플릿이 쓰는 서비스만 넣는다: sqs, secretsmanager, logs, events, lambda, `sts:AssumeRole`, `ses:SendEmail`.
    - 이 역할로 `bus-allowlist`도 돌리므로 버스 스택 권한도 포함한다: 버스 스택의 `DescribeStacks`/`UpdateStack`, `events:DescribeEventBus`, 그 스택이 가진 리소스의 변경.
-   - 정책을 어떻게 쓸지 모르겠으면 허브에 초안을 요청하고, 본인이 검토해 AWS 콘솔에 넣는다.
+   - 정책 JSON 초안(신뢰 정책, 권한 정책, 권한 경계 정책)과 콘솔 클릭 순서는 `infra/aws/deploy-role-policy.md`에 있다. 본인이 검토해 AWS 콘솔에 넣는다. 권한 경계 정책을 먼저 만든다.
 
 - [ ] **Vercel OIDC 공급자 등록(D-49)**
 
