@@ -22,7 +22,7 @@
    - 별도 브랜치 `agent/central-boundary-template`가 `central.yaml`에 `PermissionsBoundary`(세 역할과 `Globals.Function`)를 넣고, `deploy-central`을 `--s3-bucket "$SAM_ARTIFACT_BUCKET"`으로, `bus-allowlist`를 `central-bus` 환경으로 바꾼다.
    - **머지 순서: 그 PR을 먼저 머지하고, 그 다음에 첫 `plan`을 돌린다.**
    - 스택이 이미 있는 채로 경계를 붙이면 CloudFormation이 `iam:PutRolePermissionsBoundary`를 부른다. 그래서 권한 정책에 그 경계 ARN 조건의 허용(`IamPutBoundaryOnlyOurs`)을 넣었다.
-2. 권한 정책은 공백을 빼고 8,248자(실제 값을 넣은 기준)라 **관리형 정책 한도(6,144자)를 넘는다.** 그래서 역할의 **인라인 정책**으로 넣는다(역할당 인라인 정책 합계 한도 10,240자). 신뢰 정책 변경용 임시 정책(약 220자)이 붙어 있는 동안에도 한도 안이다.
+2. 권한 정책은 공백을 빼고 8,212자(실제 값을 넣은 기준, JSON을 압축해 센 값)라 **관리형 정책 한도(6,144자)를 넘는다.** 그래서 역할의 **인라인 정책**으로 넣는다(역할당 인라인 정책 합계 한도 10,240자). 신뢰 정책 변경용 임시 정책(`DateLessThan` 조건 포함, 시각 값을 채운 기준 약 300자)이 붙어 있는 동안에도 합계 약 8,500자라 한도 안이다.
 3. SAM 아티팩트 버킷은 `--resolve-s3` 대신 사람이 만든 고정 버킷을 쓴다. 이렇게 하면 `aws-sam-cli-managed-default` 스택·버킷 생성 권한과 와일드카드 버킷 권한이 필요 없다. 아래 5번의 6단계에서 만든다.
 4. 첫 배포가 실패해 스택이 `ROLLBACK_COMPLETE`가 되면 **사람이** 콘솔에서 스택을 지운다. 배포 역할에는 `DeleteStack`이 없다. 지운 뒤 `plan`을 다시 돌린다.
 5. 중앙 계정은 `AlarmOps` 전용이라고 가정한다. PoC는 D-57에 따라 공유 테스트 계정일 수 있다. 그 경우 `ApiGatewayHttpApi`의 `/apis/*` 와일드카드가 같은 계정의 다른 HTTP API까지 열어 주는 위험이 있다(생성 전에는 API ID를 몰라 이름으로 줄일 수 없다). 다른 워크로드가 없는 계정에서만 쓴다.
@@ -139,6 +139,8 @@
   ]
 }
 ```
+
+- 경계의 `AssumeRemediatorCaller`는 상한일 뿐이다. 실제 허용은 `central.yaml`이 엔진 역할 인라인 정책에 `RemediationEnabled`일 때만 만든다.
 
 ### 템플릿과 대조한 결과
 
@@ -659,6 +661,9 @@
 ### 3-2. 막은 우회 경로 (Deny 설명)
 
 - `DenyPivotAndQueueData`: `sts:AssumeRole`·`TagSession`·`SetSourceIdentity`와 SQS 메시지 동작(`SendMessage`, `ReceiveMessage`, `DeleteMessage`, `PurgeQueue`, `StartMessageMoveTask`)을 `*`에 거부한다. `CreateRole`(그리고 임시로 받는 `UpdateAssumeRolePolicy`)이 있으면 배포 역할이 **자기를 신뢰하는 역할**을 만들거나 기존 역할의 신뢰를 바꾼 뒤 그 역할을 맡아 비밀을 읽거나 고객 역할에 닿을 수 있다. 명시적 Deny는 신뢰 정책 기반 허용보다 이긴다. 그래서 배포 역할 세션으로는 어떤 역할도 맡지 못한다. 배포 역할이 만든 역할은 CloudFormation이 아니라 서비스(Lambda, Vercel)가 맡는다.
+  - **남는 경로(위험 수용).** 배포 역할이 만든 역할을 **외부**에서 맡는 경로는 막지 못한다. 외부 OIDC 공급자(`AssumeRoleWithWebIdentity`)나 외부 계정이 그 역할의 신뢰 정책에 들어 있으면, 배포 역할 세션 밖에서 맡을 수 있다. IAM은 `CreateRole`·`UpdateAssumeRolePolicy`가 쓰는 신뢰 정책의 **내용을 조건으로 제한하지 못하기** 때문이다(권한 경계는 만든 역할의 권한 상한만 건다).
+  - 이 위험은 D-57에서 수용했다(사용자 결정).
+  - 보완책 세 가지: (1) CloudTrail 알림(4-2절), (2) plan 승인 전 신뢰 정책·큐 정책 본문 확인(4-1절), (3) 임시 `TrustChange` 정책의 자동 만료(4절 3번의 `aws:CurrentTime` 조건).
 - `DenyForceDeleteSecret`: 비밀을 복구 기간 없이 지우는 삭제(`ForceDeleteWithoutRecovery=true`)를 거부한다. `UpdateSecret`은 허용하지 않는다. 템플릿의 비밀에는 이름·설명뿐이라 필요 없고, 바꿀 일은 사람이 한다.
 - `DenySecretValues`: 비밀 값 읽기·쓰기 거부.
 - 경계 쪽 `NeverAssumeCustomerRemediatorExceptCaller`: 만든 역할 중 `AlarmOpsCentral-RemediatorCaller` 말고는 고객 `AlarmOps-Remediator`를 맡지 못한다.
@@ -670,7 +675,10 @@
 
 1. `plan`의 작업 요약 맨 위 "IAM changes" 표(`.github/workflows/deploy-central.yml`의 256-262행이 만든다)에서 `AWS::IAM::Role` 행이 `Modify`인지 본다.
 2. CloudFormation 콘솔 → 스택 `alarmops-central` → 변경 세트 → 그 역할의 **세부 정보**에서 `AssumeRolePolicyDocument`가 바뀌는지 확인한다. 바뀌고 내용이 의도한 것일 때만 계속한다.
-3. 배포 역할에 **그 역할 하나만** 대상으로 하는 임시 인라인 정책 `AlarmOpsDeployCentral-TrustChange`를 붙인다.
+3. 붙이기 전에 **바뀐 신뢰 JSON이 `central.yaml`과 같은지** 확인한다.
+   - 변경 세트 세부 정보의 `AssumeRolePolicyDocument`를 파일로 복사하고, `central.yaml`의 해당 역할 `AssumeRolePolicyDocument`를 `${AWS::AccountId}` 등 값을 풀어 쓴 JSON과 `diff`로 비교한다.
+   - 차이가 있으면(특히 `Principal`, `Federated`, 외부 계정, `sub`) 중단하고 보안 담당과 정한다.
+4. 배포 역할에 **그 역할 하나만** 대상으로 하는 임시 인라인 정책 `AlarmOpsDeployCentral-TrustChange`를 붙인다. **붙인 시각 + 1시간**이 지나면 효력이 없어지도록 `aws:CurrentTime` 조건을 넣는다. `<붙인 시각 + 1시간(UTC, ISO 8601)>`은 사람이 값을 채운다(예: 형식 `YYYY-MM-DDThh:mm:ssZ`).
 
 ```json
 {
@@ -680,14 +688,65 @@
       "Sid": "TrustChangeOneRole",
       "Effect": "Allow",
       "Action": "iam:UpdateAssumeRolePolicy",
-      "Resource": "arn:<PARTITION>:iam::<ACCOUNT_ID>:role/<바뀌는 역할 이름>"
+      "Resource": "arn:<PARTITION>:iam::<ACCOUNT_ID>:role/<바뀌는 역할 이름>",
+      "Condition": {
+        "DateLessThan": {
+          "aws:CurrentTime": "<붙인 시각 + 1시간(UTC, ISO 8601)>"
+        }
+      }
     }
   ]
 }
 ```
 
-4. `apply`를 승인하고 끝나기를 기다린다. 실패하면 롤백이 같은 동작을 부를 수 있으니 스택이 `UPDATE_COMPLETE`나 `UPDATE_ROLLBACK_COMPLETE`가 될 때까지(롤백 가능성이 끝날 때까지) 정책을 떼지 않는다.
-5. 끝나면 임시 정책을 **삭제**한다. 이 정책은 `DenyPivotAndQueueData`에 걸리지 않는다(역할을 맡는 동작이 아니다).
+5. `apply`를 승인하고 끝나기를 기다린다. 실패하면 롤백이 같은 동작을 부를 수 있으니 스택이 `UPDATE_COMPLETE`나 `UPDATE_ROLLBACK_COMPLETE`가 될 때까지(롤백 가능성이 끝날 때까지) 정책을 떼지 않는다. 1시간 안에 끝나지 않으면 정책이 만료되므로 새 시각으로 다시 붙인다.
+6. 끝나면 임시 정책을 **삭제**한다(만료는 안전장치이고 삭제는 사람이 한다). 이 정책은 `DenyPivotAndQueueData`에 걸리지 않는다(역할을 맡는 동작이 아니다).
+7. 붙인 뒤(`apply` 끝난 뒤) 바뀐 역할의 **신뢰 정책에 외부 계정(`<ACCOUNT_ID>` 외 계정)이나 외부 OIDC `sub`(`token.actions.githubusercontent.com` 등 `Federated` 주체)가 없는지** IAM 콘솔 → 역할 → 신뢰 관계에서 읽어 확인한다. 있으면 즉시 신뢰 정책을 되돌리고 보안 담당에게 알린다.
+
+## 4-1. plan 승인 전 확인
+
+- [ ] `plan` 요약(IAM changes 표 등)에 아래 중 하나라도 있으면 CloudFormation 콘솔 → 스택 `alarmops-central` → 변경 세트 → 해당 리소스 **세부 정보**를 열어 본문을 읽고 의도한 내용일 때만 승인한다.
+  - `AWS::IAM::Role`(및 그 밖의 IAM 변경): `AssumeRolePolicyDocument`의 `Principal`(외부 계정, `Federated`)과 `Condition`을 읽는다.
+  - `AWS::SQS::QueuePolicy`: 큐 정책 본문의 `Principal`을 읽는다(외부 계정이 `SendMessage`/`ReceiveMessage`를 받으면 안 된다).
+  - `AWS::Lambda::Permission`: `Principal`과 `SourceArn`을 읽는다.
+  - `AWS::Events::Rule`: 대상과 이벤트 패턴을 읽는다.
+- [ ] 변경이 없으면 "IAM 변경 없음"으로 표시된 줄만 확인한다.
+
+## 4-2. 실고객 연결 전 필수
+
+배포 역할의 IAM·큐·함수 변경을 알리는 **CloudTrail 알림 규칙 1개**를 둔다. 구현은 **파일럿 전 이슈**로 남긴다(이 문서는 초안만 둔다). 실고객을 연결하기 전에 끝나야 한다.
+
+- 대상 이벤트(배포 역할 `AlarmOpsDeployCentral` 세션이 부른 것): `CreateRole`, `UpdateAssumeRolePolicy`, `PutRolePolicy`, `AttachRolePolicy`, `SetQueueAttributes`, `UpdateFunctionCode`, `AddPermission`
+- 규칙 초안(EventBridge 규칙 패턴, 서울 리전 기본 버스. IAM 이벤트는 글로벌이라 us-east-1 버스에도 같은 규칙이 필요할 수 있다. 확인 못 함):
+
+```json
+{
+  "source": ["aws.iam", "aws.sqs", "aws.lambda"],
+  "detail-type": ["AWS API Call via CloudTrail"],
+  "detail": {
+    "eventName": [
+      "CreateRole",
+      "UpdateAssumeRolePolicy",
+      "PutRolePolicy",
+      "AttachRolePolicy",
+      "SetQueueAttributes",
+      "UpdateFunctionCode",
+      "AddPermission"
+    ],
+    "userIdentity": {
+      "sessionContext": {
+        "sessionIssuer": {
+          "userName": ["AlarmOpsDeployCentral"]
+        }
+      }
+    }
+  }
+}
+```
+
+- 대상: SNS 토픽(구독은 보안 담당 이메일). 이메일 직접 대상은 EventBridge가 지원하지 않으므로 SNS를 거친다.
+- 정상 배포 때도 울린다. 알림이 `plan` 승인 때 읽은 변경과 맞는지 대조하고, 맞지 않으면 신뢰 정책을 확인한다.
+- 알림 규칙과 SNS는 배포 역할이 만들지 않는다. 사람이 만든다(배포 역할이 자기 알림을 끌 수 없게).
 
 ## 5. 콘솔 클릭 순서 (사람, 중앙 계정, 서울)
 

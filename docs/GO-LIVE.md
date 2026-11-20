@@ -603,14 +603,17 @@ http://localhost:3107/auth/dev-login?as=admin
      - `cloudformation:GetTemplate`(이 스택). `apply`가 변경 세트의 코드를 검증할 때 쓴다.
      - SAM 아티팩트 S3 버킷(사람이 만든 고정 버킷 `SAM_ARTIFACT_BUCKET`): 객체 쓰기와 `s3:GetObject`
      - 이 스택이 만드는 리소스의 생성·변경: Lambda, SQS, Events, Logs, Secrets Manager, CloudWatch 알람, API Gateway v2
-     - `arn:aws:iam::<계정>:role/AlarmOpsCentral-*` 역할의 생성·변경(`iam:CreateRole`, `PutRolePolicy`, `AttachRolePolicy` 등)
+     - `arn:aws:iam::<계정>:role/AlarmOpsCentral-*` 역할과 SAM 함수 역할 패턴 `alarmops-central-*` 역할의 생성·변경(`iam:CreateRole`, `PutRolePolicy`, `AttachRolePolicy` 등). 만들 때마다 경계 정책을 붙여야 한다
      - `iam:PassRole`: `AlarmOpsCentral-*`와 SAM이 만드는 함수 역할(`alarmops-central-*`)에, `iam:PassedToService=lambda.amazonaws.com` 조건으로만
      - 버스 스택 `DescribeStacks`
    - **권한 경계 필수**:
      - `AlarmOpsCentral-*` 역할만 만든다.
      - `PassRole`은 Lambda 서비스로만 한다.
      - 만든 역할에는 경계 정책을 붙이게 한다. `iam:PermissionsBoundary` 조건으로 건다.
-     - 경계 안에는 이 템플릿이 쓰는 서비스만 넣는다: sqs, secretsmanager, logs, events, lambda, `sts:AssumeRole`, `ses:SendEmail`.
+     - 경계 안에는 이 템플릿의 역할이 실제로 쓰는 서비스만 넣는다: sqs, secretsmanager(읽기), logs, `sts:AssumeRole`, `ses:SendEmail`.
+     - **events와 lambda는 뺀다.** 템플릿이 만드는 역할 중 `events:*`·`lambda:*`를 쓰는 것이 없다(EventBridge가 큐·함수 리소스 정책으로 호출하고, 역할 권한이 아니다). 나중에 필요해지면 경계에도 같이 넣는다(`infra/aws/deploy-role-policy.md` 2절).
+     - `sts:AssumeRole`의 `AssumeRemediatorCaller`는 상한일 뿐이다. 실제 허용은 `RemediationEnabled`일 때만 인라인 정책으로 만든다.
+     - **신뢰 정책 변경의 우회 위험은 수용했다(D-57).** 배포 역할이 만든 역할을 외부에서 맡는 경로가 남는다. 보완책(CloudTrail 알림, plan 승인 전 본문 확인, `TrustChange` 정책 1시간 자동 만료)은 같은 문서 3-2·4·4-1·4-2절에 있다. **CloudTrail 알림 규칙은 실고객 연결 전 필수다**(구현은 파일럿 전 이슈).
    - `bus-allowlist`는 이 역할로 돌리지 않는다. 버스 허용 목록용 별도 역할 `AlarmOpsDeployBus`를 만든다(`infra/aws/deploy-role-policy.md` 3-1). 신뢰 `sub`는 `repo:hkjs96/alarmops:environment:central-bus`다. 이 배포 역할에는 버스 스택 `DescribeStacks`만 둔다.
    - 정책 JSON 초안(신뢰 정책, 권한 정책, 권한 경계 정책)과 콘솔 클릭 순서는 `infra/aws/deploy-role-policy.md`에 있다. 본인이 검토해 AWS 콘솔에 넣는다. 권한 경계 정책을 먼저 만든다.
 
