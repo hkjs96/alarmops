@@ -604,11 +604,11 @@ http://localhost:3107/auth/dev-login?as=admin
      - SAM 아티팩트 S3 버킷(사람이 만든 고정 버킷 `SAM_ARTIFACT_BUCKET`): 객체 쓰기와 `s3:GetObject`
      - 이 스택이 만드는 리소스의 생성·변경: Lambda, SQS, Events, Logs, Secrets Manager, CloudWatch 알람, API Gateway v2
      - `arn:aws:iam::<계정>:role/AlarmOpsCentral-*` 역할과 SAM 함수 역할 패턴 `alarmops-central-*` 역할의 생성·변경(`iam:CreateRole`, `PutRolePolicy`, `AttachRolePolicy` 등). 만들 때마다 경계 정책을 붙여야 한다
-     - `iam:PassRole`: `AlarmOpsCentral-*`와 SAM이 만드는 함수 역할(`alarmops-central-*`)에, `iam:PassedToService=lambda.amazonaws.com` 조건으로만
+     - `iam:PassRole`: `AlarmOpsCentral-Engine`과 SAM 함수 역할(`alarmops-central-*FunctionRole-*`)에만, `iam:PassedToService=lambda.amazonaws.com` 조건으로
      - 버스 스택 `DescribeStacks`
    - **권한 경계 필수**:
-     - `AlarmOpsCentral-*` 역할만 만든다.
-     - `PassRole`은 Lambda 서비스로만 한다.
+     - `AlarmOpsCentral-*`와 SAM 함수 역할 `alarmops-central-*` 역할만 만든다.
+     - `PassRole`은 Lambda 서비스로만 하고 대상은 Engine과 SAM 함수 역할로 좁힌다.
      - 만든 역할에는 경계 정책을 붙이게 한다. `iam:PermissionsBoundary` 조건으로 건다.
      - 경계 안에는 이 템플릿의 역할이 실제로 쓰는 서비스만 넣는다: sqs, secretsmanager(읽기), logs, `sts:AssumeRole`, `ses:SendEmail`.
      - **events와 lambda는 뺀다.** 템플릿이 만드는 역할 중 `events:*`·`lambda:*`를 쓰는 것이 없다(EventBridge가 큐·함수 리소스 정책으로 호출하고, 역할 권한이 아니다). 나중에 필요해지면 경계에도 같이 넣는다(`infra/aws/deploy-role-policy.md` 2절).
@@ -899,6 +899,8 @@ npm ci --ignore-scripts && npm run build:lambda -w @alarmops/ingest && npm run b
 
 > **주의** ExternalId는 고객 담당자에게만 준다. 이슈·PR에 적지 않는다.
 
+- [ ] CloudTrail 알림 규칙 2개 동작 확인(`infra/aws/deploy-role-policy.md` 4-2). 첫 실고객 연결 전에 끝낸다.
+
 ### 7-2. 허용 목록에 계정 추가 (10분)
 
 어디서: GitHub 저장소의 Actions
@@ -936,6 +938,8 @@ npm ci --ignore-scripts && npm run build:lambda -w @alarmops/ingest && npm run b
    | `EnableTagWriter` | 7-1에서 고른 것과 같게(기본 `false`) | |
    | `EnableRemediator` | `false` 그대로 | 파일럿에서는 켜지 않는다 |
    | `RemediatorCallerRoleArn` | 비워 둔다 | `EnableRemediator`가 `true`일 때만 필요 |
+
+- 고객이 경계(`PermissionsBoundaryArn`)를 쓰면 연결 점검(Reader·이벤트 전달)을 돌려 AccessDenied가 없는지 확인한다.
 
 3. 고객 담당자가 할 일:
    1. 자기 AWS 콘솔에서 리전을 **서울(ap-northeast-2)** 로 바꾼다.

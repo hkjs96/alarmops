@@ -22,7 +22,7 @@
    - 별도 브랜치 `agent/central-boundary-template`가 `central.yaml`에 `PermissionsBoundary`(세 역할과 `Globals.Function`)를 넣고, `deploy-central`을 `--s3-bucket "$SAM_ARTIFACT_BUCKET"`으로, `bus-allowlist`를 `central-bus` 환경으로 바꾼다.
    - **머지 순서: 그 PR을 먼저 머지하고, 그 다음에 첫 `plan`을 돌린다.**
    - 스택이 이미 있는 채로 경계를 붙이면 CloudFormation이 `iam:PutRolePermissionsBoundary`를 부른다. 그래서 권한 정책에 그 경계 ARN 조건의 허용(`IamPutBoundaryOnlyOurs`)을 넣었다.
-2. 권한 정책은 공백을 빼고 8,212자(실제 값을 넣은 기준, JSON을 압축해 센 값)라 **관리형 정책 한도(6,144자)를 넘는다.** 그래서 역할의 **인라인 정책**으로 넣는다(역할당 인라인 정책 합계 한도 10,240자). 신뢰 정책 변경용 임시 정책(`DateLessThan` 조건 포함, 시각 값을 채운 기준 약 300자)이 붙어 있는 동안에도 합계 약 8,500자라 한도 안이다.
+2. 권한 정책은 공백을 빼고 8,212자(실제 값을 넣은 기준, JSON을 압축해 센 값)라 **관리형 정책 한도(6,144자)를 넘는다.** 그래서 역할의 **인라인 정책**으로 넣는다(역할당 인라인 정책 합계 한도 10,240자). 신뢰 정책 변경용 임시 정책(`DateLessThan` 조건 포함, 두 패턴·시각 값을 채운 기준 약 400자)이 붙어 있는 동안에도 합계 약 8,600자라 한도 안이다.
 3. SAM 아티팩트 버킷은 `--resolve-s3` 대신 사람이 만든 고정 버킷을 쓴다. 이렇게 하면 `aws-sam-cli-managed-default` 스택·버킷 생성 권한과 와일드카드 버킷 권한이 필요 없다. 아래 5번의 6단계에서 만든다.
 4. 첫 배포가 실패해 스택이 `ROLLBACK_COMPLETE`가 되면 **사람이** 콘솔에서 스택을 지운다. 배포 역할에는 `DeleteStack`이 없다. 지운 뒤 `plan`을 다시 돌린다.
 5. 중앙 계정은 `AlarmOps` 전용이라고 가정한다. PoC는 D-57에 따라 공유 테스트 계정일 수 있다. 그 경우 `ApiGatewayHttpApi`의 `/apis/*` 와일드카드가 같은 계정의 다른 HTTP API까지 열어 주는 위험이 있다(생성 전에는 API ID를 몰라 이름으로 줄일 수 없다). 다른 워크로드가 없는 계정에서만 쓴다.
@@ -663,7 +663,7 @@
 - `DenyPivotAndQueueData`: `sts:AssumeRole`·`TagSession`·`SetSourceIdentity`와 SQS 메시지 동작(`SendMessage`, `ReceiveMessage`, `DeleteMessage`, `PurgeQueue`, `StartMessageMoveTask`)을 `*`에 거부한다. `CreateRole`(그리고 임시로 받는 `UpdateAssumeRolePolicy`)이 있으면 배포 역할이 **자기를 신뢰하는 역할**을 만들거나 기존 역할의 신뢰를 바꾼 뒤 그 역할을 맡아 비밀을 읽거나 고객 역할에 닿을 수 있다. 명시적 Deny는 신뢰 정책 기반 허용보다 이긴다. 그래서 배포 역할 세션으로는 어떤 역할도 맡지 못한다. 배포 역할이 만든 역할은 CloudFormation이 아니라 서비스(Lambda, Vercel)가 맡는다.
   - **남는 경로(위험 수용).** 배포 역할이 만든 역할을 **외부**에서 맡는 경로는 막지 못한다. 외부 OIDC 공급자(`AssumeRoleWithWebIdentity`)나 외부 계정이 그 역할의 신뢰 정책에 들어 있으면, 배포 역할 세션 밖에서 맡을 수 있다. IAM은 `CreateRole`·`UpdateAssumeRolePolicy`가 쓰는 신뢰 정책의 **내용을 조건으로 제한하지 못하기** 때문이다(권한 경계는 만든 역할의 권한 상한만 건다).
   - 이 위험은 D-57에서 수용했다(사용자 결정).
-  - 보완책 세 가지: (1) CloudTrail 알림(4-2절), (2) plan 승인 전 신뢰 정책·큐 정책 본문 확인(4-1절), (3) 임시 `TrustChange` 정책의 자동 만료(4절 3번의 `aws:CurrentTime` 조건).
+  - 보완책 세 가지: (1) CloudTrail 알림 규칙 2개(4-2절), (2) plan 승인 전 신뢰 정책·큐 정책 본문 확인(4-1절), (3) 임시 `TrustChange` 정책의 자동 만료(4절 3번의 `aws:CurrentTime` 조건).
 - `DenyForceDeleteSecret`: 비밀을 복구 기간 없이 지우는 삭제(`ForceDeleteWithoutRecovery=true`)를 거부한다. `UpdateSecret`은 허용하지 않는다. 템플릿의 비밀에는 이름·설명뿐이라 필요 없고, 바꿀 일은 사람이 한다.
 - `DenySecretValues`: 비밀 값 읽기·쓰기 거부.
 - 경계 쪽 `NeverAssumeCustomerRemediatorExceptCaller`: 만든 역할 중 `AlarmOpsCentral-RemediatorCaller` 말고는 고객 `AlarmOps-Remediator`를 맡지 못한다.
@@ -688,7 +688,10 @@
       "Sid": "TrustChangeOneRole",
       "Effect": "Allow",
       "Action": "iam:UpdateAssumeRolePolicy",
-      "Resource": "arn:<PARTITION>:iam::<ACCOUNT_ID>:role/<바뀌는 역할 이름>",
+      "Resource": [
+        "arn:<PARTITION>:iam::<ACCOUNT_ID>:role/AlarmOpsCentral-<바뀌는 역할 이름>",
+        "arn:<PARTITION>:iam::<ACCOUNT_ID>:role/alarmops-central-<바뀌는 역할 이름>"
+      ],
       "Condition": {
         "DateLessThan": {
           "aws:CurrentTime": "<붙인 시각 + 1시간(UTC, ISO 8601)>"
@@ -698,6 +701,9 @@
   ]
 }
 ```
+
+   - `Resource`는 두 패턴(`role/AlarmOpsCentral-*`, `role/alarmops-central-*`) 안으로만 고정한다. `*` 자리에 바뀌는 역할의 정확한 이름을 채우고, 해당하지 않는 줄은 지운다.
+   - `AlarmOpsDeployCentral`·`AlarmOpsDeployBus`·`AlarmOps-*`(고객 연결 역할 이름 패턴)는 넣지 않는다.
 
 5. `apply`를 승인하고 끝나기를 기다린다. 실패하면 롤백이 같은 동작을 부를 수 있으니 스택이 `UPDATE_COMPLETE`나 `UPDATE_ROLLBACK_COMPLETE`가 될 때까지(롤백 가능성이 끝날 때까지) 정책을 떼지 않는다. 1시간 안에 끝나지 않으면 정책이 만료되므로 새 시각으로 다시 붙인다.
 6. 끝나면 임시 정책을 **삭제**한다(만료는 안전장치이고 삭제는 사람이 한다). 이 정책은 `DenyPivotAndQueueData`에 걸리지 않는다(역할을 맡는 동작이 아니다).
@@ -714,14 +720,13 @@
 
 ## 4-2. 실고객 연결 전 필수
 
-배포 역할의 IAM·큐·함수 변경을 알리는 **CloudTrail 알림 규칙 1개**를 둔다. 구현은 **파일럿 전 이슈**로 남긴다(이 문서는 초안만 둔다). 실고객을 연결하기 전에 끝나야 한다.
+배포 역할의 IAM·큐·함수 변경을 알리는 **CloudTrail 알림 규칙 2개**(리전별 1개씩)를 둔다. 구현은 **파일럿 전 이슈**로 남긴다(이 문서는 초안만 둔다). 실고객을 연결하기 전에 끝나야 한다. 두 규칙 모두 배포 역할 `AlarmOpsDeployCentral` 세션이 부른 호출만 잡는다.
 
-- 대상 이벤트(배포 역할 `AlarmOpsDeployCentral` 세션이 부른 것): `CreateRole`, `UpdateAssumeRolePolicy`, `PutRolePolicy`, `AttachRolePolicy`, `SetQueueAttributes`, `UpdateFunctionCode`, `AddPermission`
-- 규칙 초안(EventBridge 규칙 패턴, 서울 리전 기본 버스. IAM 이벤트는 글로벌이라 us-east-1 버스에도 같은 규칙이 필요할 수 있다. 확인 못 함):
+**규칙 1: us-east-1 (IAM은 글로벌 이벤트라 us-east-1로 온다).** 대상 이벤트: `CreateRole`, `UpdateAssumeRolePolicy`, `PutRolePolicy`, `AttachRolePolicy`, `PutRolePermissionsBoundary`
 
 ```json
 {
-  "source": ["aws.iam", "aws.sqs", "aws.lambda"],
+  "source": ["aws.iam"],
   "detail-type": ["AWS API Call via CloudTrail"],
   "detail": {
     "eventName": [
@@ -729,9 +734,7 @@
       "UpdateAssumeRolePolicy",
       "PutRolePolicy",
       "AttachRolePolicy",
-      "SetQueueAttributes",
-      "UpdateFunctionCode",
-      "AddPermission"
+      "PutRolePermissionsBoundary"
     ],
     "userIdentity": {
       "sessionContext": {
@@ -744,9 +747,36 @@
 }
 ```
 
+**규칙 2: 서울 (`ap-northeast-2`).** 대상 이벤트: SQS `SetQueueAttributes`, Lambda `UpdateFunctionCode*`·`UpdateFunctionConfiguration*`·`AddPermission*`(이름 뒤에 버전 접미사가 붙을 수 있어 prefix 매칭), EventBridge `PutPermission`(버스 허용 목록 역할 `AlarmOpsDeployBus`)
+
+```json
+{
+  "source": ["aws.sqs", "aws.lambda", "aws.events"],
+  "detail-type": ["AWS API Call via CloudTrail"],
+  "detail": {
+    "eventName": [
+      "SetQueueAttributes",
+      { "prefix": "UpdateFunctionCode" },
+      { "prefix": "UpdateFunctionConfiguration" },
+      { "prefix": "AddPermission" },
+      "PutPermission"
+    ],
+    "userIdentity": {
+      "sessionContext": {
+        "sessionIssuer": {
+          "userName": ["AlarmOpsDeployCentral", "AlarmOpsDeployBus"]
+        }
+      }
+    }
+  }
+}
+```
+
 - 대상: SNS 토픽(구독은 보안 담당 이메일). 이메일 직접 대상은 EventBridge가 지원하지 않으므로 SNS를 거친다.
+- **SNS 토픽은 규칙과 같은 리전에 둔다.** us-east-1에도 토픽을 두거나, us-east-1 규칙의 대상을 서울 버스로 전달한다. 토픽 정책에서 `events.amazonaws.com`의 `sns:Publish`를 허용한다.
 - 정상 배포 때도 울린다. 알림이 `plan` 승인 때 읽은 변경과 맞는지 대조하고, 맞지 않으면 신뢰 정책을 확인한다.
 - 알림 규칙과 SNS는 배포 역할이 만들지 않는다. 사람이 만든다(배포 역할이 자기 알림을 끌 수 없게).
+- 후속 아이디어: `AlarmOpsCentral-*` 역할에 대한 `AssumeRole`·`AssumeRoleWithWebIdentity`를 평소와 다른 주체가 부르면 알리는 규칙.
 
 ## 5. 콘솔 클릭 순서 (사람, 중앙 계정, 서울)
 
