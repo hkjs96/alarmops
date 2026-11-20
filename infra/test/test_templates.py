@@ -91,7 +91,7 @@ class CustomerStack(unittest.TestCase):
             (t,) = RES[rule]["Properties"]["Targets"]
             self.assertEqual(t["Arn"], {"Ref": "CentralEventBusArn"})
             self.assertEqual(t["RoleArn"], {"Fn::GetAtt": "EventForwarderRole.Arn"})
-        self.assertEqual(RES["AlarmStateRule"]["Properties"]["EventPattern"]["detail-type"],
+        self.assertEqual(RES["AlarmStateRule"]["Properties"]["EventPattern"]["Fn::If"][2]["detail-type"],
                          ["CloudWatch Alarm State Change"])
 
     def test_reader_has_no_write_and_denies_secrets(self):

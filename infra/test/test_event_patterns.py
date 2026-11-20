@@ -11,7 +11,7 @@ import re
 import unittest
 from pathlib import Path
 
-from test_templates import RES
+from test_templates import RES, T
 
 
 def _leaf(rule, value) -> bool:
@@ -47,7 +47,9 @@ def match_obj(pattern: dict, event) -> bool:
 
 
 TAG = RES["TagChangeRule"]["Properties"]["EventPattern"]
-ALARM = RES["AlarmStateRule"]["Properties"]["EventPattern"]
+_IF = RES["AlarmStateRule"]["Properties"]["EventPattern"]["Fn::If"]
+assert _IF[0] == "AlarmScopeManagedPrefix"
+ALARM_PREFIX, ALARM = _IF[1], _IF[2]       # AlarmScope=managed-prefix, AlarmScope=all (default)
 
 
 def ct(name: str, params, source: str = "aws.ec2") -> dict:
@@ -115,13 +117,49 @@ class TagChangePattern(unittest.TestCase):
         self.assertEqual(engine, set(TAG["detail"]["eventName"]))
 
 
+def alarm_ev(name: str, detail_type: str = "CloudWatch Alarm State Change", source: str = "aws.cloudwatch") -> dict:
+    return {"source": source, "detail-type": detail_type, "detail": {"alarmName": name}}
+
+
 class AlarmStatePattern(unittest.TestCase):
-    def test_all_alarm_state_changes_still_forwarded(self):
-        """Not narrowed on purpose (README: central ingests customer-owned alarms too)."""
-        ev = {"source": "aws.cloudwatch", "detail-type": "CloudWatch Alarm State Change", "detail": {"alarmName": "customer-own-alarm"}}
-        self.assertTrue(match_obj(ALARM, ev))
-        ev["detail"]["alarmName"] = "[EC2] web CPU (TagName: i-1)"
-        self.assertTrue(match_obj(ALARM, ev))
+    OWN = ["[EC2] web CPU (TagName: i-1)", "[AuroraRDS] db ACUUtilization (TagName: x)", "[WAF] acl BlockedRequests (TagName: y)"]
+    CUSTOMER = ["customer-own-alarm", "AlarmOps-legacy", "[Unknown] x", "[EC2]no-space", "ec2 [EC2] x", "[ec2] lower"]
+
+    def test_all_forwards_everything(self):
+        for n in self.OWN + self.CUSTOMER:
+            with self.subTest(n):
+                self.assertTrue(match_obj(ALARM, alarm_ev(n)))
+
+    def test_managed_prefix_forwards_only_alarmops_names(self):
+        for n in self.OWN:
+            with self.subTest(n):
+                self.assertTrue(match_obj(ALARM_PREFIX, alarm_ev(n)))
+        for n in self.CUSTOMER:
+            with self.subTest(n):
+                self.assertFalse(match_obj(ALARM_PREFIX, alarm_ev(n)))
+
+    def test_other_events_never_match(self):
+        for pat in (ALARM, ALARM_PREFIX):
+            self.assertFalse(match_obj(pat, alarm_ev("[EC2] x", "CloudWatch Alarm Configuration Change")))
+            self.assertFalse(match_obj(pat, alarm_ev("[EC2] x", source="aws.ec2")))
+
+    def test_prefixes_cover_the_29_engine_types(self):
+        root = Path(__file__).resolve().parents[2] / "services/alarm-engine/src/alarm_engine/resource_types"
+        types = set()
+        for f in root.glob("*.py"):
+            types |= set(re.findall(r'^\s+type="([^"]+)"', f.read_text(encoding="utf-8"), re.M))
+        got = {r["prefix"] for r in ALARM_PREFIX["detail"]["alarmName"]}
+        self.assertEqual(len(types), 29)
+        self.assertEqual(got, {f"[{t}] " for t in types})
+
+    def test_size_limit(self):
+        for pat in (ALARM, ALARM_PREFIX):
+            self.assertLess(len(json.dumps(pat)), 4096)
+
+    def test_parameter(self):
+        p = T["Parameters"]["AlarmScope"]
+        self.assertEqual(p["Default"], "all")
+        self.assertEqual(p["AllowedValues"], ["all", "managed-prefix"])
 
 
 if __name__ == "__main__":

@@ -14,6 +14,8 @@ Metadata:
         Parameters: [PermissionsBoundaryArn]
       - Label: { default: "Optional capabilities (all off by default)" }
         Parameters: [EnableAlarmWriter, EnableTagWriter, EnableRemediator, RemediatorCallerRoleArn]
+      - Label: { default: "Event forwarding scope" }
+        Parameters: [AlarmScope]
 
 Parameters:
   CentralRoleArn:
@@ -62,6 +64,14 @@ Parameters:
     Default: "false"
     AllowedValues: ["true", "false"]
     Description: Stop EC2/RDS and delete load balancers that carry Monitoring=on, only after a person approves in Slack.
+  AlarmScope:
+    Type: String
+    Default: all
+    AllowedValues: [all, managed-prefix]
+    Description: >-
+      all (default) forwards every CloudWatch alarm state change of this account. managed-prefix forwards only alarms
+      whose name starts with "[{type}] " for the 29 AlarmOps resource types; alarms you created yourself under other
+      names do not become incidents. A name prefix is not proof of ownership (ManagedBy tag is).
 
 Rules:
   RemediatorNeedsCaller:
@@ -75,6 +85,7 @@ Conditions:
   UseAlarmWriter: !Equals [!Ref EnableAlarmWriter, "true"]
   UseTagWriter: !Equals [!Ref EnableTagWriter, "true"]
   UseRemediator: !Equals [!Ref EnableRemediator, "true"]
+  AlarmScopeManagedPrefix: !Equals [!Ref AlarmScope, managed-prefix]
 
 Resources:
   # ---------------------------------------------------------------- Reader (required)
@@ -241,9 +252,14 @@ Resources:
       Name: AlarmOps-AlarmStateChange
       Description: Forward CloudWatch alarm state changes to the central AlarmOps bus.
       State: ENABLED
-      EventPattern:
-        source: [aws.cloudwatch]
-        detail-type: [CloudWatch Alarm State Change]
+      EventPattern: !If
+        - AlarmScopeManagedPrefix
+        - source: [aws.cloudwatch]
+          detail-type: [CloudWatch Alarm State Change]
+          detail:
+            alarmName: [{ prefix: "[ACM] " }, { prefix: "[ALB] " }, { prefix: "[APIGW] " }, { prefix: "[AuroraRDS] " }, { prefix: "[Backup] " }, { prefix: "[CLB] " }, { prefix: "[CloudFront] " }, { prefix: "[DX] " }, { prefix: "[DocDB] " }, { prefix: "[DynamoDB] " }, { prefix: "[EC2] " }, { prefix: "[ECS] " }, { prefix: "[EFS] " }, { prefix: "[ElastiCache] " }, { prefix: "[Lambda] " }, { prefix: "[MQ] " }, { prefix: "[MSK] " }, { prefix: "[NAT] " }, { prefix: "[NLB] " }, { prefix: "[OpenSearch] " }, { prefix: "[RDS] " }, { prefix: "[Route53] " }, { prefix: "[S3] " }, { prefix: "[SNS] " }, { prefix: "[SQS] " }, { prefix: "[SageMaker] " }, { prefix: "[TG] " }, { prefix: "[VPN] " }, { prefix: "[WAF] " }]
+        - source: [aws.cloudwatch]
+          detail-type: [CloudWatch Alarm State Change]
       Targets:
         - Id: central-bus
           Arn: !Ref CentralEventBusArn

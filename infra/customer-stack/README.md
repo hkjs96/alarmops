@@ -67,7 +67,7 @@ EventBridge 규칙은 `events.amazonaws.com`이 역할을 맡아 중앙 버스�
 
 ### 전달하는 이벤트
 
-- `AlarmOps-AlarmStateChange`: `aws.cloudwatch` / `CloudWatch Alarm State Change`. **고객 계정의 모든 알람**을 보낸다(이름으로 거르지 않음, 아래 "알람 상태 규칙을 좁히지 않은 이유").
+- `AlarmOps-AlarmStateChange`: `aws.cloudwatch` / `CloudWatch Alarm State Change`. 기본은 **고객 계정의 모든 알람**이고, `AlarmScope=managed-prefix`면 AlarmOps 이름 접두사 알람만(아래 "`AlarmScope`").
 - `AlarmOps-TagChange`: CloudTrail 관리 이벤트 중 태그 추가·삭제 API(`CreateTags`, `DeleteTags`, `AddTagsToResource`, `RemoveTagsFromResource`, `AddTags`, `RemoveTags`, `TagResource`, `UntagResource`, `TagResources`, `UntagResources`, `TagQueue`, `UntagQueue`) 가운데, **요청에 태그 키 `Monitoring` 또는 `Threshold_*`가 들어 있는 것만** 보낸다. 전역 서비스(IAM, CloudFront, Route 53)의 이벤트는 us-east-1에서 나오므로 서울 스택으로는 오지 않는다.
 
 ### 태그 규칙을 좁힌 방식 (#89)
@@ -91,9 +91,16 @@ CloudTrail `requestParameters`의 태그 위치는 서비스마다 달라서, �
 - Lambda의 실제 CloudTrail 이벤트 이름은 버전 접미사가 붙은 `TagResource20170331v2` 계열일 수 있다(추정). 이 규칙도 엔진도 원래 `TagResource`만 받으므로 이번 변경 범위 밖이다. 확인이 필요하다.
 - 값(`Monitoring=on` 여부)은 거르지 않는다. `off`로 바꾸거나 값만 바꾸는 이벤트도 NEEDS_REVIEW 판정에 필요하기 때문이다.
 
-### 알람 상태 규칙을 좁히지 않은 이유
+### 알람 상태 규칙의 범위: `AlarmScope`
 
-EventBridge 이벤트의 `detail`에는 알람 태그가 없고 `alarmName`·`configuration.description`만 있다. 이름 접두사(`[EC2] `처럼 `[{type}] `, 29종 목록)로 거르는 것은 패턴상 가능하다. 그러나 **중앙이 고객 자체 알람도 일부러 받는다**: `packages/core/src/normalize/cloudwatch.ts`는 메타데이터가 없는 알람을 `managed=false`, `parseError="unmanaged alarm format"`으로 적재하고(`docs/specs/fingerprint.md`·`known-bugs.md` 1-3, `severity.md`), 알람 이름 접두사는 소유 증거도 아니다(고객 알람이 `[EC2]`로 시작할 수 있고, 소유 판정은 `ManagedBy` 태그가 한다). 접두사로 거르면 고객 자체 알람의 인시던트·알림이 사라진다. 이는 D-05/D-43 범위의 제품 동작 변경이라 사용자 결정이 필요해 이번에는 바꾸지 않았다. 고객 쪽 전송과 중앙 수집 모두 그대로다.
+EventBridge 이벤트의 `detail`에는 알람 태그가 없고 `alarmName`·`configuration.description`만 있다. 그래서 고객이 파라미터로 고른다.
+
+| 값 | 전달 | 결과 |
+|---|---|---|
+| `all`(기본) | 이 계정의 모든 CloudWatch 알람 상태 변경 | 고객이 직접 만든 알람도 중앙이 적재한다(`managed=false`, "unmanaged alarm format") |
+| `managed-prefix` | `detail.alarmName`이 `[{type}] `로 시작하는 알람만(29종: `naming.alarm_name`의 `[{resourceType}] ` 접두사, 이름이 길어도 접두사는 잘리지 않는다) | **고객이 직접 만든 알람은 인시던트가 되지 않는다.** 고객 데이터 전송이 최소가 된다 |
+
+이름 접두사는 소유 증명이 아니다. 고객 알람이 `[EC2] ...`로 시작하면 그대로 전달되고, 소유 판정은 `ManagedBy` 태그가 한다. 29종에 없는 유형 이름을 엔진이 새로 쓰면 이 목록(`template.yaml`의 `AlarmStateRule`)도 같이 고쳐야 한다. 중앙·엔진 코드는 바꾸지 않았다.
 
 ## 오프라인 검증
 
