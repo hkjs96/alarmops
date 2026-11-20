@@ -10,7 +10,30 @@
 | `RemediatorCallerRoleArn` | `EnableRemediator=true`일 때 필수. 승인된 조치를 실행하는 **별도** 중앙 역할 ARN. Remediator는 `CentralRoleArn`을 신뢰하지 않는다 |
 | `ExternalId` | 콘솔이 연결마다 발급, 16자 이상, 기본값 없음 |
 | `CentralEventBusArn` | 중앙 버스 ARN(출력 `CentralBusArn`). 먼저 허용 목록에 계정이 추가돼 있어야 한다 |
+| `PermissionsBoundaryArn` | 선택, 기본 빈값. 값이 있으면 역할 5개 모두에 권한 경계로 붙는다. 비면 붙이지 않는다(`AWS::NoValue`) |
+| `RolePath` | 기본 `/`. 역할 5개의 IAM 경로. `/`로 시작하고 끝나야 한다 |
 | `EnableAlarmWriter`, `EnableTagWriter`, `EnableRemediator` | 기본 `false` |
+
+## 고객 조직이 권한 경계나 SCP를 요구할 때 (D-58)
+
+실고객 조직은 SCP나 권한 경계가 없으면 `iam:CreateRole`을 막는 경우가 있다. 이때 스택 생성이 `CreateRole`에서 실패한다.
+
+- **권한 경계**: 고객이 지정한 경계 정책 ARN을 `PermissionsBoundaryArn`에 준다. 경계는 권한을 더하지 못하고 줄이기만 하므로, 경계 정책이 켠 역할의 동작(위 표)을 허용해야 한다. 특히 `sts:AssumeRole` 신뢰는 경계와 무관하지만 Reader의 `cloudwatch:*`·`tag:*` 조회, AlarmWriter의 `cloudwatch:PutMetricAlarm`, EventForwarder의 `events:PutEvents`가 경계에 막히면 해당 기능이 AccessDenied가 된다.
+- **경로**: 고객이 특정 경로(`/org/security/` 등)의 역할만 허용하면 `RolePath`를 준다. 역할 이름은 항상 `AlarmOps-*`다.
+- **CloudFormation 실행 주체**: 스택을 만드는 사람의 권한에도 `iam:CreateRole`, `iam:PutRolePolicy`(경계가 있으면 `iam:PermissionsBoundary` 조건)가 필요하다. 이는 고객 쪽 조직이 정한다.
+
+> **RolePath 경고(미지원)**: 지금 백엔드(`packages/api/src/onboardingApi.ts`의 `roleArn()`)는 역할 ARN을 `arn:aws:iam::<계정>:role/AlarmOps-<역할>`로 계정 ID와 이름만으로 조립하고, 계정 행에 경로 필드가 없다. 엔진은 DB에 저장된 ARN을 그대로 AssumeRole 하므로 엔진 자체는 경로를 처리하지만, 저장되는 ARN이 경로 없이 만들어진다. 또 중앙 `infra/aws/central.yaml`의 `role/AlarmOps-*` 리소스는 `role/<경로>/AlarmOps-*`와 맞지 않는다. 따라서 **`RolePath`는 `/`(기본값)만 종단 간 동작한다.** 경로를 쓰려면 `CloudAccount`에 `rolePath` 필드(db), `roleArn()`과 파티션 처리(packages/api), 중앙 정책 리소스 확장(infra)이 함께 필요하다(별도 이슈). 경계 파라미터는 ARN 조립과 무관하므로 지금도 쓸 수 있다.
+> 파티션도 같은 상태다: 템플릿 패턴과 정책은 `aws`, `aws-cn`, `aws-us-gov`를 받지만 백엔드 `roleArn()`은 `aws`로 고정이다.
+
+### Organizations·Control Tower 의존 점검
+
+`template.yaml`을 점검한 결과(테스트 `CustomerStackBoundary.test_no_organizations_or_stackset_dependency`가 CI에서 확인):
+
+- `aws:PrincipalOrgID`, `aws:PrincipalOrgPaths`, `organizations:*` 사용 없음. 신뢰는 `CentralRoleArn` 한 개와 ExternalId뿐이다.
+- StackSets·Control Tower 자원 없음. 일반 스택(`CreateStack`) 하나로 CT 관리 계정, CT 멤버 계정, 일반 계정 어디서나 만든다.
+- 하드코딩된 파티션 없음(정책 ARN은 `${AWS::Partition}`, 파라미터 패턴은 `arn:aws[a-z-]*:`).
+- 남은 외부 의존: `CentralEventBusArn`은 서울 리전으로 고정(`ap-northeast-2`). 중앙 버스의 계정 허용 목록은 `infra/aws`의 별도 절차다. SCP가 리전이나 `events:PutEvents`를 막는 조직은 이 두 가지를 직접 확인해야 한다.
+- 실제 SCP·경계 하에서의 `CreateStack` 성공은 이 환경에서 검증하지 못했다(미확인).
 
 ## 역할별 권한 목록
 

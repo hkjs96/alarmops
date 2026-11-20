@@ -10,6 +10,8 @@ Metadata:
     ParameterGroups:
       - Label: { default: "Connection (given by the MSP)" }
         Parameters: [CentralRoleArn, ExternalId, CentralEventBusArn]
+      - Label: { default: "Customer organization constraints (SCP / permissions boundary)" }
+        Parameters: [PermissionsBoundaryArn, RolePath]
       - Label: { default: "Optional capabilities (all off by default)" }
         Parameters: [EnableAlarmWriter, EnableTagWriter, EnableRemediator, RemediatorCallerRoleArn]
 
@@ -17,7 +19,7 @@ Parameters:
   CentralRoleArn:
     Type: String
     Description: ARN of the one central AlarmOps role that may assume the roles of this stack (not an account root).
-    AllowedPattern: '^arn:aws:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$'
+    AllowedPattern: '^arn:aws[a-z-]*:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$'
     ConstraintDescription: Must be an IAM role ARN, e.g. arn:aws:iam::111122223333:role/AlarmOpsEngine
   ExternalId:
     Type: String
@@ -28,14 +30,32 @@ Parameters:
   CentralEventBusArn:
     Type: String
     Description: ARN of the central AlarmOps event bus (ap-northeast-2) that receives forwarded events.
-    AllowedPattern: '^arn:aws:events:ap-northeast-2:[0-9]{12}:event-bus/[A-Za-z0-9._-]+$'
+    AllowedPattern: '^arn:aws[a-z-]*:events:ap-northeast-2:[0-9]{12}:event-bus/[A-Za-z0-9._-]+$'
   RemediatorCallerRoleArn:
     Type: String
     Default: ""
     Description: >-
       Only used when EnableRemediator is true (then required). ARN of the separate central role that executes approved
       remediations. Kept apart from CentralRoleArn so the discovery/alarm role can never stop or delete anything.
-    AllowedPattern: '^$|^arn:aws:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$'
+    AllowedPattern: '^$|^arn:aws[a-z-]*:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$'
+  PermissionsBoundaryArn:
+    Type: String
+    Default: ""
+    Description: >-
+      Optional. ARN of an IAM managed policy to set as the permissions boundary of all five roles, for customer
+      organizations that require one on every role they create. Empty (default) attaches no boundary. The boundary must
+      allow the actions of the enabled roles or the roles lose them (a boundary never adds permissions).
+    AllowedPattern: '^$|^arn:aws[a-z-]*:iam::[0-9]{12}:policy/[A-Za-z0-9+=,.@_/-]+$'
+    ConstraintDescription: Empty, or an IAM policy ARN such as arn:aws:iam::444455556666:policy/OrgBoundary
+  RolePath:
+    Type: String
+    Default: /
+    MaxLength: 512
+    Description: >-
+      IAM path of the five roles. Keep "/" unless the customer organization requires a path. The AlarmOps console
+      currently builds role ARNs without a path, so a value other than "/" is not yet supported end to end (see README).
+    AllowedPattern: '^/$|^/[A-Za-z0-9+=,.@_-]+(/[A-Za-z0-9+=,.@_-]+)*/$'
+    ConstraintDescription: Must start and end with "/", e.g. / or /org/security/
   EnableAlarmWriter:
     Type: String
     Default: "false"
@@ -60,6 +80,7 @@ Rules:
         AssertDescription: RemediatorCallerRoleArn is required when EnableRemediator is true.
 
 Conditions:
+  HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
   UseAlarmWriter: !Equals [!Ref EnableAlarmWriter, "true"]
   UseTagWriter: !Equals [!Ref EnableTagWriter, "true"]
   UseRemediator: !Equals [!Ref EnableRemediator, "true"]
@@ -70,6 +91,8 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       RoleName: AlarmOps-Reader
+      Path: !Ref RolePath
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
       Description: AlarmOps read-only discovery, metrics and graph images. No secret or data access.
       MaxSessionDuration: 3600
       AssumeRolePolicyDocument:
@@ -199,6 +222,8 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       RoleName: AlarmOps-EventForwarder
+      Path: !Ref RolePath
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
       Description: Lets this account's EventBridge rules put events on the central AlarmOps bus. Nothing else.
       MaxSessionDuration: 3600
       AssumeRolePolicyDocument:
@@ -268,6 +293,8 @@ Resources:
     Condition: UseAlarmWriter
     Properties:
       RoleName: AlarmOps-AlarmWriter
+      Path: !Ref RolePath
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
       Description: AlarmOps creates/updates CloudWatch alarms and deletes only alarms tagged ManagedBy=AlarmOps.
       MaxSessionDuration: 3600
       AssumeRolePolicyDocument:
@@ -327,6 +354,8 @@ Resources:
     Condition: UseTagWriter
     Properties:
       RoleName: AlarmOps-TagWriter
+      Path: !Ref RolePath
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
       Description: AlarmOps console adds the Monitoring tag. No other tag key, no S3 or Route 53.
       MaxSessionDuration: 3600
       AssumeRolePolicyDocument:
@@ -370,6 +399,8 @@ Resources:
     Condition: UseRemediator
     Properties:
       RoleName: AlarmOps-Remediator
+      Path: !Ref RolePath
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
       Description: Stop EC2/RDS and delete ELB, only on resources tagged Monitoring=on. Used only after Slack approval.
       MaxSessionDuration: 3600
       AssumeRolePolicyDocument:

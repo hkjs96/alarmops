@@ -794,5 +794,63 @@ class DbRolesSql(unittest.TestCase):
         self.assertRegex(deletes[0], r'"ManagedAlarm" TO alarmops_engine')
 
 
+class CustomerStackBoundary(unittest.TestCase):
+    """D-58: works in organizations that demand a permissions boundary or an IAM path (hkjs96/alarmops#86)."""
+
+    def test_parameters_default_to_no_boundary_and_root_path(self):
+        P = T["Parameters"]
+        self.assertEqual(P["PermissionsBoundaryArn"]["Default"], "")
+        self.assertEqual(P["RolePath"]["Default"], "/")
+
+    def test_boundary_condition_is_false_when_empty(self):
+        self.assertEqual(T["Conditions"]["HasPermissionsBoundary"],
+                         {"Fn::Not": [{"Fn::Equals": [{"Ref": "PermissionsBoundaryArn"}, ""]}]})
+
+    def test_all_five_roles_use_path_and_optional_boundary(self):
+        for role in ROLES:
+            props = RES[role]["Properties"]
+            self.assertEqual(props["Path"], {"Ref": "RolePath"}, role)
+            self.assertEqual(props["PermissionsBoundary"],
+                             {"Fn::If": ["HasPermissionsBoundary", {"Ref": "PermissionsBoundaryArn"},
+                                         {"Ref": "AWS::NoValue"}]}, role)
+            self.assertTrue(props["RoleName"].startswith("AlarmOps-"), role)
+
+    def test_boundary_pattern_accepts_empty_and_any_partition_only_policies(self):
+        import re
+        pat = re.compile(T["Parameters"]["PermissionsBoundaryArn"]["AllowedPattern"])
+        for ok in ("", "arn:aws:iam::444455556666:policy/OrgBoundary", "arn:aws-cn:iam::444455556666:policy/p/Boundary",
+                   "arn:aws-us-gov:iam::444455556666:policy/B"):
+            self.assertTrue(pat.match(ok), ok)
+        for bad in ("arn:aws:iam::444455556666:role/x", "arn:aws:iam::4444:policy/x", "policy/x", "arn:aws:s3:::b"):
+            self.assertFalse(pat.match(bad), bad)
+
+    def test_role_path_pattern(self):
+        import re
+        pat = re.compile(T["Parameters"]["RolePath"]["AllowedPattern"])
+        for ok in ("/", "/org/", "/org/security/"):
+            self.assertTrue(pat.match(ok), ok)
+        for bad in ("", "org/", "/org", "//", "/a b/"):
+            self.assertFalse(pat.match(bad), bad)
+
+    def test_no_hardcoded_partition_anywhere(self):
+        import re
+        raw = (ROOT / "customer-stack" / "template.yaml").read_text(encoding="utf-8")
+        for line in raw.splitlines():
+            if "arn:aws:" in line:
+                # only free-text examples are allowed to name the aws partition
+                self.assertRegex(line.strip(), r"^(ConstraintDescription|Description):", line)
+        for name, p in T["Parameters"].items():
+            pat = p.get("AllowedPattern", "")
+            self.assertNotIn("arn:aws:", pat, name)
+            if "arn:" in pat:
+                self.assertIn("arn:aws[a-z-]*:", pat, name)
+
+    def test_no_organizations_or_stackset_dependency(self):
+        raw = (ROOT / "customer-stack" / "template.yaml").read_text(encoding="utf-8")
+        for needle in ("PrincipalOrgID", "PrincipalOrgPaths", "organizations:", "AWS::Organizations",
+                       "StackSet", "AWS::ControlTower"):
+            self.assertNotIn(needle, raw)
+
+
 if __name__ == "__main__":
     unittest.main()
