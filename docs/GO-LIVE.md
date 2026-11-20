@@ -611,7 +611,7 @@ http://localhost:3107/auth/dev-login?as=admin
      - `PassRole`은 Lambda 서비스로만 한다.
      - 만든 역할에는 경계 정책을 붙이게 한다. `iam:PermissionsBoundary` 조건으로 건다.
      - 경계 안에는 이 템플릿이 쓰는 서비스만 넣는다: sqs, secretsmanager, logs, events, lambda, `sts:AssumeRole`, `ses:SendEmail`.
-   - 이 역할로 `bus-allowlist`도 돌리므로 버스 스택 권한도 포함한다: 버스 스택의 `DescribeStacks`/`UpdateStack`, `events:DescribeEventBus`, 그 스택이 가진 리소스의 변경.
+   - `bus-allowlist`는 이 역할로 돌리지 않는다. 버스 허용 목록용 별도 역할 `AlarmOpsDeployBus`를 만든다(`infra/aws/deploy-role-policy.md` 3-1). 이 배포 역할에는 버스 스택 `DescribeStacks`만 둔다.
    - 정책 JSON 초안(신뢰 정책, 권한 정책, 권한 경계 정책)과 콘솔 클릭 순서는 `infra/aws/deploy-role-policy.md`에 있다. 본인이 검토해 AWS 콘솔에 넣는다. 권한 경계 정책을 먼저 만든다.
 
 - [ ] **Vercel OIDC 공급자 등록(D-49)**
@@ -656,7 +656,7 @@ http://localhost:3107/auth/dev-login?as=admin
    | `VERCEL_OIDC_PROVIDER_ARN` | 필수 | 4-1의 5번 공급자 ARN |
    | `VERCEL_TEAM_SLUG` | 필수 | Vercel 팀 슬러그(4-1의 5번 대상 주소에 쓴 것과 같은 값) |
    | `VERCEL_PROJECT_NAME` | 필수 | 3-1에서 만든 Vercel 프로젝트 이름 |
-   | `CENTRAL_BUS_DEPLOY_ROLE_ARN` | 7단계 전 필수 | `bus-allowlist` 워크플로가 읽는 변수다. 같은 배포 역할을 쓰면 `CENTRAL_DEPLOY_ROLE_ARN`과 같은 ARN을 넣는다. 이미 있고 4-1의 배포 역할과 같으면 그대로 둔다 |
+   | `CENTRAL_BUS_DEPLOY_ROLE_ARN` | 7단계 전 필수 | `bus-allowlist` 워크플로가 읽는 변수다. 4-1의 `AlarmOpsDeployBus` 역할 ARN을 넣는다. `CENTRAL_DEPLOY_ROLE_ARN`과 **다른** ARN이다 |
    | `ALARM_TOPIC_ARN` | 선택 | DLQ가 비어 있지 않을 때 알릴 SNS 주제 ARN |
    | `CENTRAL_BUS_NAME` | 선택 | 기본 `alarmops-central`. 버스 이름을 바꾸지 않았으면 넣지 않는다 |
    | `SES_IDENTITY_ARN`·`SES_FROM_ADDRESS` | 이메일을 쓸 때만 | 1-2에서 적어 둔 값(D-52, 서울 리전 SES에서 검증한 신원). 둘을 같이 넣는다 |

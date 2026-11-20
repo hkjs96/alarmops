@@ -10,14 +10,17 @@
 | 대상 | 이름 | 비고 |
 |---|---|---|
 | 배포 역할 | `AlarmOpsDeployCentral` | `AlarmOpsCentral-*`·`alarmops-central-*`·`AlarmOps-*`에 걸리지 않게 일부러 다르게 지었다. 배포 역할이 자기 자신을 고칠 수 없어야 한다 |
+| 버스 허용 목록 역할 | `AlarmOpsDeployBus` | `bus-allowlist` 전용. `AlarmOpsCentral-*`·`alarmops-central-*`·`AlarmOps-*`에 걸리지 않는다. 인라인 정책 `AlarmOpsDeployBus-Policy`(아래 3-1) |
 | 권한 경계 정책 | `AlarmOpsCentral-RoleBoundary` | 배포 역할이 만드는 모든 역할에 붙는다 |
 | 권한 정책 | `AlarmOpsDeployCentral-Policy` | 배포 역할의 **인라인** 정책 |
 
 ## 먼저 알아 둘 것 (막히는 곳)
 
-1. **현재 `central.yaml`은 역할에 권한 경계를 붙이지 않는다.** 이 문서의 권한 정책은 `iam:CreateRole`에 경계 조건을 거므로 지금 템플릿으로는 첫 배포가 `CreateRole` 거부로 실패한다. 템플릿에 `PermissionsBoundary: arn:aws:iam::<계정>:policy/AlarmOpsCentral-RoleBoundary`를 세 역할(`CentralRole`, `RemediatorCallerRole`, `VercelConsoleRole`)과 `Globals.Function`(SAM 함수 역할)에 넣어야 한다. 이는 infra 이슈로 따로 잡는다. 4-1을 시작하기 전에 끝낸다.
-2. 권한 정책은 공백을 빼고 약 7천 자라 **관리형 정책 한도(6,144자)를 넘는다.** 그래서 역할의 **인라인 정책**으로 넣는다(한도 10,240자).
+1. **현재 `central.yaml`은 역할에 권한 경계를 붙이지 않는다.** 이 문서의 권한 정책은 `iam:CreateRole`에 경계 조건을 거므로 지금 템플릿으로는 첫 배포가 `CreateRole` 거부로 실패한다. 템플릿에 `PermissionsBoundary: arn:aws:iam::<계정>:policy/AlarmOpsCentral-RoleBoundary`를 세 역할(`CentralRole`, `RemediatorCallerRole`, `VercelConsoleRole`)과 `Globals.Function`(SAM 함수 역할)에 넣어야 한다. 이는 infra 이슈로 따로 잡는다. **머지 순서: 템플릿의 경계 PR을 먼저 머지하고, 그 다음에 첫 `plan`을 돌린다.** 스택이 이미 있는 채로 경계를 붙이면 CloudFormation이 `iam:PutRolePermissionsBoundary`를 부른다. 그래서 권한 정책에 그 경계 ARN 조건의 허용(`IamPutBoundaryOnlyOurs`)을 넣었다.
+2. 권한 정책은 공백을 빼고 약 8.1천 자라 **관리형 정책 한도(6,144자)를 넘는다.** 그래서 역할의 **인라인 정책**으로 넣는다(역할당 인라인 정책 합계 한도 10,240자. 권한 정책 8,104자 + 첫 실행용 724자 = 8,828자, 공백 제외).
 3. `sam deploy --resolve-s3`는 처음에 SAM 관리 스택 `aws-sam-cli-managed-default`와 S3 버킷을 만든다. 배포 역할 상시 권한에는 이 생성을 넣지 않았다(읽기만). 처음 한 번은 아래 "첫 실행용 임시 정책"을 붙였다가 끝나면 뗀다. 이미 그 스택이 있으면 필요 없다.
+4. 첫 배포가 실패해 스택이 `ROLLBACK_COMPLETE`가 되면 **사람이** 콘솔에서 스택을 지운다. 배포 역할에는 `DeleteStack`이 없다. 지운 뒤 `plan`을 다시 돌린다.
+5. 중앙 계정은 `AlarmOps` 전용이라고 가정한다. PoC는 D-57에 따라 공유 테스트 계정일 수 있다. 그 경우 `ApiGatewayHttpApi`의 `/apis/*` 와일드카드가 같은 계정의 다른 HTTP API까지 열어 주는 위험이 있다(생성 전에는 API ID를 몰라 이름으로 줄일 수 없다). 다른 워크로드가 없는 계정에서만 쓴다.
 
 ## 1. 신뢰 정책
 
@@ -101,6 +104,17 @@ GO-LIVE 4-1의 4번과 같다. `sub`는 정확히 일치만 쓴다(와일드카�
       "Resource": "arn:aws:iam::<ACCOUNT_ID>:role/AlarmOpsCentral-RemediatorCaller"
     },
     {
+      "Sid": "NeverAssumeCustomerRemediatorExceptCaller",
+      "Effect": "Deny",
+      "Action": "sts:AssumeRole",
+      "Resource": "arn:aws:iam::*:role/AlarmOps-Remediator",
+      "Condition": {
+        "ArnNotEquals": {
+          "aws:PrincipalArn": "arn:aws:iam::<ACCOUNT_ID>:role/AlarmOpsCentral-RemediatorCaller"
+        }
+      }
+    },
+    {
       "Sid": "SesSendEmail",
       "Effect": "Allow",
       "Action": "ses:SendEmail",
@@ -169,13 +183,9 @@ GO-LIVE 4-1의 4번과 같다. `sub`는 정확히 일치만 쓴다(와일드카�
       "Resource": "arn:aws:cloudformation:ap-northeast-2:<ACCOUNT_ID>:stack/aws-sam-cli-managed-default/*"
     },
     {
-      "Sid": "CfnBusStackAllowlist",
+      "Sid": "CfnBusStackRead",
       "Effect": "Allow",
-      "Action": [
-        "cloudformation:DescribeStacks",
-        "cloudformation:UpdateStack",
-        "cloudformation:DescribeStackEvents"
-      ],
+      "Action": "cloudformation:DescribeStacks",
       "Resource": "arn:aws:cloudformation:ap-northeast-2:<ACCOUNT_ID>:stack/alarmops-central-bus/*"
     },
     {
@@ -223,6 +233,20 @@ GO-LIVE 4-1의 4번과 같다. `sub`는 정확히 일치만 쓴다(와일드카�
         "iam:PutRolePolicy",
         "iam:DeleteRolePolicy"
       ],
+      "Resource": [
+        "arn:aws:iam::<ACCOUNT_ID>:role/AlarmOpsCentral-*",
+        "arn:aws:iam::<ACCOUNT_ID>:role/alarmops-central-*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "iam:PermissionsBoundary": "arn:aws:iam::<ACCOUNT_ID>:policy/AlarmOpsCentral-RoleBoundary"
+        }
+      }
+    },
+    {
+      "Sid": "IamPutBoundaryOnlyOurs",
+      "Effect": "Allow",
+      "Action": "iam:PutRolePermissionsBoundary",
       "Resource": [
         "arn:aws:iam::<ACCOUNT_ID>:role/AlarmOpsCentral-*",
         "arn:aws:iam::<ACCOUNT_ID>:role/alarmops-central-*"
@@ -288,8 +312,8 @@ GO-LIVE 4-1의 4번과 같다. `sub`는 정확히 일치만 쓴다(와일드카�
       "Effect": "Allow",
       "Action": "iam:PassRole",
       "Resource": [
-        "arn:aws:iam::<ACCOUNT_ID>:role/AlarmOpsCentral-*",
-        "arn:aws:iam::<ACCOUNT_ID>:role/alarmops-central-*"
+        "arn:aws:iam::<ACCOUNT_ID>:role/AlarmOpsCentral-Engine",
+        "arn:aws:iam::<ACCOUNT_ID>:role/alarmops-central-*FunctionRole-*"
       ],
       "Condition": {
         "StringEquals": {
@@ -362,13 +386,9 @@ GO-LIVE 4-1의 4번과 같다. `sub`는 정확히 일치만 쓴다(와일드카�
       "Resource": "arn:aws:events:ap-northeast-2:<ACCOUNT_ID>:rule/alarmops-central/alarmops-*"
     },
     {
-      "Sid": "EventsCentralBus",
+      "Sid": "EventsCentralBusRead",
       "Effect": "Allow",
-      "Action": [
-        "events:DescribeEventBus",
-        "events:PutPermission",
-        "events:RemovePermission"
-      ],
+      "Action": "events:DescribeEventBus",
       "Resource": "arn:aws:events:ap-northeast-2:<ACCOUNT_ID>:event-bus/alarmops-central"
     },
     {
@@ -402,7 +422,6 @@ GO-LIVE 4-1의 4번과 같다. `sub`는 정확히 일치만 쓴다(와일드카�
         "secretsmanager:CreateSecret",
         "secretsmanager:DeleteSecret",
         "secretsmanager:DescribeSecret",
-        "secretsmanager:UpdateSecret",
         "secretsmanager:TagResource",
         "secretsmanager:UntagResource",
         "secretsmanager:GetResourcePolicy"
@@ -472,11 +491,37 @@ GO-LIVE 4-1의 4번과 같다. `sub`는 정확히 일치만 쓴다(와일드카�
       "Resource": "arn:aws:iam::<ACCOUNT_ID>:policy/AlarmOpsCentral-RoleBoundary"
     },
     {
+      "Sid": "DenyForceDeleteSecret",
+      "Effect": "Deny",
+      "Action": "secretsmanager:DeleteSecret",
+      "Resource": "*",
+      "Condition": {
+        "Bool": {
+          "secretsmanager:ForceDeleteWithoutRecovery": "true"
+        }
+      }
+    },
+    {
       "Sid": "DenySecretValues",
       "Effect": "Deny",
       "Action": [
         "secretsmanager:GetSecretValue",
         "secretsmanager:PutSecretValue"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "DenyPivotAndQueueData",
+      "Effect": "Deny",
+      "Action": [
+        "sts:AssumeRole",
+        "sts:TagSession",
+        "sts:SetSourceIdentity",
+        "sqs:SendMessage",
+        "sqs:ReceiveMessage",
+        "sqs:DeleteMessage",
+        "sqs:PurgeQueue",
+        "sqs:StartMessageMoveTask"
       ],
       "Resource": "*"
     }
@@ -491,7 +536,7 @@ GO-LIVE 4-1의 4번과 같다. `sub`는 정확히 일치만 쓴다(와일드카�
 | `CfnCentralStack` | 스택 조회·변경 세트 만들기/실행/삭제·`GetTemplate` | 스택 `alarmops-central`, 변경 세트 `samcli-deploy*` |
 | `CfnSamTransform` | `CreateChangeSet` | 변환 `Serverless-2016-10-31` |
 | `CfnSamManagedStackRead` | `DescribeStacks`/`DescribeStackEvents` | 스택 `aws-sam-cli-managed-default` |
-| `CfnBusStackAllowlist` | `DescribeStacks`/`UpdateStack`/`DescribeStackEvents` | 스택 `alarmops-central-bus` |
+| `CfnBusStackRead` | `DescribeStacks` | 스택 `alarmops-central-bus`(수정은 `AlarmOpsDeployBus`) |
 | `SamValidateListPolicies` | `iam:ListPolicies` | `*`(조회만. `sam validate`가 관리형 정책 목록을 읽는다. 필요 없다고 확인되면 뺀다) |
 | `SamBucketObjects` / `SamBucketList` | 객체 쓰기·읽기, 버킷 목록 | SAM 관리 버킷 `aws-sam-cli-managed-default-samclisourcebucket-*` |
 | `IamCreateRoleWithBoundary` | `iam:CreateRole` | `AlarmOpsCentral-*`, `alarmops-central-*`. 경계 정책을 붙일 때만 |
@@ -499,22 +544,69 @@ GO-LIVE 4-1의 4번과 같다. `sub`는 정확히 일치만 쓴다(와일드카�
 | `IamChangeRoles` | 신뢰 정책·설명·태그·삭제 | 같은 역할(이 동작들은 경계 조건 키를 지원하지 않는다) |
 | `IamAttachLambdaManagedPolicies` | `AttachRolePolicy`/`DetachRolePolicy` | `alarmops-central-*`, 경계가 붙은 역할, 정책은 `AWSLambdaBasicExecutionRole`·`AWSLambdaSQSQueueExecutionRole` 둘뿐 |
 | `IamReadRoles` | 역할 조회 | 같은 역할 |
-| `IamPassRoleToLambdaOnly` | `iam:PassRole` | 같은 역할, `iam:PassedToService=lambda.amazonaws.com`일 때만 |
+| `IamPutBoundaryOnlyOurs` | `PutRolePermissionsBoundary` | 같은 역할, 경계가 `AlarmOpsCentral-RoleBoundary`일 때만(기존 스택에 경계를 붙일 때) |
+| `IamPassRoleToLambdaOnly` | `iam:PassRole` | `AlarmOpsCentral-Engine`, `alarmops-central-*FunctionRole-*`, `iam:PassedToService=lambda.amazonaws.com`일 때만 |
 | `LambdaFunctions` | 함수 생성·코드/설정 변경·예약 동시성·권한·태그 | `alarmops-*` 함수 |
 | `LambdaEventSourceMappings` | 이벤트 소스 매핑 | `*`(매핑 ARN이 UUID라 이름으로 줄일 수 없다) |
 | `Sqs` | 큐 생성·삭제·속성(정책 포함)·태그 | `alarmops-*` 큐 |
 | `EventsRulesOnCentralBus` | 규칙·대상·태그 | 버스 `alarmops-central`의 `alarmops-*` 규칙 |
-| `EventsCentralBus` | `DescribeEventBus`/`PutPermission`/`RemovePermission` | 버스 `alarmops-central`(버스 정책 변경과 `bus-allowlist` 확인) |
+| `EventsCentralBusRead` | `DescribeEventBus` | 버스 `alarmops-central` |
 | `LogGroups` / `LogsDescribe` | 로그 그룹 생성·보존 기간·태그 / 목록 조회 | `/aws/lambda/alarmops-*` / `*` |
-| `SecretsManagerSecretsNoValues` | 비밀 **껍데기** 생성·삭제·조회·태그 | `alarmops/central/*` |
+| `SecretsManagerSecretsNoValues` | 비밀 **껍데기** 생성·삭제·조회·태그 | `alarmops/central/*`. 읽기·PutSecretValue 거부, UpdateSecret 미허용 |
 | `CloudWatchAlarms` / `CloudWatchDescribe` | 알람 생성·삭제·태그 / 조회 | `alarmops-*` 알람 / `*` |
 | `ApiGatewayHttpApi` | HTTP API(v2) 생성·변경 | `/apis`, `/apis/*`, `/tags/*`(생성 전에는 ID를 몰라 이름으로 줄일 수 없다) |
 | `DenyBoundaryRemoval` | Deny `DeleteRolePermissionsBoundary` | `*` |
 | `DenyOtherBoundary` | Deny `PutRolePermissionsBoundary` | 경계가 `AlarmOpsCentral-RoleBoundary`가 아닐 때 |
 | `DenyBoundaryPolicyChange` | Deny 경계 정책 수정·삭제 | 경계 정책 |
+| `DenyPivotAndQueueData` | Deny 역할 맡기·세션 태그·SQS 메시지 동작 | `*`(위 3-2) |
+| `DenyForceDeleteSecret` | Deny `DeleteSecret` | `ForceDeleteWithoutRecovery=true`일 때 |
 | `DenySecretValues` | Deny `GetSecretValue`/`PutSecretValue` | `*`(배포 역할은 비밀 값을 읽거나 쓰지 못한다) |
 
 넣지 않은 것: 고객 계정 권한, `sts:AssumeRole`, IAM 사용자·그룹·정책 생성, `AlarmOpsCentral-*`·`alarmops-central-*` 밖의 역할 변경, 배포 역할 자신의 변경, S3 버킷 삭제, SQS 메시지 읽기·쓰기.
+
+### 3-1. 버스 허용 목록 역할 (`AlarmOpsDeployBus`)
+
+`bus-allowlist`만 쓰는 별도 역할이다. 신뢰 정책은 위 1번과 같다(`sub`도 같다). 인라인 정책 `AlarmOpsDeployBus-Policy`:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "CfnBusStack",
+      "Effect": "Allow",
+      "Action": [
+        "cloudformation:DescribeStacks",
+        "cloudformation:UpdateStack",
+        "cloudformation:DescribeStackEvents"
+      ],
+      "Resource": "arn:aws:cloudformation:ap-northeast-2:<ACCOUNT_ID>:stack/alarmops-central-bus/*"
+    },
+    {
+      "Sid": "EventsCentralBus",
+      "Effect": "Allow",
+      "Action": [
+        "events:DescribeEventBus",
+        "events:PutPermission",
+        "events:RemovePermission"
+      ],
+      "Resource": "arn:aws:events:ap-northeast-2:<ACCOUNT_ID>:event-bus/alarmops-central"
+    }
+  ]
+}
+```
+
+- 버스 스택은 이벤트 버스와 버스 정책 두 개뿐이다(`central-bus.yaml`). 파라미터만 바꾸므로 `PutPermission`/`RemovePermission`/`DescribeEventBus`면 된다. 버스 만들기·삭제 권한은 없다.
+- `UpdateStack --use-previous-template`이 `cloudformation:GetTemplate`을 더 요구할 수 있다. 첫 실행에서 거부되면 그 동작만 이 스택에 더한다(확인 못 함).
+- 중앙 배포 역할에는 버스 스택 `DescribeStacks`와 `events:DescribeEventBus`만 남겼다. 버스 허용 목록은 배포 역할로 바꿀 수 없다.
+
+### 3-2. 막은 우회 경로 (Deny 설명)
+
+- `DenyPivotAndQueueData`: `sts:AssumeRole`·`TagSession`·`SetSourceIdentity`와 SQS 메시지 동작(`SendMessage`, `ReceiveMessage`, `DeleteMessage`, `PurgeQueue`, `StartMessageMoveTask`)을 `*`에 거부한다. `CreateRole`/`UpdateAssumeRolePolicy`가 있으면 배포 역할이 **자기를 신뢰하는 역할**을 만들거나 기존 역할의 신뢰를 바꾼 뒤 그 역할을 맡아 비밀을 읽거나 고객 역할에 닿을 수 있다. 명시적 Deny는 신뢰 정책 기반 허용보다 이긴다. 그래서 배포 역할 세션으로는 어떤 역할도 맡지 못한다. 배포 역할이 만든 역할은 CloudFormation이 아니라 서비스(Lambda, Vercel)가 맡는다.
+- `DenyForceDeleteSecret`: 비밀을 복구 기간 없이 지우는 삭제(`ForceDeleteWithoutRecovery=true`)를 거부한다. `UpdateSecret`은 허용하지 않는다. 템플릿의 비밀에는 이름·설명뿐이라 필요 없고, 바꿀 일은 사람이 한다.
+- `DenySecretValues`: 비밀 값 읽기·쓰기 거부.
+- 경계 쪽 `NeverAssumeCustomerRemediatorExceptCaller`: 만든 역할 중 `AlarmOpsCentral-RemediatorCaller` 말고는 고객 `AlarmOps-Remediator`를 맡지 못한다.
+- `PassRole`은 `AlarmOpsCentral-Engine`(`central.yaml`의 `CentralRole` 이름)과 `alarmops-central-*FunctionRole-*`(SAM 함수 역할)로 좁혔다. 나머지 두 역할은 Lambda에 넘기지 않는다.
 
 ## 4. 첫 실행용 임시 정책 (선택)
 
@@ -582,8 +674,15 @@ GO-LIVE 4-1의 4번과 같다. `sub`는 정확히 일치만 쓴다(와일드카�
    4. 확인: 정책의 `iam:PermissionsBoundary` 값이 1번에서 만든 경계 정책 ARN과 글자까지 같다. 이름이 다르면 조건이 맞지 않아 `CreateRole`이 거부된다.
 5. **최대 세션 시간**: 역할 → 요약 → 편집 → 최대 세션 기간 1시간.
 6. (첫 실행만) 4번의 임시 정책을 같은 방식으로 인라인 정책 `AlarmOpsDeployCentral-FirstRun`으로 붙인다. 첫 `plan` 뒤에 삭제한다.
-7. 역할 ARN을 복사해 GitHub `central` 환경 변수 `CENTRAL_DEPLOY_ROLE_ARN`과 `CENTRAL_BUS_DEPLOY_ROLE_ARN`에 넣는다(GO-LIVE 4-2).
-8. **경계 이름이 맞는지 확인**: 템플릿 이슈("먼저 알아 둘 것" 1번)가 끝난 뒤 `plan`이 `CreateRole`을 통과하는지 본다. 거부되면 `plan` 로그의 거부 메시지에서 `iam:PermissionsBoundary` 조건과 템플릿의 경계 ARN을 대조한다.
+7. **버스 허용 목록 역할 만들기**: 2번과 같은 방식으로 역할 `AlarmOpsDeployBus`를 만든다(웹 자격 증명, 같은 공급자·Audience).
+   1. 신뢰 관계를 위 1번 JSON으로 덮어쓴다(`sub` 같음).
+   2. 권한 탭 → 권한 추가 → 인라인 정책 생성 → **JSON** → 3-1의 JSON(`<ACCOUNT_ID>` 바꿈) → 이름 `AlarmOpsDeployBus-Policy`.
+   3. 최대 세션 기간 1시간. 경계 정책은 붙이지 않는다(이 역할은 역할을 만들지 못한다).
+8. **ARN을 두 변수에 따로 넣는다**(GO-LIVE 4-2, `central` 환경 변수):
+   - `CENTRAL_DEPLOY_ROLE_ARN` = `AlarmOpsDeployCentral`의 ARN
+   - `CENTRAL_BUS_DEPLOY_ROLE_ARN` = `AlarmOpsDeployBus`의 ARN
+   - 두 변수에 같은 ARN을 넣지 않는다. `AlarmOpsDeployCentral`로는 버스 허용 목록을 바꿀 수 없다.
+9. **경계 이름이 맞는지 확인**: 템플릿 이슈("먼저 알아 둘 것" 1번)가 끝난 뒤 `plan`이 `CreateRole`을 통과하는지 본다. 거부되면 `plan` 로그의 거부 메시지에서 `iam:PermissionsBoundary` 조건과 템플릿의 경계 ARN을 대조한다.
 
 > **주의** 경계 정책은 배포 역할이 고칠 수 없다(`DenyBoundaryPolicyChange`). 고칠 때는 관리자가 새 버전을 만들고 `plan`에서 IAM 변경을 확인한다.
 
@@ -591,7 +690,7 @@ GO-LIVE 4-1의 4번과 같다. `sub`는 정확히 일치만 쓴다(와일드카�
 
 | 문장(Sid) | 워크플로 | 단계 | 이유 |
 |---|---|---|---|
-| `CfnBusStackAllowlist`(`DescribeStacks`) | deploy-central | `plan` / `Check the central bus stack exists` | 버스 스택이 있는지 확인 |
+| `CfnBusStackRead` | deploy-central | `plan` / `Check the central bus stack exists` | 버스 스택이 있는지 확인 |
 | `SamValidateListPolicies` | deploy-central | `plan` / `sam validate` | SAM 변환이 관리형 정책 목록을 읽는다(추정) |
 | `CfnCentralStack`(`ListChangeSets`) | deploy-central | `plan` / `Remember the change sets that exist before`, `Change set to the job summary` | 변경 세트 목록 비교 |
 | `CfnSamManagedStackRead`, `SamBucketObjects`, `SamBucketList`, `CfnSamTransform`, `CfnCentralStack`(`CreateChangeSet`, `DescribeStackEvents`) | deploy-central | `plan` / `Create the change set (not executed)` (`sam deploy --resolve-s3 --no-execute-changeset`) | 관리 버킷에 코드 zip 올리기, 변환 포함 변경 세트 만들기 |
@@ -602,16 +701,16 @@ GO-LIVE 4-1의 4번과 같다. `sub`는 정확히 일치만 쓴다(와일드카�
 | `IamPassRoleToLambdaOnly` | deploy-central | `apply` / 실행 | 함수 생성 시 실행 역할 전달(Lambda 서비스로만) |
 | `LambdaFunctions`, `LambdaEventSourceMappings` | deploy-central | `apply` / 실행 | 함수 4개, SQS 이벤트 소스 2개, 규칙 호출 권한 |
 | `Sqs` | deploy-central | `apply` / 실행 | 큐 6개와 큐 정책 |
-| `EventsRulesOnCentralBus`, `EventsCentralBus` | deploy-central | `apply` / 실행 | 규칙 2개와 대상·DLQ 설정 |
+| `EventsRulesOnCentralBus`, `EventsCentralBusRead` | deploy-central | `apply` / 실행 | 규칙 2개와 대상·DLQ 설정 |
 | `LogGroups`, `LogsDescribe` | deploy-central | `apply` / 실행 | 로그 그룹 4개 |
 | `SecretsManagerSecretsNoValues` | deploy-central | `apply` / 실행 | DB 비밀 2개(값 없이) |
 | `CloudWatchAlarms`, `CloudWatchDescribe` | deploy-central | `apply` / 실행 | DLQ 알람 4개 |
 | `ApiGatewayHttpApi` | deploy-central | `apply` / 실행 | HTTP API와 `$default` 스테이지 |
 | `CfnCentralStack`(`DescribeStacks`) | deploy-central | `apply` / `execute-change-set` 뒤 `wait`, `Stack outputs to the job summary` | 완료 대기와 출력 표 |
-| `CfnBusStackAllowlist`(`DescribeStacks`) | bus-allowlist | `Compute the new allow list` | 현재 `AllowedAccountIds`와 `BusName` 출력 읽기 |
-| `CfnBusStackAllowlist`(`UpdateStack`, `DescribeStackEvents`), `EventsCentralBus`(`PutPermission`/`RemovePermission`) | bus-allowlist | `Update the bus stack` | 이전 템플릿으로 파라미터만 바꾸고 버스 정책 갱신 |
-| `EventsCentralBus`(`DescribeEventBus`) | bus-allowlist | `Verify the bus policy` | 정책에 계정이 있는지/없는지 확인 |
-| `Deny*` 4개 | 둘 다 | 모든 단계 | 경계 우회, 비밀 값 접근 차단 |
+| `CfnBusStack`(`DescribeStacks`, 역할 `AlarmOpsDeployBus`) | bus-allowlist | `Compute the new allow list` | 현재 `AllowedAccountIds`와 `BusName` 출력 읽기 |
+| `CfnBusStack`(`UpdateStack`, `DescribeStackEvents`), `EventsCentralBus`(`PutPermission`/`RemovePermission`) (역할 `AlarmOpsDeployBus`) | bus-allowlist | `Update the bus stack` | 이전 템플릿으로 파라미터만 바꾸고 버스 정책 갱신 |
+| `EventsCentralBus`(`DescribeEventBus`, 역할 `AlarmOpsDeployBus`) | bus-allowlist | `Verify the bus policy` | 정책에 계정이 있는지/없는지 확인 |
+| `Deny*` 6개 | deploy-central | 모든 단계 | 경계 우회, 비밀 값 접근 차단 |
 
 ## 7. 검증하지 못한 것
 
