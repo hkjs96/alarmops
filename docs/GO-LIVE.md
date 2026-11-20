@@ -599,9 +599,9 @@ http://localhost:3107/auth/dev-login?as=admin
      }
      ```
    - 권한: `infra/aws/README.md`의 "실행과 사람이 하는 일" 범위. 정확한 정책 JSON은 저장소에 없다. 사람이 만들고 검토한다. 그 절에 적힌 범위는 다음과 같다.
-     - CloudFormation: 스택 `alarmops-central`, SAM 관리 스택, 변환 `AWS::Serverless-2016-10-31`
+     - CloudFormation: 스택 `alarmops-central`, 변환 `AWS::Serverless-2016-10-31`
      - `cloudformation:GetTemplate`(이 스택). `apply`가 변경 세트의 코드를 검증할 때 쓴다.
-     - SAM 관리 S3 버킷(`--resolve-s3`): 객체 쓰기와 `s3:GetObject`
+     - SAM 아티팩트 S3 버킷(사람이 만든 고정 버킷 `SAM_ARTIFACT_BUCKET`): 객체 쓰기와 `s3:GetObject`
      - 이 스택이 만드는 리소스의 생성·변경: Lambda, SQS, Events, Logs, Secrets Manager, CloudWatch 알람, API Gateway v2
      - `arn:aws:iam::<계정>:role/AlarmOpsCentral-*` 역할의 생성·변경(`iam:CreateRole`, `PutRolePolicy`, `AttachRolePolicy` 등)
      - `iam:PassRole`: `AlarmOpsCentral-*`와 SAM이 만드는 함수 역할(`alarmops-central-*`)에, `iam:PassedToService=lambda.amazonaws.com` 조건으로만
@@ -611,7 +611,7 @@ http://localhost:3107/auth/dev-login?as=admin
      - `PassRole`은 Lambda 서비스로만 한다.
      - 만든 역할에는 경계 정책을 붙이게 한다. `iam:PermissionsBoundary` 조건으로 건다.
      - 경계 안에는 이 템플릿이 쓰는 서비스만 넣는다: sqs, secretsmanager, logs, events, lambda, `sts:AssumeRole`, `ses:SendEmail`.
-   - `bus-allowlist`는 이 역할로 돌리지 않는다. 버스 허용 목록용 별도 역할 `AlarmOpsDeployBus`를 만든다(`infra/aws/deploy-role-policy.md` 3-1). 이 배포 역할에는 버스 스택 `DescribeStacks`만 둔다.
+   - `bus-allowlist`는 이 역할로 돌리지 않는다. 버스 허용 목록용 별도 역할 `AlarmOpsDeployBus`를 만든다(`infra/aws/deploy-role-policy.md` 3-1). 신뢰 `sub`는 `repo:hkjs96/alarmops:environment:central-bus`다. 이 배포 역할에는 버스 스택 `DescribeStacks`만 둔다.
    - 정책 JSON 초안(신뢰 정책, 권한 정책, 권한 경계 정책)과 콘솔 클릭 순서는 `infra/aws/deploy-role-policy.md`에 있다. 본인이 검토해 AWS 콘솔에 넣는다. 권한 경계 정책을 먼저 만든다.
 
 - [ ] **Vercel OIDC 공급자 등록(D-49)**
@@ -635,7 +635,7 @@ http://localhost:3107/auth/dev-login?as=admin
    - 이유: 새 계정 10이면 예약 동시성 설정이 실패한다. 기본 예약 합계가 40이다.
    - 상향 요청은 AWS가 승인할 때까지 기다려야 할 수 있다. 승인 전에는 4-3을 실행하지 않는다.
 
-### 4-2. [사람] GitHub `central` 환경과 변수 (10분)
+### 4-2. [사람] GitHub `central`·`central-bus` 환경과 변수 (15분)
 
 어디서: GitHub 저장소
 
@@ -644,6 +644,13 @@ http://localhost:3107/auth/dev-login?as=admin
 1. 어디서: Settings → Environments. 이름을 정확히 `central`로 만든다.
    - 값: 배포 브랜치 `main`만
    - 값: 필수 승인자 본인
+
+- [ ] **GitHub `central-bus` 환경**(`bus-allowlist` 전용)
+
+   - 어디서: Settings → Environments → New environment. 이름을 정확히 `central-bus`로 만든다.
+   - 값: 배포 브랜치 `main`만
+   - 값: 필수 승인자 본인 한 명, **Prevent self-review는 끈다**(승인자가 1인이다)
+   - 변수: `CENTRAL_BUS_DEPLOY_ROLE_ARN` = 4-1의 `AlarmOpsDeployBus` 역할 ARN. `central`의 `CENTRAL_DEPLOY_ROLE_ARN`과 **다른** ARN이다. `central` 환경에는 넣지 않는다.
 
 - [ ] **`central` 환경 변수**
 
@@ -656,12 +663,12 @@ http://localhost:3107/auth/dev-login?as=admin
    | `VERCEL_OIDC_PROVIDER_ARN` | 필수 | 4-1의 5번 공급자 ARN |
    | `VERCEL_TEAM_SLUG` | 필수 | Vercel 팀 슬러그(4-1의 5번 대상 주소에 쓴 것과 같은 값) |
    | `VERCEL_PROJECT_NAME` | 필수 | 3-1에서 만든 Vercel 프로젝트 이름 |
-   | `CENTRAL_BUS_DEPLOY_ROLE_ARN` | 7단계 전 필수 | `bus-allowlist` 워크플로가 읽는 변수다. 4-1의 `AlarmOpsDeployBus` 역할 ARN을 넣는다. `CENTRAL_DEPLOY_ROLE_ARN`과 **다른** ARN이다 |
+   | `SAM_ARTIFACT_BUCKET` | 필수 | 4-1에서 만든 SAM 아티팩트 S3 버킷 이름(서울). `infra/aws/deploy-role-policy.md` 5번의 6단계 |
    | `ALARM_TOPIC_ARN` | 선택 | DLQ가 비어 있지 않을 때 알릴 SNS 주제 ARN |
    | `CENTRAL_BUS_NAME` | 선택 | 기본 `alarmops-central`. 버스 이름을 바꾸지 않았으면 넣지 않는다 |
    | `SES_IDENTITY_ARN`·`SES_FROM_ADDRESS` | 이메일을 쓸 때만 | 1-2에서 적어 둔 값(D-52, 서울 리전 SES에서 검증한 신원). 둘을 같이 넣는다 |
 
-4. 확인: `central` 환경의 Variables에 필수 네 개가 보인다. 하나라도 없으면 `plan`이 `Environment variable for … is not set in the central environment`로 멈춘다.
+4. 확인: `central` 환경의 Variables에 필수 다섯 개가 보인다. 하나라도 없으면 `plan`이 `Environment variable for … is not set in the central environment`로 멈춘다.
 
 ### 4-3. [사람] 배포 실행 (30분)
 
@@ -906,7 +913,7 @@ npm ci --ignore-scripts && npm run build:lambda -w @alarmops/ingest && npm run b
    | `confirm` | 계정 ID 12자리를 한 번 더 |
 
    > **주의** `action` 목록의 첫 값은 `remove`다. 반드시 `add`로 바꾼다.
-3. `central` 환경 승인을 누른다.
+3. `central-bus` 환경 승인을 누른다.
 4. 확인: 작업이 초록색으로 끝나고 요약(`central bus allow list`)에 `action: add`, 계정, `accounts allowed now` 숫자가 보인다. 워크플로가 버스 정책에 계정이 들어갔는지 직접 확인하고, 없으면 실패한다.
 
 ### 7-3. 고객에게 스택 설치 요청 (고객 일정에 따름, 작업은 15분)
@@ -1007,7 +1014,7 @@ npm ci --ignore-scripts && npm run build:lambda -w @alarmops/ingest && npm run b
 |---|---|
 | `/customers/new`가 빈 자리표시자 화면 | 아직 구현 전이다. 허브에 알린다(위 주의) |
 | `bus-allowlist`: `The confirmation does not match the account id` | `confirm`에 넣은 값이 `account_id`와 다르다. 아무것도 바뀌지 않았다. 다시 실행한다 |
-| `bus-allowlist`: 자격 증명 단계에서 실패 | `central` 환경 변수 `CENTRAL_BUS_DEPLOY_ROLE_ARN`이 없다. 4-2 |
+| `bus-allowlist`: 자격 증명 단계에서 실패 | `central-bus` 환경 변수 `CENTRAL_BUS_DEPLOY_ROLE_ARN`이 없거나, 역할 신뢰의 `sub`가 `environment:central-bus`가 아니다. 4-2 |
 | `bus-allowlist`: `The stack has no BusName output` | 버스 스택이 옛 템플릿이다. 지금의 `infra/aws/central-bus.yaml`로 먼저 갱신한다 |
 | 고객 스택 생성 실패: `ExternalId` | 16자 미만이거나 비어 있다. 7-1에서 발급된 값을 그대로 넣는다 |
 | 고객 스택 생성 실패: `CentralEventBusArn` | 서울 리전 버스 ARN이 아니다. 출력 `CentralBusArn`을 그대로 넣는다 |
