@@ -1,5 +1,7 @@
 # infra/aws — 중앙 계정 인프라
 
+중앙 계정을 다른 AWS 계정으로 옮길 때는 [MIGRATE-CENTRAL.md](MIGRATE-CENTRAL.md)를 본다(D-58).
+
 배포는 사람이 시작하는 GitHub Actions(OIDC)로만 한다. 에이전트는 배포 명령을 실행하지 않는다. 이 폴더의 템플릿은 `cfn-lint`와 `infra/test`(구조 테스트)로 오프라인 검증한다.
 
 ## 중앙 이벤트 버스와 허용 목록 (B1, D-07, D-43)
