@@ -2,8 +2,8 @@
 
 `deploy-central`과 `bus-allowlist` 워크플로가 OIDC로 맡는 **배포 역할**의 정책 초안이다. 사람이 읽고 검토한 뒤 AWS 콘솔에 넣는다. 에이전트는 AWS 명령을 실행하지 않는다.
 
-- 대상 계정: 중앙 AWS 계정. 리전: 서울(`ap-northeast-2`).
-- `<ACCOUNT_ID>`는 중앙 계정 12자리 숫자로 바꾼다. 이 문서에는 실제 값을 쓰지 않는다.
+- 대상 계정: 중앙 AWS 계정. 리전: 서울(`ap-northeast-2`). Control Tower 조직 계정이든 일반 계정이든 같은 정책이 동작해야 한다(D-58). 이 문서는 Organizations·CT 기능(`aws:PrincipalOrgID` 등)을 전제하지 않는다.
+- 자리표시자: `<ACCOUNT_ID>`는 중앙 계정 12자리 숫자, `<REGION>`은 `ap-northeast-2`, `<PARTITION>`은 `aws`(일반 상용 파티션)로 바꾼다. 이 문서에는 실제 값을 쓰지 않는다. 템플릿 쪽은 `${AWS::AccountId}`·`${AWS::Region}`·`${AWS::Partition}`을 쓴다.
 - 근거: `infra/aws/README.md`의 "실행과 사람이 하는 일", `infra/aws/central.yaml`, `infra/aws/central-bus.yaml`, `.github/workflows/deploy-central.yml`, `.github/workflows/bus-allowlist.yml`.
 - 이름은 아래처럼 정한다. 다른 이름을 쓰면 JSON의 해당 ARN도 같이 바꾼다.
 
@@ -22,7 +22,7 @@
    - 별도 브랜치 `agent/central-boundary-template`가 `central.yaml`에 `PermissionsBoundary`(세 역할과 `Globals.Function`)를 넣고, `deploy-central`을 `--s3-bucket "$SAM_ARTIFACT_BUCKET"`으로, `bus-allowlist`를 `central-bus` 환경으로 바꾼다.
    - **머지 순서: 그 PR을 먼저 머지하고, 그 다음에 첫 `plan`을 돌린다.**
    - 스택이 이미 있는 채로 경계를 붙이면 CloudFormation이 `iam:PutRolePermissionsBoundary`를 부른다. 그래서 권한 정책에 그 경계 ARN 조건의 허용(`IamPutBoundaryOnlyOurs`)을 넣었다.
-2. 권한 정책은 공백을 빼고 8,212자라 **관리형 정책 한도(6,144자)를 넘는다.** 그래서 역할의 **인라인 정책**으로 넣는다(역할당 인라인 정책 합계 한도 10,240자). 신뢰 정책 변경용 임시 정책(약 250자)이 붙어 있는 동안에도 한도 안이다.
+2. 권한 정책은 공백을 빼고 8,248자(실제 값을 넣은 기준)라 **관리형 정책 한도(6,144자)를 넘는다.** 그래서 역할의 **인라인 정책**으로 넣는다(역할당 인라인 정책 합계 한도 10,240자). 신뢰 정책 변경용 임시 정책(약 220자)이 붙어 있는 동안에도 한도 안이다.
 3. SAM 아티팩트 버킷은 `--resolve-s3` 대신 사람이 만든 고정 버킷을 쓴다. 이렇게 하면 `aws-sam-cli-managed-default` 스택·버킷 생성 권한과 와일드카드 버킷 권한이 필요 없다. 아래 5번의 6단계에서 만든다.
 4. 첫 배포가 실패해 스택이 `ROLLBACK_COMPLETE`가 되면 **사람이** 콘솔에서 스택을 지운다. 배포 역할에는 `DeleteStack`이 없다. 지운 뒤 `plan`을 다시 돌린다.
 5. 중앙 계정은 `AlarmOps` 전용이라고 가정한다. PoC는 D-57에 따라 공유 테스트 계정일 수 있다. 그 경우 `ApiGatewayHttpApi`의 `/apis/*` 와일드카드가 같은 계정의 다른 HTTP API까지 열어 주는 위험이 있다(생성 전에는 API ID를 몰라 이름으로 줄일 수 없다). 다른 워크로드가 없는 계정에서만 쓴다.
@@ -49,7 +49,7 @@
     {
       "Effect": "Allow",
       "Principal": {
-        "Federated": "arn:aws:iam::<ACCOUNT_ID>:oidc-provider/token.actions.githubusercontent.com"
+        "Federated": "arn:<PARTITION>:iam::<ACCOUNT_ID>:oidc-provider/token.actions.githubusercontent.com"
       },
       "Action": "sts:AssumeRoleWithWebIdentity",
       "Condition": {
@@ -81,13 +81,13 @@
         "sqs:GetQueueAttributes",
         "sqs:ChangeMessageVisibility"
       ],
-      "Resource": "arn:aws:sqs:ap-northeast-2:<ACCOUNT_ID>:alarmops-*"
+      "Resource": "arn:<PARTITION>:sqs:<REGION>:<ACCOUNT_ID>:alarmops-*"
     },
     {
       "Sid": "SecretsManagerRead",
       "Effect": "Allow",
       "Action": "secretsmanager:GetSecretValue",
-      "Resource": "arn:aws:secretsmanager:ap-northeast-2:<ACCOUNT_ID>:secret:alarmops/central/*"
+      "Resource": "arn:<PARTITION>:secretsmanager:<REGION>:<ACCOUNT_ID>:secret:alarmops/central/*"
     },
     {
       "Sid": "Logs",
@@ -98,15 +98,15 @@
         "logs:PutLogEvents"
       ],
       "Resource": [
-        "arn:aws:logs:ap-northeast-2:<ACCOUNT_ID>:log-group:/aws/lambda/alarmops-*",
-        "arn:aws:logs:ap-northeast-2:<ACCOUNT_ID>:log-group:/aws/lambda/alarmops-*:*"
+        "arn:<PARTITION>:logs:<REGION>:<ACCOUNT_ID>:log-group:/aws/lambda/alarmops-*",
+        "arn:<PARTITION>:logs:<REGION>:<ACCOUNT_ID>:log-group:/aws/lambda/alarmops-*:*"
       ]
     },
     {
       "Sid": "AssumeCustomerRoles",
       "Effect": "Allow",
       "Action": "sts:AssumeRole",
-      "Resource": "arn:aws:iam::*:role/AlarmOps-*",
+      "Resource": "arn:<PARTITION>:iam::*:role/AlarmOps-*",
       "Condition": {
         "Null": {
           "sts:ExternalId": "false"
@@ -117,16 +117,16 @@
       "Sid": "AssumeRemediatorCaller",
       "Effect": "Allow",
       "Action": "sts:AssumeRole",
-      "Resource": "arn:aws:iam::<ACCOUNT_ID>:role/AlarmOpsCentral-RemediatorCaller"
+      "Resource": "arn:<PARTITION>:iam::<ACCOUNT_ID>:role/AlarmOpsCentral-RemediatorCaller"
     },
     {
       "Sid": "NeverAssumeCustomerRemediatorExceptCaller",
       "Effect": "Deny",
       "Action": "sts:AssumeRole",
-      "Resource": "arn:aws:iam::*:role/AlarmOps-Remediator",
+      "Resource": "arn:<PARTITION>:iam::*:role/AlarmOps-Remediator",
       "Condition": {
         "ArnNotEquals": {
-          "aws:PrincipalArn": "arn:aws:iam::<ACCOUNT_ID>:role/AlarmOpsCentral-RemediatorCaller"
+          "aws:PrincipalArn": "arn:<PARTITION>:iam::<ACCOUNT_ID>:role/AlarmOpsCentral-RemediatorCaller"
         }
       }
     },
@@ -134,7 +134,7 @@
       "Sid": "SesSendEmail",
       "Effect": "Allow",
       "Action": "ses:SendEmail",
-      "Resource": "arn:aws:ses:ap-northeast-2:<ACCOUNT_ID>:identity/*"
+      "Resource": "arn:<PARTITION>:ses:<REGION>:<ACCOUNT_ID>:identity/*"
     }
   ]
 }
@@ -179,21 +179,21 @@
         "cloudformation:GetTemplateSummary"
       ],
       "Resource": [
-        "arn:aws:cloudformation:ap-northeast-2:<ACCOUNT_ID>:stack/alarmops-central/*",
-        "arn:aws:cloudformation:ap-northeast-2:<ACCOUNT_ID>:changeSet/samcli-deploy*/*"
+        "arn:<PARTITION>:cloudformation:<REGION>:<ACCOUNT_ID>:stack/alarmops-central/*",
+        "arn:<PARTITION>:cloudformation:<REGION>:<ACCOUNT_ID>:changeSet/samcli-deploy*/*"
       ]
     },
     {
       "Sid": "CfnSamTransform",
       "Effect": "Allow",
       "Action": "cloudformation:CreateChangeSet",
-      "Resource": "arn:aws:cloudformation:ap-northeast-2:aws:transform/Serverless-2016-10-31"
+      "Resource": "arn:<PARTITION>:cloudformation:<REGION>:aws:transform/Serverless-2016-10-31"
     },
     {
       "Sid": "CfnBusStackRead",
       "Effect": "Allow",
       "Action": "cloudformation:DescribeStacks",
-      "Resource": "arn:aws:cloudformation:ap-northeast-2:<ACCOUNT_ID>:stack/alarmops-central-bus/*"
+      "Resource": "arn:<PARTITION>:cloudformation:<REGION>:<ACCOUNT_ID>:stack/alarmops-central-bus/*"
     },
     {
       "Sid": "SamValidateListPolicies",
@@ -208,7 +208,7 @@
         "s3:PutObject",
         "s3:GetObject"
       ],
-      "Resource": "arn:aws:s3:::<SAM_ARTIFACT_BUCKET>/*"
+      "Resource": "arn:<PARTITION>:s3:::<SAM_ARTIFACT_BUCKET>/*"
     },
     {
       "Sid": "SamBucketList",
@@ -217,19 +217,19 @@
         "s3:ListBucket",
         "s3:GetBucketLocation"
       ],
-      "Resource": "arn:aws:s3:::<SAM_ARTIFACT_BUCKET>"
+      "Resource": "arn:<PARTITION>:s3:::<SAM_ARTIFACT_BUCKET>"
     },
     {
       "Sid": "IamCreateRoleWithBoundary",
       "Effect": "Allow",
       "Action": "iam:CreateRole",
       "Resource": [
-        "arn:aws:iam::<ACCOUNT_ID>:role/AlarmOpsCentral-*",
-        "arn:aws:iam::<ACCOUNT_ID>:role/alarmops-central-*"
+        "arn:<PARTITION>:iam::<ACCOUNT_ID>:role/AlarmOpsCentral-*",
+        "arn:<PARTITION>:iam::<ACCOUNT_ID>:role/alarmops-central-*"
       ],
       "Condition": {
         "StringEquals": {
-          "iam:PermissionsBoundary": "arn:aws:iam::<ACCOUNT_ID>:policy/AlarmOpsCentral-RoleBoundary"
+          "iam:PermissionsBoundary": "arn:<PARTITION>:iam::<ACCOUNT_ID>:policy/AlarmOpsCentral-RoleBoundary"
         }
       }
     },
@@ -241,12 +241,12 @@
         "iam:DeleteRolePolicy"
       ],
       "Resource": [
-        "arn:aws:iam::<ACCOUNT_ID>:role/AlarmOpsCentral-*",
-        "arn:aws:iam::<ACCOUNT_ID>:role/alarmops-central-*"
+        "arn:<PARTITION>:iam::<ACCOUNT_ID>:role/AlarmOpsCentral-*",
+        "arn:<PARTITION>:iam::<ACCOUNT_ID>:role/alarmops-central-*"
       ],
       "Condition": {
         "StringEquals": {
-          "iam:PermissionsBoundary": "arn:aws:iam::<ACCOUNT_ID>:policy/AlarmOpsCentral-RoleBoundary"
+          "iam:PermissionsBoundary": "arn:<PARTITION>:iam::<ACCOUNT_ID>:policy/AlarmOpsCentral-RoleBoundary"
         }
       }
     },
@@ -255,12 +255,12 @@
       "Effect": "Allow",
       "Action": "iam:PutRolePermissionsBoundary",
       "Resource": [
-        "arn:aws:iam::<ACCOUNT_ID>:role/AlarmOpsCentral-*",
-        "arn:aws:iam::<ACCOUNT_ID>:role/alarmops-central-*"
+        "arn:<PARTITION>:iam::<ACCOUNT_ID>:role/AlarmOpsCentral-*",
+        "arn:<PARTITION>:iam::<ACCOUNT_ID>:role/alarmops-central-*"
       ],
       "Condition": {
         "StringEquals": {
-          "iam:PermissionsBoundary": "arn:aws:iam::<ACCOUNT_ID>:policy/AlarmOpsCentral-RoleBoundary"
+          "iam:PermissionsBoundary": "arn:<PARTITION>:iam::<ACCOUNT_ID>:policy/AlarmOpsCentral-RoleBoundary"
         }
       }
     },
@@ -275,8 +275,8 @@
         "iam:DeleteRole"
       ],
       "Resource": [
-        "arn:aws:iam::<ACCOUNT_ID>:role/AlarmOpsCentral-*",
-        "arn:aws:iam::<ACCOUNT_ID>:role/alarmops-central-*"
+        "arn:<PARTITION>:iam::<ACCOUNT_ID>:role/AlarmOpsCentral-*",
+        "arn:<PARTITION>:iam::<ACCOUNT_ID>:role/alarmops-central-*"
       ]
     },
     {
@@ -286,13 +286,13 @@
         "iam:AttachRolePolicy",
         "iam:DetachRolePolicy"
       ],
-      "Resource": "arn:aws:iam::<ACCOUNT_ID>:role/alarmops-central-*",
+      "Resource": "arn:<PARTITION>:iam::<ACCOUNT_ID>:role/alarmops-central-*",
       "Condition": {
         "StringEquals": {
-          "iam:PermissionsBoundary": "arn:aws:iam::<ACCOUNT_ID>:policy/AlarmOpsCentral-RoleBoundary",
+          "iam:PermissionsBoundary": "arn:<PARTITION>:iam::<ACCOUNT_ID>:policy/AlarmOpsCentral-RoleBoundary",
           "iam:PolicyARN": [
-            "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
-            "arn:aws:iam::aws:policy/service-role/AWSLambdaSQSQueueExecutionRole"
+            "arn:<PARTITION>:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+            "arn:<PARTITION>:iam::aws:policy/service-role/AWSLambdaSQSQueueExecutionRole"
           ]
         }
       }
@@ -309,8 +309,8 @@
         "iam:ListInstanceProfilesForRole"
       ],
       "Resource": [
-        "arn:aws:iam::<ACCOUNT_ID>:role/AlarmOpsCentral-*",
-        "arn:aws:iam::<ACCOUNT_ID>:role/alarmops-central-*"
+        "arn:<PARTITION>:iam::<ACCOUNT_ID>:role/AlarmOpsCentral-*",
+        "arn:<PARTITION>:iam::<ACCOUNT_ID>:role/alarmops-central-*"
       ]
     },
     {
@@ -318,8 +318,8 @@
       "Effect": "Allow",
       "Action": "iam:PassRole",
       "Resource": [
-        "arn:aws:iam::<ACCOUNT_ID>:role/AlarmOpsCentral-Engine",
-        "arn:aws:iam::<ACCOUNT_ID>:role/alarmops-central-*FunctionRole-*"
+        "arn:<PARTITION>:iam::<ACCOUNT_ID>:role/AlarmOpsCentral-Engine",
+        "arn:<PARTITION>:iam::<ACCOUNT_ID>:role/alarmops-central-*FunctionRole-*"
       ],
       "Condition": {
         "StringEquals": {
@@ -347,7 +347,7 @@
         "lambda:UntagResource",
         "lambda:ListTags"
       ],
-      "Resource": "arn:aws:lambda:ap-northeast-2:<ACCOUNT_ID>:function:alarmops-*"
+      "Resource": "arn:<PARTITION>:lambda:<REGION>:<ACCOUNT_ID>:function:alarmops-*"
     },
     {
       "Sid": "LambdaEventSourceMappingsCreateUpdate",
@@ -359,7 +359,7 @@
       "Resource": "*",
       "Condition": {
         "ArnLike": {
-          "lambda:FunctionArn": "arn:aws:lambda:ap-northeast-2:<ACCOUNT_ID>:function:alarmops-*"
+          "lambda:FunctionArn": "arn:<PARTITION>:lambda:<REGION>:<ACCOUNT_ID>:function:alarmops-*"
         }
       }
     },
@@ -380,7 +380,7 @@
         "lambda:UntagResource",
         "lambda:ListTags"
       ],
-      "Resource": "arn:aws:lambda:ap-northeast-2:<ACCOUNT_ID>:event-source-mapping:*"
+      "Resource": "arn:<PARTITION>:lambda:<REGION>:<ACCOUNT_ID>:event-source-mapping:*"
     },
     {
       "Sid": "Sqs",
@@ -395,7 +395,7 @@
         "sqs:UntagQueue",
         "sqs:ListQueueTags"
       ],
-      "Resource": "arn:aws:sqs:ap-northeast-2:<ACCOUNT_ID>:alarmops-*"
+      "Resource": "arn:<PARTITION>:sqs:<REGION>:<ACCOUNT_ID>:alarmops-*"
     },
     {
       "Sid": "EventsRulesOnCentralBus",
@@ -411,13 +411,13 @@
         "events:UntagResource",
         "events:ListTagsForResource"
       ],
-      "Resource": "arn:aws:events:ap-northeast-2:<ACCOUNT_ID>:rule/alarmops-central/alarmops-*"
+      "Resource": "arn:<PARTITION>:events:<REGION>:<ACCOUNT_ID>:rule/alarmops-central/alarmops-*"
     },
     {
       "Sid": "EventsCentralBusRead",
       "Effect": "Allow",
       "Action": "events:DescribeEventBus",
-      "Resource": "arn:aws:events:ap-northeast-2:<ACCOUNT_ID>:event-bus/alarmops-central"
+      "Resource": "arn:<PARTITION>:events:<REGION>:<ACCOUNT_ID>:event-bus/alarmops-central"
     },
     {
       "Sid": "LogGroups",
@@ -433,8 +433,8 @@
         "logs:ListTagsLogGroup"
       ],
       "Resource": [
-        "arn:aws:logs:ap-northeast-2:<ACCOUNT_ID>:log-group:/aws/lambda/alarmops-*",
-        "arn:aws:logs:ap-northeast-2:<ACCOUNT_ID>:log-group:/aws/lambda/alarmops-*:*"
+        "arn:<PARTITION>:logs:<REGION>:<ACCOUNT_ID>:log-group:/aws/lambda/alarmops-*",
+        "arn:<PARTITION>:logs:<REGION>:<ACCOUNT_ID>:log-group:/aws/lambda/alarmops-*:*"
       ]
     },
     {
@@ -454,7 +454,7 @@
         "secretsmanager:UntagResource",
         "secretsmanager:GetResourcePolicy"
       ],
-      "Resource": "arn:aws:secretsmanager:ap-northeast-2:<ACCOUNT_ID>:secret:alarmops/central/*"
+      "Resource": "arn:<PARTITION>:secretsmanager:<REGION>:<ACCOUNT_ID>:secret:alarmops/central/*"
     },
     {
       "Sid": "CloudWatchAlarms",
@@ -466,7 +466,7 @@
         "cloudwatch:UntagResource",
         "cloudwatch:ListTagsForResource"
       ],
-      "Resource": "arn:aws:cloudwatch:ap-northeast-2:<ACCOUNT_ID>:alarm:alarmops-*"
+      "Resource": "arn:<PARTITION>:cloudwatch:<REGION>:<ACCOUNT_ID>:alarm:alarmops-*"
     },
     {
       "Sid": "CloudWatchDescribe",
@@ -485,9 +485,9 @@
         "apigateway:DELETE"
       ],
       "Resource": [
-        "arn:aws:apigateway:ap-northeast-2::/apis",
-        "arn:aws:apigateway:ap-northeast-2::/apis/*",
-        "arn:aws:apigateway:ap-northeast-2::/tags/*"
+        "arn:<PARTITION>:apigateway:<REGION>::/apis",
+        "arn:<PARTITION>:apigateway:<REGION>::/apis/*",
+        "arn:<PARTITION>:apigateway:<REGION>::/tags/*"
       ]
     },
     {
@@ -503,7 +503,7 @@
       "Resource": "*",
       "Condition": {
         "StringNotEquals": {
-          "iam:PermissionsBoundary": "arn:aws:iam::<ACCOUNT_ID>:policy/AlarmOpsCentral-RoleBoundary"
+          "iam:PermissionsBoundary": "arn:<PARTITION>:iam::<ACCOUNT_ID>:policy/AlarmOpsCentral-RoleBoundary"
         }
       }
     },
@@ -516,7 +516,7 @@
         "iam:DeletePolicyVersion",
         "iam:SetDefaultPolicyVersion"
       ],
-      "Resource": "arn:aws:iam::<ACCOUNT_ID>:policy/AlarmOpsCentral-RoleBoundary"
+      "Resource": "arn:<PARTITION>:iam::<ACCOUNT_ID>:policy/AlarmOpsCentral-RoleBoundary"
     },
     {
       "Sid": "DenyForceDeleteSecret",
@@ -608,7 +608,7 @@
     {
       "Effect": "Allow",
       "Principal": {
-        "Federated": "arn:aws:iam::<ACCOUNT_ID>:oidc-provider/token.actions.githubusercontent.com"
+        "Federated": "arn:<PARTITION>:iam::<ACCOUNT_ID>:oidc-provider/token.actions.githubusercontent.com"
       },
       "Action": "sts:AssumeRoleWithWebIdentity",
       "Condition": {
@@ -636,7 +636,7 @@
         "cloudformation:UpdateStack",
         "cloudformation:DescribeStackEvents"
       ],
-      "Resource": "arn:aws:cloudformation:ap-northeast-2:<ACCOUNT_ID>:stack/alarmops-central-bus/*"
+      "Resource": "arn:<PARTITION>:cloudformation:<REGION>:<ACCOUNT_ID>:stack/alarmops-central-bus/*"
     },
     {
       "Sid": "EventsCentralBus",
@@ -646,7 +646,7 @@
         "events:PutPermission",
         "events:RemovePermission"
       ],
-      "Resource": "arn:aws:events:ap-northeast-2:<ACCOUNT_ID>:event-bus/alarmops-central"
+      "Resource": "arn:<PARTITION>:events:<REGION>:<ACCOUNT_ID>:event-bus/alarmops-central"
     }
   ]
 }
@@ -680,7 +680,7 @@
       "Sid": "TrustChangeOneRole",
       "Effect": "Allow",
       "Action": "iam:UpdateAssumeRolePolicy",
-      "Resource": "arn:aws:iam::<ACCOUNT_ID>:role/<바뀌는 역할 이름>"
+      "Resource": "arn:<PARTITION>:iam::<ACCOUNT_ID>:role/<바뀌는 역할 이름>"
     }
   ]
 }
@@ -697,7 +697,7 @@
    1. IAM → 정책 → 정책 생성
    2. 정책 편집기에서 **JSON** 탭을 고르고 위 2번 JSON을 붙여 넣는다. `<ACCOUNT_ID>`를 바꾼다.
    3. 다음 → 정책 이름 `AlarmOpsCentral-RoleBoundary` (정확히 이 이름) → 정책 생성
-   4. 만든 정책을 열어 ARN을 확인한다. `arn:aws:iam::<ACCOUNT_ID>:policy/AlarmOpsCentral-RoleBoundary`여야 한다.
+   4. 만든 정책을 열어 ARN을 확인한다. `arn:<PARTITION>:iam::<ACCOUNT_ID>:policy/AlarmOpsCentral-RoleBoundary`여야 한다.
 2. **배포 역할 만들기**
    1. IAM → 역할 → 역할 생성
    2. 신뢰할 수 있는 엔터티 유형: **웹 자격 증명**
