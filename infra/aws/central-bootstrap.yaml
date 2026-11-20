@@ -58,7 +58,7 @@ Parameters:
   CentralStackName:
     Type: String
     Default: alarmops-central
-    AllowedPattern: '^[a-z][a-z0-9-]{1,40}$'
+    AllowedPattern: '^[a-z][a-z0-9-]{4,40}$'
     Description: Name of the central.yaml stack. Also the prefix of the SAM function role names (<name>-*).
   BusStackName:
     Type: String
@@ -73,7 +73,7 @@ Parameters:
   ResourcePrefix:
     Type: String
     Default: alarmops
-    AllowedPattern: '^[a-z][a-z0-9-]{1,20}$'
+    AllowedPattern: '^[a-z][a-z0-9-]{4,20}$'
     Description: Prefix of the queues, functions, log groups, alarms, rules and secrets (<prefix>/central/*) that central.yaml creates.
   PermissionsBoundaryName:
     Type: String
@@ -82,6 +82,16 @@ Parameters:
     Description: Name of the boundary policy. Must equal central.yaml parameter PermissionsBoundaryName.
 
 Rules:
+  # The deploy roles may change stack/<CentralStackName>/* and stack/<BusStackName>/*. If one of them were this stack's name
+  # they could change this stack. (AWS::StackName is not usable inside Rules, so the default name is compared as a literal.)
+  StackNamesAreDifferent:
+    Assertions:
+      - Assert: !Not [!Equals [!Ref CentralStackName, !Ref BusStackName]]
+        AssertDescription: CentralStackName and BusStackName must differ.
+      - Assert: !Not [!Equals [!Ref CentralStackName, "alarmops-central-bootstrap"]]
+        AssertDescription: CentralStackName must not be the bootstrap stack name alarmops-central-bootstrap.
+      - Assert: !Not [!Equals [!Ref BusStackName, "alarmops-central-bootstrap"]]
+        AssertDescription: BusStackName must not be the bootstrap stack name alarmops-central-bootstrap.
   VercelTeamSlugRequiredToCreateProvider:
     RuleCondition: !Equals [!Ref VercelOidcProviderArn, ""]
     Assertions:
@@ -121,6 +131,9 @@ Resources:
     UpdateReplacePolicy: Retain
     Properties:
       BucketName: !Sub "${ResourcePrefix}-central-artifacts-${AWS::AccountId}"
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -132,6 +145,25 @@ Resources:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
               SSEAlgorithm: AES256
+
+  SamArtifactBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: CreateSamArtifactBucket
+    Properties:
+      Bucket: !Ref SamArtifactBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !Sub "arn:${AWS::Partition}:s3:::${SamArtifactBucket}"
+              - !Sub "arn:${AWS::Partition}:s3:::${SamArtifactBucket}/*"
+            Condition:
+              Bool:
+                "aws:SecureTransport": "false"
 
   # Upper bound of every role that the deploy role creates. Same JSON as deploy-role-policy.md section 2.
   RoleBoundaryPolicy:

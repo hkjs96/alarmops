@@ -837,8 +837,18 @@
 | 경계 정책 `AlarmOpsCentral-RoleBoundary` | 지운다. **단 스택 `alarmops-central`이 이미 있으면 그 역할들이 이 정책을 경계로 쓰고 있어 지울 수 없다(`DeleteConflict`).** 그때는 사람이 보안 담당과 정한다(예: 중앙 스택을 먼저 지우고 다시 올리기). CloudFormation 리소스 가져오기(import)는 역할·정책에 `DeletionPolicy`가 없어 이 템플릿 그대로는 쓸 수 없다 |
 | GitHub OIDC 공급자 | 지우지 않는다. 파라미터 `GitHubOidcProviderArn`에 ARN을 넘긴다 |
 | Vercel OIDC 공급자 | 지우지 않는다. `VercelOidcProviderArn`에 ARN을 넘긴다 |
-| SAM 아티팩트 버킷 | 지우지 않는다. `SamArtifactBucketName`에 이름을 넘긴다. 버킷의 퍼블릭 차단·버전 관리·SSE-S3가 켜져 있는지는 사람이 확인한다(이 스택은 기존 버킷을 고치지 않는다) |
+| SAM 아티팩트 버킷 | 지우지 않는다. `SamArtifactBucketName`에 이름을 넘긴다. 아래 체크리스트를 먼저 확인한다(이 스택은 기존 버킷을 고치지 않는다). 기본은 스택이 새로 만드는 쪽이다 |
 | GitHub 환경·변수 | 그대로 둔다. 스크립트는 이미 있는 것을 덮어쓴다 |
+
+기존 버킷을 넘기기 전 체크리스트(하나라도 아니면 넘기지 않고 비워 둔다):
+
+- [ ] 버킷 소유 계정이 이 중앙 계정이다(다른 계정 버킷이면 배포 역할 정책이 닿지 않거나 남의 버킷에 코드를 올리게 된다).
+- [ ] 이 용도 전용이다(다른 데이터·다른 시스템의 쓰기 권한이 없다).
+- [ ] 서울 리전이다.
+- [ ] 퍼블릭 액세스 차단 4개가 모두 켜져 있다.
+- [ ] 버전 관리가 켜져 있다.
+- [ ] 기본 암호화(SSE-S3 이상)가 켜져 있다.
+- [ ] (권장) 새 버킷에는 스택이 `BucketOwnerEnforced`와 HTTPS 외 접근 거부 정책도 둔다. 기존 버킷에도 같은 설정이 있는지 본다.
 
 ### 5-4. GitHub 환경과 변수 (스크립트, 사람이 실행)
 
@@ -852,10 +862,10 @@ infra/scripts/setup-github-environments.sh --repo hkjs96/alarmops --reviewer <�
   --var central:VERCEL_TEAM_SLUG=<팀 슬러그> --var central:VERCEL_PROJECT_NAME=<프로젝트 이름>
 ```
 
-- 환경 `central`, `central-bus`, `production`(`--envs`로 바꿈)을 만들고, 필수 승인자 한 명, `prevent_self_review=false`, 배포 브랜치는 사용자 지정 정책으로 `main`만 둔다. 이미 있으면 설정을 덮어쓰고 `main` 외 정책은 지운다.
+- 환경 `central`, `central-bus`, `production`(`--envs`로 바꿈)을 만들고, 필수 승인자 한 명, `prevent_self_review=false`, `can_admins_bypass=false`, 배포 브랜치는 사용자 지정 정책으로 `main`만 둔다. 이미 있으면 설정을 덮어쓰고 type이 branch이고 name이 `main`인 것 외 정책은 지운다(목록을 읽지 못하면 중단한다).
 - `--from-stack`이 넣는 변수: `central`의 `CENTRAL_DEPLOY_ROLE_ARN`, `VERCEL_OIDC_PROVIDER_ARN`, `SAM_ARTIFACT_BUCKET`과 `central-bus`의 `CENTRAL_BUS_DEPLOY_ROLE_ARN`. 그 밖의 변수(`VERCEL_TEAM_SLUG` 등 GO-LIVE 4-2 표)는 `--var 환경:이름=값`으로 준다. 같은 이름이면 `--var`가 이긴다.
 - 여러 번 실행해도 같은 결과다(변수는 있으면 갱신, 없으면 생성).
-- **비밀 값은 스크립트에 넣지 않는다.** 이름에 `TOKEN`·`SECRET`·`PASSWORD`·`PRIVATE`·`KEY`가 있는 `--var`는 거부한다. `VERCEL_TOKEN` 등은 `gh secret set`을 사람이 직접 실행한다(스크립트가 끝에 명령을 안내한다).
+- **비밀 값은 스크립트에 넣지 않는다.** 이름에 `TOKEN`·`SECRET`·`PASSWORD`·`PASS`·`PRIVATE`·`KEY`·`CREDENTIAL`·`AUTH`·`CERT`·`APIKEY`가 있는 `--var`는 대소문자와 상관없이 거부하고, 값이 `AKIA`·`ghp_`·`github_pat_`·`-----BEGIN`으로 시작해도 거부한다. `VERCEL_TOKEN` 등은 `gh secret set`을 사람이 직접 실행한다(스크립트가 끝에 명령을 안내한다).
 - 두 환경의 ARN은 서로 다르다. `central` 환경에는 `CENTRAL_BUS_DEPLOY_ROLE_ARN`을 두지 않는다.
 
 ### 5-5. 이 스택은 배포 역할이 고칠 수 없다
@@ -863,7 +873,9 @@ infra/scripts/setup-github-environments.sh --repo hkjs96/alarmops --reviewer <�
 - 배포 역할 정책 어디에도 이 스택(`stack/alarmops-central-bootstrap/*`), 이 스택이 만든 역할 `AlarmOpsDeployCentral`·`AlarmOpsDeployBus`, 경계 정책에 쓰기를 허용하는 문장이 없다. 허용 문장의 리소스 패턴은 `stack/<중앙 스택 이름>/*`, `stack/<버스 스택 이름>/*`, `role/AlarmOpsCentral-*`, `role/<중앙 스택 이름>-*`뿐이고 `AlarmOpsDeploy…`는 어디에도 걸리지 않는다. 경계 정책 수정은 `DenyBoundaryPolicyChange`가 막는다.
 - OIDC 공급자·버킷의 정책을 바꾸는 IAM·S3 권한(`iam:*OpenIDConnectProvider*`, `s3:PutBucketPolicy` 등)도 허용하지 않는다. 버킷에는 객체 쓰기·읽기와 목록만 준다.
 - 이 사실은 `test_central_bootstrap.py`의 `DeployRolesCannotTouchThisStack`가 확인한다(허용 문장의 리소스 패턴이 스택·두 역할·경계·두 공급자 ARN과 맞지 않는지).
-- 따라서 **Deny 문장을 추가하지 않았다.** 이미 허용이 없는 것에 Deny를 더하면 문서 JSON과 템플릿이 따로 노는 지점이 하나 늘 뿐이다. 다만 `CentralStackName`을 `alarmops-central-bootstrap`처럼 이 스택 이름으로 바꾸면 허용이 걸리므로 그렇게 하지 않는다.
+- 따라서 **Deny 문장을 추가하지 않았다.** 이미 허용이 없는 것에 Deny를 더하면 문서 JSON과 템플릿이 따로 노는 지점이 하나 늘 뿐이다. 다만 `CentralStackName`·`BusStackName`이 서로 같거나 이 스택 이름(`alarmops-central-bootstrap`)이면 허용이 걸리므로 템플릿 Rules가 생성을 막는다.
+- 이 스택의 변경 세트 이름은 `samcli-deploy`로 시작하지 않게 한다(콘솔이 붙이는 기본 이름을 쓰면 된다). 배포 역할의 변경 세트 권한(`changeSet/samcli-deploy*/*`)에 걸리지 않게 하려는 것이다.
+- 스택을 올린 뒤(갱신 뒤에도) 두 역할의 신뢰 정책에서 `sub`가 `repo:<소유자>/<저장소>:environment:central`과 `…:central-bus` 정확히 하나씩이고 `*`가 없는지 IAM 콘솔에서 확인한다.
 - 이 스택은 사람이 같은 콘솔 절차로 갱신한다(변경 세트를 읽고 실행). 정책을 바꾸면 문서 JSON도 같이 고친다.
 
 ### 5-6. 버스 스택을 이 스택에 합치지 않는 이유

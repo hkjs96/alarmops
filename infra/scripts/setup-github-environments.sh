@@ -54,6 +54,9 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$repo" ] && [ -n "$reviewer" ] || { usage >&2; exit 2; }
 [[ "$repo" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || { echo "bad --repo: $repo" >&2; exit 2; }
+for part in "${repo%%/*}" "${repo#*/}"; do
+  { [ "$part" = "." ] || [ "$part" = ".." ]; } && { echo "bad --repo (component . or ..): $repo" >&2; exit 2; }
+done
 [[ "$reviewer" =~ ^[A-Za-z0-9-]+$ ]] || { echo "bad --reviewer: $reviewer" >&2; exit 2; }
 
 run() { if [ "$dry" = 1 ]; then echo "DRY-RUN: $*"; else "$@"; fi; }
@@ -95,10 +98,18 @@ fi
 for kv in "${vars[@]+"${vars[@]}"}"; do
   [[ "$kv" =~ ^([A-Za-z0-9._-]+):([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]] || { echo "bad --var (want ENV:NAME=VALUE): ${kv%%=*}" >&2; exit 2; }
   kv_env="${BASH_REMATCH[1]}" kv_name="${BASH_REMATCH[2]}" kv_value="${BASH_REMATCH[3]}"
-  if [[ "$kv_name" =~ (TOKEN|SECRET|PASSWORD|PRIVATE|KEY) ]]; then
+  shopt -s nocasematch
+  if [[ "$kv_name" =~ (TOKEN|SECRET|PASSWORD|PASS|PRIVATE|KEY|CREDENTIAL|AUTH|CERT|APIKEY) ]]; then
+    shopt -u nocasematch
     echo "refusing $kv_name: it looks like a secret. Use: gh secret set $kv_name --repo $repo --env $kv_env" >&2
     exit 2
   fi
+  shopt -u nocasematch
+  case "$kv_value" in
+    AKIA*|ghp_*|github_pat_*|-----BEGIN*)
+      echo "refusing the value of $kv_name: it looks like a credential. Use gh secret set." >&2
+      exit 2 ;;
+  esac
   put_kv "$kv_env:$kv_name" "$kv_value"
 done
 
@@ -113,9 +124,9 @@ for env in "${env_list[@]}"; do
   [[ "$env" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "bad environment name: $env" >&2; exit 2; }
   echo "== environment $env"
   # PUT creates or replaces the settings. Body: reviewer, prevent_self_review=false, custom branch policy.
-  body="$(printf '{"reviewers":[{"type":"User","id":%s}],"prevent_self_review":false,"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}' "${reviewer_id//[^0-9]/}")"
+  body="$(printf '{"reviewers":[{"type":"User","id":%s}],"prevent_self_review":false,"can_admins_bypass":false,"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}' "${reviewer_id//[^0-9]/}")"
   if [ "$dry" = 1 ]; then
-    echo "DRY-RUN: gh api -X PUT repos/$repo/environments/$env --input - <<< (reviewer $reviewer, prevent_self_review=false, custom branch policy)"
+    echo "DRY-RUN: gh api -X PUT repos/$repo/environments/$env --input - <<< (reviewer $reviewer, prevent_self_review=false, can_admins_bypass=false, custom branch policy)"
   else
     printf '%s' "$body" | gh api -X PUT "repos/$repo/environments/$env" --input - >/dev/null
   fi
@@ -125,11 +136,15 @@ for env in "${env_list[@]}"; do
     echo "DRY-RUN: gh api repos/$repo/environments/$env/deployment-branch-policies  (keep/create main, delete the rest)"
   else
     have_main=0
-    while IFS=$'\t' read -r pid pname; do
+    # List first; a failure here stops the script (set -e) instead of looking like "no policies".
+    policies="$(gh api --paginate "repos/$repo/environments/$env/deployment-branch-policies" \
+      --jq '.branch_policies[] | [.id, .type, .name] | @tsv')" || { echo "cannot list branch policies of $env" >&2; exit 1; }
+    # Keep only type=branch name=main; delete everything else.
+    while IFS=$'\t' read -r pid ptype pname; do
       [ -n "$pid" ] || continue
-      if [ "$pname" = "main" ]; then have_main=1
+      if [ "$ptype" = "branch" ] && [ "$pname" = "main" ] && [ "$have_main" = 0 ]; then have_main=1
       else gh api -X DELETE "repos/$repo/environments/$env/deployment-branch-policies/$pid" >/dev/null; fi
-    done < <(gh api --paginate "repos/$repo/environments/$env/deployment-branch-policies" --jq '.branch_policies[] | [.id, .name] | @tsv')
+    done <<<"$policies"
     if [ "$have_main" = 0 ]; then
       gh api -X POST "repos/$repo/environments/$env/deployment-branch-policies" -f name=main -f type=branch >/dev/null
     fi

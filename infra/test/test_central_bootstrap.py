@@ -10,7 +10,7 @@ Run from the repo root:  python -m unittest discover -s infra/test -v
 
 from __future__ import annotations
 
-import copy
+import hashlib
 import json
 import re
 import unittest
@@ -158,10 +158,24 @@ def compact_len(doc: dict) -> int:
     return len(re.sub(r"\s", "", json.dumps(doc, separators=(",", ":"))))
 
 
-def norm(doc: dict) -> dict:
-    """IAM treats a one-element list and a string alike for Action/Resource; keep the document's form but sort statements
-    by position only (order is not changed)."""
-    return copy.deepcopy(doc)
+# SHA-256 of each document JSON block (placeholders unreplaced, keys sorted, compact). Changing a policy in
+# deploy-role-policy.md fails this test until the hash is updated on purpose, in the same commit as the template change.
+DOC_HASHES = {
+    ("## 1.", 0): "d97678294062c400b74b4434ef40e25daef09bdc71864c1c7d49027f647a33e1",
+    ("## 2.", 0): "c1563d02d4dc8336eb36c6473ff951b995d5746c753a65addc5d5c6d0e604c74",
+    ("## 3.", 0): "b5f88235d020a3bc1a590242a0877ad9366ae631b0015d969419847e5246512f",
+    ("### 3-1.", 0): "c37f0b784e4c79aa3ab63512fa0f53485b5e6fd4885f2970da0237f9df3eee0d",
+    ("### 3-1.", 1): "dba3cb5ded82c23d33113e68f395bad1cac68ce8ff875cf882b9363d3f79546e",
+}
+
+
+class DocumentIsPinned(unittest.TestCase):
+    def test_document_json_hashes(self):
+        for (heading, idx), want in DOC_HASHES.items():
+            with self.subTest(heading=heading, index=idx):
+                canon = json.dumps(doc_policy(heading, idx), sort_keys=True, separators=(",", ":"))
+                self.assertEqual(hashlib.sha256(canon.encode()).hexdigest(), want,
+                                 "document JSON changed: update the template and this hash together")
 
 
 class SameAsDocument(unittest.TestCase):
@@ -174,7 +188,7 @@ class SameAsDocument(unittest.TestCase):
     def test_each_policy_equals_the_document(self):
         for name in self.exp:
             with self.subTest(policy=name):
-                self.assertEqual(norm(self.got[name]), norm(self.exp[name]))
+                self.assertEqual(self.got[name], self.exp[name])
 
     def test_statement_sids_and_order_equal_the_document(self):
         for name in ("boundary", "policy_central", "policy_bus"):
@@ -234,7 +248,7 @@ class RoleShape(unittest.TestCase):
 
     def test_only_the_expected_resource_types(self):
         types = sorted(v["Type"] for v in RES.values())
-        self.assertEqual(types, sorted(["AWS::IAM::OIDCProvider", "AWS::IAM::OIDCProvider", "AWS::S3::Bucket",
+        self.assertEqual(types, sorted(["AWS::IAM::OIDCProvider", "AWS::IAM::OIDCProvider", "AWS::S3::Bucket", "AWS::S3::BucketPolicy",
                                         "AWS::IAM::ManagedPolicy", "AWS::IAM::Role", "AWS::IAM::Role"]))
 
     def test_outputs(self):
@@ -272,6 +286,56 @@ class CreateOrReuse(unittest.TestCase):
         self.assertEqual((g["Url"], g["ClientIdList"]), ("https://token.actions.githubusercontent.com", ["sts.amazonaws.com"]))
         self.assertEqual(v["Url"], "https://oidc.vercel.com")
         self.assertEqual(v["ClientIdList"], [{"Fn::Sub": "https://vercel.com/${VercelTeamSlug}"}])
+
+
+class StackNameRules(unittest.TestCase):
+    BOOT = "alarmops-central-bootstrap"
+
+    def assertions(self):
+        return T["Rules"]["StackNamesAreDifferent"]["Assertions"]
+
+    def passes(self, central, bus):
+        r = Renderer({**defaults(), "CentralStackName": central, "BusStackName": bus})
+
+        def ev(n):
+            (k, v), = n.items()
+            if k == "Fn::Not":
+                return not ev(v[0])
+            if k == "Fn::Equals":
+                return r.expr(v[0]) == r.expr(v[1])
+            raise ValueError(k)
+        return all(ev(a["Assert"]) for a in self.assertions())
+
+    def test_defaults_pass(self):
+        self.assertTrue(self.passes("alarmops-central", "alarmops-central-bus"))
+
+    def test_equal_or_bootstrap_names_fail(self):
+        self.assertFalse(self.passes("same-name", "same-name"))
+        self.assertFalse(self.passes(self.BOOT, "alarmops-central-bus"))
+        self.assertFalse(self.passes("alarmops-central", self.BOOT))
+
+    def test_minimum_length_is_five(self):
+        for name in ("ResourcePrefix", "CentralStackName"):
+            pat = re.compile(T["Parameters"][name]["AllowedPattern"])
+            with self.subTest(parameter=name):
+                self.assertIsNone(pat.match("abcd"))
+                self.assertIsNotNone(pat.match("abcde"))
+
+
+class BucketHardening(unittest.TestCase):
+    def test_owner_enforced(self):
+        rules = RES["SamArtifactBucket"]["Properties"]["OwnershipControls"]["Rules"]
+        self.assertEqual(rules, [{"ObjectOwnership": "BucketOwnerEnforced"}])
+
+    def test_policy_denies_plain_http_on_bucket_and_objects(self):
+        r = Renderer({**defaults()})
+        pol = r.resource("SamArtifactBucketPolicy", "PolicyDocument")
+        self.assertEqual(RES["SamArtifactBucketPolicy"]["Condition"], "CreateSamArtifactBucket")
+        (s,) = pol["Statement"]
+        self.assertEqual((s["Effect"], s["Principal"], s["Action"]), ("Deny", "*", "s3:*"))
+        self.assertEqual(s["Condition"], {"Bool": {"aws:SecureTransport": "false"}})
+        b = r.bucket_name()
+        self.assertEqual(s["Resource"], [f"arn:{PARTITION}:s3:::{b}", f"arn:{PARTITION}:s3:::{b}/*"])
 
 
 class InlinePolicySize(unittest.TestCase):
