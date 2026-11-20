@@ -179,10 +179,14 @@ jobs:
           PROVIDER: ${{ vars.VERCEL_OIDC_PROVIDER_ARN }}
           TEAM: ${{ vars.VERCEL_TEAM_SLUG }}
           PROJECT: ${{ vars.VERCEL_PROJECT_NAME }}
+          SAM_ARTIFACT_BUCKET: ${{ vars.SAM_ARTIFACT_BUCKET }}
         run: |
-          for v in ROLE PROVIDER TEAM PROJECT; do
+          for v in ROLE PROVIDER TEAM PROJECT SAM_ARTIFACT_BUCKET; do
             if [ -z "${!v}" ]; then echo "::error::Environment variable for $v is not set in the central environment"; exit 1; fi
           done
+          if ! [[ "$SAM_ARTIFACT_BUCKET" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]]; then
+            echo "::error::SAM_ARTIFACT_BUCKET is not a valid S3 bucket name"; exit 1
+          fi
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ vars.CENTRAL_DEPLOY_ROLE_ARN }}
@@ -209,6 +213,7 @@ jobs:
           CENTRAL_BUS_NAME: ${{ vars.CENTRAL_BUS_NAME }}
           DLQ_OPS_ROLE_ARN: ${{ vars.DLQ_OPS_ROLE_ARN }}
           REMEDIATION_EXECUTION: ${{ vars.REMEDIATION_EXECUTION }}
+          SAM_ARTIFACT_BUCKET: ${{ vars.SAM_ARTIFACT_BUCKET }}
         run: |
           params=(
             "VercelOidcProviderArn=${VERCEL_OIDC_PROVIDER_ARN}"
@@ -227,7 +232,7 @@ jobs:
             --stack-name "$STACK_NAME" \
             --region "$AWS_REGION" \
             --capabilities CAPABILITY_NAMED_IAM \
-            --resolve-s3 \
+            --s3-bucket "$SAM_ARTIFACT_BUCKET" \
             --no-execute-changeset \
             --no-fail-on-empty-changeset \
             --parameter-overrides "${params[@]}"
@@ -258,7 +263,7 @@ jobs:
             echo "| Action | Logical id | Type | Replacement |"
             echo "|---|---|---|---|"
             aws cloudformation describe-change-set --change-set-name "$id" \
-              --query "Changes[?starts_with(ResourceChange.ResourceType, 'AWS::IAM')].[ResourceChange.Action,ResourceChange.LogicalResourceId,ResourceChange.ResourceType,ResourceChange.Replacement]" --output text |
+              --query "Changes[?starts_with(ResourceChange.ResourceType, 'AWS::IAM') || ResourceChange.ResourceType=='AWS::SQS::QueuePolicy' || ResourceChange.ResourceType=='AWS::Lambda::Permission' || ResourceChange.ResourceType=='AWS::Events::Rule'].[ResourceChange.Action,ResourceChange.LogicalResourceId,ResourceChange.ResourceType,ResourceChange.Replacement]" --output text |
               awk -F'\t' '{ printf "| %s | %s | %s | %s |\n", $1, $2, $3, $4 }'
             echo
             echo "### All changes"
