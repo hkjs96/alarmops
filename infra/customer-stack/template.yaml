@@ -249,11 +249,16 @@ Resources:
           Arn: !Ref CentralEventBusArn
           RoleArn: !GetAtt EventForwarderRole.Arn
 
+  # Narrowed (#89): only tag changes whose request names a tag key the central engine acts on: `Monitoring` (D-16) or
+  # `Threshold_*` (D-08), in the request shapes `alarm_engine.events.extract` can read. Anything else is a no-op centrally.
+  # `$or` branches differ only in where the key sits (CloudTrail requestParameters is per service). Map-style `tags`
+  # ({"k": "v"}: Lambda, SQS, MSK, tag:TagResources) can only be matched by exact key, so there only `Monitoring` is
+  # forwarded; a `Threshold_*` change on those APIs is picked up by the hourly TAG_RECONCILE run. See README.
   TagChangeRule:
     Type: AWS::Events::Rule
     Properties:
       Name: AlarmOps-TagChange
-      Description: Forward CloudTrail tag add/remove events (Monitoring tag changes, D-16) to the central bus.
+      Description: Forward CloudTrail tag add/remove events that touch the Monitoring or Threshold_* tag keys (D-16) to the central bus.
       State: ENABLED
       EventPattern:
         detail-type: [AWS API Call via CloudTrail]
@@ -271,6 +276,18 @@ Resources:
             - UntagResources
             - TagQueue
             - UntagQueue
+          requestParameters:
+            $or:
+              - tagSet: { items: { key: [Monitoring, { prefix: Threshold_ }] } }
+              - tags: { key: [Monitoring, { prefix: Threshold_ }] }
+              - tags: { Key: [Monitoring, { prefix: Threshold_ }] }
+              - tags: { Monitoring: [{ exists: true }] }
+              - tagList: { key: [Monitoring, { prefix: Threshold_ }] }
+              - tagList: { Key: [Monitoring, { prefix: Threshold_ }] }
+              - TagList: { key: [Monitoring, { prefix: Threshold_ }] }
+              - TagList: { Key: [Monitoring, { prefix: Threshold_ }] }
+              - tagKeys: [Monitoring, { prefix: Threshold_ }]
+              - TagKeys: [Monitoring, { prefix: Threshold_ }]
       Targets:
         - Id: central-bus
           Arn: !Ref CentralEventBusArn
