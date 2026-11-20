@@ -617,6 +617,17 @@ http://localhost:3107/auth/dev-login?as=admin
 
 어디서: 본인 터미널(저장소 관리자 권한으로 `gh` 로그인, 본인이 연 SSO 세션). 환경은 CloudFormation으로 만들 수 없어서 스크립트로 한다.
 
+> **참고 — GitHub 환경은 왜 여러 개인가** 배포 대상마다 환경을 따로 둔다. 환경은 세 가지 일을 한다. ① AWS·Vercel이 "이 이름의 환경에서 돈 작업"만 열쇠를 준다(OIDC 신뢰 `sub`). ② 배포 직전에 멈춰 사람 승인을 받는다. ③ 그 배포에만 쓰는 값·비밀을 담는다. 하나로 합치면 콘솔 배포를 승인한 작업이 AWS 열쇠까지 읽을 수 있어서 나눈다.
+>
+> | 환경 | 쓰는 워크플로 | 배포 대상 | 담는 것 | 만드는 곳 |
+> |---|---|---|---|---|
+> | `production` | `deploy-console` | 콘솔 → Vercel | Vercel 토큰·ID(비밀) | 3-2 |
+> | `production-db` | `prod-db` | 운영 DB 마이그레이션 | DB 연결 주소(비밀) | `SETUP-PROD-DB.md` |
+> | `central` | `deploy-central` | 엔진·수집 → AWS 중앙 계정 | 배포 역할 ARN, SAM 버킷, Vercel OIDC 공급자 ARN 등(변수) | 이 절 |
+> | `central-bus` | `bus-allowlist` | 고객 허용 목록 → AWS 버스 | 버스 전용 역할 ARN(변수) | 이 절 |
+>
+> 값을 넣을 환경을 헷갈리지 않는다. 예: `VERCEL_OIDC_PROVIDER_ARN`은 AWS 중앙 배포가 쓰므로 `production`이 아니라 `central`에 넣는다.
+
 - [ ] **스크립트 실행**
 
 1. 먼저 아무것도 호출하지 않는 `--dry-run`으로 본다.
