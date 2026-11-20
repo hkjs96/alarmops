@@ -1,6 +1,6 @@
 # 배포 역할 정책 초안 (GO-LIVE 4-1의 4번)
 
-`deploy-central`과 `bus-allowlist` 워크플로가 OIDC로 맡는 **배포 역할**의 정책 초안이다. 사람이 읽고 검토한 뒤 AWS 콘솔에 넣는다. 에이전트는 AWS 명령을 실행하지 않는다.
+`deploy-central`과 `bus-allowlist` 워크플로가 OIDC로 맡는 **배포 역할**의 정책 초안이다. 사람이 읽고 검토한다. 이 문서의 JSON은 부트스트랩 스택 `infra/aws/central-bootstrap.yaml`이 그대로 만든다(5절). 문서와 템플릿이 같은지는 `infra/test/test_central_bootstrap.py`가 검사한다. 에이전트는 AWS 명령을 실행하지 않는다.
 
 - 대상 계정: 중앙 AWS 계정. 리전: 서울(`ap-northeast-2`). Control Tower 조직 계정이든 일반 계정이든 같은 정책이 동작해야 한다(D-58). 이 문서는 Organizations·CT 기능(`aws:PrincipalOrgID` 등)을 전제하지 않는다.
 - 자리표시자: `<ACCOUNT_ID>`는 중앙 계정 12자리 숫자, `<REGION>`은 `ap-northeast-2`, `<PARTITION>`은 `aws`(일반 상용 파티션)로 바꾼다. 이 문서에는 실제 값을 쓰지 않는다. 템플릿 쪽은 `${AWS::AccountId}`·`${AWS::Region}`·`${AWS::Partition}`을 쓴다.
@@ -11,7 +11,8 @@
 |---|---|---|
 | 배포 역할 | `AlarmOpsDeployCentral` | `AlarmOpsCentral-*`·`alarmops-central-*`·`AlarmOps-*`에 걸리지 않게 일부러 다르게 지었다. 배포 역할이 자기 자신을 고칠 수 없어야 한다 |
 | 버스 허용 목록 역할 | `AlarmOpsDeployBus` | `bus-allowlist` 전용. `AlarmOpsCentral-*`·`alarmops-central-*`·`AlarmOps-*`에 걸리지 않는다. 신뢰 `sub`는 `environment:central-bus`. 인라인 정책 `AlarmOpsDeployBus-Policy`(아래 3-1) |
-| SAM 아티팩트 버킷 | `alarmops-central-artifacts-<ACCOUNT_ID>` (예) | 배포 코드 zip을 올리는 고정 버킷. GitHub `central` 환경 변수 `SAM_ARTIFACT_BUCKET` |
+| SAM 아티팩트 버킷 | `alarmops-central-artifacts-<ACCOUNT_ID>` | 배포 코드 zip을 올리는 고정 버킷. 부트스트랩 스택이 만든다(이미 있으면 이름을 파라미터로 넘긴다). GitHub `central` 환경 변수 `SAM_ARTIFACT_BUCKET` |
+| 부트스트랩 스택 | `alarmops-central-bootstrap` | 위 경계 정책·두 역할·OIDC 공급자 두 개·버킷을 만드는 스택. 배포 역할이 고칠 수 없다(5-5) |
 | 권한 경계 정책 | `AlarmOpsCentral-RoleBoundary` | 배포 역할이 만드는 모든 역할에 붙는다 |
 | 권한 정책 | `AlarmOpsDeployCentral-Policy` | 배포 역할의 **인라인** 정책 |
 
@@ -22,8 +23,8 @@
    - 별도 브랜치 `agent/central-boundary-template`가 `central.yaml`에 `PermissionsBoundary`(세 역할과 `Globals.Function`)를 넣고, `deploy-central`을 `--s3-bucket "$SAM_ARTIFACT_BUCKET"`으로, `bus-allowlist`를 `central-bus` 환경으로 바꾼다.
    - **머지 순서: 그 PR을 먼저 머지하고, 그 다음에 첫 `plan`을 돌린다.**
    - 스택이 이미 있는 채로 경계를 붙이면 CloudFormation이 `iam:PutRolePermissionsBoundary`를 부른다. 그래서 권한 정책에 그 경계 ARN 조건의 허용(`IamPutBoundaryOnlyOurs`)을 넣었다.
-2. 권한 정책은 공백을 빼고 8,212자(실제 값을 넣은 기준, JSON을 압축해 센 값)라 **관리형 정책 한도(6,144자)를 넘는다.** 그래서 역할의 **인라인 정책**으로 넣는다(역할당 인라인 정책 합계 한도 10,240자). 신뢰 정책 변경용 임시 정책(`DateLessThan` 조건 포함, 두 패턴·시각 값을 채운 기준 약 400자)이 붙어 있는 동안에도 합계 약 8,600자라 한도 안이다.
-3. SAM 아티팩트 버킷은 `--resolve-s3` 대신 사람이 만든 고정 버킷을 쓴다. 이렇게 하면 `aws-sam-cli-managed-default` 스택·버킷 생성 권한과 와일드카드 버킷 권한이 필요 없다. 아래 5번의 6단계에서 만든다.
+2. 권한 정책은 공백을 빼고 8,248자(기본 이름과 기본 버킷 이름을 넣은 기준, JSON을 압축해 센 값)라 **관리형 정책 한도(6,144자)를 넘는다.** 그래서 역할의 **인라인 정책**으로 넣는다(역할당 인라인 정책 합계 한도 10,240자). 신뢰 정책 변경용 임시 정책(`DateLessThan` 조건 포함, 두 패턴·시각 값을 채운 기준 약 400자)이 붙어 있는 동안에도 합계 약 8,650자라 한도 안이다. 테스트가 CloudFormation이 값을 풀어 쓴 뒤의 길이를 세어 이 한도를 지키는지 확인한다.
+3. SAM 아티팩트 버킷은 `--resolve-s3` 대신 고정 버킷을 쓴다. 이렇게 하면 `aws-sam-cli-managed-default` 스택·버킷 생성 권한과 와일드카드 버킷 권한이 필요 없다. 부트스트랩 스택이 만든다(5절).
 4. 첫 배포가 실패해 스택이 `ROLLBACK_COMPLETE`가 되면 **사람이** 콘솔에서 스택을 지운다. 배포 역할에는 `DeleteStack`이 없다. 지운 뒤 `plan`을 다시 돌린다.
 5. 중앙 계정은 `AlarmOps` 전용이라고 가정한다. PoC는 D-57에 따라 공유 테스트 계정일 수 있다. 그 경우 `ApiGatewayHttpApi`의 `/apis/*` 와일드카드가 같은 계정의 다른 HTTP API까지 열어 주는 위험이 있다(생성 전에는 API ID를 몰라 이름으로 줄일 수 없다). 다른 워크로드가 없는 계정에서만 쓴다.
 
@@ -778,54 +779,110 @@
 - 알림 규칙과 SNS는 배포 역할이 만들지 않는다. 사람이 만든다(배포 역할이 자기 알림을 끌 수 없게).
 - 후속 아이디어: `AlarmOpsCentral-*` 역할에 대한 `AssumeRole`·`AssumeRoleWithWebIdentity`를 평소와 다른 주체가 부르면 알리는 규칙.
 
-## 5. 콘솔 클릭 순서 (사람, 중앙 계정, 서울)
+## 5. 부트스트랩 스택 올리기 (사람, 중앙 계정, 서울)
 
-권한 경계 정책 → 역할(+권한 정책) 순서다. 경계가 먼저 있어야 권한 정책의 조건 ARN이 맞는다.
+손으로 만드는 것은 없다. **스택 하나와 스크립트 하나**로 끝난다.
 
-1. **권한 경계 정책 만들기**
-   1. IAM → 정책 → 정책 생성
-   2. 정책 편집기에서 **JSON** 탭을 고르고 위 2번 JSON을 붙여 넣는다. `<ACCOUNT_ID>`를 바꾼다.
-   3. 다음 → 정책 이름 `AlarmOpsCentral-RoleBoundary` (정확히 이 이름) → 정책 생성
-   4. 만든 정책을 열어 ARN을 확인한다. `arn:<PARTITION>:iam::<ACCOUNT_ID>:policy/AlarmOpsCentral-RoleBoundary`여야 한다.
-2. **배포 역할 만들기**
-   1. IAM → 역할 → 역할 생성
-   2. 신뢰할 수 있는 엔터티 유형: **웹 자격 증명**
-   3. 자격 증명 공급자: `token.actions.githubusercontent.com`, Audience: `sts.amazonaws.com`
-   4. 마법사의 GitHub 조직 칸은 필수다. `hkjs96`을 넣는다. 리포지토리·브랜치 칸은 비워도 된다(`alarmops`를 넣어도 된다). 아래 3번에서 신뢰 정책을 JSON으로 덮어쓰므로 `sub`는 거기서 정해진다.
-   5. 권한 추가 화면은 정책을 고르지 않고 다음 → 역할 이름 `AlarmOpsDeployCentral` → 역할 생성
-3. **신뢰 정책 덮어쓰기**
-   1. 만든 역할 → 신뢰 관계 → 신뢰 정책 편집
-   2. 위 1번 JSON을 붙여 넣고 `<ACCOUNT_ID>`를 바꾼다.
-   3. 확인: `sub`가 `repo:hkjs96/alarmops:environment:central` 한 줄이고 `*`가 없다.
-4. **권한 정책 넣기(인라인)**
-   1. 역할 → 권한 탭 → 권한 추가 → 인라인 정책 생성
-   2. **JSON** 탭에 위 3번 JSON을 붙여 넣고 `<ACCOUNT_ID>`를 바꾼다.
-   3. 정책 이름 `AlarmOpsDeployCentral-Policy` → 정책 생성
-   4. 확인: 정책의 `iam:PermissionsBoundary` 값이 1번에서 만든 경계 정책 ARN과 글자까지 같다. 이름이 다르면 조건이 맞지 않아 `CreateRole`이 거부된다.
-5. **최대 세션 시간**: 역할 → 요약 → 편집 → 최대 세션 기간 1시간.
-6. **SAM 아티팩트 버킷 만들기**
-   1. S3 → 버킷 만들기. 리전은 **서울(ap-northeast-2)**.
-   2. 버킷 이름 예: `alarmops-central-artifacts-<ACCOUNT_ID>`
-   3. 퍼블릭 액세스 모두 차단: 켬(기본값)
-   4. 버킷 버전 관리: 활성화
-   5. 기본 암호화: SSE-S3(Amazon S3 관리형 키)
-   6. 버킷 만들기 후, 3번 JSON의 `<SAM_ARTIFACT_BUCKET>` 두 곳을 이 버킷 이름으로 바꿔 4번의 인라인 정책을 갱신한다.
-   7. GitHub → Settings → Environments → `central` → Variables에 `SAM_ARTIFACT_BUCKET` = 버킷 이름을 추가한다.
-7. **버스 허용 목록 역할 만들기**: 2번과 같은 방식으로 역할 `AlarmOpsDeployBus`를 만든다(웹 자격 증명, 같은 공급자·Audience, 조직 `hkjs96`).
-   1. 신뢰 관계를 3-1의 신뢰 정책 JSON으로 덮어쓴다(`sub`는 `repo:hkjs96/alarmops:environment:central-bus`).
-   2. 권한 탭 → 권한 추가 → 인라인 정책 생성 → **JSON** → 3-1의 권한 JSON(`<ACCOUNT_ID>` 바꿈) → 이름 `AlarmOpsDeployBus-Policy`.
-   3. 최대 세션 기간 1시간. 경계 정책은 붙이지 않는다(이 역할은 역할을 만들지 못한다).
-8. **GitHub 환경 `central-bus` 만들기**
-   1. 저장소 → Settings → Environments → New environment → 이름 `central-bus`
-   2. Deployment branches and tags → Selected branches and tags → `main`만 추가
-   3. Required reviewers: 본인 한 명을 넣는다.
-   4. Prevent self-review는 **끈다**(승인자가 1인이라 켜면 아무도 승인하지 못한다).
-   5. Variables에 `CENTRAL_BUS_DEPLOY_ROLE_ARN` = `AlarmOpsDeployBus`의 ARN을 추가한다.
-9. **배포 역할 ARN 변수**: `central` 환경 변수 `CENTRAL_DEPLOY_ROLE_ARN` = `AlarmOpsDeployCentral`의 ARN(GO-LIVE 4-2).
-   - 두 역할의 ARN은 서로 다르다. `central` 환경에는 `CENTRAL_BUS_DEPLOY_ROLE_ARN`을 두지 않는다.
-10. **경계 이름이 맞는지 확인**: 템플릿 PR("먼저 알아 둘 것" 1번)이 머지된 뒤 `plan`이 `CreateRole`을 통과하는지 본다. 거부되면 `plan` 로그의 거부 메시지에서 `iam:PermissionsBoundary` 조건과 템플릿의 경계 ARN을 대조한다.
+| 무엇 | 어디서 | 만드는 것 |
+|---|---|---|
+| 스택 `alarmops-central-bootstrap` (`infra/aws/central-bootstrap.yaml`) | CloudFormation 콘솔 | GitHub OIDC 공급자, Vercel OIDC 공급자, SAM 아티팩트 버킷, 경계 정책 `AlarmOpsCentral-RoleBoundary`, 역할 `AlarmOpsDeployCentral`, `AlarmOpsDeployBus` |
+| 스크립트 `infra/scripts/setup-github-environments.sh` | 본인 터미널 | GitHub 환경 `central`·`central-bus`·`production`과 변수 |
 
-> **주의** 경계 정책은 배포 역할이 고칠 수 없다(`DenyBoundaryPolicyChange`). 고칠 때는 관리자가 새 버전을 만들고 `plan`에서 IAM 변경을 확인한다.
+배포 역할이 자기 자신을 만들 수 없다(닭과 달걀). 그래서 파이프라인이 아니라 사람이 이 템플릿을 한 번 올린다. 중앙 계정을 옮길 때도 새 계정에서 이 스택 하나와 스크립트 하나면 된다(D-58).
+
+문서 2·3·3-1·1절의 JSON과 템플릿의 정책은 같아야 한다. `infra/test/test_central_bootstrap.py`가 문서의 json 블록을 파싱해 자리표시자를 바꾼 뒤 템플릿과 비교한다. 문서나 템플릿 한쪽만 고치면 테스트가 실패한다.
+
+### 5-1. 올리는 사람에게 필요한 것과 순서
+
+- 중앙 계정 관리자 세션(SSO·MFA). 에이전트가 아니라 사람이 한다.
+- 필요한 권한(관리자 권한이면 충분하다): `cloudformation:CreateStack`, 템플릿 업로드, IAM의 `CreateRole`·`PutRolePolicy`·`CreatePolicy`·`CreateOpenIDConnectProvider`(공급자를 새로 만들 때), S3의 `CreateBucket`·`PutBucketVersioning`·`PutEncryptionConfiguration`·`PutBucketPublicAccessBlock`(버킷을 새로 만들 때).
+- **IAM 승인: `CAPABILITY_NAMED_IAM`이 필요하다.** 역할과 정책에 이름(`AlarmOpsDeployCentral` 등)을 고정했기 때문에 `CAPABILITY_IAM`으로는 안 된다. 콘솔에서는 마지막 화면의 체크 상자("AWS CloudFormation이 사용자 지정 이름으로 IAM 리소스를 생성할 수 있음을 승인합니다")다.
+- 순서:
+  1. 0절 체크리스트를 끝낸다.
+  2. 이 스택을 올린다(5-2). **다른 스택보다 먼저다.** 배포 역할이 이 스택에 있다.
+  3. 버스 스택 `alarmops-central-bus`(`central-bus.yaml`)를 올린다(GO-LIVE 4-1의 1~2번). 이 스택과 서로 의존하지 않는다(역할 정책은 이름 문자열만 쓴다).
+  4. 스크립트를 돌린다(5-4).
+  5. `deploy-central`의 `plan`을 돌린다(GO-LIVE 4-3).
+
+### 5-2. 콘솔 클릭 순서
+
+1. CloudFormation → 스택 → **스택 생성** → 새 리소스 사용(표준).
+2. 템플릿 지정: **템플릿 파일 업로드** → 저장소의 `infra/aws/central-bootstrap.yaml`(약 27KB).
+3. 스택 이름: 정확히 `alarmops-central-bootstrap`.
+4. 파라미터. 대부분 기본값 그대로 둔다.
+   - `GitHubOidcProviderArn`: 이 계정에 `token.actions.githubusercontent.com` 공급자가 **이미 있으면** IAM → 자격 증명 공급자에서 ARN을 복사해 붙인다. 없으면 비워 둔다(스택이 만든다). 공급자는 계정에 하나뿐이라 있는데 비워 두면 생성이 실패하고 스택이 롤백된다(피해는 없다).
+   - `VercelOidcProviderArn`: `oidc.vercel.com` 공급자가 이미 있으면 ARN을, 없으면 비운다. 비우면 `VercelTeamSlug`가 필수다(Rules가 막는다).
+   - `VercelTeamSlug`: Vercel 팀 슬러그. 새 공급자의 대상(aud)이 `https://vercel.com/<슬러그>`가 된다.
+   - `SamArtifactBucketName`: 버킷이 이미 있으면 그 이름을, 없으면 비운다(스택이 `alarmops-central-artifacts-<계정 ID>`를 만든다).
+   - `GitHubRepo`: 기본 `hkjs96/alarmops`.
+   - `CentralStackName`·`BusStackName`·`BusName`·`ResourcePrefix`·`PermissionsBoundaryName`: 기본값. `central.yaml`·`central-bus.yaml`에서 이름을 바꾼 경우에만 같이 바꾼다.
+5. 스택 옵션: **종료 방지(Termination protection)를 켠다.** 실수로 지우는 것을 막는다.
+6. 검토 화면 맨 아래 **IAM 승인 체크**(위 `CAPABILITY_NAMED_IAM`)를 켜고 **스택 생성**.
+7. 상태가 `CREATE_COMPLETE`가 되면 **출력** 탭을 연다.
+   - `DeployCentralRoleArn` → GitHub `central` 변수 `CENTRAL_DEPLOY_ROLE_ARN`
+   - `DeployBusRoleArn` → GitHub `central-bus` 변수 `CENTRAL_BUS_DEPLOY_ROLE_ARN`
+   - `VercelOidcProviderArn` → `central` 변수 `VERCEL_OIDC_PROVIDER_ARN`
+   - `SamArtifactBucketName` → `central` 변수 `SAM_ARTIFACT_BUCKET`
+   - `PermissionsBoundaryArn`, `GitHubOidcProviderArn`: 확인용
+8. Vercel 대시보드에서 OIDC 발급자 모드가 **Global**인지 본다(GO-LIVE 4-1의 5번). 이것만은 AWS 밖이라 손으로 한다.
+9. 변수는 복사하지 않고 5-4의 스크립트가 출력에서 읽어 넣게 해도 된다.
+
+### 5-3. 이미 손으로 일부를 만든 경우
+
+이 스택은 **이름이 겹치면 생성이 실패한다**(롤백되고 아무것도 남지 않는다). 아래처럼 정리한 뒤 올린다.
+
+| 이미 만든 것 | 할 일 |
+|---|---|
+| 역할 `AlarmOpsDeployCentral`, `AlarmOpsDeployBus` | 지운다(인라인 정책 `AlarmOpsDeployCentral-Policy`, `AlarmOpsDeployBus-Policy`도 함께 사라진다). 지우기 전에 GitHub 변수의 ARN이 바뀌지 않는지 본다. 이름이 같아 ARN은 같다. 단 **삭제와 생성 사이에는 배포가 돌지 않게** 한다 |
+| 경계 정책 `AlarmOpsCentral-RoleBoundary` | 지운다. **단 스택 `alarmops-central`이 이미 있으면 그 역할들이 이 정책을 경계로 쓰고 있어 지울 수 없다(`DeleteConflict`).** 그때는 사람이 보안 담당과 정한다(예: 중앙 스택을 먼저 지우고 다시 올리기). CloudFormation 리소스 가져오기(import)는 역할·정책에 `DeletionPolicy`가 없어 이 템플릿 그대로는 쓸 수 없다 |
+| GitHub OIDC 공급자 | 지우지 않는다. 파라미터 `GitHubOidcProviderArn`에 ARN을 넘긴다 |
+| Vercel OIDC 공급자 | 지우지 않는다. `VercelOidcProviderArn`에 ARN을 넘긴다 |
+| SAM 아티팩트 버킷 | 지우지 않는다. `SamArtifactBucketName`에 이름을 넘긴다. 아래 체크리스트를 먼저 확인한다(이 스택은 기존 버킷을 고치지 않는다). 기본은 스택이 새로 만드는 쪽이다 |
+| GitHub 환경·변수 | 그대로 둔다. 스크립트는 이미 있는 것을 덮어쓴다 |
+
+기존 버킷을 넘기기 전 체크리스트(하나라도 아니면 넘기지 않고 비워 둔다):
+
+- [ ] 버킷 소유 계정이 이 중앙 계정이다(다른 계정 버킷이면 배포 역할 정책이 닿지 않거나 남의 버킷에 코드를 올리게 된다).
+- [ ] 이 용도 전용이다(다른 데이터·다른 시스템의 쓰기 권한이 없다).
+- [ ] 서울 리전이다.
+- [ ] 퍼블릭 액세스 차단 4개가 모두 켜져 있다.
+- [ ] 버전 관리가 켜져 있다.
+- [ ] 기본 암호화(SSE-S3 이상)가 켜져 있다.
+- [ ] (권장) 새 버킷에는 스택이 `BucketOwnerEnforced`와 HTTPS 외 접근 거부 정책도 둔다. 기존 버킷에도 같은 설정이 있는지 본다.
+
+### 5-4. GitHub 환경과 변수 (스크립트, 사람이 실행)
+
+CloudFormation은 GitHub 환경을 만들 수 없다. `infra/scripts/setup-github-environments.sh`가 `gh api`로 한다. `gh`는 저장소 관리자 권한으로 로그인해 있어야 한다.
+
+```bash
+# 먼저 --dry-run으로 무엇을 부를지만 본다(아무것도 호출하지 않는다).
+infra/scripts/setup-github-environments.sh --repo hkjs96/alarmops --reviewer <본인 GitHub ID> --from-stack --dry-run
+# 본인이 연 SSO 세션에서 실행. --from-stack은 describe-stacks --query로 스택 출력을 읽는다.
+infra/scripts/setup-github-environments.sh --repo hkjs96/alarmops --reviewer <본인 GitHub ID> --from-stack \
+  --var central:VERCEL_TEAM_SLUG=<팀 슬러그> --var central:VERCEL_PROJECT_NAME=<프로젝트 이름>
+```
+
+- 환경 `central`, `central-bus`, `production`(`--envs`로 바꿈)을 만들고, 필수 승인자 한 명, `prevent_self_review=false`, `can_admins_bypass=false`, 배포 브랜치는 사용자 지정 정책으로 `main`만 둔다. 이미 있으면 설정을 덮어쓰고 type이 branch이고 name이 `main`인 것 외 정책은 지운다(목록을 읽지 못하면 중단한다).
+- `--from-stack`이 넣는 변수: `central`의 `CENTRAL_DEPLOY_ROLE_ARN`, `VERCEL_OIDC_PROVIDER_ARN`, `SAM_ARTIFACT_BUCKET`과 `central-bus`의 `CENTRAL_BUS_DEPLOY_ROLE_ARN`. 그 밖의 변수(`VERCEL_TEAM_SLUG` 등 GO-LIVE 4-2 표)는 `--var 환경:이름=값`으로 준다. 같은 이름이면 `--var`가 이긴다.
+- 여러 번 실행해도 같은 결과다(변수는 있으면 갱신, 없으면 생성).
+- **비밀 값은 스크립트에 넣지 않는다.** 이름에 `TOKEN`·`SECRET`·`PASSWORD`·`PASS`·`PRIVATE`·`KEY`·`CREDENTIAL`·`AUTH`·`CERT`·`APIKEY`가 있는 `--var`는 대소문자와 상관없이 거부하고, 값이 `AKIA`·`ghp_`·`github_pat_`·`-----BEGIN`으로 시작해도 거부한다. `VERCEL_TOKEN` 등은 `gh secret set`을 사람이 직접 실행한다(스크립트가 끝에 명령을 안내한다).
+- 두 환경의 ARN은 서로 다르다. `central` 환경에는 `CENTRAL_BUS_DEPLOY_ROLE_ARN`을 두지 않는다.
+
+### 5-5. 이 스택은 배포 역할이 고칠 수 없다
+
+- 배포 역할 정책 어디에도 이 스택(`stack/alarmops-central-bootstrap/*`), 이 스택이 만든 역할 `AlarmOpsDeployCentral`·`AlarmOpsDeployBus`, 경계 정책에 쓰기를 허용하는 문장이 없다. 허용 문장의 리소스 패턴은 `stack/<중앙 스택 이름>/*`, `stack/<버스 스택 이름>/*`, `role/AlarmOpsCentral-*`, `role/<중앙 스택 이름>-*`뿐이고 `AlarmOpsDeploy…`는 어디에도 걸리지 않는다. 경계 정책 수정은 `DenyBoundaryPolicyChange`가 막는다.
+- OIDC 공급자·버킷의 정책을 바꾸는 IAM·S3 권한(`iam:*OpenIDConnectProvider*`, `s3:PutBucketPolicy` 등)도 허용하지 않는다. 버킷에는 객체 쓰기·읽기와 목록만 준다.
+- 이 사실은 `test_central_bootstrap.py`의 `DeployRolesCannotTouchThisStack`가 확인한다(허용 문장의 리소스 패턴이 스택·두 역할·경계·두 공급자 ARN과 맞지 않는지).
+- 따라서 **Deny 문장을 추가하지 않았다.** 이미 허용이 없는 것에 Deny를 더하면 문서 JSON과 템플릿이 따로 노는 지점이 하나 늘 뿐이다. 다만 `CentralStackName`·`BusStackName`이 서로 같거나 이 스택 이름(`alarmops-central-bootstrap`)이면 허용이 걸리므로 템플릿 Rules가 생성을 막는다.
+- 이 스택의 변경 세트 이름은 `samcli-deploy`로 시작하지 않게 한다(콘솔이 붙이는 기본 이름을 쓰면 된다). 배포 역할의 변경 세트 권한(`changeSet/samcli-deploy*/*`)에 걸리지 않게 하려는 것이다.
+- 스택을 올린 뒤(갱신 뒤에도) 두 역할의 신뢰 정책에서 `sub`가 `repo:<소유자>/<저장소>:environment:central`과 `…:central-bus` 정확히 하나씩이고 `*`가 없는지 IAM 콘솔에서 확인한다.
+- 이 스택은 사람이 같은 콘솔 절차로 갱신한다(변경 세트를 읽고 실행). 정책을 바꾸면 문서 JSON도 같이 고친다.
+
+### 5-6. 버스 스택을 이 스택에 합치지 않는 이유
+
+합치지 않는다. `bus-allowlist`가 버스 스택을 `UpdateStack`한다. 합치면 그 워크플로가 이 스택(역할·경계 정책 포함)을 고칠 수 있어야 해서 5-5가 깨진다. 이 스택의 갱신은 사람만 한다.
+
+> **주의** 경계 정책은 배포 역할이 고칠 수 없다(`DenyBoundaryPolicyChange`). 고칠 때는 관리자가 이 스택을 갱신하고 `plan`에서 IAM 변경을 확인한다.
 
 ## 6. 롤백 복구 절차 (사람)
 
@@ -879,7 +936,58 @@ aws secretsmanager describe-secret --region ap-northeast-2 \
 
 ## 8. 검증하지 못한 것
 
+- 부트스트랩 스택 `central-bootstrap.yaml`은 `cfn-lint`와 `infra/test/test_central_bootstrap.py`(문서 JSON과 값을 푼 템플릿 정책의 비교)만 통과했다. 실제 스택 생성, `CAPABILITY_NAMED_IAM` 동작, 기존 공급자·버킷을 넘기는 경로, 스크립트의 `gh api` 호출은 돌려 보지 못했다(`sam`도 이 환경에 없다. 이 템플릿은 SAM 변환이 없는 순수 CloudFormation이다).
 - 이 문서의 JSON은 문법만 검사했다(`python json.loads`). IAM 정책 시뮬레이터나 실제 `plan`으로는 돌려 보지 못했다.
 - 동작 목록은 템플릿과 워크플로에서 도출했다. CloudFormation이 리소스 생성 때 부르는 보조 동작(예: 태그·조회)은 실제 `plan`/`apply`의 `AccessDenied` 메시지로 마무리한다. 처음 두세 번은 거부가 나올 수 있다고 보고 사람이 지켜본다.
 - 확신이 낮은 항목: `sam validate`의 `iam:ListPolicies`, 변경 세트 ARN 리소스 형태(`changeSet/samcli-deploy*/*`), SAM이 붙이는 관리형 정책이 위 둘뿐인지, `lambda:FunctionArn` 조건이 `CreateEventSourceMapping`에서 CloudFormation 호출에도 채워지는지(안 채워지면 거부되니 첫 `apply`에서 본다), 고정 버킷에서 SAM이 `s3:PutObject` 외에 더 요구하는 동작.
 - 경계 조건 키(`iam:PermissionsBoundary`)는 `CreateRole`, `PutRolePolicy`, `DeleteRolePolicy`, `AttachRolePolicy`, `DetachRolePolicy`, `PutRolePermissionsBoundary`에만 걸었다. 나머지 역할 변경 동작은 조건 키를 지원하지 않아 이름 범위로만 막는다.
+
+## 부록. 템플릿을 쓸 수 없을 때 (손으로 만들기)
+
+5절의 부트스트랩 스택을 쓸 수 없을 때만(예: CloudFormation을 못 쓰는 계정) 아래처럼 콘솔에서 만든다. 이 길은 템플릿과 따로 놀 수 있으니 JSON을 문서 1·2·3·3-1절에서 그대로 복사한다. 권한 경계 정책 → 역할(+권한 정책) 순서다. 경계가 먼저 있어야 권한 정책의 조건 ARN이 맞는다.
+
+1. **권한 경계 정책 만들기**
+   1. IAM → 정책 → 정책 생성
+   2. 정책 편집기에서 **JSON** 탭을 고르고 위 2번 JSON을 붙여 넣는다. `<ACCOUNT_ID>`를 바꾼다.
+   3. 다음 → 정책 이름 `AlarmOpsCentral-RoleBoundary` (정확히 이 이름) → 정책 생성
+   4. 만든 정책을 열어 ARN을 확인한다. `arn:<PARTITION>:iam::<ACCOUNT_ID>:policy/AlarmOpsCentral-RoleBoundary`여야 한다.
+2. **배포 역할 만들기**
+   1. IAM → 역할 → 역할 생성
+   2. 신뢰할 수 있는 엔터티 유형: **웹 자격 증명**
+   3. 자격 증명 공급자: `token.actions.githubusercontent.com`, Audience: `sts.amazonaws.com`
+   4. 마법사의 GitHub 조직 칸은 필수다. `hkjs96`을 넣는다. 리포지토리·브랜치 칸은 비워도 된다(`alarmops`를 넣어도 된다). 아래 3단계에서 신뢰 정책을 JSON으로 덮어쓰므로 `sub`는 거기서 정해진다.
+   5. 권한 추가 화면은 정책을 고르지 않고 다음 → 역할 이름 `AlarmOpsDeployCentral` → 역할 생성
+3. **신뢰 정책 덮어쓰기**
+   1. 만든 역할 → 신뢰 관계 → 신뢰 정책 편집
+   2. 위 1번 JSON을 붙여 넣고 `<ACCOUNT_ID>`를 바꾼다.
+   3. 확인: `sub`가 `repo:hkjs96/alarmops:environment:central` 한 줄이고 `*`가 없다.
+4. **권한 정책 넣기(인라인)**
+   1. 역할 → 권한 탭 → 권한 추가 → 인라인 정책 생성
+   2. **JSON** 탭에 위 3번 JSON을 붙여 넣고 `<ACCOUNT_ID>`를 바꾼다.
+   3. 정책 이름 `AlarmOpsDeployCentral-Policy` → 정책 생성
+   4. 확인: 정책의 `iam:PermissionsBoundary` 값이 1번에서 만든 경계 정책 ARN과 글자까지 같다. 이름이 다르면 조건이 맞지 않아 `CreateRole`이 거부된다.
+5. **최대 세션 시간**: 역할 → 요약 → 편집 → 최대 세션 기간 1시간.
+6. **SAM 아티팩트 버킷 만들기**
+   1. S3 → 버킷 만들기. 리전은 **서울(ap-northeast-2)**.
+   2. 버킷 이름 예: `alarmops-central-artifacts-<ACCOUNT_ID>`
+   3. 퍼블릭 액세스 모두 차단: 켬(기본값)
+   4. 버킷 버전 관리: 활성화
+   5. 기본 암호화: SSE-S3(Amazon S3 관리형 키)
+   6. 버킷 만들기 후, 3번 JSON의 `<SAM_ARTIFACT_BUCKET>` 두 곳을 이 버킷 이름으로 바꿔 4번의 인라인 정책을 갱신한다.
+   7. GitHub → Settings → Environments → `central` → Variables에 `SAM_ARTIFACT_BUCKET` = 버킷 이름을 추가한다.
+7. **버스 허용 목록 역할 만들기**: 2번과 같은 방식으로 역할 `AlarmOpsDeployBus`를 만든다(웹 자격 증명, 같은 공급자·Audience, 조직 `hkjs96`).
+   1. 신뢰 관계를 3-1의 신뢰 정책 JSON으로 덮어쓴다(`sub`는 `repo:hkjs96/alarmops:environment:central-bus`).
+   2. 권한 탭 → 권한 추가 → 인라인 정책 생성 → **JSON** → 3-1의 권한 JSON(`<ACCOUNT_ID>` 바꿈) → 이름 `AlarmOpsDeployBus-Policy`.
+   3. 최대 세션 기간 1시간. 경계 정책은 붙이지 않는다(이 역할은 역할을 만들지 못한다).
+8. **GitHub 환경 `central-bus` 만들기**
+   1. 저장소 → Settings → Environments → New environment → 이름 `central-bus`
+   2. Deployment branches and tags → Selected branches and tags → `main`만 추가
+   3. Required reviewers: 본인 한 명을 넣는다.
+   4. Prevent self-review는 **끈다**(승인자가 1인이라 켜면 아무도 승인하지 못한다).
+   5. Variables에 `CENTRAL_BUS_DEPLOY_ROLE_ARN` = `AlarmOpsDeployBus`의 ARN을 추가한다.
+9. **배포 역할 ARN 변수**: `central` 환경 변수 `CENTRAL_DEPLOY_ROLE_ARN` = `AlarmOpsDeployCentral`의 ARN(GO-LIVE 4-2).
+   - 두 역할의 ARN은 서로 다르다. `central` 환경에는 `CENTRAL_BUS_DEPLOY_ROLE_ARN`을 두지 않는다.
+10. **경계 이름이 맞는지 확인**: 템플릿 PR("먼저 알아 둘 것" 1번)이 머지된 뒤 `plan`이 `CreateRole`을 통과하는지 본다. 거부되면 `plan` 로그의 거부 메시지에서 `iam:PermissionsBoundary` 조건과 템플릿의 경계 ARN을 대조한다.
+
+> **주의** 경계 정책은 배포 역할이 고칠 수 없다(`DenyBoundaryPolicyChange`). 고칠 때는 관리자가 새 버전을 만들고 `plan`에서 IAM 변경을 확인한다.
+> 이 부록으로 만든 역할·정책이 있으면 나중에 스택으로 옮길 때 5-3처럼 먼저 지워야 한다.

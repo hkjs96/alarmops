@@ -565,83 +565,57 @@ http://localhost:3107/auth/dev-login?as=admin
    - 확인: 스택 상태가 생성 완료이고 출력에 `CentralBusArn`, `BusName`이 보인다.
    - 참고: `bus-allowlist` 워크플로가 이 스택을 갱신한다.
 
-- [ ] **AWS에 GitHub OIDC 공급자**
+- [ ] **부트스트랩 스택 `alarmops-central-bootstrap`**(OIDC 공급자 두 개, SAM 아티팩트 버킷, 경계 정책, 배포 역할 두 개를 한 번에)
 
-3. 어디서: IAM → 자격 증명 공급자 → OpenID Connect
-   - 값: URL `https://token.actions.githubusercontent.com`
-   - 값: 대상 `sts.amazonaws.com`
-   - 확인: 공급자 목록에 `token.actions.githubusercontent.com`이 보인다.
+3. 어디서: CloudFormation 콘솔(중앙 계정, 서울). 손으로 IAM 리소스를 만들지 않는다. 클릭 순서와 파라미터는 `infra/aws/deploy-role-policy.md` 5절이 정본이다. 요약은 다음과 같다.
+   1. 스택 생성 → 템플릿 파일 업로드: `infra/aws/central-bootstrap.yaml`
+   2. 스택 이름: 정확히 `alarmops-central-bootstrap`
+   3. 파라미터
+      - `GitHubOidcProviderArn`, `VercelOidcProviderArn`, `SamArtifactBucketName`: 이 계정에 이미 있으면(예: PoC 계정에서 손으로 만들어 둔 것) ARN이나 이름을 넣는다. 비워 두면 스택이 새로 만든다. 새 계정은 비워 둔다.
+      - `VercelTeamSlug`: Vercel 공급자를 새로 만들 때 필수
+      - 나머지는 기본값
+   4. 마지막 화면의 **IAM 승인 체크**(`CAPABILITY_NAMED_IAM`)를 켜고 생성. 종료 방지를 켠다.
+   5. 출력에서 `DeployCentralRoleArn`, `DeployBusRoleArn`, `VercelOidcProviderArn`, `SamArtifactBucketName`을 확인한다(4-2의 스크립트가 읽어 변수로 넣는다).
+   - 확인: 상태 `CREATE_COMPLETE`.
+   - 이미 손으로 만든 경계 정책·역할이 있으면 이름이 겹쳐 생성이 실패한다. 지우고 스택으로 만든다(`deploy-role-policy.md` 5-3). 공급자와 버킷은 지우지 않고 파라미터로 넘긴다.
+   - 이 스택은 배포 역할이 고칠 수 없다(`deploy-role-policy.md` 5-5). 갱신은 사람이 한다.
+   - 버스 스택(1~2번)은 이 스택에 합치지 않는다. `bus-allowlist`가 `UpdateStack`하기 때문이다.
 
-- [ ] **배포 역할**(웹 ID 역할)
+   스택이 만드는 배포 역할의 요약:
+   - 배포 역할 `AlarmOpsDeployCentral`: 신뢰 `sub` = `repo:hkjs96/alarmops:environment:central`(와일드카드 금지), 최대 세션 1시간. 권한은 `infra/aws/README.md`의 "실행과 사람이 하는 일" 범위다.
+     - CloudFormation: 스택 `alarmops-central`, 변환 `AWS::Serverless-2016-10-31`, `GetTemplate`
+     - SAM 아티팩트 버킷: 객체 쓰기와 `s3:GetObject`
+     - 이 스택이 만드는 리소스의 생성·변경: Lambda, SQS, Events, Logs, Secrets Manager(값 없이), CloudWatch 알람, API Gateway v2
+     - `AlarmOpsCentral-*`와 `alarmops-central-*` 역할의 생성·변경. 만들 때마다 경계 정책을 붙여야 한다(`iam:PermissionsBoundary` 조건)
+     - `iam:PassRole`: `AlarmOpsCentral-Engine`과 SAM 함수 역할에만, `iam:PassedToService=lambda.amazonaws.com` 조건으로
+     - 버스 스택은 `DescribeStacks`만
+   - **권한 경계 필수**: 경계 안에는 이 템플릿의 역할이 실제로 쓰는 서비스만 넣는다(sqs, secretsmanager 읽기, logs, `sts:AssumeRole`, `ses:SendEmail`). events와 lambda는 뺐다(`deploy-role-policy.md` 2절). `AssumeRemediatorCaller`는 상한일 뿐이고 실제 허용은 `RemediationEnabled`일 때만 만든다.
+   - **신뢰 정책 변경의 우회 위험은 수용했다(D-57).** 보완책(CloudTrail 알림, plan 승인 전 본문 확인, `TrustChange` 정책 1시간 자동 만료)은 `deploy-role-policy.md` 3-2·4·4-1·4-2절에 있다. **CloudTrail 알림 규칙은 실고객 연결 전 필수다**(구현은 파일럿 전 이슈).
+   - 버스 허용 목록 역할 `AlarmOpsDeployBus`: 신뢰 `sub` = `repo:hkjs96/alarmops:environment:central-bus`. `bus-allowlist` 전용이다. 중앙 배포 역할에는 버스 스택 `DescribeStacks`만 둔다.
+   - 정책 JSON(신뢰, 권한, 경계)의 정본은 `deploy-role-policy.md`이고, 템플릿이 같은 내용을 만든다(`infra/test/test_central_bootstrap.py`가 비교한다).
 
-4. IAM에서 역할을 만든다. 신뢰할 대상은 3번의 공급자(웹 ID)다. 역할 이름은 정해진 것이 없다. 만든 뒤 ARN을 적어 둔다(4-2에서 쓴다).
-   - 신뢰 조건:
-     - `token.actions.githubusercontent.com:aud = sts.amazonaws.com`
-     - `token.actions.githubusercontent.com:sub = repo:hkjs96/alarmops:environment:central`(와일드카드 금지)
-   - 위 두 조건을 신뢰 정책으로 쓰면 아래와 같다. `<중앙 계정 ID>`만 바꾼다.
-     ```json
-     {
-       "Version": "2012-10-17",
-       "Statement": [
-         {
-           "Effect": "Allow",
-           "Principal": {
-             "Federated": "arn:aws:iam::<중앙 계정 ID>:oidc-provider/token.actions.githubusercontent.com"
-           },
-           "Action": "sts:AssumeRoleWithWebIdentity",
-           "Condition": {
-             "StringEquals": {
-               "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-               "token.actions.githubusercontent.com:sub": "repo:hkjs96/alarmops:environment:central"
-             }
-           }
-         }
-       ]
-     }
-     ```
-   - 권한: `infra/aws/README.md`의 "실행과 사람이 하는 일" 범위. 정확한 정책 JSON은 저장소에 없다. 사람이 만들고 검토한다. 그 절에 적힌 범위는 다음과 같다.
-     - CloudFormation: 스택 `alarmops-central`, 변환 `AWS::Serverless-2016-10-31`
-     - `cloudformation:GetTemplate`(이 스택). `apply`가 변경 세트의 코드를 검증할 때 쓴다.
-     - SAM 아티팩트 S3 버킷(사람이 만든 고정 버킷 `SAM_ARTIFACT_BUCKET`): 객체 쓰기와 `s3:GetObject`
-     - 이 스택이 만드는 리소스의 생성·변경: Lambda, SQS, Events, Logs, Secrets Manager, CloudWatch 알람, API Gateway v2
-     - `arn:aws:iam::<계정>:role/AlarmOpsCentral-*` 역할과 SAM 함수 역할 패턴 `alarmops-central-*` 역할의 생성·변경(`iam:CreateRole`, `PutRolePolicy`, `AttachRolePolicy` 등). 만들 때마다 경계 정책을 붙여야 한다
-     - `iam:PassRole`: `AlarmOpsCentral-Engine`과 SAM 함수 역할(`alarmops-central-*FunctionRole-*`)에만, `iam:PassedToService=lambda.amazonaws.com` 조건으로
-     - 버스 스택 `DescribeStacks`
-   - **권한 경계 필수**:
-     - `AlarmOpsCentral-*`와 SAM 함수 역할 `alarmops-central-*` 역할만 만든다.
-     - `PassRole`은 Lambda 서비스로만 하고 대상은 Engine과 SAM 함수 역할로 좁힌다.
-     - 만든 역할에는 경계 정책을 붙이게 한다. `iam:PermissionsBoundary` 조건으로 건다.
-     - 경계 안에는 이 템플릿의 역할이 실제로 쓰는 서비스만 넣는다: sqs, secretsmanager(읽기), logs, `sts:AssumeRole`, `ses:SendEmail`.
-     - **events와 lambda는 뺀다.** 템플릿이 만드는 역할 중 `events:*`·`lambda:*`를 쓰는 것이 없다(EventBridge가 큐·함수 리소스 정책으로 호출하고, 역할 권한이 아니다). 나중에 필요해지면 경계에도 같이 넣는다(`infra/aws/deploy-role-policy.md` 2절).
-     - `sts:AssumeRole`의 `AssumeRemediatorCaller`는 상한일 뿐이다. 실제 허용은 `RemediationEnabled`일 때만 인라인 정책으로 만든다.
-     - **신뢰 정책 변경의 우회 위험은 수용했다(D-57).** 배포 역할이 만든 역할을 외부에서 맡는 경로가 남는다. 보완책(CloudTrail 알림, plan 승인 전 본문 확인, `TrustChange` 정책 1시간 자동 만료)은 같은 문서 3-2·4·4-1·4-2절에 있다. **CloudTrail 알림 규칙은 실고객 연결 전 필수다**(구현은 파일럿 전 이슈).
-   - `bus-allowlist`는 이 역할로 돌리지 않는다. 버스 허용 목록용 별도 역할 `AlarmOpsDeployBus`를 만든다(`infra/aws/deploy-role-policy.md` 3-1). 신뢰 `sub`는 `repo:hkjs96/alarmops:environment:central-bus`다. 이 배포 역할에는 버스 스택 `DescribeStacks`만 둔다.
-   - 정책 JSON 초안(신뢰 정책, 권한 정책, 권한 경계 정책)과 콘솔 클릭 순서는 `infra/aws/deploy-role-policy.md`에 있다. 본인이 검토해 AWS 콘솔에 넣는다. 권한 경계 정책을 먼저 만든다.
+- [ ] **Vercel 쪽 설정(D-49)**
 
-- [ ] **Vercel OIDC 공급자 등록(D-49)**
-
-5. 순서대로 한다.
+4. 순서대로 한다. AWS 쪽 공급자는 위 스택이 만들었다.
    1. 어디서: Vercel 프로젝트 Settings → Security → Secure backend access with OIDC federation
    2. 발급자 모드를 **Global**로 둔다.
-   3. AWS에 OpenID Connect 공급자를 추가한다. 3번과 같은 화면이다.
-      - 값: URL `https://oidc.vercel.com`
-      - 값: 대상 `https://vercel.com/<팀 슬러그>`
-   4. 만든 공급자 ARN을 적어 둔다. 4-2에서 변수 `VERCEL_OIDC_PROVIDER_ARN`에 넣는다.
+   3. 스택 파라미터 `VercelTeamSlug`가 이 팀 슬러그와 같은지 확인한다(공급자 대상이 `https://vercel.com/<팀 슬러그>`다).
+   4. 공급자 ARN은 스택 출력 `VercelOidcProviderArn`이다. 4-2의 스크립트가 변수 `VERCEL_OIDC_PROVIDER_ARN`에 넣는다.
       - ARN 모양: `arn:aws:iam::<중앙 계정 ID>:oidc-provider/oidc.vercel.com`
 
    > **주의** 팀 발급자 모드는 이 템플릿의 신뢰 키와 맞지 않는다.
 
 - [ ] **Service Quotas**
 
-6. AWS 콘솔의 Service Quotas에서 Lambda 동시 실행 한도를 찾아 올린다.
+5. AWS 콘솔의 Service Quotas에서 Lambda 동시 실행 한도를 찾아 올린다.
    - 값: Lambda 동시 실행 한도를 올린다.
    - 확인: 계정 한도 140 이상
    - 이유: 새 계정 10이면 예약 동시성 설정이 실패한다. 기본 예약 합계가 40이다.
    - 상향 요청은 AWS가 승인할 때까지 기다려야 할 수 있다. 승인 전에는 4-3을 실행하지 않는다.
 
-### 4-2. [사람] GitHub `central`·`central-bus` 환경과 변수 (15분)
+### 4-2. [사람] GitHub 환경과 변수 (스크립트 한 번, 10분)
 
-어디서: GitHub 저장소
+어디서: 본인 터미널(저장소 관리자 권한으로 `gh` 로그인, 본인이 연 SSO 세션). 환경은 CloudFormation으로 만들 수 없어서 스크립트로 한다.
 
 > **참고 — GitHub 환경은 왜 여러 개인가** 배포 대상마다 환경을 따로 둔다. 환경은 세 가지 일을 한다. ① AWS·Vercel이 "이 이름의 환경에서 돈 작업"만 열쇠를 준다(OIDC 신뢰 `sub`). ② 배포 직전에 멈춰 사람 승인을 받는다. ③ 그 배포에만 쓰는 값·비밀을 담는다. 하나로 합치면 콘솔 배포를 승인한 작업이 AWS 열쇠까지 읽을 수 있어서 나눈다.
 >
@@ -654,36 +628,39 @@ http://localhost:3107/auth/dev-login?as=admin
 >
 > 값을 넣을 환경을 헷갈리지 않는다. 예: `VERCEL_OIDC_PROVIDER_ARN`은 AWS 중앙 배포가 쓰므로 `production`이 아니라 `central`에 넣는다.
 
-- [ ] **GitHub `central` 환경**
+- [ ] **스크립트 실행**
 
-1. 어디서: Settings → Environments. 이름을 정확히 `central`로 만든다.
-   - 값: 배포 브랜치 `main`만
-   - 값: 필수 승인자 본인
-
-- [ ] **GitHub `central-bus` 환경**(`bus-allowlist` 전용)
-
-   - 어디서: Settings → Environments → New environment. 이름을 정확히 `central-bus`로 만든다.
-   - 값: 배포 브랜치 `main`만
-   - 값: 필수 승인자 본인 한 명, **Prevent self-review는 끈다**(승인자가 1인이다)
-   - 변수: `CENTRAL_BUS_DEPLOY_ROLE_ARN` = 4-1의 `AlarmOpsDeployBus` 역할 ARN. `central`의 `CENTRAL_DEPLOY_ROLE_ARN`과 **다른** ARN이다. `central` 환경에는 넣지 않는다.
-
-- [ ] **`central` 환경 변수**
-
-2. 어디서: Settings → Environments → central → Variables (저장소 변수 아님, 비밀 아님)
-3. 아래 변수를 넣는다.
+1. 먼저 아무것도 호출하지 않는 `--dry-run`으로 본다.
+   ```bash
+   infra/scripts/setup-github-environments.sh --repo hkjs96/alarmops --reviewer <본인 GitHub ID> --from-stack --dry-run
+   ```
+2. 이어서 실제로 실행한다. `--from-stack`이 `aws cloudformation describe-stacks --query`로 4-1 스택 출력을 읽는다. 나머지 변수는 `--var 환경:이름=값`으로 준다.
+   ```bash
+   infra/scripts/setup-github-environments.sh --repo hkjs96/alarmops --reviewer <본인 GitHub ID> --from-stack \
+     --var central:VERCEL_TEAM_SLUG=<팀 슬러그> --var central:VERCEL_PROJECT_NAME=<Vercel 프로젝트 이름>
+   ```
+3. 스크립트가 하는 일
+   - 환경 `central`, `central-bus`, `production`을 만든다. 필수 승인자는 본인 한 명이고, **Prevent self-review는 끈다**(승인자가 1인이다). 배포 브랜치는 사용자 지정 정책으로 `main`만 둔다.
+   - 변수: `central`에 `CENTRAL_DEPLOY_ROLE_ARN`, `VERCEL_OIDC_PROVIDER_ARN`, `SAM_ARTIFACT_BUCKET`, `central-bus`에 `CENTRAL_BUS_DEPLOY_ROLE_ARN`(스택 출력에서). 두 ARN은 서로 다르다. `central` 환경에는 `CENTRAL_BUS_DEPLOY_ROLE_ARN`을 두지 않는다.
+   - 이미 있는 환경과 변수는 덮어쓴다(여러 번 실행해도 된다).
+4. 변수 표(환경 `central`)
 
    | 변수 | 필수 | 값 |
    |---|---|---|
-   | `CENTRAL_DEPLOY_ROLE_ARN` | 필수 | 4-1의 4번 배포 역할 ARN |
-   | `VERCEL_OIDC_PROVIDER_ARN` | 필수 | 4-1의 5번 공급자 ARN |
-   | `VERCEL_TEAM_SLUG` | 필수 | Vercel 팀 슬러그(4-1의 5번 대상 주소에 쓴 것과 같은 값) |
-   | `VERCEL_PROJECT_NAME` | 필수 | 3-1에서 만든 Vercel 프로젝트 이름 |
-   | `SAM_ARTIFACT_BUCKET` | 필수 | 4-1에서 만든 SAM 아티팩트 S3 버킷 이름(서울). `infra/aws/deploy-role-policy.md` 5번의 6단계 |
-   | `ALARM_TOPIC_ARN` | 선택 | DLQ가 비어 있지 않을 때 알릴 SNS 주제 ARN |
+   | `CENTRAL_DEPLOY_ROLE_ARN` | 필수 | 스택 출력 `DeployCentralRoleArn`(스크립트가 넣음) |
+   | `VERCEL_OIDC_PROVIDER_ARN` | 필수 | 스택 출력 `VercelOidcProviderArn`(스크립트가 넣음) |
+   | `VERCEL_TEAM_SLUG` | 필수 | Vercel 팀 슬러그(`--var`) |
+   | `VERCEL_PROJECT_NAME` | 필수 | 3-1에서 만든 Vercel 프로젝트 이름(`--var`) |
+   | `SAM_ARTIFACT_BUCKET` | 필수 | 스택 출력 `SamArtifactBucketName`(스크립트가 넣음) |
+   | `ALARM_TOPIC_ARN` | 선택 | DLQ가 비어 있지 않을 때 알릴 SNS 주제 ARN(`--var`) |
    | `CENTRAL_BUS_NAME` | 선택 | 기본 `alarmops-central`. 버스 이름을 바꾸지 않았으면 넣지 않는다 |
-   | `SES_IDENTITY_ARN`·`SES_FROM_ADDRESS` | 이메일을 쓸 때만 | 1-2에서 적어 둔 값(D-52, 서울 리전 SES에서 검증한 신원). 둘을 같이 넣는다 |
+   | `SES_IDENTITY_ARN`·`SES_FROM_ADDRESS` | 이메일을 쓸 때만 | 1-2에서 적어 둔 값(D-52). 둘을 같이 넣는다 |
 
-4. 확인: `central` 환경의 Variables에 필수 다섯 개가 보인다. 하나라도 없으면 `plan`이 `Environment variable for … is not set in the central environment`로 멈춘다.
+5. 확인: `central` 환경의 Variables에 필수 다섯 개가 보이고 `central-bus`에 `CENTRAL_BUS_DEPLOY_ROLE_ARN`이 보인다. 하나라도 없으면 `plan`이 `Environment variable for … is not set in the central environment`로 멈춘다.
+
+- [ ] **비밀 값**(스크립트가 하지 않는다)
+
+6. `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`는 사람이 직접 `gh secret set <이름> --repo hkjs96/alarmops --env production`으로 넣는다(값은 프롬프트로 입력). 스크립트는 이름에 `TOKEN`·`SECRET`·`PASSWORD`·`PRIVATE`·`KEY`가 들어간 `--var`를 거부한다.
 
 ### 4-3. [사람] 배포 실행 (30분)
 
@@ -782,10 +759,10 @@ http://localhost:3107/auth/dev-login?as=admin
 | `plan`: `Environment variable for … is not set in the central environment` | 4-2의 필수 변수가 없거나 저장소 변수로 넣었다. `central` 환경의 Variables에 넣는다 |
 | `plan`: AWS 자격 증명 단계에서 실패 | 배포 역할의 신뢰 조건이 다르다. `sub`가 정확히 `repo:hkjs96/alarmops:environment:central`인지, 공급자의 대상이 `sts.amazonaws.com`인지 본다 |
 | `plan`: `Check the central bus stack exists`에서 실패 | 버스 스택이 없거나 이름이 `alarmops-central-bus`가 아니다. 4-1의 1~2번 |
-| `plan`: 파라미터 `VercelOidcProviderArn` 형식 오류 | ARN이 `…:oidc-provider/oidc.vercel.com`으로 끝나야 한다. 4-1의 5번 |
+| `plan`: 파라미터 `VercelOidcProviderArn` 형식 오류 | ARN이 `…:oidc-provider/oidc.vercel.com`으로 끝나야 한다. 4-1의 4번 |
 | `plan`: `SesFromAddress is required when SesIdentityArn is set` | `SES_FROM_ADDRESS`도 같이 넣는다 |
-| `apply`: 예약 동시성 관련 실패 | Lambda 동시 실행 한도가 140 미만이다. 4-1의 6번 |
-| `apply`: 코드 검증 단계에서 권한 거부 | 배포 역할에 `cloudformation:GetTemplate`이나 SAM 버킷 `s3:GetObject`가 없다. 4-1의 4번 |
+| `apply`: 예약 동시성 관련 실패 | Lambda 동시 실행 한도가 140 미만이다. 4-1의 5번 |
+| `apply`: 코드 검증 단계에서 권한 거부 | 배포 역할에 `cloudformation:GetTemplate`이나 SAM 버킷 `s3:GetObject`가 없다. 4-1의 3번 |
 | `apply`가 건너뛰어짐, 요약에 `no changes` | 바뀐 것이 없다. 정상이다 |
 | Lambda가 시작을 거부 | 비밀의 연결 문자열에 `sslmode=require`가 없다. 4-4의 3번 |
 | 콘솔에서 고객 해지 시 503 `COMMANDS_UNAVAILABLE` | Vercel에 `ALARM_COMMANDS_QUEUE_URL`이 없다. 4-5 |
