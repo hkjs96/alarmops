@@ -1,0 +1,6 @@
+# 인프라·배포 경로는 저장소 주인의 검토를 거친다 (11/20 3자 검토, D-57 수용 위험의 보완 통제).
+# main 보호에서 "Require review from Code Owners"를 켜야 효과가 있다.
+/infra/              @hkjs96
+/.github/workflows/  @hkjs96
+/.github/scripts/    @hkjs96
+/.github/CODEOWNERS  @hkjs96
