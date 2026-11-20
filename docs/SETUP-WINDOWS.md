@@ -63,6 +63,39 @@ gh auth login
 aws configure --profile dev       # 개발 계정만. 기본 리전 ap-northeast-2
 ```
 
+### 4-1. 개발 AWS 계정을 회사 SSO로 `dev` 프로필에 등록하기
+
+`aws sts get-caller-identity --profile dev`가 `The config profile (dev) could not be found`이면 아직 등록하지 않은 것이다. 회사 계정은 액세스 키가 아니라 SSO로 등록한다. 이 절차는 사람이 직접 한다.
+
+1. **어디서:** 회사 PC의 PowerShell.
+   **입력할 것:**
+   ```powershell
+   aws configure sso --profile dev
+   ```
+2. 질문에 답한다.
+
+   | 질문 | 입력 |
+   |---|---|
+   | SSO session name | 아무 이름(예: `mz`) |
+   | SSO start URL | 회사 AWS SSO 포털 주소(`https://d-…awsapps.com/start`). 끝의 `/#/`는 뺀다. 주소는 팀에서 받는다(저장소에 적지 않는다) |
+   | SSO region | 회사 SSO가 있는 리전. 모르면 `ap-northeast-2`로 해 보고 오류면 `us-east-1` |
+   | SSO registration scopes | Enter |
+
+3. 브라우저가 열리면 회사 계정으로 로그인하고 **Allow**를 누른다.
+4. 터미널에 계정 목록이 나오면 **시험용(샌드박스·PoC) 계정만** 고른다.
+
+   > **주의** MSP라서 목록에 실고객 계정이 섞여 있을 수 있다. 이름으로 판단이 안 되면 고르지 말고 허브에 이름만 알린다(계정 번호는 빼고). 시험용 계정이 없으면 클라우드 담당자에게 PoC용 샌드박스를 요청한다.
+
+5. 역할은 관리자 권한(예: `AdministratorAccess`), **CLI default client Region**은 `ap-northeast-2`, output format은 Enter.
+6. **확인:**
+   ```powershell
+   aws sts get-caller-identity --profile dev
+   ```
+   `Account`가 고른 시험용 계정 번호다.
+7. 세션은 몇 시간 뒤 만료된다. 그때는 `aws sso login --profile dev`로 다시 로그인한다.
+
+> **주의** 프로필 이름은 정확히 `dev`. `prod`, `cust-`로 시작하는 이름은 가드가 막는다.
+
 > **주의** 운영 계정과 실고객 SSO 프로필은 에이전트가 쓰는 세션에서 쓰지 않는다. 가드가 `prod`, `cust-`로 시작하는 프로필을 막는다(이름 규칙을 맞출 것).
 
 > **주의** 실고객 작업은 별도 PowerShell 창에서 사람이 `aws sso login`으로 한다. 그 창에서는 에이전트를 돌리지 않는다.

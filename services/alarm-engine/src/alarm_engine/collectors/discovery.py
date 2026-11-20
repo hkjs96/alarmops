@@ -19,6 +19,7 @@ from alarm_engine.collectors.core import Ctx, call, error_code
 from alarm_engine.collectors.groups import GROUP_OF, GROUPS, Group
 from alarm_engine.engine import DiscoveredResource, DiscoveryError
 from alarm_engine.repository import ResourceRow
+from alarm_engine.retry import safe_error
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +60,7 @@ class AwsDiscovery:
                 failed += 1
                 msg = _code(e)          # counts keep only the code; full text (may hold ARNs) stays in the log
                 first_error = first_error or msg
-                logger.warning("collector %s failed in %s: %s: %s", g.name, r, type(e).__name__, e)
+                logger.warning("collector %s failed in %s: %s", g.name, r, safe_error(e))
                 for t in g.types:
                     self._errors[(r, t)] = msg
         if ran and failed == ran:
@@ -71,7 +72,7 @@ class AwsDiscovery:
             ctx = Ctx(self.sessions, account, row.region)
             r = call(ctx.client("resourcegroupstaggingapi").get_resources, ResourceARNList=[row.resource_arn])
         except Exception as e:  # noqa: BLE001
-            logger.warning("read_tags %s failed: %s", row.resource_arn, e)
+            logger.warning("read_tags failed: %s", safe_error(e))
             return None
         tags: dict[str, str] = {}
         for m in r.get("ResourceTagMappingList", []):

@@ -8,45 +8,25 @@ the group, which records it as that type's error (one failing type never aborts 
 from __future__ import annotations
 
 import logging
-import random
 import time
 from collections.abc import Callable, Iterator
 from typing import Any
 
-from botocore.exceptions import ClientError
-
+from alarm_engine import retry as _retry
 from alarm_engine.aws import CloudAccount, SessionFactory
 from alarm_engine.engine import DiscoveredResource
+from alarm_engine.retry import MAX_ATTEMPTS, THROTTLE_CODES, error_code  # noqa: F401 — re-exported
 
 logger = logging.getLogger(__name__)
 
-MAX_ATTEMPTS = 5
-THROTTLE_CODES = frozenset({
-    "Throttling", "ThrottlingException", "ThrottledException", "RequestLimitExceeded", "TooManyRequestsException",
-    "ProvisionedThroughputExceededException", "RequestThrottled", "RequestThrottledException", "SlowDown",
-    "PriorRequestNotComplete", "BandwidthLimitExceeded", "LimitExceededException",
-})
 MONITORING_KEY = "Monitoring"
 
 _sleep: Callable[[float], None] = time.sleep     # tests replace this
 
 
-def error_code(e: ClientError) -> str:
-    return str(e.response.get("Error", {}).get("Code", ""))
-
-
 def call(fn: Callable[..., Any], **kw: Any) -> Any:
-    """One API call with at most MAX_ATTEMPTS tries on throttling errors (exponential backoff, jitter)."""
-    for attempt in range(MAX_ATTEMPTS):
-        try:
-            return fn(**kw)
-        except ClientError as e:
-            if error_code(e) not in THROTTLE_CODES or attempt == MAX_ATTEMPTS - 1:
-                raise
-            delay = min(8.0, 0.5 * 2 ** attempt) * (0.5 + random.random() / 2)  # noqa: S311 — jitter, not security
-            logger.warning("throttled (%s), retry %d/%d in %.1fs", error_code(e), attempt + 1, MAX_ATTEMPTS - 1, delay)
-            _sleep(delay)
-    raise AssertionError("unreachable")  # pragma: no cover
+    """One API call with at most MAX_ATTEMPTS tries on throttling errors (shared policy: `alarm_engine.retry`)."""
+    return _retry.call(fn, _sleeper=lambda d: _sleep(d), **kw)
 
 
 class PaginationError(Exception):

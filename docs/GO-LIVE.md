@@ -414,7 +414,7 @@ http://localhost:3107/auth/dev-login?as=admin
 틱은 DB가 1분마다 콘솔의 `POST /api/internal/tick`을 부르는 것이다. 이게 돌아야 에스컬레이션과 발송 대기열이 움직인다.
 
 1. Supabase에서 확장 `pg_cron`과 `pg_net`이 켜져 있는지 확인한다. 꺼져 있으면 확장(Extensions) 설정을 찾아 켠다.
-2. Supabase Vault에 `tick_secret`을 저장한다.
+2. Supabase Vault에 `tick_secret`을 저장한다. (Vercel이 아니라 **Supabase** 대시보드다. 왼쪽 **Integrations** → **Vault** → **Secrets** 탭 → **Add new secret**. 11/19 실제 화면 확인)
    - 이름: 정확히 `tick_secret`
    - 값: 3-3에서 만든 `TICK_SECRET`과 **같은 값**
 3. SQL Editor에서 `docs/API-CONTRACT.md` §5의 `cron.schedule('alarmops-tick', ...)`을 실행한다. 아래가 그 SQL이다. `<console-host>` 한 곳만 바꾼다.
@@ -540,6 +540,7 @@ http://localhost:3107/auth/dev-login?as=admin
 준비물:
 
 - 중앙 AWS 계정에 SSO·MFA로 들어갈 수 있는 관리자 권한. 리전은 **서울(ap-northeast-2)**.
+  - PoC 동안은 회사 CT 조직 안의 사용자 본인 계정(`dev` 프로필)을 중앙 계정으로 쓴다(D-57). 등록 방법: `docs/SETUP-WINDOWS.md` 4-1. 중앙은 어느 계정에든 옮길 수 있게 만든다(D-58).
 - 3단계가 끝난 Vercel 프로젝트(팀 슬러그와 프로젝트 이름을 안다)
 - GitHub 저장소 관리자 권한
 
@@ -890,6 +891,8 @@ npm ci --ignore-scripts && npm run build:lambda -w @alarmops/ingest && npm run b
 > **주의** ExternalId는 고객 담당자에게만 준다. 이슈·PR에 적지 않는다.
 
 ### 7-2. 허용 목록에 계정 추가 (10분)
+
+> **주의 (D-57)** 실고객 계정을 허용 목록에 넣기 전에 확인한다: 고객 동의를 받았는가, 고객 스택은 읽기 전용(Reader·EventForwarder)인가. 리허설용 CT 계정은 그 계정 소유자의 확인을 받았는가.
 
 어디서: GitHub 저장소의 Actions
 

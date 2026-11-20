@@ -20,6 +20,7 @@ from typing import Any, Protocol
 from alarm_engine import naming
 from alarm_engine import tags as T
 from alarm_engine.aws import (
+    DEFAULT_ALARM_LIMIT,
     AlarmWriter,
     CapabilityDisabled,
     CloudAccount,
@@ -33,6 +34,7 @@ from alarm_engine.aws import (
 from alarm_engine.desired import DesiredAlarm, ResourceRef, alarm_region, build_desired, type_defs
 from alarm_engine.repository import ManagedAlarmRow, Repository, ResourceRow, new_id, now
 from alarm_engine.resource_types.base import global_service_regions
+from alarm_engine.retry import AwsStateUnknown, is_unknown_state, safe_error
 from alarm_engine.sync import ActualAlarm, Command, SyncPlan, plan
 from alarm_engine.thresholds import LayerValues
 
@@ -110,7 +112,10 @@ class ResourceResult:
 
 class Engine:
     def __init__(self, repo: Repository, sessions: SessionFactory, discovery: Discovery,
-                 alarm_actions: dict[str, list[str]] | None = None):
+                 alarm_actions: dict[str, list[str]] | None = None, alarm_limit: int = DEFAULT_ALARM_LIMIT):
+        self.alarm_limit = alarm_limit          # per account+region metric alarm quota (AWS default 5,000)
+        self._alarm_counts: dict[tuple[str, str], dict[str, int]] = {}   # cleared per sync pass
+        self._batch = False
         self.repo = repo
         self.sessions = sessions
         self.discovery = discovery
@@ -125,12 +130,16 @@ class Engine:
             cw = self.sessions.client(account, "alarmWriter", "cloudwatch", region)
         except CapabilityDisabled:
             return None
-        return AlarmWriter(cw, account.aws_account_id, self.alarm_actions.get(region))
+        cell = self._alarm_counts.setdefault((account.id, region), {})
+        return AlarmWriter(cw, account.aws_account_id, self.alarm_actions.get(region), region=region,
+                           alarm_limit=self.alarm_limit, alarm_count=cell)
 
     # ── single resource
     def sync_resource(self, account: CloudAccount, row: ResourceRow, *, index: dict[str, list[ActualAlarm]] | None = None,
                       restore_external: bool = False, console_override: dict[str, LayerValues] | None = None,
                       ) -> ResourceResult:
+        if not self._batch:
+            self._alarm_counts.clear()          # outside a sync pass the cached counts could be stale
         ref = ResourceRef(row.resource_type, row.resource_key, row.region, account.aws_account_id, row.tags, row.id)
         reader = self._reader_cw(account, row.region)
         actual = index.get(row.resource_key, []) if index is not None else self._owned_for(account, ref)
@@ -185,8 +194,8 @@ class Engine:
                 res.collisions.append(cmd.name)
                 res.errors.append(f"{cmd.op} {cmd.name}: {e}")
             except Exception as e:  # noqa: BLE001 — one alarm's failure must not stop the resource
-                logger.exception("apply %s %s failed", cmd.op, cmd.name)
-                res.errors.append(f"{cmd.op} {cmd.name}: {e}")
+                logger.error("apply %s failed: %s", cmd.op, safe_error(e))
+                res.errors.append(f"{cmd.op} {cmd.name}: {safe_error(e)}")
         for d, a, sev, manual in p.in_sync:
             console, _, _ = layers(d.metric_key)
             self._save_alarm(row, account, d, a.name, a.arn, sev, manual, console, "IN_SYNC", None)
@@ -237,11 +246,28 @@ class Engine:
 
     # ── account
     def sync_account(self, account_id: str, mode: str) -> dict:
+        self._alarm_counts.clear()
+        self._batch = True
+        try:
+            return self._sync_account(account_id, mode)
+        finally:
+            self._batch = False
+            self._alarm_counts.clear()
+
+    def _sync_account(self, account_id: str, mode: str) -> dict:
         account = self.repo.get_account(account_id)
         self.repo.fail_stale_sync_runs(STALE_RUN_AFTER)
         run = self.repo.start_sync_run(account.customer_id, account.id, mode)
         counts: dict[str, Any] = {"created": 0, "updated": 0, "refreshed": 0, "deleted": 0, "needsReview": 0, "externalChange": 0,
                   "errors": 0, "readOnly": False}
+        try:
+            return self._sync_body(account, run, counts)
+        except Exception as e:  # noqa: BLE001 — never leave the run RUNNING (expired credentials, DB errors, ...)
+            logger.error("sync run failed: %s", safe_error(e))
+            self.repo.finish_sync_run(account.customer_id, run, "FAILED", counts, safe_error(e))
+            return counts
+
+    def _sync_body(self, account: CloudAccount, run: str, counts: dict[str, Any]) -> dict:
         take_errors = getattr(self.discovery, "take_errors", None)
         if take_errors:
             take_errors()             # drop leftovers of an aborted earlier pass
@@ -250,7 +276,7 @@ class Engine:
             for region in account.regions:
                 discovered += self.discovery.list_monitored(account, region)
         except Exception as e:  # noqa: BLE001 — failure ≠ zero resources (4-9)
-            self.repo.finish_sync_run(account.customer_id, run, "FAILED", counts, f"discovery failed: {e}")
+            self.repo.finish_sync_run(account.customer_id, run, "FAILED", counts, f"discovery failed: {e if isinstance(e, DiscoveryError) else safe_error(e)}")  # DiscoveryError text is code-only
             return counts
         # Per-type collector failures (one type failing must not abort the account): recorded in the run counts; rows
         # of a failed (region, type) are left alone below — "could not list" is not "gone / tag removed".
@@ -284,7 +310,13 @@ class Engine:
             for row in rows:
                 state = alive.get(row.resource_key)
                 if state is False:
-                    self._delete_all(account, row, counts)
+                    try:
+                        self._delete_all(account, row, counts)
+                    except AwsStateUnknown as e:
+                        # Throttled / denied while listing or deleting: leave the resource and its alarms as they are.
+                        logger.warning("delete %s skipped: state unknown (%s)", row.resource_key, e.code)
+                        counts["unknown"] = counts.get("unknown", 0) + 1
+                        continue
                     row.monitoring_state = "DELETED"
                     self.repo.upsert_resource(row)
                 elif state is True:
@@ -297,8 +329,20 @@ class Engine:
         # Owned alarms whose resource we have no row for (orphans): delete only if the resource is gone.
         index: dict[str, list[ActualAlarm]] = {}
         alarm_regions = set(account.regions) | set(global_service_regions().values())
+        unknown_regions: set[str] = set()
         for region in sorted(alarm_regions):
-            for rid, alarms in list_owned_alarms(self._reader_cw(account, region)).items():
+            try:
+                listed = list_owned_alarms(self._reader_cw(account, region))
+            except Exception as e:  # noqa: BLE001
+                if not is_unknown_state(e):
+                    raise
+                # Not "zero alarms": nothing is deleted or created from this region's index this pass.
+                logger.warning("alarm list for %s unknown (%s); orphan cleanup and sync skipped there", region,
+                               safe_error(e))
+                unknown_regions.add(region)
+                counts["unknown"] = counts.get("unknown", 0) + 1
+                continue
+            for rid, alarms in listed.items():
                 index.setdefault(rid, []).extend(alarms)
         known_keys = {r.resource_key for r in known.values()}
         for rid, alarms in index.items():
@@ -313,16 +357,27 @@ class Engine:
                 w = self._writer(account, region)
                 for a in alarms:
                     if w is not None:
-                        w.apply(Command("DELETE", a.name, a.metadata.metric_key if a.metadata else "", actual=a))
+                        try:
+                            w.apply(Command("DELETE", a.name, a.metadata.metric_key if a.metadata else "", actual=a))
+                        except AwsStateUnknown as e:
+                            logger.warning("orphan delete skipped: state unknown (%s)", e.code)
+                            counts["unknown"] = counts.get("unknown", 0) + 1
+                            continue
                         counts["deleted"] += 1
                     else:
                         counts["readOnly"] = True
 
         for row in to_sync:
+            ref = ResourceRef(row.resource_type, row.resource_key, row.region, account.aws_account_id, row.tags, row.id)
+            if {row.region, alarm_region(ref)} & unknown_regions:
+                # An index with a missing region would look like "no alarms yet": skip, no re-listing (a persistent
+                # throttle would otherwise burn the Lambda time budget).
+                counts["unknown"] = counts.get("unknown", 0) + 1
+                continue
             try:
                 r = self.sync_resource(account, row, index=index)
-            except Exception:  # noqa: BLE001
-                logger.exception("sync %s failed", row.resource_key)
+            except Exception as e:  # noqa: BLE001
+                logger.error("sync resource failed: %s", safe_error(e))
                 counts["errors"] += 1
                 continue
             for ck, cv in r.plan.counts().items():
@@ -333,7 +388,7 @@ class Engine:
             self.repo.heartbeat_sync_run(account.customer_id, run)
         counts["needsReview"] = sum(1 for rr in self.repo.list_resources(account.id)
                                     if rr.monitoring_state == "NEEDS_REVIEW")
-        self.repo.finish_sync_run(account.customer_id, run, "PARTIAL" if counts["errors"] else "SUCCEEDED", counts)
+        self.repo.finish_sync_run(account.customer_id, run, "PARTIAL" if counts["errors"] or counts.get("unknown") else "SUCCEEDED", counts)
         return counts
 
     def sync_after_tag_event(self, account: CloudAccount, row: ResourceRow) -> str:
@@ -379,8 +434,8 @@ class Engine:
             w.apply(Command("DELETE", a.name, a.metadata.metric_key if a.metadata else "", actual=a))
             self.repo.delete_managed_alarm(row.customer_id, row.id, a.metadata.metric_key if a.metadata else "")
             n += 1
-        if counts is not None:
-            counts["deleted"] = counts.get("deleted", 0) + n
+            if counts is not None:
+                counts["deleted"] = counts.get("deleted", 0) + 1
         return n
 
     # ── commands
@@ -442,7 +497,7 @@ class Engine:
         try:
             res = self.sync_resource(account, row, console_override={key: override}, restore_external=True)
         except Exception as e:  # noqa: BLE001
-            self.repo.finish_threshold_change(customer_id, change_id, "FAILED", str(e)[:500])
+            self.repo.finish_threshold_change(customer_id, change_id, "FAILED", safe_error(e))
             return "FAILED"
         if res.errors or res.read_only:
             self.repo.finish_threshold_change(customer_id, change_id, "FAILED", "; ".join(res.errors)[:500] or
