@@ -23,11 +23,14 @@ MAX_ATTEMPTS = 5
 THROTTLE_CODES = frozenset({
     "Throttling", "ThrottlingException", "ThrottledException", "RequestLimitExceeded", "TooManyRequestsException",
     "ProvisionedThroughputExceededException", "RequestThrottled", "RequestThrottledException", "SlowDown",
-    "PriorRequestNotComplete", "BandwidthLimitExceeded", "LimitExceededException",
+    "PriorRequestNotComplete", "BandwidthLimitExceeded",
 })
+# Access denied (SCPs also surface as AccessDenied) and credential problems: the scope's state is unknown.
+# LimitExceededException is deliberately not a throttle code: for CloudWatch it means a quota is exhausted.
 DENIED_CODES = frozenset({
     "AccessDenied", "AccessDeniedException", "UnauthorizedOperation", "AuthFailure", "UnauthorizedAccess",
-    "SCPDenied",
+    "ExpiredToken", "ExpiredTokenException", "InvalidClientTokenId", "UnrecognizedClientException",
+    "InvalidSignatureException", "OptInRequired",
 })
 
 _sleep: Callable[[float], None] = time.sleep     # tests replace this
@@ -40,6 +43,25 @@ class AwsStateUnknown(Exception):
     def __init__(self, code: str, op: str = ""):
         super().__init__(f"STATE_UNKNOWN: {code}" + (f" ({op})" if op else ""))
         self.code = code
+
+
+def safe_error(e: BaseException) -> str:
+    """Log-safe description: exception type plus a short code (SQLSTATE / AWS error code). Never the message, ARNs or
+    account ids: a driver or AWS error can carry the DB host, a connection string or customer identifiers."""
+    code = getattr(e, "sqlstate", None)
+    if code is None:
+        resp = getattr(e, "response", None)
+        if isinstance(resp, dict):
+            code = (resp.get("Error") or {}).get("Code")
+        else:
+            code = getattr(e, "code", None)
+    code_s = str(code) if isinstance(code, str) and code.replace("_", "").isalnum() and len(code) <= 64 else None
+    return f"{type(e).__name__}" + (f" code={code_s}" if code_s else "")
+
+
+def is_unknown_state(e: BaseException) -> bool:
+    return isinstance(e, AwsStateUnknown) or (
+        isinstance(e, ClientError) and (error_code(e) in THROTTLE_CODES or error_code(e) in DENIED_CODES))
 
 
 def error_code(e: ClientError) -> str:

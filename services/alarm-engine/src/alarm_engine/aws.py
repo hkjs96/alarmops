@@ -18,11 +18,9 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
-from botocore.exceptions import ClientError
-
 from alarm_engine import naming
 from alarm_engine.desired import DesiredAlarm
-from alarm_engine.retry import AwsStateUnknown, error_code, guarded_call
+from alarm_engine.retry import AwsStateUnknown, guarded_call, safe_error
 from alarm_engine.sync import ActualAlarm, Command
 
 logger = logging.getLogger(__name__)
@@ -143,7 +141,11 @@ class StsSessionFactory:
         creds = self.credentials(account, role)
         if self._ctor is None:  # pragma: no cover - production wiring only
             import boto3
-            return boto3.client(service, region_name=region, **creds)  # type: ignore[call-overload]
+            from botocore.config import Config
+
+            # One retry layer only (ours, retry.call): botocore's own retries would multiply the attempt count.
+            return boto3.client(service, region_name=region, config=Config(retries={"total_max_attempts": 1}),
+                                **creds)  # type: ignore[call-overload]
         return self._ctor(service, region_name=region, **creds)
 
 
@@ -223,7 +225,7 @@ class AlarmWriter:
         rows = guarded_call(self.cw.describe_alarms, AlarmNames=[name]).get("MetricAlarms", [])
         arn = rows[0]["AlarmArn"] if rows else ""
         if f":{self.account_id}:alarm:" not in arn:
-            raise TaggingFailed(f"alarm ARN {arn!r} is not in customer account {self.account_id}")
+            raise TaggingFailed("alarm ARN is not in the customer account")
         return str(arn)
 
     def _existing(self, name: str) -> tuple[str, dict[str, str]] | None:
@@ -235,7 +237,7 @@ class AlarmWriter:
             return None
         arn = str(rows[0].get("AlarmArn", ""))
         if f":{self.account_id}:alarm:" not in arn:
-            raise TaggingFailed(f"alarm ARN {arn!r} is not in customer account {self.account_id}")
+            raise TaggingFailed("alarm ARN is not in the customer account")
         tags = {t["Key"]: t["Value"] for t in guarded_call(self.cw.list_tags_for_resource, ResourceARN=arn).get("Tags", [])}
         return arn, tags
 
@@ -245,10 +247,8 @@ class AlarmWriter:
             guarded_call(self.cw.tag_resource, ResourceARN=arn, Tags=tags)
         except AwsStateUnknown:
             raise
-        except ClientError as e:  # surfaced, never swallowed (4-5); code only, no message
-            raise TaggingFailed(f"TagResource failed for {arn}: {error_code(e)}") from None
-        except Exception as e:  # noqa: BLE001 — surfaced, never swallowed (4-5)
-            raise TaggingFailed(f"TagResource failed for {arn}: {e}") from e
+        except Exception as e:  # noqa: BLE001 — surfaced, never swallowed (4-5); type and code only
+            raise TaggingFailed(f"TagResource failed: {safe_error(e)}") from None
 
     def untag(self, arn: str, keys: list[str]) -> None:
         assert_no_protected_tag_keys(keys)

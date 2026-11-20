@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Callable, Mapping
 from typing import Any
@@ -10,11 +11,24 @@ from alarm_engine.aws import DEFAULT_ALARM_LIMIT, SessionFactory
 from alarm_engine.engine import Engine
 from alarm_engine.repository import Repository
 
+logger = logging.getLogger(__name__)
+MAX_ALARM_LIMIT = 100_000
+
 
 def alarm_limit_from_env(env: Mapping[str, str] | None = None) -> int:
     """Per account+region metric-alarm quota the engine refuses to exceed (`ALARMOPS_ALARM_LIMIT`, default 5000)."""
-    raw = (os.environ if env is None else env).get("ALARMOPS_ALARM_LIMIT", "").strip()
-    return int(raw) if raw.isdigit() and int(raw) > 0 else DEFAULT_ALARM_LIMIT
+    raw = (os.environ if env is None else env).get("ALARMOPS_ALARM_LIMIT", "")
+    if not raw.strip():
+        return DEFAULT_ALARM_LIMIT
+    try:
+        v = int(raw.strip())
+    except ValueError:
+        v = 0
+    if 1 <= v <= MAX_ALARM_LIMIT and raw.strip().isascii():
+        return v
+    logger.warning("ALARMOPS_ALARM_LIMIT=%r invalid (need integer 1..%d); using default %d", raw[:40], MAX_ALARM_LIMIT,
+                   DEFAULT_ALARM_LIMIT)
+    return DEFAULT_ALARM_LIMIT
 
 
 def make_engine(repo: Repository, sessions: SessionFactory) -> Engine:

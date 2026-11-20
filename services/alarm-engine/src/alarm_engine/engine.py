@@ -34,7 +34,7 @@ from alarm_engine.aws import (
 from alarm_engine.desired import DesiredAlarm, ResourceRef, alarm_region, build_desired, type_defs
 from alarm_engine.repository import ManagedAlarmRow, Repository, ResourceRow, new_id, now
 from alarm_engine.resource_types.base import global_service_regions
-from alarm_engine.retry import AwsStateUnknown
+from alarm_engine.retry import AwsStateUnknown, is_unknown_state, safe_error
 from alarm_engine.sync import ActualAlarm, Command, SyncPlan, plan
 from alarm_engine.thresholds import LayerValues
 
@@ -194,8 +194,8 @@ class Engine:
                 res.collisions.append(cmd.name)
                 res.errors.append(f"{cmd.op} {cmd.name}: {e}")
             except Exception as e:  # noqa: BLE001 — one alarm's failure must not stop the resource
-                logger.exception("apply %s %s failed", cmd.op, cmd.name)
-                res.errors.append(f"{cmd.op} {cmd.name}: {e}")
+                logger.error("apply %s failed: %s", cmd.op, safe_error(e))
+                res.errors.append(f"{cmd.op} {cmd.name}: {safe_error(e)}")
         for d, a, sev, manual in p.in_sync:
             console, _, _ = layers(d.metric_key)
             self._save_alarm(row, account, d, a.name, a.arn, sev, manual, console, "IN_SYNC", None)
@@ -260,6 +260,14 @@ class Engine:
         run = self.repo.start_sync_run(account.customer_id, account.id, mode)
         counts: dict[str, Any] = {"created": 0, "updated": 0, "refreshed": 0, "deleted": 0, "needsReview": 0, "externalChange": 0,
                   "errors": 0, "readOnly": False}
+        try:
+            return self._sync_body(account, run, counts)
+        except Exception as e:  # noqa: BLE001 — never leave the run RUNNING (expired credentials, DB errors, ...)
+            logger.error("sync run failed: %s", safe_error(e))
+            self.repo.finish_sync_run(account.customer_id, run, "FAILED", counts, safe_error(e))
+            return counts
+
+    def _sync_body(self, account: CloudAccount, run: str, counts: dict[str, Any]) -> dict:
         take_errors = getattr(self.discovery, "take_errors", None)
         if take_errors:
             take_errors()             # drop leftovers of an aborted earlier pass
@@ -268,7 +276,7 @@ class Engine:
             for region in account.regions:
                 discovered += self.discovery.list_monitored(account, region)
         except Exception as e:  # noqa: BLE001 — failure ≠ zero resources (4-9)
-            self.repo.finish_sync_run(account.customer_id, run, "FAILED", counts, f"discovery failed: {e}")
+            self.repo.finish_sync_run(account.customer_id, run, "FAILED", counts, f"discovery failed: {e if isinstance(e, DiscoveryError) else safe_error(e)}")  # DiscoveryError text is code-only
             return counts
         # Per-type collector failures (one type failing must not abort the account): recorded in the run counts; rows
         # of a failed (region, type) are left alone below — "could not list" is not "gone / tag removed".
@@ -325,9 +333,12 @@ class Engine:
         for region in sorted(alarm_regions):
             try:
                 listed = list_owned_alarms(self._reader_cw(account, region))
-            except AwsStateUnknown as e:
+            except Exception as e:  # noqa: BLE001
+                if not is_unknown_state(e):
+                    raise
                 # Not "zero alarms": nothing is deleted or created from this region's index this pass.
-                logger.warning("alarm list for %s unknown (%s); orphan cleanup and sync skipped there", region, e.code)
+                logger.warning("alarm list for %s unknown (%s); orphan cleanup and sync skipped there", region,
+                               safe_error(e))
                 unknown_regions.add(region)
                 counts["unknown"] = counts.get("unknown", 0) + 1
                 continue
@@ -357,13 +368,16 @@ class Engine:
                         counts["readOnly"] = True
 
         for row in to_sync:
+            ref = ResourceRef(row.resource_type, row.resource_key, row.region, account.aws_account_id, row.tags, row.id)
+            if {row.region, alarm_region(ref)} & unknown_regions:
+                # An index with a missing region would look like "no alarms yet": skip, no re-listing (a persistent
+                # throttle would otherwise burn the Lambda time budget).
+                counts["unknown"] = counts.get("unknown", 0) + 1
+                continue
             try:
-                ref = ResourceRef(row.resource_type, row.resource_key, row.region, account.aws_account_id, row.tags, row.id)
-                partial = bool({row.region, alarm_region(ref)} & unknown_regions)
-                # An index with a missing region would look like "no alarms yet": re-list (and fail, counted) instead.
-                r = self.sync_resource(account, row, index=None if partial else index)
-            except Exception:  # noqa: BLE001
-                logger.exception("sync %s failed", row.resource_key)
+                r = self.sync_resource(account, row, index=index)
+            except Exception as e:  # noqa: BLE001
+                logger.error("sync resource failed: %s", safe_error(e))
                 counts["errors"] += 1
                 continue
             for ck, cv in r.plan.counts().items():
@@ -374,7 +388,7 @@ class Engine:
             self.repo.heartbeat_sync_run(account.customer_id, run)
         counts["needsReview"] = sum(1 for rr in self.repo.list_resources(account.id)
                                     if rr.monitoring_state == "NEEDS_REVIEW")
-        self.repo.finish_sync_run(account.customer_id, run, "PARTIAL" if counts["errors"] else "SUCCEEDED", counts)
+        self.repo.finish_sync_run(account.customer_id, run, "PARTIAL" if counts["errors"] or counts.get("unknown") else "SUCCEEDED", counts)
         return counts
 
     def sync_after_tag_event(self, account: CloudAccount, row: ResourceRow) -> str:
@@ -483,7 +497,7 @@ class Engine:
         try:
             res = self.sync_resource(account, row, console_override={key: override}, restore_external=True)
         except Exception as e:  # noqa: BLE001
-            self.repo.finish_threshold_change(customer_id, change_id, "FAILED", str(e)[:500])
+            self.repo.finish_threshold_change(customer_id, change_id, "FAILED", safe_error(e))
             return "FAILED"
         if res.errors or res.read_only:
             self.repo.finish_threshold_change(customer_id, change_id, "FAILED", "; ".join(res.errors)[:500] or
