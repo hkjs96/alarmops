@@ -67,6 +67,17 @@ class PermissionsBoundary(unittest.TestCase):
                     self.assertEqual(r["Properties"].get("PermissionsBoundary", EXPECTED), EXPECTED)
 
 
+class ResourceShape(unittest.TestCase):
+    def test_only_the_engine_function_sets_role_and_it_is_central_role(self):
+        with_role = {k: v["Properties"]["Role"] for k, v in T["Resources"].items()
+                     if v["Type"] == "AWS::Serverless::Function" and "Role" in v["Properties"]}
+        self.assertEqual(with_role, {"AlarmEngineFunction": {"Fn::GetAtt": "CentralRole.Arn"}})
+
+    def test_no_other_iam_resource_types(self):
+        types = {v["Type"] for v in T["Resources"].values() if v["Type"].startswith("AWS::IAM::")}
+        self.assertEqual(types, {"AWS::IAM::Role"})
+
+
 class Portability(unittest.TestCase):
     """No account id, region or partition is written into the template (D-58)."""
 

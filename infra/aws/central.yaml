@@ -131,8 +131,16 @@ Rules:
 
 Conditions:
   HasAlarmTopic: !Not [!Equals [!Ref AlarmTopicArn, ""]]
-  HasSes: !Not [!Equals [!Ref SesIdentityArn, ""]]
-  HasDlqOpsRole: !Not [!Equals [!Ref DlqOpsRoleArn, ""]]
+  # D-58: the three ARN parameters must belong to THIS account (field 4 of the ARN), whatever the account type.
+  # No Organizations feature is involved. A foreign SES identity or DLQ role is ignored (grants nothing); a foreign
+  # Vercel OIDC provider leaves the trust statement without a Principal, so the role cannot be created.
+  VercelProviderInThisAccount: !Equals [!Select [4, !Split [":", !Ref VercelOidcProviderArn]], !Ref "AWS::AccountId"]
+  HasSes: !And
+    - !Not [!Equals [!Ref SesIdentityArn, ""]]
+    - !Equals [!Select [4, !Split [":", !Ref SesIdentityArn]], !Ref "AWS::AccountId"]
+  HasDlqOpsRole: !And
+    - !Not [!Equals [!Ref DlqOpsRoleArn, ""]]
+    - !Equals [!Select [4, !Split [":", !Ref DlqOpsRoleArn]], !Ref "AWS::AccountId"]
   RemediationEnabled: !Equals [!Ref RemediationExecution, "true"]
 
 Globals:
@@ -541,7 +549,7 @@ Resources:
         Version: "2012-10-17"
         Statement:
           - Effect: Allow
-            Principal: { Federated: !Ref VercelOidcProviderArn }
+            Principal: { Federated: !If [VercelProviderInThisAccount, !Ref VercelOidcProviderArn, !Ref "AWS::NoValue"] }
             Action: sts:AssumeRoleWithWebIdentity
             Condition:
               StringEquals:

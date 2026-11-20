@@ -314,7 +314,8 @@ class CentralTemplate(unittest.TestCase):
         for n in ("VercelTeamSlug", "VercelProjectName", "VercelOidcProviderArn"):
             self.assertNotIn("Default", P[n])
         (st,) = CR["VercelConsoleRole"]["Properties"]["AssumeRolePolicyDocument"]["Statement"]
-        self.assertEqual(st["Principal"], {"Federated": {"Ref": "VercelOidcProviderArn"}})
+        self.assertEqual(st["Principal"], {"Federated": {"Fn::If": [
+            "VercelProviderInThisAccount", {"Ref": "VercelOidcProviderArn"}, {"Ref": "AWS::NoValue"}]}})
         self.assertEqual(st["Action"], "sts:AssumeRoleWithWebIdentity")
         self.assertEqual(st["Condition"], {"StringEquals": {
             "oidc.vercel.com:aud": {"Fn::Sub": "https://vercel.com/${VercelTeamSlug}"},

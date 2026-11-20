@@ -184,6 +184,9 @@ jobs:
           for v in ROLE PROVIDER TEAM PROJECT SAM_ARTIFACT_BUCKET; do
             if [ -z "${!v}" ]; then echo "::error::Environment variable for $v is not set in the central environment"; exit 1; fi
           done
+          if ! [[ "$SAM_ARTIFACT_BUCKET" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]]; then
+            echo "::error::SAM_ARTIFACT_BUCKET is not a valid S3 bucket name"; exit 1
+          fi
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ vars.CENTRAL_DEPLOY_ROLE_ARN }}
@@ -260,7 +263,7 @@ jobs:
             echo "| Action | Logical id | Type | Replacement |"
             echo "|---|---|---|---|"
             aws cloudformation describe-change-set --change-set-name "$id" \
-              --query "Changes[?starts_with(ResourceChange.ResourceType, 'AWS::IAM')].[ResourceChange.Action,ResourceChange.LogicalResourceId,ResourceChange.ResourceType,ResourceChange.Replacement]" --output text |
+              --query "Changes[?starts_with(ResourceChange.ResourceType, 'AWS::IAM') || ResourceChange.ResourceType=='AWS::SQS::QueuePolicy' || ResourceChange.ResourceType=='AWS::Lambda::Permission' || ResourceChange.ResourceType=='AWS::Events::Rule'].[ResourceChange.Action,ResourceChange.LogicalResourceId,ResourceChange.ResourceType,ResourceChange.Replacement]" --output text |
               awk -F'\t' '{ printf "| %s | %s | %s | %s |\n", $1, $2, $3, $4 }'
             echo
             echo "### All changes"
