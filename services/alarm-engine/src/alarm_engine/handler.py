@@ -16,6 +16,7 @@ from typing import Any
 from alarm_engine import events, offboard, remediation
 from alarm_engine.aws import CapabilityDisabled
 from alarm_engine.engine import Engine, classify_liveness
+from alarm_engine.retry import safe_error  # noqa: F401 — shared log-safe formatter
 
 logger = logging.getLogger(__name__)
 
@@ -174,18 +175,6 @@ def dispatch(engine: Engine, cmd: dict, liveness_sink: Callable[[str, str, dict]
 
 
 DEFAULT_TIME_MARGIN_MS = 30_000
-
-
-def safe_error(e: BaseException) -> str:
-    """Log-safe description: exception type plus a short code (SQLSTATE / AWS error code). Never the message or
-    traceback: a driver error can carry the DB host, user or connection string (security review lambda-packaging 1)."""
-    code = getattr(e, "sqlstate", None)
-    if code is None:
-        resp = getattr(e, "response", None)
-        if isinstance(resp, dict):
-            code = (resp.get("Error") or {}).get("Code")
-    code_s = str(code) if isinstance(code, str) and code.replace("_", "").isalnum() and len(code) <= 64 else None
-    return f"{type(e).__name__}" + (f" code={code_s}" if code_s else "")
 
 
 def _debug_tb() -> bool:
