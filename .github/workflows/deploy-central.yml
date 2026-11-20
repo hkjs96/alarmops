@@ -179,8 +179,9 @@ jobs:
           PROVIDER: ${{ vars.VERCEL_OIDC_PROVIDER_ARN }}
           TEAM: ${{ vars.VERCEL_TEAM_SLUG }}
           PROJECT: ${{ vars.VERCEL_PROJECT_NAME }}
+          SAM_ARTIFACT_BUCKET: ${{ vars.SAM_ARTIFACT_BUCKET }}
         run: |
-          for v in ROLE PROVIDER TEAM PROJECT; do
+          for v in ROLE PROVIDER TEAM PROJECT SAM_ARTIFACT_BUCKET; do
             if [ -z "${!v}" ]; then echo "::error::Environment variable for $v is not set in the central environment"; exit 1; fi
           done
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
@@ -209,6 +210,7 @@ jobs:
           CENTRAL_BUS_NAME: ${{ vars.CENTRAL_BUS_NAME }}
           DLQ_OPS_ROLE_ARN: ${{ vars.DLQ_OPS_ROLE_ARN }}
           REMEDIATION_EXECUTION: ${{ vars.REMEDIATION_EXECUTION }}
+          SAM_ARTIFACT_BUCKET: ${{ vars.SAM_ARTIFACT_BUCKET }}
         run: |
           params=(
             "VercelOidcProviderArn=${VERCEL_OIDC_PROVIDER_ARN}"
@@ -227,7 +229,7 @@ jobs:
             --stack-name "$STACK_NAME" \
             --region "$AWS_REGION" \
             --capabilities CAPABILITY_NAMED_IAM \
-            --resolve-s3 \
+            --s3-bucket "$SAM_ARTIFACT_BUCKET" \
             --no-execute-changeset \
             --no-fail-on-empty-changeset \
             --parameter-overrides "${params[@]}"

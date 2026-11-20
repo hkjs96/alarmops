@@ -16,6 +16,13 @@ Description: >-
 #                                                       (handler alarm_engine.handler.lambda_handler)
 
 Parameters:
+  PermissionsBoundaryName:
+    Type: String
+    Default: AlarmOpsCentral-RoleBoundary
+    AllowedPattern: '^[A-Za-z0-9+=,.@_-]{1,128}$'
+    Description: >-
+      Name of the IAM managed policy a person created in this account (infra/aws/deploy-role-policy.md). Every role
+      this stack creates, including the Lambda execution roles SAM generates, gets it as its permissions boundary (D-58).
   ResourcePrefix:
     Type: String
     Default: alarmops
@@ -27,7 +34,7 @@ Parameters:
     Description: Name of the bus created by central-bus.yaml (stack output BusName). Must exist before this stack.
   VercelOidcProviderArn:
     Type: String
-    AllowedPattern: '^arn:aws:iam::[0-9]{12}:oidc-provider/oidc\.vercel\.com$'
+    AllowedPattern: '^arn:aws[a-z-]*:iam::[0-9]{12}:oidc-provider/oidc\.vercel\.com$'
     Description: IAM OIDC provider registered by a person for issuer https://oidc.vercel.com (Vercel "Global" issuer mode).
   VercelTeamSlug:
     Type: String
@@ -38,7 +45,7 @@ Parameters:
   SesIdentityArn:
     Type: String
     Default: ""
-    AllowedPattern: '^$|^arn:aws:ses:ap-northeast-2:[0-9]{12}:identity/[A-Za-z0-9.@_-]+$'
+    AllowedPattern: '^$|^arn:aws[a-z-]*:ses:[a-z0-9-]+:[0-9]{12}:identity/[A-Za-z0-9.@_-]+$'
     Description: Optional (D-52). A verified SES identity; when set the Vercel role may ses:SendEmail through it only.
   SesFromAddress:
     Type: String
@@ -105,7 +112,7 @@ Parameters:
   DlqOpsRoleArn:
     Type: String
     Default: ""
-    AllowedPattern: '^$|^arn:aws:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$'
+    AllowedPattern: '^$|^arn:aws[a-z-]*:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$'
     Description: >-
       Optional break-glass role that may receive/delete messages in the alarm-commands DLQ (redrive, inspection).
       Without it nobody but the central role can read the DLQ (the Deny also blocks StartMessageMoveTask).
@@ -133,6 +140,7 @@ Globals:
     Timeout: 30
     MemorySize: 256
     Tracing: PassThrough
+    PermissionsBoundary: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${PermissionsBoundaryName}"
 
 Resources:
   # ================================================================ secrets (value put by a person)
@@ -444,6 +452,7 @@ Resources:
   CentralRole:
     Type: AWS::IAM::Role
     Properties:
+      PermissionsBoundary: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${PermissionsBoundaryName}"
       RoleName: AlarmOpsCentral-Engine
       Description: Alarm engine; the role customers trust. Assumes customer AlarmOps-* roles with ExternalId.
       MaxSessionDuration: 3600
@@ -498,6 +507,7 @@ Resources:
   RemediatorCallerRole:
     Type: AWS::IAM::Role
     Properties:
+      PermissionsBoundary: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${PermissionsBoundaryName}"
       RoleName: AlarmOpsCentral-RemediatorCaller
       Description: Assumed by the engine only to run a Slack-approved remediation in a customer account.
       MaxSessionDuration: 3600
@@ -523,6 +533,7 @@ Resources:
   VercelConsoleRole:
     Type: AWS::IAM::Role
     Properties:
+      PermissionsBoundary: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${PermissionsBoundaryName}"
       RoleName: AlarmOpsCentral-VercelConsole
       Description: Vercel console (production) sends alarm commands. Nothing else.
       MaxSessionDuration: 3600

@@ -310,7 +310,7 @@ class CentralTemplate(unittest.TestCase):
     def test_vercel_trust_is_pinned_to_project_production_and_team_audience(self):
         P = C["Parameters"]
         self.assertEqual(P["VercelOidcProviderArn"]["AllowedPattern"],
-                         r"^arn:aws:iam::[0-9]{12}:oidc-provider/oidc\.vercel\.com$")
+                         r"^arn:aws[a-z-]*:iam::[0-9]{12}:oidc-provider/oidc\.vercel\.com$")
         for n in ("VercelTeamSlug", "VercelProjectName", "VercelOidcProviderArn"):
             self.assertNotIn("Default", P[n])
         (st,) = CR["VercelConsoleRole"]["Properties"]["AssumeRolePolicyDocument"]["Statement"]
