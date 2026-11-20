@@ -18,8 +18,11 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
+from botocore.exceptions import ClientError
+
 from alarm_engine import naming
 from alarm_engine.desired import DesiredAlarm
+from alarm_engine.retry import AwsStateUnknown, error_code, guarded_call
 from alarm_engine.sync import ActualAlarm, Command
 
 logger = logging.getLogger(__name__)
@@ -47,6 +50,19 @@ class NotOwned(Exception):
         super().__init__(f"NAME_COLLISION: alarm {name!r} exists and is not managed by AlarmOps (ManagedBy={managed_by!r})")
         self.alarm_name = name
         self.managed_by = managed_by
+
+
+class AlarmLimitExceeded(Exception):
+    """Creating this alarm would exceed the per-region alarm quota (AWS default 5,000 metric alarms). Nothing is
+    created; the sync records the error."""
+
+    def __init__(self, region: str, count: int, limit: int):
+        super().__init__(f"ALARM_LIMIT_EXCEEDED: {region} has {count} alarms, limit {limit}")
+        self.region, self.count, self.limit = region, count, limit
+
+
+DEFAULT_ALARM_LIMIT = 5000
+MAX_LIST_PAGES = 1000
 
 
 class ForbiddenTagKey(Exception):
@@ -132,27 +148,40 @@ class StsSessionFactory:
 
 
 def _paginate(cw: Any, method: str, key: str, **kw: Any) -> list[dict]:
+    """Every item across all NextToken pages. Each page call is retried on throttling; throttling that persists or
+    AccessDenied raises `AwsStateUnknown` — a partial or failed list is never returned as if complete (4-7, 4-9, 9-1)."""
     out: list[dict] = []
     token = None
-    while True:
-        resp = getattr(cw, method)(**kw, **({"NextToken": token} if token else {}))
+    seen: set[str] = set()
+    for _ in range(MAX_LIST_PAGES):
+        resp = guarded_call(getattr(cw, method), **kw, **({"NextToken": token} if token else {}))
         out.extend(resp.get(key, []))
         token = resp.get("NextToken")
         if not token:
             return out
+        if token in seen:
+            raise AwsStateUnknown("PaginationLoop", method)
+        seen.add(token)
+    raise AwsStateUnknown("PaginationLimit", method)
+
+
+def count_metric_alarms(cw: Any) -> int:
+    return len(_paginate(cw, "describe_alarms", "MetricAlarms", AlarmTypes=["MetricAlarm"]))
 
 
 def list_owned_alarms(cw: Any) -> dict[str, list[ActualAlarm]]:
     """All metric alarms in this client's account/region that we own, grouped by metadata resourceId.
 
     Only alarms whose description parses are tag-checked (one ListTagsForResource each); the ManagedBy tag decides.
+    Raises `AwsStateUnknown` if any call is throttled past the retry budget or denied: callers must not delete then.
     """
     out: dict[str, list[ActualAlarm]] = {}
     for raw in _paginate(cw, "describe_alarms", "MetricAlarms", AlarmTypes=["MetricAlarm"]):
         md = naming.parse_metadata(raw.get("AlarmDescription"))
         if md is None:
             continue
-        tags = {t["Key"]: t["Value"] for t in cw.list_tags_for_resource(ResourceARN=raw["AlarmArn"]).get("Tags", [])}
+        resp = guarded_call(cw.list_tags_for_resource, ResourceARN=raw["AlarmArn"])
+        tags = {t["Key"]: t["Value"] for t in resp.get("Tags", [])}
         if tags.get("ManagedBy") != naming.MANAGED_BY:
             continue
         out.setdefault(md.resource_id, []).append(ActualAlarm(raw=raw, tags=tags))
@@ -171,13 +200,27 @@ def read_console_tags(tags: dict[str, str]) -> dict[str, str]:
 class AlarmWriter:
     """Applies sync commands with an AlarmWriter-role client for one account+region."""
 
-    def __init__(self, cw: Any, account_id: str, actions: list[str] | None = None):
+    def __init__(self, cw: Any, account_id: str, actions: list[str] | None = None, *, region: str = "",
+                 alarm_limit: int = DEFAULT_ALARM_LIMIT, alarm_count: dict[str, int] | None = None):
         self.cw = cw
         self.account_id = account_id
         self.actions = actions or []
+        self.region = region
+        self.alarm_limit = alarm_limit
+        # Shared mutable cell {"n": count}; the engine passes one per (account, region) for a whole sync pass.
+        self._count = alarm_count if alarm_count is not None else {}
+
+    def _check_limit(self) -> None:
+        """Before a CREATE: current alarm count + 1 must not exceed the region limit. Unknown count → AwsStateUnknown
+        (the create is skipped, nothing is guessed)."""
+        if "n" not in self._count:
+            self._count["n"] = count_metric_alarms(self.cw)
+        if self._count["n"] + 1 > self.alarm_limit:
+            logger.error("alarm limit: region %s has %d, limit %d; not creating", self.region, self._count["n"], self.alarm_limit)
+            raise AlarmLimitExceeded(self.region, self._count["n"], self.alarm_limit)
 
     def _arn(self, name: str) -> str:
-        rows = self.cw.describe_alarms(AlarmNames=[name]).get("MetricAlarms", [])
+        rows = guarded_call(self.cw.describe_alarms, AlarmNames=[name]).get("MetricAlarms", [])
         arn = rows[0]["AlarmArn"] if rows else ""
         if f":{self.account_id}:alarm:" not in arn:
             raise TaggingFailed(f"alarm ARN {arn!r} is not in customer account {self.account_id}")
@@ -185,7 +228,7 @@ class AlarmWriter:
 
     def _existing(self, name: str) -> tuple[str, dict[str, str]] | None:
         """(ARN, tags) of an alarm with exactly this name, or None. ARN must be in the customer account."""
-        resp = self.cw.describe_alarms(AlarmNames=[name], AlarmTypes=["MetricAlarm", "CompositeAlarm"])
+        resp = guarded_call(self.cw.describe_alarms, AlarmNames=[name], AlarmTypes=["MetricAlarm", "CompositeAlarm"])
         rows = [r for r in list(resp.get("MetricAlarms", [])) + list(resp.get("CompositeAlarms", []))
                 if r.get("AlarmName") == name]
         if not rows:
@@ -193,19 +236,23 @@ class AlarmWriter:
         arn = str(rows[0].get("AlarmArn", ""))
         if f":{self.account_id}:alarm:" not in arn:
             raise TaggingFailed(f"alarm ARN {arn!r} is not in customer account {self.account_id}")
-        tags = {t["Key"]: t["Value"] for t in self.cw.list_tags_for_resource(ResourceARN=arn).get("Tags", [])}
+        tags = {t["Key"]: t["Value"] for t in guarded_call(self.cw.list_tags_for_resource, ResourceARN=arn).get("Tags", [])}
         return arn, tags
 
     def _tag(self, arn: str, tags: list[dict[str, str]]) -> None:
         assert_no_protected_tag_keys([t["Key"] for t in tags])
         try:
-            self.cw.tag_resource(ResourceARN=arn, Tags=tags)
+            guarded_call(self.cw.tag_resource, ResourceARN=arn, Tags=tags)
+        except AwsStateUnknown:
+            raise
+        except ClientError as e:  # surfaced, never swallowed (4-5); code only, no message
+            raise TaggingFailed(f"TagResource failed for {arn}: {error_code(e)}") from None
         except Exception as e:  # noqa: BLE001 — surfaced, never swallowed (4-5)
             raise TaggingFailed(f"TagResource failed for {arn}: {e}") from e
 
     def untag(self, arn: str, keys: list[str]) -> None:
         assert_no_protected_tag_keys(keys)
-        self.cw.untag_resource(ResourceARN=arn, TagKeys=keys)
+        guarded_call(self.cw.untag_resource, ResourceARN=arn, TagKeys=keys)
 
     def put(self, d: DesiredAlarm, *, name: str, severity: str, extra_tags: list[dict[str, str]] | None = None) -> str:
         """Create or update (D-43). Create = one PutMetricAlarm with Tags (ManagedBy=AlarmOps is only allowed there).
@@ -221,12 +268,14 @@ class AlarmWriter:
         existing = self._existing(name)
         if existing is None:
             tags = [{"Key": "ManagedBy", "Value": naming.MANAGED_BY}, {"Key": "Severity", "Value": severity}] + extra
-            self.cw.put_metric_alarm(**params, Tags=tags)
+            self._check_limit()
+            guarded_call(self.cw.put_metric_alarm, **params, Tags=tags)
+            self._count["n"] = self._count.get("n", 0) + 1
             return self._arn(name)
         arn, current = existing
         if current.get("ManagedBy") != naming.MANAGED_BY:
             raise NotOwned(name, current.get("ManagedBy"))
-        self.cw.put_metric_alarm(**params)
+        guarded_call(self.cw.put_metric_alarm, **params)
         self._tag(arn, [{"Key": "Severity", "Value": severity}] + extra)
         return arn
 
@@ -235,7 +284,9 @@ class AlarmWriter:
             assert cmd.actual is not None
             if not naming.is_ours(cmd.actual.raw, cmd.actual.tags):   # last guard (4-6)
                 raise PermissionError(f"refusing to delete non-owned alarm {cmd.name}")
-            self.cw.delete_alarms(AlarmNames=[cmd.name])
+            guarded_call(self.cw.delete_alarms, AlarmNames=[cmd.name])
+            if "n" in self._count:
+                self._count["n"] = max(0, self._count["n"] - 1)
             return None
         assert cmd.desired is not None and cmd.severity is not None
         return self.put(cmd.desired, name=cmd.name, severity=cmd.severity, extra_tags=extra_tags)
@@ -251,5 +302,5 @@ class AlarmWriter:
                                      "DatapointsToAlarm", "AlarmActions", "OKActions", "ActionsEnabled") if k in raw}
         keep["AlarmDescription"] = naming.build_description(md.resource_type, md.resource_id, md.metric_key, severity,
                                                             md.resource_name or "")
-        self.cw.put_metric_alarm(**keep)
+        guarded_call(self.cw.put_metric_alarm, **keep)
         self._tag(actual.arn, [{"Key": "Severity", "Value": severity}])

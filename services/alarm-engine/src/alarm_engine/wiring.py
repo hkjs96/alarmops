@@ -6,15 +6,21 @@ import os
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from alarm_engine.aws import SessionFactory
+from alarm_engine.aws import DEFAULT_ALARM_LIMIT, SessionFactory
 from alarm_engine.engine import Engine
 from alarm_engine.repository import Repository
+
+
+def alarm_limit_from_env(env: Mapping[str, str] | None = None) -> int:
+    """Per account+region metric-alarm quota the engine refuses to exceed (`ALARMOPS_ALARM_LIMIT`, default 5000)."""
+    raw = (os.environ if env is None else env).get("ALARMOPS_ALARM_LIMIT", "").strip()
+    return int(raw) if raw.isdigit() and int(raw) > 0 else DEFAULT_ALARM_LIMIT
 
 
 def make_engine(repo: Repository, sessions: SessionFactory) -> Engine:
     """Engine with the real collectors (Reader role). Tests pass fake sessions (Stubber clients)."""
     from alarm_engine.collectors import AwsDiscovery
-    return Engine(repo, sessions, AwsDiscovery(sessions))
+    return Engine(repo, sessions, AwsDiscovery(sessions), alarm_limit=alarm_limit_from_env())
 
 
 def resolve_database_url(env: Mapping[str, str] | None = None, client_factory: Callable[..., Any] | None = None) -> str:
