@@ -892,7 +892,7 @@ npm ci --ignore-scripts && npm run build:lambda -w @alarmops/ingest && npm run b
 
 ### 7-2. 허용 목록에 계정 추가 (10분)
 
-> **주의 (D-57)** 실고객 계정을 허용 목록에 넣기 전에 확인한다: 고객 동의를 받았는가, 콘솔·DB가 회사 소유로 옮겨졌는가, 고객 스택은 읽기 전용(Reader·EventForwarder)인가. 리허설용 CT 계정은 그 계정 소유자의 확인을 받았는가.
+> **주의 (D-57)** 실고객 계정을 허용 목록에 넣기 전에 확인한다: 고객 동의를 받았는가, 고객 스택은 읽기 전용(Reader·EventForwarder)인가. 리허설용 CT 계정은 그 계정 소유자의 확인을 받았는가.
 
 어디서: GitHub 저장소의 Actions
 
