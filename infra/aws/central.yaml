@@ -132,15 +132,17 @@ Rules:
 Conditions:
   HasAlarmTopic: !Not [!Equals [!Ref AlarmTopicArn, ""]]
   # D-58: the three ARN parameters must belong to THIS account (field 4 of the ARN), whatever the account type.
+  # The ":::::" padding keeps index 4 present when a parameter is empty: CloudFormation evaluates every Fn::Select
+  # (no short-circuit in !And), and Select on a missing index fails the whole change set.
   # No Organizations feature is involved. A foreign SES identity or DLQ role is ignored (grants nothing); a foreign
   # Vercel OIDC provider leaves the trust statement without a Principal, so the role cannot be created.
-  VercelProviderInThisAccount: !Equals [!Select [4, !Split [":", !Ref VercelOidcProviderArn]], !Ref "AWS::AccountId"]
+  VercelProviderInThisAccount: !Equals [!Select [4, !Split [":", !Join ["", [!Ref VercelOidcProviderArn, ":::::"]]]], !Ref "AWS::AccountId"]
   HasSes: !And
     - !Not [!Equals [!Ref SesIdentityArn, ""]]
-    - !Equals [!Select [4, !Split [":", !Ref SesIdentityArn]], !Ref "AWS::AccountId"]
+    - !Equals [!Select [4, !Split [":", !Join ["", [!Ref SesIdentityArn, ":::::"]]]], !Ref "AWS::AccountId"]
   HasDlqOpsRole: !And
     - !Not [!Equals [!Ref DlqOpsRoleArn, ""]]
-    - !Equals [!Select [4, !Split [":", !Ref DlqOpsRoleArn]], !Ref "AWS::AccountId"]
+    - !Equals [!Select [4, !Split [":", !Join ["", [!Ref DlqOpsRoleArn, ":::::"]]]], !Ref "AWS::AccountId"]
   RemediationEnabled: !Equals [!Ref RemediationExecution, "true"]
 
 Globals:
