@@ -226,6 +226,13 @@ Resources:
   # deploy-central workflow (environment central). No boundary on this role itself.
   DeployCentralRole:
     Type: AWS::IAM::Role
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            # apigateway:TagResource/UntagResource are real actions (the first apply was denied on
+            # apigateway:TagResource for the HTTP API stage, 11/23) but cfn-lint's action list does not have them yet.
+            - W3037
     Properties:
       RoleName: AlarmOpsDeployCentral
       Description: GitHub OIDC role for the deploy-central workflow (environment central).
@@ -479,6 +486,8 @@ Resources:
                   - "apigateway:PUT"
                   - "apigateway:PATCH"
                   - "apigateway:DELETE"
+                  - "apigateway:TagResource"
+                  - "apigateway:UntagResource"
                 Resource:
                   - !Sub "arn:${AWS::Partition}:apigateway:${AWS::Region}::/apis"
                   - !Sub "arn:${AWS::Partition}:apigateway:${AWS::Region}::/apis/*"
