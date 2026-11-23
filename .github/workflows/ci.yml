@@ -1,9 +1,30 @@
 name: ci
 
+# Which jobs run (job-level `if:` on the outputs of the `changes` job; a skipped job does not block required checks).
+# The mapping is .github/scripts/ci-changes.sh; keep this table in sync with it.
+#
+#   changed path                                   jobs that run
+#   apps/**                                        test, e2e, e2e-live
+#   packages/** (not store-sql)                    test, e2e, e2e-live
+#   packages/store-sql/**                          test, e2e, e2e-live, db
+#   services/ingest/**                             test
+#   services/alarm-engine/**                       engine, infra (infra tests read its sources)
+#   db/** (not db/sql)                             test, e2e-live, engine, db (engine's Postgres tests use the migrations)
+#   db/sql/**                                      the line above + infra (infra tests read roles.sql)
+#   infra/**                                       infra
+#   .github/scripts/**                             infra, db (both run the script tests)
+#   docs/**, *.md, .claude/**, .env.example,       nothing (docs_only). docs/SETUP-PROD-DB.md also runs infra.
+#     .gitignore
+#
+# ALWAYS everything: push to main (main push is always the full run), workflow_dispatch, .github/workflows/**,
+# package.json, package-lock.json, tsconfig*, .npmrc/.nvmrc, an empty diff, a path not listed above, and any
+# failure of the changes job (fail-safe). There is no docs-site build check in CI.
+
 on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -22,7 +43,36 @@ env:
 # the postgres:16 image to a digest. dev-db.yml first (it reads secrets). The SHAs are to be copied from each
 # action's release page by a person (or by Dependabot); they are not guessed here.
 jobs:
+  # Decides which of the jobs below run. The logic is .github/scripts/ci-changes.sh (tested by ci-changes.test.mjs).
+  changes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      test: ${{ steps.diff.outputs.test }}
+      e2e: ${{ steps.diff.outputs.e2e }}
+      e2e_live: ${{ steps.diff.outputs.e2e_live }}
+      engine: ${{ steps.diff.outputs.engine }}
+      db: ${{ steps.diff.outputs.db }}
+      infra: ${{ steps.diff.outputs.infra }}
+      docs_only: ${{ steps.diff.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: diff
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          bash .github/scripts/ci-changes.sh | tee -a "$GITHUB_OUTPUT"
+
   test:
+    needs: changes
+    # Runs when the change needs it, and also when the changes job itself failed (fail-safe).
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.test == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -42,6 +92,9 @@ jobs:
         run: npm run build -w @alarmops/console
 
   engine:
+    needs: changes
+    # Runs when the change needs it, and also when the changes job itself failed (fail-safe).
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.engine == 'true') }}
     # services/alarm-engine is Python (D-05 port, Lambda); not an npm workspace (no package.json there).
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -89,6 +142,9 @@ jobs:
 
   # Offline checks of the infrastructure templates and the workflow helper scripts. No AWS access, no credentials.
   infra:
+    needs: changes
+    # Runs when the change needs it, and also when the changes job itself failed (fail-safe).
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.infra == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -105,9 +161,12 @@ jobs:
       - name: Template structure tests (roles, trust, Deny rules)
         run: python -m unittest discover -s infra/test -v
       - name: Workflow script tests (console deploy environment check, bus allow list)
-        run: node --test .github/scripts/check-console-deploy-env.test.mjs .github/scripts/smoke-console.test.mjs .github/scripts/strip-deploy-env.test.mjs .github/scripts/bus-allowlist.test.mjs
+        run: node --test .github/scripts/check-console-deploy-env.test.mjs .github/scripts/smoke-console.test.mjs .github/scripts/strip-deploy-env.test.mjs .github/scripts/bus-allowlist.test.mjs .github/scripts/ci-changes.test.mjs
 
   e2e:
+    needs: changes
+    # Runs when the change needs it, and also when the changes job itself failed (fail-safe).
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.e2e == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
@@ -166,6 +225,9 @@ jobs:
   # apps/console/playwright.live.config.ts creates a fresh database from the migrations and starts `next dev`
   # (the live dev sign-in exists only outside production).
   e2e-live:
+    needs: changes
+    # Runs when the change needs it, and also when the changes job itself failed (fail-safe).
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.e2e_live == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     services:
@@ -200,6 +262,9 @@ jobs:
         run: npx playwright test -c playwright.live.config.ts --reporter=list
 
   db:
+    needs: changes
+    # Runs when the change needs it, and also when the changes job itself failed (fail-safe).
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.db == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     services:
