@@ -1,7 +1,8 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
   AlarmOps central bootstrap stack (D-58): the permissions boundary policy and the two GitHub OIDC deploy roles
-  (AlarmOpsDeployCentral, AlarmOpsDeployBus) that the deploy-central and bus-allowlist workflows use. A person uploads this
+  (AlarmOpsDeployCentral, AlarmOpsDeployBus) and their customer managed policies (AlarmOpsDeployCentral-Cfn/-Iam/-Services,
+  AlarmOpsDeployBus) that the deploy-central and bus-allowlist workflows use. A person uploads this
   template once in the CloudFormation console (stack name alarmops-central-bootstrap, CAPABILITY_NAMED_IAM). The deploy roles
   cannot create themselves, so no pipeline deploys this stack. Moving the central account means uploading this one template
   in the new account. Policy bodies must stay the same as the JSON in infra/aws/deploy-role-policy.md
@@ -223,16 +224,348 @@ Resources:
             Action: "ses:SendEmail"
             Resource: !Sub "arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/*"
 
-  # deploy-central workflow (environment central). No boundary on this role itself.
-  DeployCentralRole:
-    Type: AWS::IAM::Role
+  # Customer managed policies of the deploy-central role (ISMS-P audit: version history, review one by one; one policy
+  # cannot hold the 8,000+ characters, the limit is 6,144 without whitespace). Cfn = orchestration, Iam = roles, boundary
+  # and every Deny, Services = Lambda, SQS, Events, Logs, Secrets, CloudWatch, API Gateway. Same JSON as deploy-role-policy.md
+  # section 3. The roles cannot change these policies (DenyBoundaryPolicyChange, DenyDeployPolicyAttachment in Iam).
+  DeployCentralCfnPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: AlarmOpsDeployCentral-Cfn
+      Description: CloudFormation, SAM artifact bucket and ListPolicies (deploy orchestration).
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: "CfnCentralStack"
+            Effect: "Allow"
+            Action:
+              - "cloudformation:DescribeStacks"
+              - "cloudformation:DescribeStackEvents"
+              - "cloudformation:DescribeStackResources"
+              - "cloudformation:ListStackResources"
+              - "cloudformation:GetTemplate"
+              - "cloudformation:CreateChangeSet"
+              - "cloudformation:DescribeChangeSet"
+              - "cloudformation:ExecuteChangeSet"
+              - "cloudformation:DeleteChangeSet"
+              - "cloudformation:ListChangeSets"
+              - "cloudformation:GetTemplateSummary"
+            Resource:
+              - !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${CentralStackName}/*"
+              - !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:changeSet/samcli-deploy*/*"
+          - Sid: "CfnSamTransform"
+            Effect: "Allow"
+            Action: "cloudformation:CreateChangeSet"
+            Resource: !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:aws:transform/Serverless-2016-10-31"
+          - Sid: "CfnBusStackRead"
+            Effect: "Allow"
+            Action: "cloudformation:DescribeStacks"
+            Resource: !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${BusStackName}/*"
+          - Sid: "SamValidateListPolicies"
+            Effect: "Allow"
+            Action: "iam:ListPolicies"
+            Resource: "*"
+          - Sid: "SamBucketObjects"
+            Effect: "Allow"
+            Action:
+              - "s3:PutObject"
+              - "s3:GetObject"
+            Resource: !Sub ["arn:${AWS::Partition}:s3:::${SamBucket}/*", {SamBucket: !If [CreateSamArtifactBucket, !Ref SamArtifactBucket, !Ref SamArtifactBucketName]}]
+          - Sid: "SamBucketList"
+            Effect: "Allow"
+            Action:
+              - "s3:ListBucket"
+              - "s3:GetBucketLocation"
+            Resource: !Sub ["arn:${AWS::Partition}:s3:::${SamBucket}", {SamBucket: !If [CreateSamArtifactBucket, !Ref SamArtifactBucket, !Ref SamArtifactBucketName]}]
+
+  DeployCentralIamPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: AlarmOpsDeployCentral-Iam
+      Description: Role creation, boundary, PassRole and every Deny statement of the central deploy role.
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: "IamCreateRoleWithBoundary"
+            Effect: "Allow"
+            Action: "iam:CreateRole"
+            Resource:
+              - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/AlarmOpsCentral-*"
+              - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${CentralStackName}-*"
+            Condition:
+              StringEquals:
+                "iam:PermissionsBoundary": !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${PermissionsBoundaryName}"
+          - Sid: "IamRolePoliciesWithBoundary"
+            Effect: "Allow"
+            Action:
+              - "iam:PutRolePolicy"
+              - "iam:DeleteRolePolicy"
+            Resource:
+              - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/AlarmOpsCentral-*"
+              - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${CentralStackName}-*"
+            Condition:
+              StringEquals:
+                "iam:PermissionsBoundary": !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${PermissionsBoundaryName}"
+          - Sid: "IamPutBoundaryOnlyOurs"
+            Effect: "Allow"
+            Action: "iam:PutRolePermissionsBoundary"
+            Resource:
+              - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/AlarmOpsCentral-*"
+              - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${CentralStackName}-*"
+            Condition:
+              StringEquals:
+                "iam:PermissionsBoundary": !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${PermissionsBoundaryName}"
+          - Sid: "IamChangeRoles"
+            Effect: "Allow"
+            Action:
+              - "iam:UpdateRole"
+              - "iam:UpdateRoleDescription"
+              - "iam:TagRole"
+              - "iam:UntagRole"
+              - "iam:DeleteRole"
+            Resource:
+              - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/AlarmOpsCentral-*"
+              - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${CentralStackName}-*"
+          - Sid: "IamAttachLambdaManagedPolicies"
+            Effect: "Allow"
+            Action:
+              - "iam:AttachRolePolicy"
+              - "iam:DetachRolePolicy"
+            Resource: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${CentralStackName}-*"
+            Condition:
+              StringEquals:
+                "iam:PermissionsBoundary": !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${PermissionsBoundaryName}"
+                "iam:PolicyARN":
+                  - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+                  - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaSQSQueueExecutionRole"
+          - Sid: "IamReadRoles"
+            Effect: "Allow"
+            Action:
+              - "iam:GetRole"
+              - "iam:GetRolePolicy"
+              - "iam:ListRolePolicies"
+              - "iam:ListAttachedRolePolicies"
+              - "iam:ListRoleTags"
+              - "iam:ListInstanceProfilesForRole"
+            Resource:
+              - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/AlarmOpsCentral-*"
+              - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${CentralStackName}-*"
+          - Sid: "IamPassRoleToLambdaOnly"
+            Effect: "Allow"
+            Action: "iam:PassRole"
+            Resource:
+              - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/AlarmOpsCentral-Engine"
+              - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${CentralStackName}-*FunctionRole-*"
+            Condition:
+              StringEquals:
+                "iam:PassedToService": "lambda.amazonaws.com"
+          - Sid: "DenyBoundaryRemoval"
+            Effect: "Deny"
+            Action: "iam:DeleteRolePermissionsBoundary"
+            Resource: "*"
+          - Sid: "DenyOtherBoundary"
+            Effect: "Deny"
+            Action: "iam:PutRolePermissionsBoundary"
+            Resource: "*"
+            Condition:
+              StringNotEquals:
+                "iam:PermissionsBoundary": !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${PermissionsBoundaryName}"
+          - Sid: "DenyBoundaryPolicyChange"
+            Effect: "Deny"
+            Action:
+              - "iam:CreatePolicyVersion"
+              - "iam:DeletePolicy"
+              - "iam:DeletePolicyVersion"
+              - "iam:SetDefaultPolicyVersion"
+            Resource:
+              - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${PermissionsBoundaryName}"
+              - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/AlarmOpsDeployCentral-*"
+              - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/AlarmOpsDeployBus"
+          - Sid: "DenyDeployPolicyAttachment"
+            Effect: "Deny"
+            Action:
+              - "iam:AttachRolePolicy"
+              - "iam:DetachRolePolicy"
+              - "iam:AttachUserPolicy"
+              - "iam:DetachUserPolicy"
+              - "iam:AttachGroupPolicy"
+              - "iam:DetachGroupPolicy"
+            Resource: "*"
+            Condition:
+              ArnLike:
+                "iam:PolicyARN":
+                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${PermissionsBoundaryName}"
+                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/AlarmOpsDeployCentral-*"
+                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/AlarmOpsDeployBus"
+          - Sid: "DenyForceDeleteSecret"
+            Effect: "Deny"
+            Action: "secretsmanager:DeleteSecret"
+            Resource: "*"
+            Condition:
+              Bool:
+                "secretsmanager:ForceDeleteWithoutRecovery": "true"
+          - Sid: "DenySecretValues"
+            Effect: "Deny"
+            Action:
+              - "secretsmanager:GetSecretValue"
+              - "secretsmanager:PutSecretValue"
+            Resource: "*"
+          - Sid: "DenyPivotAndQueueData"
+            Effect: "Deny"
+            Action:
+              - "sts:AssumeRole"
+              - "sts:TagSession"
+              - "sts:SetSourceIdentity"
+              - "sqs:SendMessage"
+              - "sqs:ReceiveMessage"
+              - "sqs:DeleteMessage"
+              - "sqs:PurgeQueue"
+              - "sqs:StartMessageMoveTask"
+            Resource: "*"
+
+  DeployCentralServicesPolicy:
     Metadata:
       cfn-lint:
         config:
           ignore_checks:
-            # apigateway:TagResource/UntagResource are real actions (the first apply was denied on
-            # apigateway:TagResource for the HTTP API stage, 11/23) but cfn-lint's action list does not have them yet.
+            # apigateway:TagResource/UntagResource are real actions (HTTP API stage, #104) that cfn-lint does not list yet.
             - W3037
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: AlarmOpsDeployCentral-Services
+      Description: Lambda, SQS, Events, Logs, Secrets Manager (no values), CloudWatch alarms and API Gateway for the central stack.
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: "LambdaFunctions"
+            Effect: "Allow"
+            Action:
+              - "lambda:CreateFunction"
+              - "lambda:DeleteFunction"
+              - "lambda:GetFunction"
+              - "lambda:GetFunctionConfiguration"
+              - "lambda:UpdateFunctionCode"
+              - "lambda:UpdateFunctionConfiguration"
+              - "lambda:PutFunctionConcurrency"
+              - "lambda:DeleteFunctionConcurrency"
+              - "lambda:GetFunctionConcurrency"
+              - "lambda:AddPermission"
+              - "lambda:RemovePermission"
+              - "lambda:GetPolicy"
+              - "lambda:TagResource"
+              - "lambda:UntagResource"
+              - "lambda:ListTags"
+            Resource: !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${ResourcePrefix}-*"
+          - Sid: "LambdaEventSourceMappingsCreateUpdate"
+            Effect: "Allow"
+            Action:
+              - "lambda:CreateEventSourceMapping"
+              - "lambda:UpdateEventSourceMapping"
+            Resource: "*"
+            Condition:
+              ArnLike:
+                "lambda:FunctionArn": !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${ResourcePrefix}-*"
+          - Sid: "LambdaEventSourceMappingsDeleteGet"
+            Effect: "Allow"
+            Action:
+              - "lambda:DeleteEventSourceMapping"
+              - "lambda:GetEventSourceMapping"
+            Resource: "*"
+          - Sid: "LambdaEventSourceMappingsTags"
+            Effect: "Allow"
+            Action:
+              - "lambda:TagResource"
+              - "lambda:UntagResource"
+              - "lambda:ListTags"
+            Resource: !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:event-source-mapping:*"
+          - Sid: "Sqs"
+            Effect: "Allow"
+            Action:
+              - "sqs:CreateQueue"
+              - "sqs:DeleteQueue"
+              - "sqs:SetQueueAttributes"
+              - "sqs:GetQueueAttributes"
+              - "sqs:GetQueueUrl"
+              - "sqs:TagQueue"
+              - "sqs:UntagQueue"
+              - "sqs:ListQueueTags"
+            Resource: !Sub "arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:${ResourcePrefix}-*"
+          - Sid: "EventsRulesOnCentralBus"
+            Effect: "Allow"
+            Action:
+              - "events:PutRule"
+              - "events:DeleteRule"
+              - "events:DescribeRule"
+              - "events:PutTargets"
+              - "events:RemoveTargets"
+              - "events:ListTargetsByRule"
+              - "events:TagResource"
+              - "events:UntagResource"
+              - "events:ListTagsForResource"
+            Resource: !Sub "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/${BusName}/${ResourcePrefix}-*"
+          - Sid: "EventsCentralBusRead"
+            Effect: "Allow"
+            Action: "events:DescribeEventBus"
+            Resource: !Sub "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:event-bus/${BusName}"
+          - Sid: "LogGroups"
+            Effect: "Allow"
+            Action:
+              - "logs:CreateLogGroup"
+              - "logs:DeleteLogGroup"
+              - "logs:PutRetentionPolicy"
+              - "logs:DeleteRetentionPolicy"
+              - "logs:TagResource"
+              - "logs:UntagResource"
+              - "logs:ListTagsForResource"
+              - "logs:ListTagsLogGroup"
+            Resource:
+              - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${ResourcePrefix}-*"
+              - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${ResourcePrefix}-*:*"
+          - Sid: "LogsDescribe"
+            Effect: "Allow"
+            Action: "logs:DescribeLogGroups"
+            Resource: "*"
+          - Sid: "SecretsManagerSecretsNoValues"
+            Effect: "Allow"
+            Action:
+              - "secretsmanager:CreateSecret"
+              - "secretsmanager:DeleteSecret"
+              - "secretsmanager:DescribeSecret"
+              - "secretsmanager:TagResource"
+              - "secretsmanager:UntagResource"
+              - "secretsmanager:GetResourcePolicy"
+            Resource: !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${ResourcePrefix}/central/*"
+          - Sid: "CloudWatchAlarms"
+            Effect: "Allow"
+            Action:
+              - "cloudwatch:PutMetricAlarm"
+              - "cloudwatch:DeleteAlarms"
+              - "cloudwatch:TagResource"
+              - "cloudwatch:UntagResource"
+              - "cloudwatch:ListTagsForResource"
+            Resource: !Sub "arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:${ResourcePrefix}-*"
+          - Sid: "CloudWatchDescribe"
+            Effect: "Allow"
+            Action: "cloudwatch:DescribeAlarms"
+            Resource: "*"
+          - Sid: "ApiGatewayHttpApi"
+            Effect: "Allow"
+            Action:
+              - "apigateway:GET"
+              - "apigateway:POST"
+              - "apigateway:PUT"
+              - "apigateway:PATCH"
+              - "apigateway:DELETE"
+              - "apigateway:TagResource"
+              - "apigateway:UntagResource"
+            Resource:
+              - !Sub "arn:${AWS::Partition}:apigateway:${AWS::Region}::/apis"
+              - !Sub "arn:${AWS::Partition}:apigateway:${AWS::Region}::/apis/*"
+              - !Sub "arn:${AWS::Partition}:apigateway:${AWS::Region}::/tags/*"
+
+  # deploy-central workflow (environment central). No boundary on this role itself.
+  DeployCentralRole:
+    Type: AWS::IAM::Role
     Properties:
       RoleName: AlarmOpsDeployCentral
       Description: GitHub OIDC role for the deploy-central workflow (environment central).
@@ -248,294 +581,34 @@ Resources:
               StringEquals:
                 "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
                 "token.actions.githubusercontent.com:sub": !Sub "repo:${GitHubRepo}:environment:central"
-      Policies:
-        - PolicyName: AlarmOpsDeployCentral-Policy
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Sid: "CfnCentralStack"
-                Effect: "Allow"
-                Action:
-                  - "cloudformation:DescribeStacks"
-                  - "cloudformation:DescribeStackEvents"
-                  - "cloudformation:DescribeStackResources"
-                  - "cloudformation:ListStackResources"
-                  - "cloudformation:GetTemplate"
-                  - "cloudformation:CreateChangeSet"
-                  - "cloudformation:DescribeChangeSet"
-                  - "cloudformation:ExecuteChangeSet"
-                  - "cloudformation:DeleteChangeSet"
-                  - "cloudformation:ListChangeSets"
-                  - "cloudformation:GetTemplateSummary"
-                Resource:
-                  - !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${CentralStackName}/*"
-                  - !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:changeSet/samcli-deploy*/*"
-              - Sid: "CfnSamTransform"
-                Effect: "Allow"
-                Action: "cloudformation:CreateChangeSet"
-                Resource: !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:aws:transform/Serverless-2016-10-31"
-              - Sid: "CfnBusStackRead"
-                Effect: "Allow"
-                Action: "cloudformation:DescribeStacks"
-                Resource: !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${BusStackName}/*"
-              - Sid: "SamValidateListPolicies"
-                Effect: "Allow"
-                Action: "iam:ListPolicies"
-                Resource: "*"
-              - Sid: "SamBucketObjects"
-                Effect: "Allow"
-                Action:
-                  - "s3:PutObject"
-                  - "s3:GetObject"
-                Resource: !Sub ["arn:${AWS::Partition}:s3:::${SamBucket}/*", {SamBucket: !If [CreateSamArtifactBucket, !Ref SamArtifactBucket, !Ref SamArtifactBucketName]}]
-              - Sid: "SamBucketList"
-                Effect: "Allow"
-                Action:
-                  - "s3:ListBucket"
-                  - "s3:GetBucketLocation"
-                Resource: !Sub ["arn:${AWS::Partition}:s3:::${SamBucket}", {SamBucket: !If [CreateSamArtifactBucket, !Ref SamArtifactBucket, !Ref SamArtifactBucketName]}]
-              - Sid: "IamCreateRoleWithBoundary"
-                Effect: "Allow"
-                Action: "iam:CreateRole"
-                Resource:
-                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/AlarmOpsCentral-*"
-                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${CentralStackName}-*"
-                Condition:
-                  StringEquals:
-                    "iam:PermissionsBoundary": !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${PermissionsBoundaryName}"
-              - Sid: "IamRolePoliciesWithBoundary"
-                Effect: "Allow"
-                Action:
-                  - "iam:PutRolePolicy"
-                  - "iam:DeleteRolePolicy"
-                Resource:
-                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/AlarmOpsCentral-*"
-                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${CentralStackName}-*"
-                Condition:
-                  StringEquals:
-                    "iam:PermissionsBoundary": !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${PermissionsBoundaryName}"
-              - Sid: "IamPutBoundaryOnlyOurs"
-                Effect: "Allow"
-                Action: "iam:PutRolePermissionsBoundary"
-                Resource:
-                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/AlarmOpsCentral-*"
-                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${CentralStackName}-*"
-                Condition:
-                  StringEquals:
-                    "iam:PermissionsBoundary": !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${PermissionsBoundaryName}"
-              - Sid: "IamChangeRoles"
-                Effect: "Allow"
-                Action:
-                  - "iam:UpdateRole"
-                  - "iam:UpdateRoleDescription"
-                  - "iam:TagRole"
-                  - "iam:UntagRole"
-                  - "iam:DeleteRole"
-                Resource:
-                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/AlarmOpsCentral-*"
-                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${CentralStackName}-*"
-              - Sid: "IamAttachLambdaManagedPolicies"
-                Effect: "Allow"
-                Action:
-                  - "iam:AttachRolePolicy"
-                  - "iam:DetachRolePolicy"
-                Resource: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${CentralStackName}-*"
-                Condition:
-                  StringEquals:
-                    "iam:PermissionsBoundary": !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${PermissionsBoundaryName}"
-                    "iam:PolicyARN":
-                      - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-                      - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaSQSQueueExecutionRole"
-              - Sid: "IamReadRoles"
-                Effect: "Allow"
-                Action:
-                  - "iam:GetRole"
-                  - "iam:GetRolePolicy"
-                  - "iam:ListRolePolicies"
-                  - "iam:ListAttachedRolePolicies"
-                  - "iam:ListRoleTags"
-                  - "iam:ListInstanceProfilesForRole"
-                Resource:
-                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/AlarmOpsCentral-*"
-                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${CentralStackName}-*"
-              - Sid: "IamPassRoleToLambdaOnly"
-                Effect: "Allow"
-                Action: "iam:PassRole"
-                Resource:
-                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/AlarmOpsCentral-Engine"
-                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${CentralStackName}-*FunctionRole-*"
-                Condition:
-                  StringEquals:
-                    "iam:PassedToService": "lambda.amazonaws.com"
-              - Sid: "LambdaFunctions"
-                Effect: "Allow"
-                Action:
-                  - "lambda:CreateFunction"
-                  - "lambda:DeleteFunction"
-                  - "lambda:GetFunction"
-                  - "lambda:GetFunctionConfiguration"
-                  - "lambda:UpdateFunctionCode"
-                  - "lambda:UpdateFunctionConfiguration"
-                  - "lambda:PutFunctionConcurrency"
-                  - "lambda:DeleteFunctionConcurrency"
-                  - "lambda:GetFunctionConcurrency"
-                  - "lambda:AddPermission"
-                  - "lambda:RemovePermission"
-                  - "lambda:GetPolicy"
-                  - "lambda:TagResource"
-                  - "lambda:UntagResource"
-                  - "lambda:ListTags"
-                Resource: !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${ResourcePrefix}-*"
-              - Sid: "LambdaEventSourceMappingsCreateUpdate"
-                Effect: "Allow"
-                Action:
-                  - "lambda:CreateEventSourceMapping"
-                  - "lambda:UpdateEventSourceMapping"
-                Resource: "*"
-                Condition:
-                  ArnLike:
-                    "lambda:FunctionArn": !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${ResourcePrefix}-*"
-              - Sid: "LambdaEventSourceMappingsDeleteGet"
-                Effect: "Allow"
-                Action:
-                  - "lambda:DeleteEventSourceMapping"
-                  - "lambda:GetEventSourceMapping"
-                Resource: "*"
-              - Sid: "LambdaEventSourceMappingsTags"
-                Effect: "Allow"
-                Action:
-                  - "lambda:TagResource"
-                  - "lambda:UntagResource"
-                  - "lambda:ListTags"
-                Resource: !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:event-source-mapping:*"
-              - Sid: "Sqs"
-                Effect: "Allow"
-                Action:
-                  - "sqs:CreateQueue"
-                  - "sqs:DeleteQueue"
-                  - "sqs:SetQueueAttributes"
-                  - "sqs:GetQueueAttributes"
-                  - "sqs:GetQueueUrl"
-                  - "sqs:TagQueue"
-                  - "sqs:UntagQueue"
-                  - "sqs:ListQueueTags"
-                Resource: !Sub "arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:${ResourcePrefix}-*"
-              - Sid: "EventsRulesOnCentralBus"
-                Effect: "Allow"
-                Action:
-                  - "events:PutRule"
-                  - "events:DeleteRule"
-                  - "events:DescribeRule"
-                  - "events:PutTargets"
-                  - "events:RemoveTargets"
-                  - "events:ListTargetsByRule"
-                  - "events:TagResource"
-                  - "events:UntagResource"
-                  - "events:ListTagsForResource"
-                Resource: !Sub "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/${BusName}/${ResourcePrefix}-*"
-              - Sid: "EventsCentralBusRead"
-                Effect: "Allow"
-                Action: "events:DescribeEventBus"
-                Resource: !Sub "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:event-bus/${BusName}"
-              - Sid: "LogGroups"
-                Effect: "Allow"
-                Action:
-                  - "logs:CreateLogGroup"
-                  - "logs:DeleteLogGroup"
-                  - "logs:PutRetentionPolicy"
-                  - "logs:DeleteRetentionPolicy"
-                  - "logs:TagResource"
-                  - "logs:UntagResource"
-                  - "logs:ListTagsForResource"
-                  - "logs:ListTagsLogGroup"
-                Resource:
-                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${ResourcePrefix}-*"
-                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${ResourcePrefix}-*:*"
-              - Sid: "LogsDescribe"
-                Effect: "Allow"
-                Action: "logs:DescribeLogGroups"
-                Resource: "*"
-              - Sid: "SecretsManagerSecretsNoValues"
-                Effect: "Allow"
-                Action:
-                  - "secretsmanager:CreateSecret"
-                  - "secretsmanager:DeleteSecret"
-                  - "secretsmanager:DescribeSecret"
-                  - "secretsmanager:TagResource"
-                  - "secretsmanager:UntagResource"
-                  - "secretsmanager:GetResourcePolicy"
-                Resource: !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${ResourcePrefix}/central/*"
-              - Sid: "CloudWatchAlarms"
-                Effect: "Allow"
-                Action:
-                  - "cloudwatch:PutMetricAlarm"
-                  - "cloudwatch:DeleteAlarms"
-                  - "cloudwatch:TagResource"
-                  - "cloudwatch:UntagResource"
-                  - "cloudwatch:ListTagsForResource"
-                Resource: !Sub "arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:${ResourcePrefix}-*"
-              - Sid: "CloudWatchDescribe"
-                Effect: "Allow"
-                Action: "cloudwatch:DescribeAlarms"
-                Resource: "*"
-              - Sid: "ApiGatewayHttpApi"
-                Effect: "Allow"
-                Action:
-                  - "apigateway:GET"
-                  - "apigateway:POST"
-                  - "apigateway:PUT"
-                  - "apigateway:PATCH"
-                  - "apigateway:DELETE"
-                  - "apigateway:TagResource"
-                  - "apigateway:UntagResource"
-                Resource:
-                  - !Sub "arn:${AWS::Partition}:apigateway:${AWS::Region}::/apis"
-                  - !Sub "arn:${AWS::Partition}:apigateway:${AWS::Region}::/apis/*"
-                  - !Sub "arn:${AWS::Partition}:apigateway:${AWS::Region}::/tags/*"
-              - Sid: "DenyBoundaryRemoval"
-                Effect: "Deny"
-                Action: "iam:DeleteRolePermissionsBoundary"
-                Resource: "*"
-              - Sid: "DenyOtherBoundary"
-                Effect: "Deny"
-                Action: "iam:PutRolePermissionsBoundary"
-                Resource: "*"
-                Condition:
-                  StringNotEquals:
-                    "iam:PermissionsBoundary": !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${PermissionsBoundaryName}"
-              - Sid: "DenyBoundaryPolicyChange"
-                Effect: "Deny"
-                Action:
-                  - "iam:CreatePolicyVersion"
-                  - "iam:DeletePolicy"
-                  - "iam:DeletePolicyVersion"
-                  - "iam:SetDefaultPolicyVersion"
-                Resource: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${PermissionsBoundaryName}"
-              - Sid: "DenyForceDeleteSecret"
-                Effect: "Deny"
-                Action: "secretsmanager:DeleteSecret"
-                Resource: "*"
-                Condition:
-                  Bool:
-                    "secretsmanager:ForceDeleteWithoutRecovery": "true"
-              - Sid: "DenySecretValues"
-                Effect: "Deny"
-                Action:
-                  - "secretsmanager:GetSecretValue"
-                  - "secretsmanager:PutSecretValue"
-                Resource: "*"
-              - Sid: "DenyPivotAndQueueData"
-                Effect: "Deny"
-                Action:
-                  - "sts:AssumeRole"
-                  - "sts:TagSession"
-                  - "sts:SetSourceIdentity"
-                  - "sqs:SendMessage"
-                  - "sqs:ReceiveMessage"
-                  - "sqs:DeleteMessage"
-                  - "sqs:PurgeQueue"
-                  - "sqs:StartMessageMoveTask"
-                Resource: "*"
+      ManagedPolicyArns:
+        - !Ref DeployCentralCfnPolicy
+        - !Ref DeployCentralIamPolicy
+        - !Ref DeployCentralServicesPolicy
+
+  # Customer managed policy of the bus-allowlist role (same JSON as deploy-role-policy.md section 3-1).
+  DeployBusPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: AlarmOpsDeployBus
+      Description: CloudFormation UpdateStack on the bus stack and the central event bus allow list.
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: "CfnBusStack"
+            Effect: "Allow"
+            Action:
+              - "cloudformation:DescribeStacks"
+              - "cloudformation:UpdateStack"
+              - "cloudformation:DescribeStackEvents"
+            Resource: !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${BusStackName}/*"
+          - Sid: "EventsCentralBus"
+            Effect: "Allow"
+            Action:
+              - "events:DescribeEventBus"
+              - "events:PutPermission"
+              - "events:RemovePermission"
+            Resource: !Sub "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:event-bus/${BusName}"
 
   # bus-allowlist workflow (environment central-bus). Cannot create roles, so no boundary.
   DeployBusRole:
@@ -555,25 +628,8 @@ Resources:
               StringEquals:
                 "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
                 "token.actions.githubusercontent.com:sub": !Sub "repo:${GitHubRepo}:environment:central-bus"
-      Policies:
-        - PolicyName: AlarmOpsDeployBus-Policy
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Sid: "CfnBusStack"
-                Effect: "Allow"
-                Action:
-                  - "cloudformation:DescribeStacks"
-                  - "cloudformation:UpdateStack"
-                  - "cloudformation:DescribeStackEvents"
-                Resource: !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${BusStackName}/*"
-              - Sid: "EventsCentralBus"
-                Effect: "Allow"
-                Action:
-                  - "events:DescribeEventBus"
-                  - "events:PutPermission"
-                  - "events:RemovePermission"
-                Resource: !Sub "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:event-bus/${BusName}"
+      ManagedPolicyArns:
+        - !Ref DeployBusPolicy
 
 Outputs:
   GitHubOidcProviderArn:

@@ -25,7 +25,10 @@ DOC = ROOT / "aws" / "deploy-role-policy.md"
 ACCOUNT, PARTITION, REGION = "123456789012", "aws", "ap-northeast-2"
 REPO_SUBJECT = "hkjs96@75015048/alarmops@1451138684"  # GitHubRepo default: the sub format GitHub sends (immutable IDs)
 OIDC_ARN = f"arn:{PARTITION}:iam::{ACCOUNT}:oidc-provider/token.actions.githubusercontent.com"
-INLINE_LIMIT = 10240  # total inline policy characters per role (whitespace excluded)
+MANAGED_LIMIT = 6144  # characters of one customer managed policy (whitespace excluded)
+CENTRAL_PARTS = ("cfn", "iam", "services")
+CENTRAL_RESOURCES = {"cfn": "DeployCentralCfnPolicy", "iam": "DeployCentralIamPolicy", "services": "DeployCentralServicesPolicy"}
+CENTRAL_NAMES = {"cfn": "AlarmOpsDeployCentral-Cfn", "iam": "AlarmOpsDeployCentral-Iam", "services": "AlarmOpsDeployCentral-Services"}
 
 
 def _load(path: Path) -> dict:
@@ -140,7 +143,9 @@ def expected_docs(bucket: str) -> dict:
     return {
         "boundary": fill(doc_policy("## 2."), m),
         "trust_central": fill(doc_policy("## 1."), m),
-        "policy_central": fill(doc_policy("## 3."), m),
+        "policy_central_cfn": fill(doc_policy("### 3a."), m),
+        "policy_central_iam": fill(doc_policy("### 3b."), m),
+        "policy_central_services": fill(doc_policy("### 3c."), m),
         "trust_bus": fill(doc_policy("### 3-1.", 0), m),
         "policy_bus": fill(doc_policy("### 3-1.", 1), m),
     }
@@ -150,9 +155,11 @@ def rendered(r: Renderer) -> dict:
     return {
         "boundary": r.resource("RoleBoundaryPolicy", "PolicyDocument"),
         "trust_central": r.resource("DeployCentralRole", "AssumeRolePolicyDocument"),
-        "policy_central": r.resource("DeployCentralRole", "Policies", 0, "PolicyDocument"),
+        "policy_central_cfn": r.resource("DeployCentralCfnPolicy", "PolicyDocument"),
+        "policy_central_iam": r.resource("DeployCentralIamPolicy", "PolicyDocument"),
+        "policy_central_services": r.resource("DeployCentralServicesPolicy", "PolicyDocument"),
         "trust_bus": r.resource("DeployBusRole", "AssumeRolePolicyDocument"),
-        "policy_bus": r.resource("DeployBusRole", "Policies", 0, "PolicyDocument"),
+        "policy_bus": r.resource("DeployBusPolicy", "PolicyDocument"),
     }
 
 
@@ -165,7 +172,9 @@ def compact_len(doc: dict) -> int:
 DOC_HASHES = {
     ("## 1.", 0): "a0bea8d89843e52d7805d6b8b2b7f215a87f16afb3b27b1cbe189da25dfc9bdb",
     ("## 2.", 0): "c1563d02d4dc8336eb36c6473ff951b995d5746c753a65addc5d5c6d0e604c74",
-    ("## 3.", 0): "00464ba94aedd1e6776794db2595a49d5e673412514053a6d76dc74502571dee",
+    ("### 3a.", 0): "f312d3465cfee7a1cacb55df0e268c2ee67aba9e8ff8e341637e35fd126a29be",
+    ("### 3b.", 0): "dd0bc86677afefd2568c898b8c11315dfd5b93ad629e025bc281d57354c639ed",
+    ("### 3c.", 0): "ded691a7909312d6e83e9a6f228d6d7de53b1ffedb0391ac7c472a4c190724fe",
     ("### 3-1.", 0): "71fc111a3162ef97264aa3dd69ecf81dbaf97834ba17431c6045a1b8d14bbab8",
     ("### 3-1.", 1): "dba3cb5ded82c23d33113e68f395bad1cac68ce8ff875cf882b9363d3f79546e",
 }
@@ -193,15 +202,15 @@ class SameAsDocument(unittest.TestCase):
                 self.assertEqual(self.got[name], self.exp[name])
 
     def test_statement_sids_and_order_equal_the_document(self):
-        for name in ("boundary", "policy_central", "policy_bus"):
+        for name in ("boundary", "policy_central_cfn", "policy_central_iam", "policy_central_services", "policy_bus"):
             with self.subTest(policy=name):
                 self.assertEqual([s.get("Sid") for s in self.got[name]["Statement"]],
                                  [s.get("Sid") for s in self.exp[name]["Statement"]])
 
     def test_created_bucket_name_is_the_documented_example(self):
         params = defaults()  # SamArtifactBucketName empty -> the stack creates the bucket
-        got = rendered(Renderer(params))["policy_central"]
-        exp = expected_docs(f"alarmops-central-artifacts-{ACCOUNT}")["policy_central"]
+        got = rendered(Renderer(params))["policy_central_cfn"]  # the bucket is only in the Cfn policy
+        exp = expected_docs(f"alarmops-central-artifacts-{ACCOUNT}")["policy_central_cfn"]
         self.assertEqual(got, exp)
 
     def test_existing_oidc_provider_arn_is_used_when_given(self):
@@ -254,9 +263,17 @@ class RoleShape(unittest.TestCase):
     def test_roles_and_names(self):
         self.assertEqual(RES["DeployCentralRole"]["Properties"]["RoleName"], "AlarmOpsDeployCentral")
         self.assertEqual(RES["DeployBusRole"]["Properties"]["RoleName"], "AlarmOpsDeployBus")
-        self.assertEqual(RES["DeployCentralRole"]["Properties"]["Policies"][0]["PolicyName"], "AlarmOpsDeployCentral-Policy")
-        self.assertEqual(RES["DeployBusRole"]["Properties"]["Policies"][0]["PolicyName"], "AlarmOpsDeployBus-Policy")
+        for part in CENTRAL_PARTS:
+            self.assertEqual(RES[CENTRAL_RESOURCES[part]]["Properties"]["ManagedPolicyName"], CENTRAL_NAMES[part])
+        self.assertEqual(RES["DeployBusPolicy"]["Properties"]["ManagedPolicyName"], "AlarmOpsDeployBus")
         self.assertEqual(T["Parameters"]["PermissionsBoundaryName"]["Default"], "AlarmOpsCentral-RoleBoundary")
+
+    def test_roles_use_managed_policies_only(self):
+        for n, want in (("DeployCentralRole", [{"Ref": v} for v in CENTRAL_RESOURCES.values()]),
+                        ("DeployBusRole", [{"Ref": "DeployBusPolicy"}])):
+            props = RES[n]["Properties"]
+            self.assertNotIn("Policies", props)  # no inline policy: ISMS-P audit wants version history
+            self.assertEqual(props["ManagedPolicyArns"], want)
 
     def test_session_is_one_hour_at_most(self):
         for n in ("DeployCentralRole", "DeployBusRole"):
@@ -274,7 +291,8 @@ class RoleShape(unittest.TestCase):
     def test_only_the_expected_resource_types(self):
         types = sorted(v["Type"] for v in RES.values())
         self.assertEqual(types, sorted(["AWS::IAM::OIDCProvider", "AWS::IAM::OIDCProvider", "AWS::S3::Bucket", "AWS::S3::BucketPolicy",
-                                        "AWS::IAM::ManagedPolicy", "AWS::IAM::Role", "AWS::IAM::Role"]))
+                                        "AWS::IAM::ManagedPolicy", "AWS::IAM::ManagedPolicy", "AWS::IAM::ManagedPolicy",
+                                        "AWS::IAM::ManagedPolicy", "AWS::IAM::ManagedPolicy", "AWS::IAM::Role", "AWS::IAM::Role"]))
 
     def test_outputs(self):
         for o in ("DeployCentralRoleArn", "DeployBusRoleArn", "PermissionsBoundaryArn", "GitHubOidcProviderArn",
@@ -363,14 +381,84 @@ class BucketHardening(unittest.TestCase):
         self.assertEqual(s["Resource"], [f"arn:{PARTITION}:s3:::{b}", f"arn:{PARTITION}:s3:::{b}/*"])
 
 
-class InlinePolicySize(unittest.TestCase):
-    def test_expanded_size_stays_under_the_inline_limit_with_the_trust_change_policy_room(self):
+class ManagedPolicySize(unittest.TestCase):
+    """One customer managed policy holds at most 6,144 characters (whitespace excluded), counted after Fn::Sub is expanded."""
+
+    def test_every_managed_policy_is_within_the_limit(self):
         got = rendered(Renderer({**defaults(), "SamArtifactBucketName": "alarmops-central-artifacts-123456789012"}))
-        # The temporary TrustChange policy (document section 4) is about 400 characters and shares the limit.
-        for key in ("policy_central", "policy_bus"):
+        for key in ("boundary", "policy_central_cfn", "policy_central_iam", "policy_central_services", "policy_bus"):
             size = compact_len(got[key])
             with self.subTest(policy=key, size=size):
-                self.assertLess(size + 400, INLINE_LIMIT)
+                self.assertLessEqual(size, MANAGED_LIMIT)
+
+    def test_size_is_checked_with_long_names_too(self):
+        params = {**defaults(), "ResourcePrefix": "p" * 20, "CentralStackName": "c" * 30, "BusStackName": "b" * 30,
+                  "BusName": "n" * 30, "PermissionsBoundaryName": "B" * 40, "SamArtifactBucketName": "x" * 63}
+        got = rendered(Renderer(params))
+        for key in ("policy_central_cfn", "policy_central_iam", "policy_central_services", "policy_bus"):
+            with self.subTest(policy=key):
+                self.assertLessEqual(compact_len(got[key]), MANAGED_LIMIT)
+
+    def test_trust_change_policy_still_fits_the_inline_limit(self):
+        # The temporary TrustChange policy (document section 4) is the only inline policy; about 400 characters of 10,240.
+        self.assertEqual(sum("Policies" in RES[n]["Properties"] for n in ("DeployCentralRole", "DeployBusRole")), 0)
+
+
+class DeployPolicyIsProtected(unittest.TestCase):
+    """The deploy roles cannot edit their own managed policies; the Deny statements stay in the attached policies."""
+
+    def setUp(self):
+        self.got = rendered(Renderer({**defaults(), "SamArtifactBucketName": "b"}))
+        self.iam = {s["Sid"]: s for s in self.got["policy_central_iam"]["Statement"]}
+        self.own = [f"arn:{PARTITION}:iam::{ACCOUNT}:policy/AlarmOpsCentral-RoleBoundary",
+                    f"arn:{PARTITION}:iam::{ACCOUNT}:policy/AlarmOpsDeployCentral-*",
+                    f"arn:{PARTITION}:iam::{ACCOUNT}:policy/AlarmOpsDeployBus"]
+
+    def test_all_deny_statements_live_in_the_iam_policy(self):
+        for key in ("policy_central_cfn", "policy_central_services"):
+            self.assertEqual([s["Sid"] for s in self.got[key]["Statement"] if s["Effect"] == "Deny"], [])
+        for sid in ("DenyBoundaryRemoval", "DenyOtherBoundary", "DenyBoundaryPolicyChange", "DenyDeployPolicyAttachment",
+                    "DenyForceDeleteSecret", "DenySecretValues", "DenyPivotAndQueueData"):
+            self.assertEqual(self.iam[sid]["Effect"], "Deny", sid)
+
+    def test_policy_edit_is_denied_on_boundary_and_deploy_policies(self):
+        s = self.iam["DenyBoundaryPolicyChange"]
+        self.assertEqual(sorted(s["Action"]), ["iam:CreatePolicyVersion", "iam:DeletePolicy", "iam:DeletePolicyVersion", "iam:SetDefaultPolicyVersion"])
+        self.assertEqual(s["Resource"], self.own)
+
+    def test_attach_detach_of_own_policies_is_denied(self):
+        s = self.iam["DenyDeployPolicyAttachment"]
+        self.assertEqual(s["Resource"], "*")
+        self.assertIn("iam:AttachRolePolicy", s["Action"])
+        self.assertIn("iam:DetachRolePolicy", s["Action"])
+        self.assertEqual(s["Condition"], {"ArnLike": {"iam:PolicyARN": self.own}})
+
+    def test_no_allow_grants_policy_writes(self):
+        import fnmatch
+        banned = ("iam:CreatePolicy", "iam:SetDefaultPolicyVersion", "iam:DeletePolicy", "iam:PutRolePolicy", "iam:AttachRolePolicy")
+        for key in ("policy_central_cfn", "policy_central_iam", "policy_central_services", "policy_bus"):
+            for s in self.got[key]["Statement"]:
+                if s["Effect"] != "Allow":
+                    continue
+                acts = [s["Action"]] if isinstance(s["Action"], str) else s["Action"]
+                for a in acts:
+                    if a in ("iam:PutRolePolicy", "iam:AttachRolePolicy"):
+                        continue  # on roles of the central stack only, checked below
+                    self.assertFalse(any(fnmatch.fnmatchcase(a, b) for b in banned), (key, s["Sid"], a))
+
+    def test_attach_allow_condition_is_unchanged(self):
+        s = self.iam["IamAttachLambdaManagedPolicies"]
+        self.assertEqual(s["Action"], ["iam:AttachRolePolicy", "iam:DetachRolePolicy"])
+        self.assertEqual(s["Resource"], f"arn:{PARTITION}:iam::{ACCOUNT}:role/alarmops-central-*")
+        self.assertEqual(s["Condition"], {"StringEquals": {
+            "iam:PermissionsBoundary": f"arn:{PARTITION}:iam::{ACCOUNT}:policy/AlarmOpsCentral-RoleBoundary",
+            "iam:PolicyARN": [f"arn:{PARTITION}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+                              f"arn:{PARTITION}:iam::aws:policy/service-role/AWSLambdaSQSQueueExecutionRole"]}})
+
+    def test_apigateway_tagging_is_in_the_services_policy(self):
+        s = {x["Sid"]: x for x in self.got["policy_central_services"]["Statement"]}["ApiGatewayHttpApi"]
+        self.assertIn("apigateway:TagResource", s["Action"])
+        self.assertIn("apigateway:UntagResource", s["Action"])
 
 
 class Portability(unittest.TestCase):
@@ -406,7 +494,7 @@ class DeployRolesCannotTouchThisStack(unittest.TestCase):
 
     def statements(self):
         got = rendered(Renderer({**defaults(), "SamArtifactBucketName": "b"}))
-        return got["policy_central"]["Statement"] + got["policy_bus"]["Statement"]
+        return got["policy_central_cfn"]["Statement"] + got["policy_central_iam"]["Statement"] + got["policy_central_services"]["Statement"] + got["policy_bus"]["Statement"]
 
     def resources_of_allows(self):
         for s in self.statements():
@@ -420,6 +508,10 @@ class DeployRolesCannotTouchThisStack(unittest.TestCase):
                    f"arn:{PARTITION}:iam::{ACCOUNT}:role/AlarmOpsDeployCentral",
                    f"arn:{PARTITION}:iam::{ACCOUNT}:role/AlarmOpsDeployBus",
                    f"arn:{PARTITION}:iam::{ACCOUNT}:policy/AlarmOpsCentral-RoleBoundary",
+                   f"arn:{PARTITION}:iam::{ACCOUNT}:policy/AlarmOpsDeployCentral-Cfn",
+                   f"arn:{PARTITION}:iam::{ACCOUNT}:policy/AlarmOpsDeployCentral-Iam",
+                   f"arn:{PARTITION}:iam::{ACCOUNT}:policy/AlarmOpsDeployCentral-Services",
+                   f"arn:{PARTITION}:iam::{ACCOUNT}:policy/AlarmOpsDeployBus",
                    OIDC_ARN,
                    f"arn:{PARTITION}:iam::{ACCOUNT}:oidc-provider/oidc.vercel.com"]
         for s, resources in self.resources_of_allows():

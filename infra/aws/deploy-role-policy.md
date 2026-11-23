@@ -10,11 +10,11 @@
 | 대상 | 이름 | 비고 |
 |---|---|---|
 | 배포 역할 | `AlarmOpsDeployCentral` | `AlarmOpsCentral-*`·`alarmops-central-*`·`AlarmOps-*`에 걸리지 않게 일부러 다르게 지었다. 배포 역할이 자기 자신을 고칠 수 없어야 한다 |
-| 버스 허용 목록 역할 | `AlarmOpsDeployBus` | `bus-allowlist` 전용. `AlarmOpsCentral-*`·`alarmops-central-*`·`AlarmOps-*`에 걸리지 않는다. 신뢰 `sub`는 `environment:central-bus`. 인라인 정책 `AlarmOpsDeployBus-Policy`(아래 3-1) |
+| 버스 허용 목록 역할 | `AlarmOpsDeployBus` | `bus-allowlist` 전용. `AlarmOpsCentral-*`·`alarmops-central-*`·`AlarmOps-*`에 걸리지 않는다. 신뢰 `sub`는 `environment:central-bus`. 관리형 정책 `AlarmOpsDeployBus`(아래 3-1) |
 | SAM 아티팩트 버킷 | `alarmops-central-artifacts-<ACCOUNT_ID>` | 배포 코드 zip을 올리는 고정 버킷. 부트스트랩 스택이 만든다(이미 있으면 이름을 파라미터로 넘긴다). GitHub `central` 환경 변수 `SAM_ARTIFACT_BUCKET` |
 | 부트스트랩 스택 | `alarmops-central-bootstrap` | 위 경계 정책·두 역할·OIDC 공급자 두 개·버킷을 만드는 스택. 배포 역할이 고칠 수 없다(5-5) |
 | 권한 경계 정책 | `AlarmOpsCentral-RoleBoundary` | 배포 역할이 만드는 모든 역할에 붙는다 |
-| 권한 정책 | `AlarmOpsDeployCentral-Policy` | 배포 역할의 **인라인** 정책 |
+| 권한 정책 | `AlarmOpsDeployCentral-Cfn`, `-Iam`, `-Services` | 배포 역할에 붙는 **고객 관리형 정책** 3개(3절). 버스 역할은 `AlarmOpsDeployBus` 1개 |
 
 ## 먼저 알아 둘 것 (막히는 곳)
 
@@ -23,7 +23,7 @@
    - 별도 브랜치 `agent/central-boundary-template`가 `central.yaml`에 `PermissionsBoundary`(세 역할과 `Globals.Function`)를 넣고, `deploy-central`을 `--s3-bucket "$SAM_ARTIFACT_BUCKET"`으로, `bus-allowlist`를 `central-bus` 환경으로 바꾼다.
    - **머지 순서: 그 PR을 먼저 머지하고, 그 다음에 첫 `plan`을 돌린다.**
    - 스택이 이미 있는 채로 경계를 붙이면 CloudFormation이 `iam:PutRolePermissionsBoundary`를 부른다. 그래서 권한 정책에 그 경계 ARN 조건의 허용(`IamPutBoundaryOnlyOurs`)을 넣었다.
-2. 권한 정책은 공백을 빼고 8,248자(기본 이름과 기본 버킷 이름을 넣은 기준, JSON을 압축해 센 값)라 **관리형 정책 한도(6,144자)를 넘는다.** 그래서 역할의 **인라인 정책**으로 넣는다(역할당 인라인 정책 합계 한도 10,240자). 신뢰 정책 변경용 임시 정책(`DateLessThan` 조건 포함, 두 패턴·시각 값을 채운 기준 약 400자)이 붙어 있는 동안에도 합계 약 8,650자라 한도 안이다. 테스트가 CloudFormation이 값을 풀어 쓴 뒤의 길이를 세어 이 한도를 지키는지 확인한다.
+2. **관리형 정책 3개로 나눈 이유(ISMS-P 감사: 버전 이력·독립 검토, 6,144자 한도).** 관리형 정책은 버전 이력이 남고 IAM 콘솔에서 따로 조회·검토할 수 있다. 권한 정책은 공백을 빼고 약 8,900자(기본 이름 기준)라 관리형 정책 한도(6,144자) 하나에 들어가지 않는다. 그래서 의미 단위로 **관리형 정책 3개**(`-Cfn` 약 1,400자, `-Iam` 약 4,000자, `-Services` 약 3,500자)로 나눈다. 역할에는 관리형 정책을 최대 10개 붙일 수 있어 여유가 있다. 신뢰 정책 변경용 임시 인라인 정책(4절, `DateLessThan` 조건 포함 약 400자)은 그대로 인라인이고 역할당 인라인 합계 한도(10,240자) 안이다. 테스트가 CloudFormation이 값을 풀어 쓴 뒤의 길이를 정책마다 세어 6,144자 이내인지 확인한다.
 3. SAM 아티팩트 버킷은 `--resolve-s3` 대신 고정 버킷을 쓴다. 이렇게 하면 `aws-sam-cli-managed-default` 스택·버킷 생성 권한과 와일드카드 버킷 권한이 필요 없다. 부트스트랩 스택이 만든다(5절).
 4. 첫 배포가 실패해 스택이 `ROLLBACK_COMPLETE`가 되면 **사람이** 콘솔에서 스택을 지운다. 배포 역할에는 `DeleteStack`이 없다. 지운 뒤 `plan`을 다시 돌린다.
 5. 중앙 계정은 `AlarmOps` 전용이라고 가정한다. PoC는 D-57에 따라 공유 테스트 계정일 수 있다. 그 경우 `ApiGatewayHttpApi`의 `/apis/*` 와일드카드가 같은 계정의 다른 HTTP API까지 열어 주는 위험이 있다(생성 전에는 API ID를 몰라 이름으로 줄일 수 없다). 다른 워크로드가 없는 계정에서만 쓴다.
@@ -32,7 +32,7 @@
 
 시작 전에 중앙 계정 관리자 세션(SSO·MFA)에서 확인한다.
 
-- [ ] IAM에서 정책·역할·인라인 정책을 만들 수 있다(IAM → 정책 → 정책 생성 화면이 열린다).
+- [ ] IAM에서 정책·역할을 만들 수 있다(IAM → 정책 → 정책 생성 화면이 열린다).
 - [ ] 이 계정에 걸린 SCP나 회사의 권한 경계 요구가 없다. 있으면 `CreateRole`에 회사 경계를 붙이라는 규칙과 이 문서의 경계가 겹치므로 먼저 보안 담당과 정한다. (AWS Organizations → 정책 또는 보안 담당에게 확인)
 - [ ] 이 계정에서 `token.actions.githubusercontent.com`을 신뢰하는 **다른 역할**의 `sub`가 넓지 않다.
   - IAM → 역할 목록에서 "신뢰할 수 있는 엔터티" 열에 `Identity Provider: token.actions.githubusercontent.com`이 보이는 역할을 모두 연다.
@@ -161,7 +161,11 @@
 - 리소스는 기본 이름(`ResourcePrefix=alarmops`, 비밀 이름 `alarmops/central/*`)을 가정한다. 파라미터로 이름을 바꾸면 경계와 권한 정책을 같이 고친다.
 - `AWSLambdaBasicExecutionRole`은 로그를 `*`에 허용하지만 경계가 `/aws/lambda/alarmops-*` 로그 그룹으로 줄인다.
 
-## 3. 권한 정책 (`AlarmOpsDeployCentral-Policy`, 인라인)
+## 3. 권한 정책 (관리형 정책 3개, `AlarmOpsDeployCentral-Cfn`·`-Iam`·`-Services`)
+
+배포 역할 `AlarmOpsDeployCentral`에 고객 관리형 정책 3개를 붙인다. 문장의 Sid는 나누기 전과 같다. 각 정책은 6,144자(공백 제외, 값을 풀어 쓴 뒤) 이내이고 `infra/test/test_central_bootstrap.py`가 크기를 검사한다. **Deny 문장은 모두 `-Iam` 정책에 있다.** 역할의 `ManagedPolicyArns`가 셋을 모두 붙이므로 Deny는 항상 함께 적용된다. 배포 역할은 이 정책들을 고칠 수 없다(`DenyBoundaryPolicyChange`가 새 버전 만들기·기본 버전 바꾸기·삭제를, `DenyDeployPolicyAttachment`가 붙이기·떼기를 막는다).
+
+### 3a. `AlarmOpsDeployCentral-Cfn` (배포 오케스트레이션: CloudFormation, SAM 버킷, `iam:ListPolicies`)
 
 ```json
 {
@@ -223,7 +227,17 @@
         "s3:GetBucketLocation"
       ],
       "Resource": "arn:<PARTITION>:s3:::<SAM_ARTIFACT_BUCKET>"
-    },
+    }
+  ]
+}
+```
+
+### 3b. `AlarmOpsDeployCentral-Iam` (역할 생성·경계·`PassRole`과 모든 Deny 문장)
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
     {
       "Sid": "IamCreateRoleWithBoundary",
       "Effect": "Allow",
@@ -332,6 +346,105 @@
         }
       }
     },
+    {
+      "Sid": "DenyBoundaryRemoval",
+      "Effect": "Deny",
+      "Action": "iam:DeleteRolePermissionsBoundary",
+      "Resource": "*"
+    },
+    {
+      "Sid": "DenyOtherBoundary",
+      "Effect": "Deny",
+      "Action": "iam:PutRolePermissionsBoundary",
+      "Resource": "*",
+      "Condition": {
+        "StringNotEquals": {
+          "iam:PermissionsBoundary": "arn:<PARTITION>:iam::<ACCOUNT_ID>:policy/AlarmOpsCentral-RoleBoundary"
+        }
+      }
+    },
+    {
+      "Sid": "DenyBoundaryPolicyChange",
+      "Effect": "Deny",
+      "Action": [
+        "iam:CreatePolicyVersion",
+        "iam:DeletePolicy",
+        "iam:DeletePolicyVersion",
+        "iam:SetDefaultPolicyVersion"
+      ],
+      "Resource": [
+        "arn:<PARTITION>:iam::<ACCOUNT_ID>:policy/AlarmOpsCentral-RoleBoundary",
+        "arn:<PARTITION>:iam::<ACCOUNT_ID>:policy/AlarmOpsDeployCentral-*",
+        "arn:<PARTITION>:iam::<ACCOUNT_ID>:policy/AlarmOpsDeployBus"
+      ]
+    },
+    {
+      "Sid": "DenyDeployPolicyAttachment",
+      "Effect": "Deny",
+      "Action": [
+        "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy",
+        "iam:AttachUserPolicy",
+        "iam:DetachUserPolicy",
+        "iam:AttachGroupPolicy",
+        "iam:DetachGroupPolicy"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "ArnLike": {
+          "iam:PolicyARN": [
+            "arn:<PARTITION>:iam::<ACCOUNT_ID>:policy/AlarmOpsCentral-RoleBoundary",
+            "arn:<PARTITION>:iam::<ACCOUNT_ID>:policy/AlarmOpsDeployCentral-*",
+            "arn:<PARTITION>:iam::<ACCOUNT_ID>:policy/AlarmOpsDeployBus"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "DenyForceDeleteSecret",
+      "Effect": "Deny",
+      "Action": "secretsmanager:DeleteSecret",
+      "Resource": "*",
+      "Condition": {
+        "Bool": {
+          "secretsmanager:ForceDeleteWithoutRecovery": "true"
+        }
+      }
+    },
+    {
+      "Sid": "DenySecretValues",
+      "Effect": "Deny",
+      "Action": [
+        "secretsmanager:GetSecretValue",
+        "secretsmanager:PutSecretValue"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "DenyPivotAndQueueData",
+      "Effect": "Deny",
+      "Action": [
+        "sts:AssumeRole",
+        "sts:TagSession",
+        "sts:SetSourceIdentity",
+        "sqs:SendMessage",
+        "sqs:ReceiveMessage",
+        "sqs:DeleteMessage",
+        "sqs:PurgeQueue",
+        "sqs:StartMessageMoveTask"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+### 3c. `AlarmOpsDeployCentral-Services` (Lambda, SQS, Events, Logs, Secrets Manager(값 제외), CloudWatch, API Gateway)
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
     {
       "Sid": "LambdaFunctions",
       "Effect": "Allow",
@@ -496,69 +609,6 @@
         "arn:<PARTITION>:apigateway:<REGION>::/apis/*",
         "arn:<PARTITION>:apigateway:<REGION>::/tags/*"
       ]
-    },
-    {
-      "Sid": "DenyBoundaryRemoval",
-      "Effect": "Deny",
-      "Action": "iam:DeleteRolePermissionsBoundary",
-      "Resource": "*"
-    },
-    {
-      "Sid": "DenyOtherBoundary",
-      "Effect": "Deny",
-      "Action": "iam:PutRolePermissionsBoundary",
-      "Resource": "*",
-      "Condition": {
-        "StringNotEquals": {
-          "iam:PermissionsBoundary": "arn:<PARTITION>:iam::<ACCOUNT_ID>:policy/AlarmOpsCentral-RoleBoundary"
-        }
-      }
-    },
-    {
-      "Sid": "DenyBoundaryPolicyChange",
-      "Effect": "Deny",
-      "Action": [
-        "iam:CreatePolicyVersion",
-        "iam:DeletePolicy",
-        "iam:DeletePolicyVersion",
-        "iam:SetDefaultPolicyVersion"
-      ],
-      "Resource": "arn:<PARTITION>:iam::<ACCOUNT_ID>:policy/AlarmOpsCentral-RoleBoundary"
-    },
-    {
-      "Sid": "DenyForceDeleteSecret",
-      "Effect": "Deny",
-      "Action": "secretsmanager:DeleteSecret",
-      "Resource": "*",
-      "Condition": {
-        "Bool": {
-          "secretsmanager:ForceDeleteWithoutRecovery": "true"
-        }
-      }
-    },
-    {
-      "Sid": "DenySecretValues",
-      "Effect": "Deny",
-      "Action": [
-        "secretsmanager:GetSecretValue",
-        "secretsmanager:PutSecretValue"
-      ],
-      "Resource": "*"
-    },
-    {
-      "Sid": "DenyPivotAndQueueData",
-      "Effect": "Deny",
-      "Action": [
-        "sts:AssumeRole",
-        "sts:TagSession",
-        "sts:SetSourceIdentity",
-        "sqs:SendMessage",
-        "sqs:ReceiveMessage",
-        "sqs:DeleteMessage",
-        "sqs:PurgeQueue",
-        "sqs:StartMessageMoveTask"
-      ],
-      "Resource": "*"
     }
   ]
 }
@@ -593,7 +643,8 @@
 | `ApiGatewayHttpApi` | HTTP API(v2) 생성·변경 | `/apis`, `/apis/*`, `/tags/*`(생성 전에는 ID를 몰라 이름으로 줄일 수 없다) |
 | `DenyBoundaryRemoval` | Deny `DeleteRolePermissionsBoundary` | `*` |
 | `DenyOtherBoundary` | Deny `PutRolePermissionsBoundary` | 경계가 `AlarmOpsCentral-RoleBoundary`가 아닐 때 |
-| `DenyBoundaryPolicyChange` | Deny 경계 정책 수정·삭제 | 경계 정책 |
+| `DenyBoundaryPolicyChange` | Deny 정책 새 버전·기본 버전 변경·삭제 | 경계 정책, 배포 관리형 정책 `AlarmOpsDeployCentral-*`·`AlarmOpsDeployBus` |
+| `DenyDeployPolicyAttachment` | Deny 정책 붙이기·떼기(역할·사용자·그룹) | `iam:PolicyARN`이 경계 정책·배포 관리형 정책일 때. `IamAttachLambdaManagedPolicies`의 허용 조건(Lambda 정책 2개)은 그대로다 |
 | `DenyPivotAndQueueData` | Deny 역할 맡기·세션 태그·SQS 메시지 동작 | `*`(위 3-2) |
 | `DenyForceDeleteSecret` | Deny `DeleteSecret` | `ForceDeleteWithoutRecovery=true`일 때 |
 | `DenySecretValues` | Deny `GetSecretValue`/`PutSecretValue` | `*`(배포 역할은 비밀 값을 읽거나 쓰지 못한다) |
@@ -629,7 +680,7 @@
 }
 ```
 
-인라인 정책 `AlarmOpsDeployBus-Policy`:
+관리형 정책 `AlarmOpsDeployBus`:
 
 ```json
 {
@@ -794,7 +845,9 @@
 
 배포 역할이 자기 자신을 만들 수 없다(닭과 달걀). 그래서 파이프라인이 아니라 사람이 이 템플릿을 한 번 올린다. 중앙 계정을 옮길 때도 새 계정에서 이 스택 하나와 스크립트 하나면 된다(D-58).
 
-문서 2·3·3-1·1절의 JSON과 템플릿의 정책은 같아야 한다. `infra/test/test_central_bootstrap.py`가 문서의 json 블록을 파싱해 자리표시자를 바꾼 뒤 템플릿과 비교한다. 문서나 템플릿 한쪽만 고치면 테스트가 실패한다.
+문서 1·2·3a~3c·3-1절의 JSON과 템플릿의 정책은 같아야 한다. `infra/test/test_central_bootstrap.py`가 문서의 json 블록을 파싱해 자리표시자를 바꾼 뒤 템플릿과 비교한다. 문서나 템플릿 한쪽만 고치면 테스트가 실패한다.
+
+**기존 스택 업데이트 안내.** 인라인 정책 `AlarmOpsDeployCentral-Policy`·`AlarmOpsDeployBus-Policy`를 쓰던 스택을 업데이트하면 인라인 정책은 삭제되고 관리형 정책 4개가 새로 붙는다. CloudFormation이 같은 업데이트 안에서 처리하므로(정책 생성, 역할에 붙이기, 인라인 정책 삭제 순) 권한 공백은 잠깐이다. 업데이트가 끝날 때까지 `deploy-central`·`bus-allowlist`를 돌리지 않는다. 이 업데이트에는 `apigateway:TagResource`·`UntagResource`(#104)도 함께 반영된다.
 
 ### 5-1. 올리는 사람에게 필요한 것과 순서
 
@@ -837,7 +890,7 @@
 
 | 이미 만든 것 | 할 일 |
 |---|---|
-| 역할 `AlarmOpsDeployCentral`, `AlarmOpsDeployBus` | 지운다(인라인 정책 `AlarmOpsDeployCentral-Policy`, `AlarmOpsDeployBus-Policy`도 함께 사라진다). 지우기 전에 GitHub 변수의 ARN이 바뀌지 않는지 본다. 이름이 같아 ARN은 같다. 단 **삭제와 생성 사이에는 배포가 돌지 않게** 한다 |
+| 역할 `AlarmOpsDeployCentral`, `AlarmOpsDeployBus`, 관리형 정책 `AlarmOpsDeployCentral-Cfn`·`-Iam`·`-Services`, `AlarmOpsDeployBus` | 지운다(관리형 정책은 역할에서 뗀 뒤 지운다. 옛 인라인 정책 `AlarmOpsDeployCentral-Policy`, `AlarmOpsDeployBus-Policy`는 역할과 함께 사라진다). 지우기 전에 GitHub 변수의 ARN이 바뀌지 않는지 본다. 이름이 같아 ARN은 같다. 단 **삭제와 생성 사이에는 배포가 돌지 않게** 한다 |
 | 경계 정책 `AlarmOpsCentral-RoleBoundary` | 지운다. **단 스택 `alarmops-central`이 이미 있으면 그 역할들이 이 정책을 경계로 쓰고 있어 지울 수 없다(`DeleteConflict`).** 그때는 사람이 보안 담당과 정한다(예: 중앙 스택을 먼저 지우고 다시 올리기). CloudFormation 리소스 가져오기(import)는 역할·정책에 `DeletionPolicy`가 없어 이 템플릿 그대로는 쓸 수 없다 |
 | GitHub OIDC 공급자 | 지우지 않는다. 파라미터 `GitHubOidcProviderArn`에 ARN을 넘긴다 |
 | Vercel OIDC 공급자 | 지우지 않는다. `VercelOidcProviderArn`에 ARN을 넘긴다 |
@@ -874,7 +927,7 @@ infra/scripts/setup-github-environments.sh --repo hkjs96/alarmops --reviewer <�
 
 ### 5-5. 이 스택은 배포 역할이 고칠 수 없다
 
-- 배포 역할 정책 어디에도 이 스택(`stack/alarmops-central-bootstrap/*`), 이 스택이 만든 역할 `AlarmOpsDeployCentral`·`AlarmOpsDeployBus`, 경계 정책에 쓰기를 허용하는 문장이 없다. 허용 문장의 리소스 패턴은 `stack/<중앙 스택 이름>/*`, `stack/<버스 스택 이름>/*`, `role/AlarmOpsCentral-*`, `role/<중앙 스택 이름>-*`뿐이고 `AlarmOpsDeploy…`는 어디에도 걸리지 않는다. 경계 정책 수정은 `DenyBoundaryPolicyChange`가 막는다.
+- 배포 역할 정책 어디에도 이 스택(`stack/alarmops-central-bootstrap/*`), 이 스택이 만든 역할 `AlarmOpsDeployCentral`·`AlarmOpsDeployBus`, 경계 정책에 쓰기를 허용하는 문장이 없다. 허용 문장의 리소스 패턴은 `stack/<중앙 스택 이름>/*`, `stack/<버스 스택 이름>/*`, `role/AlarmOpsCentral-*`, `role/<중앙 스택 이름>-*`뿐이고 `AlarmOpsDeploy…`는 어디에도 걸리지 않는다. 경계 정책과 배포 관리형 정책의 수정은 `DenyBoundaryPolicyChange`(새 버전·기본 버전·삭제)와 `DenyDeployPolicyAttachment`(붙이기·떼기)가 막는다.
 - OIDC 공급자·버킷의 정책을 바꾸는 IAM·S3 권한(`iam:*OpenIDConnectProvider*`, `s3:PutBucketPolicy` 등)도 허용하지 않는다. 버킷에는 객체 쓰기·읽기와 목록만 준다.
 - 이 사실은 `test_central_bootstrap.py`의 `DeployRolesCannotTouchThisStack`가 확인한다(허용 문장의 리소스 패턴이 스택·두 역할·경계·두 공급자 ARN과 맞지 않는지).
 - 따라서 **Deny 문장을 추가하지 않았다.** 이미 허용이 없는 것에 Deny를 더하면 문서 JSON과 템플릿이 따로 노는 지점이 하나 늘 뿐이다. 다만 `CentralStackName`·`BusStackName`이 서로 같거나 이 스택 이름(`alarmops-central-bootstrap`)이면 허용이 걸리므로 템플릿 Rules가 생성을 막는다.
@@ -965,11 +1018,12 @@ aws secretsmanager describe-secret --region ap-northeast-2 \
    1. 만든 역할 → 신뢰 관계 → 신뢰 정책 편집
    2. 위 1번 JSON을 붙여 넣고 `<ACCOUNT_ID>`를 바꾼다.
    3. 확인: `sub`가 `repo:<GITHUB_REPO_SUBJECT>:environment:central` 한 줄(자리표시자를 실제 값으로 바꾼 것)이고 `*`가 없다.
-4. **권한 정책 넣기(인라인)**
-   1. 역할 → 권한 탭 → 권한 추가 → 인라인 정책 생성
-   2. **JSON** 탭에 위 3번 JSON을 붙여 넣고 `<ACCOUNT_ID>`를 바꾼다.
-   3. 정책 이름 `AlarmOpsDeployCentral-Policy` → 정책 생성
-   4. 확인: 정책의 `iam:PermissionsBoundary` 값이 1번에서 만든 경계 정책 ARN과 글자까지 같다. 이름이 다르면 조건이 맞지 않아 `CreateRole`이 거부된다.
+4. **권한 정책 넣기(관리형 정책 3개)**
+   1. IAM → 정책 → 정책 생성 → **JSON** 탭
+   2. 3a·3b·3c의 JSON을 각각 붙여 넣고 `<ACCOUNT_ID>`를 바꾼다.
+   3. 정책 이름 `AlarmOpsDeployCentral-Cfn`, `AlarmOpsDeployCentral-Iam`, `AlarmOpsDeployCentral-Services` → 정책 생성
+   4. 역할 → 권한 탭 → 권한 추가 → 정책 연결에서 세 정책을 모두 붙인다.
+   5. 확인: `-Iam` 정책의 `iam:PermissionsBoundary` 값이 1번에서 만든 경계 정책 ARN과 글자까지 같다. 이름이 다르면 조건이 맞지 않아 `CreateRole`이 거부된다.
 5. **최대 세션 시간**: 역할 → 요약 → 편집 → 최대 세션 기간 1시간.
 6. **SAM 아티팩트 버킷 만들기**
    1. S3 → 버킷 만들기. 리전은 **서울(ap-northeast-2)**.
@@ -977,11 +1031,11 @@ aws secretsmanager describe-secret --region ap-northeast-2 \
    3. 퍼블릭 액세스 모두 차단: 켬(기본값)
    4. 버킷 버전 관리: 활성화
    5. 기본 암호화: SSE-S3(Amazon S3 관리형 키)
-   6. 버킷 만들기 후, 3번 JSON의 `<SAM_ARTIFACT_BUCKET>` 두 곳을 이 버킷 이름으로 바꿔 4번의 인라인 정책을 갱신한다.
+   6. 버킷 만들기 후, 3a의 JSON의 `<SAM_ARTIFACT_BUCKET>` 두 곳을 이 버킷 이름으로 바꿔 4번의 `-Cfn` 정책을 갱신한다(새 버전).
    7. GitHub → Settings → Environments → `central` → Variables에 `SAM_ARTIFACT_BUCKET` = 버킷 이름을 추가한다.
 7. **버스 허용 목록 역할 만들기**: 2번과 같은 방식으로 역할 `AlarmOpsDeployBus`를 만든다(웹 자격 증명, 같은 공급자·Audience, 조직 `hkjs96`).
    1. 신뢰 관계를 3-1의 신뢰 정책 JSON으로 덮어쓴다(`sub`는 `repo:<GITHUB_REPO_SUBJECT>:environment:central-bus`).
-   2. 권한 탭 → 권한 추가 → 인라인 정책 생성 → **JSON** → 3-1의 권한 JSON(`<ACCOUNT_ID>` 바꿈) → 이름 `AlarmOpsDeployBus-Policy`.
+   2. IAM → 정책 → 정책 생성 → **JSON** → 3-1의 권한 JSON(`<ACCOUNT_ID>` 바꿈) → 이름 `AlarmOpsDeployBus`. 만든 정책을 이 역할에 붙인다.
    3. 최대 세션 기간 1시간. 경계 정책은 붙이지 않는다(이 역할은 역할을 만들지 못한다).
 8. **GitHub 환경 `central-bus` 만들기**
    1. 저장소 → Settings → Environments → New environment → 이름 `central-bus`

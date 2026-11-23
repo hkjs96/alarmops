@@ -565,7 +565,7 @@ http://localhost:3107/auth/dev-login?as=admin
    - 확인: 스택 상태가 생성 완료이고 출력에 `CentralBusArn`, `BusName`이 보인다.
    - 참고: `bus-allowlist` 워크플로가 이 스택을 갱신한다.
 
-- [ ] **부트스트랩 스택 `alarmops-central-bootstrap`**(OIDC 공급자 두 개, SAM 아티팩트 버킷, 경계 정책, 배포 역할 두 개를 한 번에)
+- [ ] **부트스트랩 스택 `alarmops-central-bootstrap`**(OIDC 공급자 두 개, SAM 아티팩트 버킷, 경계 정책, 배포 역할 두 개와 그 관리형 정책 4개를 한 번에)
 
 3. 어디서: CloudFormation 콘솔(중앙 계정, 서울). 손으로 IAM 리소스를 만들지 않는다. 클릭 순서와 파라미터는 `infra/aws/deploy-role-policy.md` 5절이 정본이다. 요약은 다음과 같다.
    1. 스택 생성 → 템플릿 파일 업로드: `infra/aws/central-bootstrap.yaml`
@@ -592,6 +592,7 @@ http://localhost:3107/auth/dev-login?as=admin
    - **권한 경계 필수**: 경계 안에는 이 템플릿의 역할이 실제로 쓰는 서비스만 넣는다(sqs, secretsmanager 읽기, logs, `sts:AssumeRole`, `ses:SendEmail`). events와 lambda는 뺐다(`deploy-role-policy.md` 2절). `AssumeRemediatorCaller`는 상한일 뿐이고 실제 허용은 `RemediationEnabled`일 때만 만든다.
    - **신뢰 정책 변경의 우회 위험은 수용했다(D-57).** 보완책(CloudTrail 알림, plan 승인 전 본문 확인, `TrustChange` 정책 1시간 자동 만료)은 `deploy-role-policy.md` 3-2·4·4-1·4-2절에 있다. **CloudTrail 알림 규칙은 실고객 연결 전 필수다**(구현은 파일럿 전 이슈).
    - 버스 허용 목록 역할 `AlarmOpsDeployBus`: 신뢰 `sub` = `repo:<GITHUB_REPO_SUBJECT>:environment:central-bus`. `bus-allowlist` 전용이다. 중앙 배포 역할에는 버스 스택 `DescribeStacks`만 둔다.
+   - 배포 권한은 인라인이 아니라 **고객 관리형 정책**이다(`AlarmOpsDeployCentral-Cfn`·`-Iam`·`-Services`, `AlarmOpsDeployBus`). ISMS-P 감사에서 버전 이력과 독립 검토를 위해서이고 정책 하나는 6,144자 한도라 3개로 나눴다. 기존 스택을 갱신하면 인라인 정책은 삭제되고 관리형 정책이 붙는다(`deploy-role-policy.md` 5절).
    - 정책 JSON(신뢰, 권한, 경계)의 정본은 `deploy-role-policy.md`이고, 템플릿이 같은 내용을 만든다(`infra/test/test_central_bootstrap.py`가 비교한다).
 
 - [ ] **Vercel 쪽 설정(D-49)**
