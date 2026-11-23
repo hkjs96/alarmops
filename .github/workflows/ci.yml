@@ -13,12 +13,17 @@ name: ci
 #   db/sql/**                                      the line above + infra (infra tests read roles.sql)
 #   infra/**                                       infra
 #   .github/scripts/**                             infra, db (both run the script tests)
-#   docs/**, *.md, .claude/**, .env.example,       nothing (docs_only). docs/SETUP-PROD-DB.md also runs infra.
-#     .gitignore
+#   docs/**, root *.md, .env.example, .gitignore,  nothing (docs_only). Exceptions that tests read:
+#     .claude/worktrees/**                         docs/specs/alarm-rules.md -> engine, docs/SETUP-PROD-DB.md -> infra,
+#                                                  tools/vercel-cli/** -> infra, the offboard-account.command.json
+#                                                  fixtures (packages/api, alarm-engine) -> test + engine.
+#   *.md inside an area                            follows that area's rule (e.g. infra/aws/*.md -> infra)
+#   .claude/** (not worktrees)                     everything (unmapped)
 #
 # ALWAYS everything: push to main (main push is always the full run), workflow_dispatch, .github/workflows/**,
-# package.json, package-lock.json, tsconfig*, .npmrc/.nvmrc, an empty diff, a path not listed above, and any
-# failure of the changes job (fail-safe). There is no docs-site build check in CI.
+# package.json, package-lock.json, tsconfig*, .npmrc/.nvmrc, .github/scripts/ci-changes.*, an empty diff, a path not listed above, and any
+# failure of the changes job (fail-safe: a job is skipped only when its output is exactly 'false').
+# Renames count as delete + add, so the old path is judged too. There is no docs-site build check in CI.
 
 on:
   pull_request:
@@ -61,18 +66,24 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          persist-credentials: false
       - id: diff
         env:
           EVENT_NAME: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          bash .github/scripts/ci-changes.sh | tee -a "$GITHUB_OUTPUT"
+          set -euo pipefail
+          # Written to a file first so the script's exit code is not hidden by a pipe. The script prints all=true on
+          # any internal failure or incomplete answer; a non-zero exit here fails the job, and the jobs then run anyway.
+          bash .github/scripts/ci-changes.sh > "$RUNNER_TEMP/ci-changes.out"
+          cat "$RUNNER_TEMP/ci-changes.out"
+          cat "$RUNNER_TEMP/ci-changes.out" >> "$GITHUB_OUTPUT"
 
   test:
     needs: changes
-    # Runs when the change needs it, and also when the changes job itself failed (fail-safe).
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.test == 'true') }}
+    # Skipped only when changes says 'false'. A failed or empty answer runs the job (fail-safe).
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.test != 'false') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -93,8 +104,8 @@ jobs:
 
   engine:
     needs: changes
-    # Runs when the change needs it, and also when the changes job itself failed (fail-safe).
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.engine == 'true') }}
+    # Skipped only when changes says 'false'. A failed or empty answer runs the job (fail-safe).
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.engine != 'false') }}
     # services/alarm-engine is Python (D-05 port, Lambda); not an npm workspace (no package.json there).
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -143,8 +154,8 @@ jobs:
   # Offline checks of the infrastructure templates and the workflow helper scripts. No AWS access, no credentials.
   infra:
     needs: changes
-    # Runs when the change needs it, and also when the changes job itself failed (fail-safe).
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.infra == 'true') }}
+    # Skipped only when changes says 'false'. A failed or empty answer runs the job (fail-safe).
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.infra != 'false') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -165,8 +176,8 @@ jobs:
 
   e2e:
     needs: changes
-    # Runs when the change needs it, and also when the changes job itself failed (fail-safe).
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.e2e == 'true') }}
+    # Skipped only when changes says 'false'. A failed or empty answer runs the job (fail-safe).
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.e2e != 'false') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
@@ -226,8 +237,8 @@ jobs:
   # (the live dev sign-in exists only outside production).
   e2e-live:
     needs: changes
-    # Runs when the change needs it, and also when the changes job itself failed (fail-safe).
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.e2e_live == 'true') }}
+    # Skipped only when changes says 'false'. A failed or empty answer runs the job (fail-safe).
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.e2e_live != 'false') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     services:
@@ -263,8 +274,8 @@ jobs:
 
   db:
     needs: changes
-    # Runs when the change needs it, and also when the changes job itself failed (fail-safe).
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.db == 'true') }}
+    # Skipped only when changes says 'false'. A failed or empty answer runs the job (fail-safe).
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.db != 'false') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     services:
