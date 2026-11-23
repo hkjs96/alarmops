@@ -28,8 +28,8 @@ name: deploy-central
 # AWS access: GitHub OIDC only (no long-lived keys). The role in CENTRAL_DEPLOY_ROLE_ARN must have a trust policy that
 # requires
 #   token.actions.githubusercontent.com:aud = sts.amazonaws.com
-#   token.actions.githubusercontent.com:sub = repo:hkjs96/alarmops:environment:central
-# (the `sub` of a job that uses `environment: central`; no wildcard). Its permissions and boundary: infra/aws/README.md.
+#   token.actions.githubusercontent.com:sub = repo:<GITHUB_REPO_SUBJECT>:environment:central
+# (<GITHUB_REPO_SUBJECT> = owner@ownerId/repo@repoId as GitHub sends it, see infra/aws/deploy-role-policy.md section 1; the `sub` of a job that uses `environment: central`; no wildcard). Its permissions and boundary: infra/aws/README.md.
 # Variables are `central` ENVIRONMENT variables (Settings -> Environments -> central -> Variables), not repository
 # variables: only jobs that passed the environment's rules can read them. None of them is a secret. The DB connection
 # strings are never passed here; a person puts them into the Secrets Manager secrets this stack creates.

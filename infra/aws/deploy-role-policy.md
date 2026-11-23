@@ -43,6 +43,8 @@
 
 배포 역할(`AlarmOpsDeployCentral`)용이다. GO-LIVE 4-1의 4번과 같다. `sub`는 정확히 일치만 쓴다(와일드카드 금지).
 
+`<GITHUB_REPO_SUBJECT>`는 GitHub가 토큰에 넣는 형식 그대로다. 소유자와 저장소에 불변 ID가 붙은 `owner@소유자ID/repo@저장소ID`이다(이 저장소: `hkjs96@75015048/alarmops@1451138684`). 저장소 이름이 바뀌거나 같은 이름으로 다시 만들어져도 다른 저장소가 이 역할을 맡지 못한다. 실제 값은 CloudTrail의 `AssumeRoleWithWebIdentity` 이벤트 `userIdentity.userName`에서 확인한다. 이름만 쓴 옛 형식(`owner/repo`)은 GitHub가 불변 ID 형식을 보내면 거부된다.
+
 ```json
 {
   "Version": "2012-10-17",
@@ -56,7 +58,7 @@
       "Condition": {
         "StringEquals": {
           "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-          "token.actions.githubusercontent.com:sub": "repo:hkjs96/alarmops:environment:central"
+          "token.actions.githubusercontent.com:sub": "repo:<GITHUB_REPO_SUBJECT>:environment:central"
         }
       }
     }
@@ -617,7 +619,7 @@
       "Condition": {
         "StringEquals": {
           "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-          "token.actions.githubusercontent.com:sub": "repo:hkjs96/alarmops:environment:central-bus"
+          "token.actions.githubusercontent.com:sub": "repo:<GITHUB_REPO_SUBJECT>:environment:central-bus"
         }
       }
     }
@@ -814,7 +816,7 @@
    - `VercelOidcProviderArn`: `oidc.vercel.com` 공급자가 이미 있으면 ARN을, 없으면 비운다. 비우면 `VercelTeamSlug`가 필수다(Rules가 막는다).
    - `VercelTeamSlug`: Vercel 팀 슬러그. 새 공급자의 대상(aud)이 `https://vercel.com/<슬러그>`가 된다.
    - `SamArtifactBucketName`: 버킷이 이미 있으면 그 이름을, 없으면 비운다(스택이 `alarmops-central-artifacts-<계정 ID>`를 만든다).
-   - `GitHubRepo`: 기본 `hkjs96/alarmops`.
+   - `GitHubRepo`: 기본 `hkjs96@75015048/alarmops@1451138684`(GitHub가 보내는 sub 형식 그대로, 불변 ID 포함).
    - `CentralStackName`·`BusStackName`·`BusName`·`ResourcePrefix`·`PermissionsBoundaryName`: 기본값. `central.yaml`·`central-bus.yaml`에서 이름을 바꾼 경우에만 같이 바꾼다.
 5. 스택 옵션: **종료 방지(Termination protection)를 켠다.** 실수로 지우는 것을 막는다.
 6. 검토 화면 맨 아래 **IAM 승인 체크**(위 `CAPABILITY_NAMED_IAM`)를 켜고 **스택 생성**.
@@ -960,7 +962,7 @@ aws secretsmanager describe-secret --region ap-northeast-2 \
 3. **신뢰 정책 덮어쓰기**
    1. 만든 역할 → 신뢰 관계 → 신뢰 정책 편집
    2. 위 1번 JSON을 붙여 넣고 `<ACCOUNT_ID>`를 바꾼다.
-   3. 확인: `sub`가 `repo:hkjs96/alarmops:environment:central` 한 줄이고 `*`가 없다.
+   3. 확인: `sub`가 `repo:<GITHUB_REPO_SUBJECT>:environment:central` 한 줄(자리표시자를 실제 값으로 바꾼 것)이고 `*`가 없다.
 4. **권한 정책 넣기(인라인)**
    1. 역할 → 권한 탭 → 권한 추가 → 인라인 정책 생성
    2. **JSON** 탭에 위 3번 JSON을 붙여 넣고 `<ACCOUNT_ID>`를 바꾼다.
@@ -976,7 +978,7 @@ aws secretsmanager describe-secret --region ap-northeast-2 \
    6. 버킷 만들기 후, 3번 JSON의 `<SAM_ARTIFACT_BUCKET>` 두 곳을 이 버킷 이름으로 바꿔 4번의 인라인 정책을 갱신한다.
    7. GitHub → Settings → Environments → `central` → Variables에 `SAM_ARTIFACT_BUCKET` = 버킷 이름을 추가한다.
 7. **버스 허용 목록 역할 만들기**: 2번과 같은 방식으로 역할 `AlarmOpsDeployBus`를 만든다(웹 자격 증명, 같은 공급자·Audience, 조직 `hkjs96`).
-   1. 신뢰 관계를 3-1의 신뢰 정책 JSON으로 덮어쓴다(`sub`는 `repo:hkjs96/alarmops:environment:central-bus`).
+   1. 신뢰 관계를 3-1의 신뢰 정책 JSON으로 덮어쓴다(`sub`는 `repo:<GITHUB_REPO_SUBJECT>:environment:central-bus`).
    2. 권한 탭 → 권한 추가 → 인라인 정책 생성 → **JSON** → 3-1의 권한 JSON(`<ACCOUNT_ID>` 바꿈) → 이름 `AlarmOpsDeployBus-Policy`.
    3. 최대 세션 기간 1시간. 경계 정책은 붙이지 않는다(이 역할은 역할을 만들지 못한다).
 8. **GitHub 환경 `central-bus` 만들기**

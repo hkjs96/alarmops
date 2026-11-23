@@ -582,7 +582,7 @@ http://localhost:3107/auth/dev-login?as=admin
    - 버스 스택(1~2번)은 이 스택에 합치지 않는다. `bus-allowlist`가 `UpdateStack`하기 때문이다.
 
    스택이 만드는 배포 역할의 요약:
-   - 배포 역할 `AlarmOpsDeployCentral`: 신뢰 `sub` = `repo:hkjs96/alarmops:environment:central`(와일드카드 금지), 최대 세션 1시간. 권한은 `infra/aws/README.md`의 "실행과 사람이 하는 일" 범위다.
+   - 배포 역할 `AlarmOpsDeployCentral`: 신뢰 `sub` = `repo:<GITHUB_REPO_SUBJECT>:environment:central`(와일드카드 금지. `<GITHUB_REPO_SUBJECT>`는 GitHub가 보내는 불변 ID 형식 `owner@ID/repo@ID`, 이 저장소는 `hkjs96@75015048/alarmops@1451138684`), 최대 세션 1시간. 권한은 `infra/aws/README.md`의 "실행과 사람이 하는 일" 범위다.
      - CloudFormation: 스택 `alarmops-central`, 변환 `AWS::Serverless-2016-10-31`, `GetTemplate`
      - SAM 아티팩트 버킷: 객체 쓰기와 `s3:GetObject`
      - 이 스택이 만드는 리소스의 생성·변경: Lambda, SQS, Events, Logs, Secrets Manager(값 없이), CloudWatch 알람, API Gateway v2
@@ -591,7 +591,7 @@ http://localhost:3107/auth/dev-login?as=admin
      - 버스 스택은 `DescribeStacks`만
    - **권한 경계 필수**: 경계 안에는 이 템플릿의 역할이 실제로 쓰는 서비스만 넣는다(sqs, secretsmanager 읽기, logs, `sts:AssumeRole`, `ses:SendEmail`). events와 lambda는 뺐다(`deploy-role-policy.md` 2절). `AssumeRemediatorCaller`는 상한일 뿐이고 실제 허용은 `RemediationEnabled`일 때만 만든다.
    - **신뢰 정책 변경의 우회 위험은 수용했다(D-57).** 보완책(CloudTrail 알림, plan 승인 전 본문 확인, `TrustChange` 정책 1시간 자동 만료)은 `deploy-role-policy.md` 3-2·4·4-1·4-2절에 있다. **CloudTrail 알림 규칙은 실고객 연결 전 필수다**(구현은 파일럿 전 이슈).
-   - 버스 허용 목록 역할 `AlarmOpsDeployBus`: 신뢰 `sub` = `repo:hkjs96/alarmops:environment:central-bus`. `bus-allowlist` 전용이다. 중앙 배포 역할에는 버스 스택 `DescribeStacks`만 둔다.
+   - 버스 허용 목록 역할 `AlarmOpsDeployBus`: 신뢰 `sub` = `repo:<GITHUB_REPO_SUBJECT>:environment:central-bus`. `bus-allowlist` 전용이다. 중앙 배포 역할에는 버스 스택 `DescribeStacks`만 둔다.
    - 정책 JSON(신뢰, 권한, 경계)의 정본은 `deploy-role-policy.md`이고, 템플릿이 같은 내용을 만든다(`infra/test/test_central_bootstrap.py`가 비교한다).
 
 - [ ] **Vercel 쪽 설정(D-49)**
@@ -757,7 +757,8 @@ http://localhost:3107/auth/dev-login?as=admin
 |---|---|
 | `deploy-central` 작업이 모두 건너뛰어짐 | `main`이 아닌 브랜치에서 실행했다 |
 | `plan`: `Environment variable for … is not set in the central environment` | 4-2의 필수 변수가 없거나 저장소 변수로 넣었다. `central` 환경의 Variables에 넣는다 |
-| `plan`: AWS 자격 증명 단계에서 실패 | 배포 역할의 신뢰 조건이 다르다. `sub`가 정확히 `repo:hkjs96/alarmops:environment:central`인지, 공급자의 대상이 `sts.amazonaws.com`인지 본다 |
+| `plan`: AWS 자격 증명 단계에서 실패 | 배포 역할의 신뢰 조건이 다르다. `sub`가 정확히 `repo:<GITHUB_REPO_SUBJECT>:environment:central`(불변 ID 형식)인지, 공급자의 대상이 `sts.amazonaws.com`인지 본다 |
+| `Not authorized to perform sts:AssumeRoleWithWebIdentity` | CloudTrail의 `AssumeRoleWithWebIdentity` 이벤트에서 `userIdentity.userName`의 실제 sub를 확인하고, 스택 `alarmops-central-bootstrap`의 파라미터 `GitHubRepo`를 그 값(`owner@ID/repo@ID`)으로 업데이트한다 |
 | `plan`: `Check the central bus stack exists`에서 실패 | 버스 스택이 없거나 이름이 `alarmops-central-bus`가 아니다. 4-1의 1~2번 |
 | `plan`: 파라미터 `VercelOidcProviderArn` 형식 오류 | ARN이 `…:oidc-provider/oidc.vercel.com`으로 끝나야 한다. 4-1의 4번 |
 | `plan`: `SesFromAddress is required when SesIdentityArn is set` | `SES_FROM_ADDRESS`도 같이 넣는다 |
