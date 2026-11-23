@@ -45,8 +45,8 @@
 - [ ] **배포 역할 2개**
   - 어디서: IAM → 역할 → 웹 ID
   - 누를 것: `infra/aws/deploy-role-policy.md`대로 만든다.
-    - 중앙 배포 역할: 신뢰 `sub` = `repo:hkjs96/alarmops:environment:central`
-    - `AlarmOpsDeployBus`: 신뢰 `sub` = `repo:hkjs96/alarmops:environment:central-bus`
+    - 중앙 배포 역할: 신뢰 `sub` = `repo:<GITHUB_REPO_SUBJECT>:environment:central`(`deploy-role-policy.md` 1절의 불변 ID 형식)
+    - `AlarmOpsDeployBus`: 신뢰 `sub` = `repo:<GITHUB_REPO_SUBJECT>:environment:central-bus`
   - 확인: 두 ARN을 적어 둔다. 신뢰 정책의 공급자 ARN이 **새 계정** 것이다. 와일드카드가 없다.
 - [ ] **SAM 아티팩트 버킷**
   - 어디서: S3 → 버킷 만들기(서울)

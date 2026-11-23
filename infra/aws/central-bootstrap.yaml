@@ -33,9 +33,13 @@ Parameters:
       so when it already exists (IAM, Identity providers) paste its ARN here and nothing is created.
   GitHubRepo:
     Type: String
-    Default: hkjs96/alarmops
-    AllowedPattern: '^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$'
-    Description: owner/repo. The trust policies accept only repo:<this>:environment:central and :central-bus (exact match).
+    Default: hkjs96@75015048/alarmops@1451138684
+    AllowedPattern: '^[A-Za-z0-9._-]+(@[0-9]+)?/[A-Za-z0-9._-]+(@[0-9]+)?$'
+    Description: >-
+      The sub format GitHub sends as is (with immutable IDs): owner@ownerId/repo@repoId. Check it in CloudTrail,
+      AssumeRoleWithWebIdentity, userIdentity.userName (GitHub가 보내는 sub 형식 그대로(불변 ID 포함). CloudTrail
+      AssumeRoleWithWebIdentity의 userIdentity.userName에서 확인). The trust policies accept only
+      repo:<this>:environment:central and :central-bus (StringEquals, exact match, no wildcard).
   VercelTeamSlug:
     Type: String
     Default: ""

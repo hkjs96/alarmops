@@ -12,7 +12,8 @@ name: bus-allowlist
 # PutPermission/RemovePermission on the bus (infra/aws/deploy-role-policy.md, section 3-1).
 # OIDC: the AWS role's trust policy must require
 #   token.actions.githubusercontent.com:aud = sts.amazonaws.com
-#   token.actions.githubusercontent.com:sub = repo:hkjs96/alarmops:environment:central-bus
+#   token.actions.githubusercontent.com:sub = repo:<GITHUB_REPO_SUBJECT>:environment:central-bus
+#   (<GITHUB_REPO_SUBJECT> = owner@ownerId/repo@repoId as GitHub sends it, see infra/aws/deploy-role-policy.md section 1)
 # (the `sub` of a job that uses `environment: central-bus`; do not use a wildcard). The deploy role of
 # deploy-central.yml trusts only `environment:central`, so neither environment can assume the other's role.
 # Every `uses:` is pinned to the same full commit SHA as in deploy-central.yml; keep the two files in step.

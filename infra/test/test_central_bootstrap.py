@@ -23,6 +23,7 @@ TEMPLATE = ROOT / "aws" / "central-bootstrap.yaml"
 DOC = ROOT / "aws" / "deploy-role-policy.md"
 
 ACCOUNT, PARTITION, REGION = "123456789012", "aws", "ap-northeast-2"
+REPO_SUBJECT = "hkjs96@75015048/alarmops@1451138684"  # GitHubRepo default: the sub format GitHub sends (immutable IDs)
 OIDC_ARN = f"arn:{PARTITION}:iam::{ACCOUNT}:oidc-provider/token.actions.githubusercontent.com"
 INLINE_LIMIT = 10240  # total inline policy characters per role (whitespace excluded)
 
@@ -134,7 +135,8 @@ class Renderer:
 
 
 def expected_docs(bucket: str) -> dict:
-    m = {"<PARTITION>": PARTITION, "<ACCOUNT_ID>": ACCOUNT, "<REGION>": REGION, "<SAM_ARTIFACT_BUCKET>": bucket}
+    m = {"<PARTITION>": PARTITION, "<ACCOUNT_ID>": ACCOUNT, "<REGION>": REGION, "<SAM_ARTIFACT_BUCKET>": bucket,
+         "<GITHUB_REPO_SUBJECT>": REPO_SUBJECT}
     return {
         "boundary": fill(doc_policy("## 2."), m),
         "trust_central": fill(doc_policy("## 1."), m),
@@ -161,10 +163,10 @@ def compact_len(doc: dict) -> int:
 # SHA-256 of each document JSON block (placeholders unreplaced, keys sorted, compact). Changing a policy in
 # deploy-role-policy.md fails this test until the hash is updated on purpose, in the same commit as the template change.
 DOC_HASHES = {
-    ("## 1.", 0): "d97678294062c400b74b4434ef40e25daef09bdc71864c1c7d49027f647a33e1",
+    ("## 1.", 0): "a0bea8d89843e52d7805d6b8b2b7f215a87f16afb3b27b1cbe189da25dfc9bdb",
     ("## 2.", 0): "c1563d02d4dc8336eb36c6473ff951b995d5746c753a65addc5d5c6d0e604c74",
     ("## 3.", 0): "b5f88235d020a3bc1a590242a0877ad9366ae631b0015d969419847e5246512f",
-    ("### 3-1.", 0): "c37f0b784e4c79aa3ab63512fa0f53485b5e6fd4885f2970da0237f9df3eee0d",
+    ("### 3-1.", 0): "71fc111a3162ef97264aa3dd69ecf81dbaf97834ba17431c6045a1b8d14bbab8",
     ("### 3-1.", 1): "dba3cb5ded82c23d33113e68f395bad1cac68ce8ff875cf882b9363d3f79546e",
 }
 
@@ -225,6 +227,29 @@ class NamesAreParameters(unittest.TestCase):
         self.assertIn("repo:own/repo:environment:central-bus", json.dumps(got["trust_bus"]))
 
 
+class GitHubRepoParameter(unittest.TestCase):
+    PATTERN = re.compile(T["Parameters"]["GitHubRepo"]["AllowedPattern"])
+
+    def test_default_is_the_immutable_id_form_and_passes(self):
+        self.assertEqual(T["Parameters"]["GitHubRepo"]["Default"], REPO_SUBJECT)
+        self.assertTrue(self.PATTERN.match(REPO_SUBJECT))
+
+    def test_new_and_old_forms_pass(self):
+        for v in ("owner@123/repo@456", "hkjs96/alarmops", "owner@123/repo", "owner/repo@456"):
+            with self.subTest(value=v):
+                self.assertTrue(self.PATTERN.match(v))
+
+    def test_wildcards_and_malformed_are_rejected(self):
+        for v in ("*", "owner/*", "*/repo", "owner@*/repo@1", "owner@1/repo@*", "owner@abc/repo", "owner/repo/x", "owner", "", "a b/c"):
+            with self.subTest(value=v):
+                self.assertFalse(self.PATTERN.match(v))
+
+    def test_condition_stays_string_equals(self):
+        for n in ("DeployCentralRole", "DeployBusRole"):
+            cond = RES[n]["Properties"]["AssumeRolePolicyDocument"]["Statement"][0]["Condition"]
+            self.assertEqual(list(cond), ["StringEquals"])
+
+
 class RoleShape(unittest.TestCase):
     def test_roles_and_names(self):
         self.assertEqual(RES["DeployCentralRole"]["Properties"]["RoleName"], "AlarmOpsDeployCentral")
@@ -239,8 +264,8 @@ class RoleShape(unittest.TestCase):
 
     def test_trust_is_exact_sub_without_wildcards(self):
         r = Renderer(defaults())
-        for key, sub in (("trust_central", "repo:hkjs96/alarmops:environment:central"),
-                         ("trust_bus", "repo:hkjs96/alarmops:environment:central-bus")):
+        for key, sub in (("trust_central", f"repo:{REPO_SUBJECT}:environment:central"),
+                         ("trust_bus", f"repo:{REPO_SUBJECT}:environment:central-bus")):
             cond = rendered(r)[key]["Statement"][0]["Condition"]
             self.assertEqual(list(cond), ["StringEquals"])
             self.assertEqual(cond["StringEquals"]["token.actions.githubusercontent.com:sub"], sub)
