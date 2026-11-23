@@ -63,6 +63,25 @@ gh auth login
 aws configure --profile dev       # 개발 계정만. 기본 리전 ap-northeast-2
 ```
 
+### 4-0. GitHub CLI(`gh`) 설치
+
+중앙 배포 준비 스크립트(`infra/scripts/setup-github-environments.sh`)가 `gh`를 쓴다. bash 스크립트라 **PowerShell이 아니라 Git Bash**에서 실행한다.
+
+1. PowerShell에서 설치한다.
+   ```powershell
+   winget install --id GitHub.cli
+   ```
+2. 열려 있는 터미널을 모두 닫고 **Git Bash를 새로 연다**(설치 전에 연 창은 새 경로를 모른다).
+3. `gh --version`이 `command not found`이면 경로를 직접 넣는다(한 번만).
+   ```bash
+   echo 'export PATH="$PATH:/c/Program Files/GitHub CLI"' >> ~/.bashrc && source ~/.bashrc
+   ```
+   설치 위치가 다르면 `ls "/c/Program Files/GitHub CLI/" "$LOCALAPPDATA/Programs/GitHub CLI/"`로 찾는다.
+4. `gh auth login` → GitHub.com → HTTPS → Login with a web browser.
+5. **확인:** `gh auth status`가 로그인 상태를 보여 준다.
+
+> **참고** AWS SSO 세션은 몇 시간(주말을 넘기면 반드시) 뒤 만료된다. `Token has expired and refresh failed`가 나오면 `aws sso login --profile dev`를 다시 한다.
+
 ### 4-1. 개발 AWS 계정을 회사 SSO로 `dev` 프로필에 등록하기
 
 `aws sts get-caller-identity --profile dev`가 `The config profile (dev) could not be found`이면 아직 등록하지 않은 것이다. 회사 계정은 액세스 키가 아니라 SSO로 등록한다. 이 절차는 사람이 직접 한다.
