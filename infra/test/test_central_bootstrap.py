@@ -165,7 +165,7 @@ def compact_len(doc: dict) -> int:
 DOC_HASHES = {
     ("## 1.", 0): "a0bea8d89843e52d7805d6b8b2b7f215a87f16afb3b27b1cbe189da25dfc9bdb",
     ("## 2.", 0): "c1563d02d4dc8336eb36c6473ff951b995d5746c753a65addc5d5c6d0e604c74",
-    ("## 3.", 0): "b5f88235d020a3bc1a590242a0877ad9366ae631b0015d969419847e5246512f",
+    ("## 3.", 0): "00464ba94aedd1e6776794db2595a49d5e673412514053a6d76dc74502571dee",
     ("### 3-1.", 0): "71fc111a3162ef97264aa3dd69ecf81dbaf97834ba17431c6045a1b8d14bbab8",
     ("### 3-1.", 1): "dba3cb5ded82c23d33113e68f395bad1cac68ce8ff875cf882b9363d3f79546e",
 }
