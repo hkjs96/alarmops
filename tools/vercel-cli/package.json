@@ -4,6 +4,6 @@
   "private": true,
   "description": "Pinned Vercel CLI for .github/workflows/deploy-console.yml (not part of the app workspaces)",
   "dependencies": {
-    "vercel": "65.16.0"
+    "vercel": "66.6.0"
   }
 }
