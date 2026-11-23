@@ -20,7 +20,8 @@ name: ci
 #   *.md inside an area                            follows that area's rule (e.g. infra/aws/*.md -> infra)
 #   .claude/** (not worktrees)                     everything (unmapped)
 #
-# ALWAYS everything: push to main (main push is always the full run), workflow_dispatch, .github/workflows/**,
+# Push to main uses the same table on the pushed range (before..after), so a squash merge runs what its PR ran.
+# ALWAYS everything: a push whose range is not linear (force push, new branch), workflow_dispatch, .github/workflows/**,
 # package.json, package-lock.json, tsconfig*, .npmrc/.nvmrc, .github/scripts/ci-changes.*, an empty diff, a path not listed above, and any
 # failure of the changes job (fail-safe: a job is skipped only when its output is exactly 'false').
 # Renames count as delete + add, so the old path is judged too. There is no docs-site build check in CI.
@@ -70,8 +71,8 @@ jobs:
       - id: diff
         env:
           EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.after }}
         run: |
           set -euo pipefail
           # Written to a file first so the script's exit code is not hidden by a pipe. The script prints all=true on

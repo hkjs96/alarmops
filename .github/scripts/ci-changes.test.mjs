@@ -73,9 +73,19 @@ test('unmapped path runs everything (fail-safe)', () => {
   assert.deepEqual(on(run(['tools/docs-site/build.mjs'])), ALL);
 });
 
-test('push and workflow_dispatch run everything', () => {
-  for (const EVENT_NAME of ['push', 'workflow_dispatch', '']) {
+test('workflow_dispatch and unknown events run everything', () => {
+  for (const EVENT_NAME of ['workflow_dispatch', 'schedule', '']) {
     assert.deepEqual(on(run(['docs/a.md'], { EVENT_NAME })), ALL, EVENT_NAME);
+  }
+});
+
+test('push uses the path table', () => {
+  assert.deepEqual(on(run(['infra/aws/central.yaml'], { EVENT_NAME: 'push', BASE_SHA: 'aa', HEAD_SHA: 'bb' })), ['infra']);
+});
+
+test('push without a previous commit runs everything', () => {
+  for (const BASE_SHA of ['', '0000000000000000000000000000000000000000']) {
+    assert.deepEqual(on(run(['docs/a.md'], { EVENT_NAME: 'push', BASE_SHA, HEAD_SHA: 'bb' })), ALL, BASE_SHA);
   }
 });
 
@@ -174,4 +184,32 @@ test('docs/ paths read by tests turn on the right job', () => {
   for (const [file, path, job] of found) {
     assert.ok(on(run([path])).includes(job), `${path} (read by ${file}) must turn on ${job}`);
   }
+});
+
+test('push range: linear runs the table, force push runs everything', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ci-push-'));
+  const git = (...a) => {
+    const r = spawnSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...a], { cwd: dir, encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    return r.stdout.trim();
+  };
+  const runPush = (BASE_SHA, HEAD_SHA) => {
+    const r = spawnSync('bash', [script], { cwd: dir, encoding: 'utf8', env: { PATH: process.env.PATH, EVENT_NAME: 'push', BASE_SHA, HEAD_SHA } });
+    assert.equal(r.status, 0, r.stderr);
+    return Object.fromEntries(r.stdout.trim().split('\n').map((l) => l.split('=')));
+  };
+  git('init', '-q', '-b', 'main');
+  mkdirSync(join(dir, 'infra'), { recursive: true });
+  writeFileSync(join(dir, 'README.md'), 'x\n');
+  git('add', '-A'); git('commit', '-q', '-m', 'base');
+  const base = git('rev-parse', 'HEAD');
+  writeFileSync(join(dir, 'infra/a.yaml'), 'a\n');
+  git('add', '-A'); git('commit', '-q', '-m', 'one');
+  const one = git('rev-parse', 'HEAD');
+  assert.deepEqual(on(runPush(base, one)), ['infra']);
+  git('checkout', '-q', base);
+  writeFileSync(join(dir, 'README.md'), 'y\n');
+  git('commit', '-qam', 'other');
+  const other = git('rev-parse', 'HEAD');
+  assert.deepEqual(on(runPush(one, other)), ALL);
 });
