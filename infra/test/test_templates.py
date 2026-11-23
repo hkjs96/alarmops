@@ -771,7 +771,9 @@ class DbRolesSql(unittest.TestCase):
         self.assertNotRegex(self.code, r"(?i)password")
 
     def test_roles_have_bypassrls_and_no_extra_power(self):
-        self.assertIn("NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS", self.code)
+        self.assertIn("LOGIN NOCREATEDB NOCREATEROLE BYPASSRLS NOINHERIT", self.code)
+        self.assertIn("rolsuper OR rolreplication", self.code)
+        self.assertRegex(self.code, r"RAISE EXCEPTION 'role % has SUPERUSER or REPLICATION")
         self.assertIn("alarmops_engine", self.code)
         self.assertIn("alarmops_ingest", self.code)
 

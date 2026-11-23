@@ -34,7 +34,13 @@ BEGIN
       EXECUTE format('CREATE ROLE %I LOGIN', r);
     END IF;
     -- The attributes are stated every time, so a role that was changed by hand is put back.
-    EXECUTE format('ALTER ROLE %I LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS NOINHERIT CONNECTION LIMIT 20', r);
+    -- SUPERUSER / REPLICATION are not named: on Supabase the owner (`postgres`) is not a superuser, and naming either
+    -- attribute in ALTER ROLE, even NOSUPERUSER, is refused (42501). CREATE ROLE leaves both off; the check below stops
+    -- the script if either is on.
+    EXECUTE format('ALTER ROLE %I LOGIN NOCREATEDB NOCREATEROLE BYPASSRLS NOINHERIT CONNECTION LIMIT 20', r);
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r AND (rolsuper OR rolreplication)) THEN
+      RAISE EXCEPTION 'role % has SUPERUSER or REPLICATION; remove it as a superuser, then run this file again', r;
+    END IF;
     -- Reset: nothing carried over from an earlier version of this file.
     EXECUTE format('REVOKE ALL ON ALL TABLES IN SCHEMA public FROM %I', r);
     EXECUTE format('REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM %I', r);
