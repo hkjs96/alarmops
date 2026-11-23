@@ -49,9 +49,17 @@ emit() { # emit <all|none|selected>; selected reads the flag_* variables
 
 fail_safe() { echo "ci-changes: $1 -> running everything" >&2; emit all; exit 0; }
 
-if [ "${EVENT_NAME:-}" != "pull_request" ]; then
-  fail_safe "event '${EVENT_NAME:-unset}' is not pull_request"
-fi
+# pull_request: diff against the merge base. push to main: diff the pushed range (before..after); a new branch or
+# a force push (before is all zeros or not an ancestor) runs everything. Any other event runs everything.
+case "${EVENT_NAME:-}" in
+  pull_request) RANGE="${BASE_SHA:-}...${HEAD_SHA:-}" ;;
+  push)
+    case "${BASE_SHA:-}" in ''|*[!0]*) [ -n "${BASE_SHA:-}" ] || fail_safe "push without a previous commit" ;; *) fail_safe "push without a previous commit" ;; esac
+    [ "${1:-}" = "--stdin" ] || git merge-base --is-ancestor "${BASE_SHA:-x}" "${HEAD_SHA:-x}" 2>/dev/null \
+      || fail_safe "push range is not linear (force push or missing commit)"
+    RANGE="${BASE_SHA:-}..${HEAD_SHA:-}" ;;
+  *) fail_safe "event '${EVENT_NAME:-unset}' runs everything" ;;
+esac
 
 list=$(mktemp) || fail_safe "mktemp failed"
 trap 'rm -f "$list"' EXIT
@@ -59,7 +67,7 @@ if [ "${1:-}" = "--stdin" ]; then
   cat > "$list" || fail_safe "reading stdin failed"
 else
   if [ -z "${BASE_SHA:-}" ] || [ -z "${HEAD_SHA:-}" ]; then fail_safe "BASE_SHA or HEAD_SHA missing"; fi
-  git -c core.quotepath=false diff --name-only --no-renames -z "$BASE_SHA...$HEAD_SHA" > "$list" || fail_safe "git diff failed"
+  git -c core.quotepath=false diff --name-only --no-renames -z "$RANGE" > "$list" || fail_safe "git diff failed"
 fi
 
 if [ ! -s "$list" ]; then fail_safe "empty file list"; fi
