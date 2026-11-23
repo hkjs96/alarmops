@@ -8,3 +8,6 @@ __pycache__/
 .env.*
 !.env.example
 docs/qa/shots/
+
+# agent worktrees (local only; also exempt from CI path filter, so never commit them)
+.claude/worktrees/

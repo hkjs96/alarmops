@@ -4,3 +4,5 @@
 /.github/workflows/  @hkjs96
 /.github/scripts/    @hkjs96
 /.github/CODEOWNERS  @hkjs96
+/.claude/            @hkjs96
+/docs/decisions/     @hkjs96
