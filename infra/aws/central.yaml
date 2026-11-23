@@ -149,7 +149,8 @@ Globals:
   Function:
     Timeout: 30
     MemorySize: 256
-    Tracing: PassThrough
+    # No tracing setting here. SAM attaches AWSXrayWriteOnlyAccess for ANY Tracing value (even PassThrough), which the deploy role may
+    # not attach and the boundary does not allow (first apply failed on iam:AttachRolePolicy, 11/23).
     PermissionsBoundary: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${PermissionsBoundaryName}"
 
 Resources:
