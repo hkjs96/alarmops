@@ -367,6 +367,45 @@ class CentralAlerts(unittest.TestCase):
         self.assertIn("AlarmOpsDeployCentral", names)
         self.assertIn("AlarmOpsDeployBus", names)
 
+    def test_added_events_are_in_each_rule_and_dropped_ones_are_not(self):
+        iam = self.render("us-east-1").x(next(iter(self.rules("us-east-1").values()))["Properties"]["EventPattern"])
+        svc = self.render("ap-northeast-2").x(next(iter(self.rules("ap-northeast-2").values()))["Properties"]["EventPattern"])
+        iam_names = iam["detail"]["eventName"]
+        svc_names = svc["detail"]["eventName"]
+        for n in ("DeleteRolePermissionsBoundary", "CreatePolicyVersion", "SetDefaultPolicyVersion"):
+            self.assertIn(n, iam_names)
+        for n in ("PutRule", "PutTargets", "RemoveTargets", "DeleteRule"):
+            self.assertIn(n, svc_names)
+        for n in ("CreateFunction", "CreateEventSourceMapping", "UpdateEventSourceMapping"):
+            self.assertIn({"prefix": n}, svc_names)
+        for names in (iam_names, svc_names):
+            for bad in ("DeleteRolePolicy", "DetachRolePolicy"):
+                self.assertNotIn(bad, names)
+                self.assertNotIn({"prefix": bad}, names)
+        for src in ("aws.lambda", "aws.events"):
+            self.assertIn(src, svc["source"])
+
+    def test_targets_have_input_transformer_with_summary_fields(self):
+        for region in ("us-east-1", "ap-northeast-2"):
+            for rule in self.rules(region).values():
+                for t in rule["Properties"]["Targets"]:
+                    it = t["InputTransformer"]
+                    paths = it["InputPathsMap"]
+                    self.assertEqual(paths["eventId"], "$.detail.eventID")
+                    self.assertEqual(paths["eventName"], "$.detail.eventName")
+                    self.assertEqual(paths["errorCode"], "$.detail.errorCode")
+                    tmpl = it["InputTemplate"]
+                    for var in ("<eventId>", "<eventName>", "<errorCode>", "<aws.events.rule-name>", "<eventTime>", "<sourceIp>", "<userAgent>", "<region>"):
+                        self.assertIn(var, tmpl)
+                    used = set(re.findall(r"<([A-Za-z]+)>", tmpl))
+                    self.assertLessEqual(used, set(paths), f"{region}: template uses undefined path variables")
+                    self.assertNotIn("<aws.events.event>", tmpl)  # no raw event dump
+
+    def test_doc_4_2_records_skipped_events_and_completion(self):
+        sec = doc_section("## 4-2.")
+        for needle in ("DeleteRolePolicy", "DetachRolePolicy", "소음", "관리 이벤트를 기록하는 추적", "CT 조직 추적", "실제 배포 1회"):
+            self.assertIn(needle, sec, needle)
+
     # -- which resources exist in which region
 
     def test_region_selects_the_rule(self):
@@ -513,7 +552,7 @@ class CiAndDocs(unittest.TestCase):
                 break
             item.append(l)
         body = "\n".join(item)
-        for needle in ("CREATE_COMPLETE", "CentralStackName", "BusStackName", "Confirmed", "시험 알림", "CloudTrail 관리 이벤트"):
+        for needle in ("CREATE_COMPLETE", "CentralStackName", "BusStackName", "Confirmed", "시험 알림", "CloudTrail 관리 이벤트", "실측", "메일 수신"):
             self.assertIn(needle, body, needle)
 
     def test_go_live_d57_line_is_unchanged(self):

@@ -778,7 +778,7 @@
 
 배포 역할의 IAM·큐·함수 변경을 알리는 **CloudTrail 알림 규칙 2개**(리전별 1개씩)를 둔다. central-alerts.yaml로 구현(#115)했다(`infra/aws/central-alerts.yaml`). 실고객을 연결하기 전에 끝나야 한다. 규칙 1은 `AlarmOpsDeployCentral` 세션이 부른 호출만, 규칙 2는 `AlarmOpsDeployCentral`과 `AlarmOpsDeployBus` 세션이 부른 호출을 잡는다.
 
-**규칙 1: us-east-1 (IAM은 글로벌 이벤트라 us-east-1로 온다).** 대상 이벤트: `CreateRole`, `UpdateAssumeRolePolicy`, `PutRolePolicy`, `AttachRolePolicy`, `PutRolePermissionsBoundary`
+**규칙 1: us-east-1 (IAM은 글로벌 이벤트라 us-east-1로 온다).** 대상 이벤트: `CreateRole`, `UpdateAssumeRolePolicy`, `PutRolePolicy`, `AttachRolePolicy`, `PutRolePermissionsBoundary`, `DeleteRolePermissionsBoundary`, `CreatePolicyVersion`, `SetDefaultPolicyVersion`(마지막 세 개는 배포 역할 정책이 Deny하는 호출이라 거부된 시도가 잡힌다)
 
 ```json
 {
@@ -790,7 +790,10 @@
       "UpdateAssumeRolePolicy",
       "PutRolePolicy",
       "AttachRolePolicy",
-      "PutRolePermissionsBoundary"
+      "PutRolePermissionsBoundary",
+      "DeleteRolePermissionsBoundary",
+      "CreatePolicyVersion",
+      "SetDefaultPolicyVersion"
     ],
     "userIdentity": {
       "sessionContext": {
@@ -803,7 +806,7 @@
 }
 ```
 
-**규칙 2: 서울 (`ap-northeast-2`).** 대상 이벤트: SQS `SetQueueAttributes`, Lambda `UpdateFunctionCode*`·`UpdateFunctionConfiguration*`·`AddPermission*`(이름 뒤에 버전 접미사가 붙을 수 있어 prefix 매칭), EventBridge `PutPermission`(버스 허용 목록 역할 `AlarmOpsDeployBus`)
+**규칙 2: 서울 (`ap-northeast-2`).** 대상 이벤트: SQS `SetQueueAttributes`, Lambda `UpdateFunctionCode*`·`UpdateFunctionConfiguration*`·`AddPermission*`(이름 뒤에 버전 접미사가 붙을 수 있어 prefix 매칭), EventBridge `PutPermission`(버스 허용 목록 역할 `AlarmOpsDeployBus`), Lambda `CreateFunction*`·`CreateEventSourceMapping*`·`UpdateEventSourceMapping*`(CloudTrail 이벤트 이름에 `20150331` 같은 버전 접미사가 붙어 prefix 매칭), EventBridge `PutRule`·`PutTargets`·`RemoveTargets`·`DeleteRule`
 
 ```json
 {
@@ -815,7 +818,14 @@
       { "prefix": "UpdateFunctionCode" },
       { "prefix": "UpdateFunctionConfiguration" },
       { "prefix": "AddPermission" },
-      "PutPermission"
+      "PutPermission",
+      { "prefix": "CreateFunction" },
+      { "prefix": "CreateEventSourceMapping" },
+      { "prefix": "UpdateEventSourceMapping" },
+      "PutRule",
+      "PutTargets",
+      "RemoveTargets",
+      "DeleteRule"
     ],
     "userIdentity": {
       "sessionContext": {
@@ -828,6 +838,11 @@
 }
 ```
 
+- **넣지 않은 이벤트:** `DeleteRolePolicy`, `DetachRolePolicy`는 규칙 1에 넣지 않았다. 권한을 줄이는 쪽이고 정상 스택 업데이트마다 나와 소음이다.
+- `CreateFunction` prefix는 `CreateFunctionUrlConfig`도 잡는다. 함수 URL 생성도 보고 싶은 변경이라 그대로 둔다.
+- 메일 본문은 InputTransformer로 요약한다: 규칙 이름, eventName, errorCode(비어 있으면 성공), 실행 역할, 대상(roleName·policyArn·functionName·name·rule·queueUrl 중 있는 것), eventTime, sourceIPAddress, userAgent, awsRegion, eventID. 원시 이벤트 전체는 넣지 않는다. 자세한 내용은 eventID로 CloudTrail에서 찾는다.
+- **추적 전제:** `AWS API Call via CloudTrail` 이벤트를 받으려면 그 리전에 관리 이벤트를 기록하는 추적이 필요하다(CT 조직 추적으로 충분한지는 계정마다 다를 수 있음).
+- **완료 조건:** 배포 후 각 리전에서 시험 호출로 메일 수신을 확인한다. 거부되는 호출은 배포 역할이 아닌 주체로 부르면 규칙에 안 잡히므로 시험 호출로 쓸 수 없다. 절차는 SNS 토픽 publish 시험 + 실제 배포 1회 후 메일 수신 확인이다.
 - 대상: SNS 토픽(구독은 보안 담당 이메일). 이메일 직접 대상은 EventBridge가 지원하지 않으므로 SNS를 거친다.
 - **SNS 토픽은 규칙과 같은 리전에 둔다.** 리전마다 토픽을 하나씩 둔다(us-east-1에도 토픽을 둔다). 다른 리전의 버스나 토픽으로 넘기지 않는다. 토픽 정책에서 `events.amazonaws.com`의 `sns:Publish`를 허용한다.
 - 정상 배포 때도 울린다. 알림이 `plan` 승인 때 읽은 변경과 맞는지 대조하고, 맞지 않으면 신뢰 정책을 확인한다.
@@ -839,7 +854,7 @@
 2. 스택 이름은 정확히 `alarmops-central-alerts`로 한다. 부트스트랩의 `CentralStackName`·`BusStackName` 값과 달라야 한다. 같으면 배포 역할이 이 스택을 바꾸거나 지울 수 있다. 두 파라미터가 이 이름이면 bootstrap Rules `StackNamesAreDifferent`가 스택 생성·갱신을 막는다(#115). bootstrap 스택을 갱신해야 반영된다.
 3. 파라미터 `AlertEmail`에 보안 담당 이메일을 넣는다. `ResourcePrefix`는 `AlarmOpsGuard`로 고정이다.
 4. 스택이 `CREATE_COMPLETE`가 되면 두 리전 모두에서 구독 확인 메일의 링크를 눌러 구독을 `Confirmed`로 만든다(`aws sns list-subscriptions-by-topic`으로 확인).
-5. 시험 알림을 보낸다. SNS 토픽에서 시험 메시지를 발행해 메일이 오는지 보고, CloudTrail 관리 이벤트 추적이 있는지 확인한다. 추적이 없으면 이벤트가 오지 않는다.
+5. 시험 알림을 보낸다. SNS 토픽에서 시험 메시지를 발행해 메일이 오는지 보고, 관리 이벤트를 기록하는 추적이 그 리전에 있는지 확인한다(위 추적 전제). 추적이 없으면 이벤트가 오지 않는다. 이어서 실제 배포 1회 후 규칙 메일이 오는지 확인한다(완료 조건).
 6. 배포 역할은 이 스택의 규칙·토픽·스택을 바꿀 권한이 없어야 한다. `python -m unittest discover -s infra/test`의 격리 검사가 부트스트랩 정책 전체를 검사한다.
 
 **되돌리기.** 스택을 삭제하면 규칙·토픽·구독이 함께 지워진다(남는 리소스 없음, Retain 없음): `aws cloudformation delete-stack --stack-name alarmops-central-alerts --region <리전>`. 삭제하면 알림이 사라지므로 실고객 연결 중 삭제 금지.
