@@ -1,0 +1,108 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  AlarmOps CloudTrail alert rules for the central deploy roles (deploy-role-policy.md 4-2, issue 115).
+  Deploy this one template as stack alarmops-central-alerts in each of the two regions, by a human.
+  The IAM rule is created in the global IAM event region only; every other region gets the service rule.
+  The deploy roles must not be able to change these resources (isolation test: infra/test/test_central_alerts.py).
+
+Parameters:
+  AlertEmail:
+    Type: String
+    Description: Security contact that receives the alerts. Confirm the subscription mail in every region.
+    AllowedPattern: '^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$'
+    ConstraintDescription: Must be an email address.
+  ResourcePrefix:
+    Type: String
+    Default: AlarmOpsGuard
+    AllowedPattern: '^AlarmOpsGuard$'
+    ConstraintDescription: Fixed. The deploy roles are denied or not granted changes on names with this prefix only.
+
+Conditions:
+  IsUsEast1: !Equals [!Ref "AWS::Region", us-east-1]
+  IsNotUsEast1: !Not [!Condition IsUsEast1]
+
+Resources:
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "${ResourcePrefix}-alerts"
+      Subscription:
+        - Protocol: email
+          Endpoint: !Ref AlertEmail
+
+  AlertTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref AlertTopic
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowGuardRulesPublish
+            Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref AlertTopic
+            Condition:
+              ArnLike:
+                aws:SourceArn: !Sub "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/${ResourcePrefix}-*"
+
+  IamChangeRule:
+    Type: AWS::Events::Rule
+    Condition: IsUsEast1
+    Properties:
+      Name: !Sub "${ResourcePrefix}-iam-change"
+      Description: IAM role changes made by the central deploy role
+      State: ENABLED
+      EventPattern:
+        source:
+          - aws.iam
+        detail-type:
+          - AWS API Call via CloudTrail
+        detail:
+          eventName:
+            - CreateRole
+            - UpdateAssumeRolePolicy
+            - PutRolePolicy
+            - AttachRolePolicy
+            - PutRolePermissionsBoundary
+          userIdentity:
+            sessionContext:
+              sessionIssuer:
+                userName:
+                  - AlarmOpsDeployCentral
+      Targets:
+        - Id: alert-topic
+          Arn: !Ref AlertTopic
+
+  ServiceChangeRule:
+    Type: AWS::Events::Rule
+    Condition: IsNotUsEast1
+    Properties:
+      Name: !Sub "${ResourcePrefix}-service-change"
+      Description: Queue, function and bus permission changes made by the central deploy roles
+      State: ENABLED
+      EventPattern:
+        source:
+          - aws.sqs
+          - aws.lambda
+          - aws.events
+        detail-type:
+          - AWS API Call via CloudTrail
+        detail:
+          eventName:
+            - SetQueueAttributes
+            - prefix: UpdateFunctionCode
+            - prefix: UpdateFunctionConfiguration
+            - prefix: AddPermission
+            - PutPermission
+          userIdentity:
+            sessionContext:
+              sessionIssuer:
+                userName:
+                  - AlarmOpsDeployCentral
+                  - AlarmOpsDeployBus
+      Targets:
+        - Id: alert-topic
+          Arn: !Ref AlertTopic

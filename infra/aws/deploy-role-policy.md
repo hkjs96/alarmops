@@ -776,7 +776,7 @@
 
 ## 4-2. 실고객 연결 전 필수
 
-배포 역할의 IAM·큐·함수 변경을 알리는 **CloudTrail 알림 규칙 2개**(리전별 1개씩)를 둔다. 구현은 **파일럿 전 이슈**로 남긴다(이 문서는 초안만 둔다). 실고객을 연결하기 전에 끝나야 한다. 두 규칙 모두 배포 역할 `AlarmOpsDeployCentral` 세션이 부른 호출만 잡는다.
+배포 역할의 IAM·큐·함수 변경을 알리는 **CloudTrail 알림 규칙 2개**(리전별 1개씩)를 둔다. central-alerts.yaml로 구현(#115)했다(`infra/aws/central-alerts.yaml`). 실고객을 연결하기 전에 끝나야 한다. 두 규칙 모두 배포 역할 `AlarmOpsDeployCentral` 세션이 부른 호출만 잡는다.
 
 **규칙 1: us-east-1 (IAM은 글로벌 이벤트라 us-east-1로 온다).** 대상 이벤트: `CreateRole`, `UpdateAssumeRolePolicy`, `PutRolePolicy`, `AttachRolePolicy`, `PutRolePermissionsBoundary`
 
@@ -829,9 +829,20 @@
 ```
 
 - 대상: SNS 토픽(구독은 보안 담당 이메일). 이메일 직접 대상은 EventBridge가 지원하지 않으므로 SNS를 거친다.
-- **SNS 토픽은 규칙과 같은 리전에 둔다.** us-east-1에도 토픽을 두거나, us-east-1 규칙의 대상을 서울 버스로 전달한다. 토픽 정책에서 `events.amazonaws.com`의 `sns:Publish`를 허용한다.
+- **SNS 토픽은 규칙과 같은 리전에 둔다.** 리전마다 토픽을 하나씩 둔다(us-east-1에도 토픽을 둔다). 다른 리전의 버스나 토픽으로 넘기지 않는다. 토픽 정책에서 `events.amazonaws.com`의 `sns:Publish`를 허용한다.
 - 정상 배포 때도 울린다. 알림이 `plan` 승인 때 읽은 변경과 맞는지 대조하고, 맞지 않으면 신뢰 정책을 확인한다.
 - 알림 규칙과 SNS는 배포 역할이 만들지 않는다. 사람이 만든다(배포 역할이 자기 알림을 끌 수 없게).
+**배포 절차 (사람, 리전마다 한 번씩).** 같은 템플릿 `infra/aws/central-alerts.yaml`을 두 리전에 같은 스택 이름 `alarmops-central-alerts`로 올린다. 이 스택은 GitHub Actions가 배포하지 않는다.
+
+1. 대상 리전은 `us-east-1`(IAM 규칙 `AlarmOpsGuard-iam-change`)과 `ap-northeast-2`(서비스 규칙 `AlarmOpsGuard-service-change`)다. 리전에 따라 템플릿이 규칙을 고른다.
+2. 스택 이름은 정확히 `alarmops-central-alerts`로 한다. 부트스트랩의 `CentralStackName`·`BusStackName` 값과 달라야 한다. 같으면 배포 역할이 이 스택을 바꾸거나 지울 수 있다. CloudFormation Rules로는 이름을 강제할 수 없고, 두 파라미터의 AllowedPattern이 이 이름과 겹치는 것도 막지 못한다(남는 위험, GO-LIVE 확인 항목으로 막는다).
+3. 파라미터 `AlertEmail`에 보안 담당 이메일을 넣는다. `ResourcePrefix`는 `AlarmOpsGuard`로 고정이다.
+4. 스택이 `CREATE_COMPLETE`가 되면 두 리전 모두에서 구독 확인 메일의 링크를 눌러 구독을 `Confirmed`로 만든다(`aws sns list-subscriptions-by-topic`으로 확인).
+5. 시험 알림을 보낸다. SNS 토픽에서 시험 메시지를 발행해 메일이 오는지 보고, CloudTrail 관리 이벤트 추적이 있는지 확인한다. 추적이 없으면 이벤트가 오지 않는다.
+6. 배포 역할은 이 스택의 규칙·토픽·스택을 바꿀 권한이 없어야 한다. `python -m unittest discover -s infra/test`의 격리 검사가 부트스트랩 정책 전체를 검사한다.
+
+**되돌리기.** 스택을 삭제하면 규칙·토픽·구독이 함께 지워진다(남는 리소스 없음, Retain 없음): `aws cloudformation delete-stack --stack-name alarmops-central-alerts --region <리전>`. 삭제하면 알림이 사라지므로 실고객 연결 중 삭제 금지.
+
 - 후속 아이디어: `AlarmOpsCentral-*` 역할에 대한 `AssumeRole`·`AssumeRoleWithWebIdentity`를 평소와 다른 주체가 부르면 알리는 규칙.
 
 ## 5. 부트스트랩 스택 올리기 (사람, 중앙 계정, 서울)
