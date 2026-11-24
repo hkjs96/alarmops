@@ -357,6 +357,12 @@ class StackNameRules(unittest.TestCase):
         self.assertFalse(self.passes(self.BOOT, "alarmops-central-bus"))
         self.assertFalse(self.passes("alarmops-central", self.BOOT))
 
+    def test_alerts_stack_name_fails_for_either_parameter(self):
+        alerts = "alarmops-central-alerts"
+        self.assertFalse(self.passes(alerts, "alarmops-central-bus"))
+        self.assertFalse(self.passes("alarmops-central", alerts))
+        self.assertTrue(self.passes("alarmops-central", "alarmops-central-bus"))
+
     def test_minimum_length_is_five(self):
         for name in ("ResourcePrefix", "CentralStackName"):
             pat = re.compile(T["Parameters"][name]["AllowedPattern"])

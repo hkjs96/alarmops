@@ -97,6 +97,10 @@ Rules:
         AssertDescription: CentralStackName must not be the bootstrap stack name alarmops-central-bootstrap.
       - Assert: !Not [!Equals [!Ref BusStackName, "alarmops-central-bootstrap"]]
         AssertDescription: BusStackName must not be the bootstrap stack name alarmops-central-bootstrap.
+      - Assert: !Not [!Equals [!Ref CentralStackName, "alarmops-central-alerts"]]
+        AssertDescription: CentralStackName must not be the alerts stack name alarmops-central-alerts.
+      - Assert: !Not [!Equals [!Ref BusStackName, "alarmops-central-alerts"]]
+        AssertDescription: BusStackName must not be the alerts stack name alarmops-central-alerts.
   VercelTeamSlugRequiredToCreateProvider:
     RuleCondition: !Equals [!Ref VercelOidcProviderArn, ""]
     Assertions:

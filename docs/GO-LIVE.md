@@ -898,6 +898,11 @@ npm ci --ignore-scripts && npm run build:lambda -w @alarmops/ingest && npm run b
 > **주의** ExternalId는 고객 담당자에게만 준다. 이슈·PR에 적지 않는다.
 
 - [ ] CloudTrail 알림 규칙 2개 동작 확인(`infra/aws/deploy-role-policy.md` 4-2). 첫 실고객 연결 전에 끝낸다.
+  - 두 리전(us-east-1, 서울)의 스택이 `CREATE_COMPLETE`이고 스택 이름이 정확히 `alarmops-central-alerts`다. 부트스트랩의 `CentralStackName`·`BusStackName` 값과 다른지는 bootstrap Rules가 막는다(#115). 단 bootstrap 스택을 이 변경으로 갱신한 뒤여야 하므로 갱신 여부를 `aws cloudformation describe-stacks`로 확인한다.
+  - 두 리전 모두 구독이 `Confirmed`다.
+  - 시험 알림이 도착한다.
+  - CloudTrail 관리 이벤트 추적이 있다(리전마다 관리 이벤트를 기록하는 추적).
+  - 실측: 시험 알림 후 실제 배포 1회를 하고 각 리전에서 규칙 메일 수신 확인(eventName·eventID 포함).
 
 ### 7-2. 허용 목록에 계정 추가 (10분)
 
