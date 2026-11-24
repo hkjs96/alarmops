@@ -34,24 +34,28 @@ const AUDIT = { type: 'object', required: ['verdict', 'blocking'], properties: {
 // 만든 쪽 → 검수 → 반려 시 고쳐서 다시, 최대 MAX_ROUNDS. 넘으면 멈추고 사람에게.
 async function produceAndReview(phaseName, produce, review) {
   let out = await produce(null)
+  let prev = null
   for (let round = 1; round <= MAX_ROUNDS; round++) {
-    const r = await review(out)
+    const r = await review(out, prev)
     if (!r || r.blocking.length === 0) return { out, review: r }
     log(`${phaseName}: 반려 ${round}회 — ${r.blocking.length}건`)
     if (round === MAX_ROUNDS) throw new Error(`${phaseName}: ${MAX_ROUNDS}회 반려, 사용자 보고 필요\n- ` + r.blocking.join('\n- '))
+    prev = r.blocking
     out = await produce(r.blocking)
   }
 }
 
 phase('Plan')
-const planned = await produceAndReview('Plan',
+const planned = (A.plan && A.criteria) ? (log('허브가 확정한 계획을 사용한다 (Plan 단계 건너뜀)'), { out: { plan: A.plan, criteria: A.criteria }, review: { blocking: [], notes: A.planNotes || [] } }) : await produceAndReview('Plan',
   fix => agent(`이슈 #${A.issue}: ${A.task}\n담당 영역: ${A.area}. docs/specs·DECISIONS.md를 읽고 계획과 수용 기준을 써라. ` +
     `수용 기준은 검사 가능한 문장으로(무엇을 하면 무엇이 관찰되는가). 권한·격리·실패·되돌리기 경우를 빠뜨리지 마라.` +
-    (fix ? `\n이전 계획의 반려 사유를 고쳐라:\n- ${fix.join('\n- ')}` : ''), { phase: 'Plan', schema: PLAN }),
-  p => agent(`다른 에이전트가 쓴 계획이다. 틀렸다고 가정하고 검수하라. 명세(docs/specs)·결정(D-xx)과 어긋나는 점, ` +
-    `빠진 경우, 검사할 수 없는 수용 기준을 [차단]으로 적어라.\n계획:\n${p.plan}\n수용 기준:\n- ${p.criteria.join('\n- ')}`,
+    (A.hints ? `\n허브의 판정(반드시 반영):\n- ${A.hints.join('\n- ')}` : '') +
+    (fix ? `\n검수자의 반려 사유다. 검수자도 틀릴 수 있다. 원문(파일·줄)을 직접 확인해 맞으면 고치고, 틀리면 고치지 말고 plan 끝에 '반박:' 항목으로 근거를 적어라:\n- ${fix.join('\n- ')}` : ''), { phase: 'Plan', schema: PLAN }),
+  (p, prev) => agent((prev ? `재검수다. [차단]은 두 가지만 낸다: (1) 아래 이전 [차단] 중 해결되지 않은 것, (2) 새로 생긴 보안 결함·명세 위반·기계로 검사할 수 없는 수용 기준. 그 밖의 문서 문구·표기·세부 구현 선택은 notes([권고])로만 적는다. 이전 [차단]:\n- ${prev.join('\n- ')}\n` : '') + `다른 에이전트가 쓴 계획이다. 틀렸다고 가정하고 검수하라. 명세(docs/specs)·결정(D-xx)과 어긋나는 점, ` +
+    `빠진 경우, 검사할 수 없는 수용 기준을 [차단]으로 적어라. [차단]마다 원문 파일:줄 근거를 붙여라(근거 없는 [차단]은 무효). 계획의 '반박:' 항목이 원문으로 맞으면 그 지적은 다시 내지 마라.\n계획:\n${p.plan}\n수용 기준:\n- ${p.criteria.join('\n- ')}`,
     { phase: 'Plan', schema: REVIEW, agentType: 'Plan' }))
 const criteria = planned.out.criteria
+const planNotes = (planned.review && planned.review.notes) || []
 
 phase('Tests')
 const tests = await produceAndReview('Tests',
@@ -66,7 +70,7 @@ const tests = await produceAndReview('Tests',
 phase('Implement')
 const impl = await agent(`브랜치 ${tests.out.branch}(테스트 커밋 ${tests.out.commit})에서 시작해 ${A.branch}를 만들고 구현하라. ` +
   `주의: worktree는 main에서 갈라지므로 반드시 git fetch origin ${tests.out.branch} 후 그 커밋에서 브랜치를 만들어라. ` +
-  `테스트 파일은 수정하지 마라. 테스트가 틀렸다고 판단되면 구현하지 말고 그 이유만 summary에 적어라. 테스트·타입 검사를 통과시킨 뒤 push하라.` +
+  (planNotes.length ? `계획 검수의 [권고](가능하면 반영):\n- ${planNotes.join('\n- ')}\n` : '') + `테스트 파일은 수정하지 마라. 테스트가 틀렸다고 판단되면 구현하지 말고 그 이유만 summary에 적어라. 테스트·타입 검사를 통과시킨 뒤 push하라.` +
   `\n계획:\n${planned.out.plan}`, { phase: 'Implement', schema: BRANCH, agentType: A.area, isolation: 'worktree' })
 if (!impl) throw new Error('Implement: 결과 없음')
 
