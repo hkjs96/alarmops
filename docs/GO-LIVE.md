@@ -690,6 +690,12 @@ http://localhost:3107/auth/dev-login?as=admin
 
 > **참고** 화면별 순서는 `docs/SETUP-PROD-DB.md` 6~7단계
 
+> **참고 (11/24 실제로 해 본 순서)** 비밀 값 한 줄은 이렇게 만든다.
+> 1. Supabase 프로젝트 맨 위 **Connect** → **Session pooler** 주소를 메모장에 복사한다.
+> 2. `postgres.` → `alarmops_engine.`(수집은 `alarmops_ingest.`), `[YOUR-PASSWORD]` → 그 사용자 비밀번호(대괄호까지 지움), 끝에 `?sslmode=require`.
+> 3. 수집용은 포트를 `:5432` → `:6543`으로 바꾼다.
+> 4. Secrets Manager(서울) → 비밀 → **비밀 값 검색** → **편집** → **일반 텍스트**에 임시 값을 지우고 붙인다. 메모장은 저장하지 않고 닫는다.
+
 <!-- include: docs/SETUP-PROD-DB.md 6~7 -->
 
 ### 4-5. [사람] 출력값 연결 (10분)
@@ -709,7 +715,7 @@ http://localhost:3107/auth/dev-login?as=admin
    | `CENTRAL_EVENT_BUS_ARN` | `CentralBusArn` |
    | `REMEDIATOR_CALLER_ROLE_ARN` | `RemediatorCallerRoleArn` (Remediator를 켜는 고객이 있을 때만) |
 
-   모두 일반(Plain) 변수로 넣는다. 비밀이 아니다.
+   모두 일반 변수로 넣는다. 비밀이 아니다. Vercel 추가 창의 Type에서 **Config**를 고른다(**Secret** 아님). 다섯 개는 한 창에서 Key·Value 칸을 늘려 한 번에 넣을 수 있다.
 
    > **주의** `AWS_ROLE_ARN`은 배포된 Vercel 런타임에만 넣는다. 회사 PC `.env`, CI, 에이전트 세션에는 넣지 않는다(`apps/console/README.md`).
 2. 콘솔을 다시 배포한다. Actions → `deploy-console` 실행 → 승인(3-4). 새 변수는 새 배포부터 쓰인다.
