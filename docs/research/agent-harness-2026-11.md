@@ -49,6 +49,20 @@ D-60(초안)의 근거다. 출처 본문을 직접 읽고 정리했다. 수치�
 - 서브에이전트는 메인 세션에 최종 메시지만 돌려준다. 그 요약은 증거가 아니다.
 - CLAUDE.md는 200줄 이하로 두고, 담당자를 정하고, 코드처럼 리뷰한다.
 
+## 참고 링크
+1. Stack Overflow 블로그, "Your coding agent shouldn't grade its own homework" (2026-11-13): https://stackoverflow.blog/2026/11/13/your-coding-agent-shouldn-t-grade-its-own-homework/
+2. Martin Fowler 사이트, "TDD in the agent loop": https://www.martinfowler.com/articles/exploring-gen-ai/tdd-in-the-agent-loop.html
+3. Vercel, "Agent responsibly" (2026-03-30): https://vercel.com/blog/agent-responsibly
+4. Kief Morris, "Humans and Agents in Software Engineering Loops" (2026-03-04): https://www.martinfowler.com/articles/exploring-gen-ai/humans-and-agents.html
+   Thoughtworks, "How far can we push AI autonomy in code generation?": https://www.martinfowler.com/articles/pushing-ai-autonomy.html
+5. METR, 2025 연구: https://metr.org/blog/2025-07-10-early-2025-ai-experienced-os-dev-study/
+   METR, 2026 업데이트: https://metr.org/blog/2026-02-24-uplift-update/
+6. Anthropic, "Steering Claude Code: skills, hooks, rules, subagents and more": https://claude.com/resources/articles/steering-claude-code-skills-hooks-rules-subagents-and-more
+
+본문을 못 받았지만 관련 있는 글:
+- Vercel, "58% of PRs in our largest monorepo merge without human review": https://vercel.com/blog/58-percent-of-prs-in-our-largest-monorepo-merge-without-human-review
+- Augment Code, "Coordinator, implementor, verifier": https://www.augmentcode.com/guides/coordinator-implementor-verifier
+
 ## 확인하지 못한 것
 - 본문을 받지 못한 출처: Vercel "58% of PRs merge without human review", arXiv 논문들, dev.to 사후 분석 글.
 - 다른 회사 모델을 섞었을 때의 효과(1번)는 자사 벤치마크 하나뿐이다.
