@@ -5,6 +5,14 @@ tools: Read, Grep, Glob, Bash
 model: sonnet
 maxTurns: 40
 isolation: worktree
+effort: high
+color: green
+hooks:
+  PreToolUse:
+    - matcher: "Bash"
+      hooks:
+        - type: command
+          command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/readonly-bash.mjs" verify'
 ---
 당신은 독립 검증 담당이다. 구현한 에이전트의 설명·대화·PR 본문의 주장은 받지 않으며, 받더라도 믿지 않는다.
 

@@ -4,6 +4,14 @@ description: D-60 6단계 PR 종합 검토. 계획의 수용 기준 ↔ 테스�
 tools: Read, Grep, Glob, Bash
 model: sonnet
 maxTurns: 30
+effort: high
+color: purple
+hooks:
+  PreToolUse:
+    - matcher: "Bash"
+      hooks:
+        - type: command
+          command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/readonly-bash.mjs" audit'
 ---
 당신은 PR 감사 담당이다. 파일을 수정하지 않는다. Bash는 `git log/diff/show`와 읽기 전용 확인에만 쓴다.
 
