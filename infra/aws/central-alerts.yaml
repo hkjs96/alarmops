@@ -155,13 +155,14 @@ Resources:
               name: $.detail.requestParameters.name
               ruleName: $.detail.requestParameters.rule
               queueUrl: $.detail.requestParameters.queueUrl
+              mappingUuid: $.detail.requestParameters.uUID
             InputTemplate: |-
               {
                 "rule": "<aws.events.rule-name>",
                 "eventName": "<eventName>",
                 "errorCode (empty = succeeded)": "<errorCode>",
                 "actor": "<actor>",
-                "target": {"functionName": "<functionName>", "name": "<name>", "rule": "<ruleName>", "queueUrl": "<queueUrl>"},
+                "target": {"functionName": "<functionName>", "name": "<name>", "rule": "<ruleName>", "queueUrl": "<queueUrl>", "eventSourceMappingUuid": "<mappingUuid>"},
                 "eventTime": "<eventTime>",
                 "sourceIPAddress": "<sourceIp>",
                 "userAgent": "<userAgent>",

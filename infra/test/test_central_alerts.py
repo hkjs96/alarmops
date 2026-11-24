@@ -153,6 +153,37 @@ def doc_pattern_4_2(index: int) -> dict:
     return blocks[0][index]
 
 
+def matches(pattern, event) -> bool:
+    """Minimal EventBridge matcher: list = any element matches; dict leaf rules {prefix}, {exists}; nested dicts recurse;
+    an array-valued event field matches if any of its values matches."""
+    def leaf(rule, val):
+        if isinstance(rule, dict):
+            if "prefix" in rule:
+                return isinstance(val, str) and val.startswith(rule["prefix"])
+            if "exists" in rule:
+                return (val is not _MISSING) == bool(rule["exists"])
+            raise ValueError(f"unsupported rule {rule}")
+        return val is not _MISSING and val == rule
+
+    def node(pat, ev):
+        for key, sub in pat.items():
+            val = ev.get(key, _MISSING) if isinstance(ev, dict) else _MISSING
+            if isinstance(sub, dict):
+                if not isinstance(val, dict) and not (isinstance(val, list)):
+                    return False
+                if not node(sub, val if isinstance(val, dict) else {}):
+                    return False
+            else:
+                vals = val if isinstance(val, list) else [val]
+                if not any(leaf(r, v) for r in sub for v in vals):
+                    return False
+        return True
+    return node(pattern, event)
+
+
+_MISSING = object()
+
+
 # ---------------------------------------------------------------- isolation checker
 
 # Changing actions per service that must not be allowed on the alert rules, the topic or the stack.
@@ -367,23 +398,62 @@ class CentralAlerts(unittest.TestCase):
         self.assertIn("AlarmOpsDeployCentral", names)
         self.assertIn("AlarmOpsDeployBus", names)
 
-    def test_added_events_are_in_each_rule_and_dropped_ones_are_not(self):
-        iam = self.render("us-east-1").x(next(iter(self.rules("us-east-1").values()))["Properties"]["EventPattern"])
-        svc = self.render("ap-northeast-2").x(next(iter(self.rules("ap-northeast-2").values()))["Properties"]["EventPattern"])
-        iam_names = iam["detail"]["eventName"]
-        svc_names = svc["detail"]["eventName"]
-        for n in ("DeleteRolePermissionsBoundary", "CreatePolicyVersion", "SetDefaultPolicyVersion"):
-            self.assertIn(n, iam_names)
-        for n in ("PutRule", "PutTargets", "RemoveTargets", "DeleteRule"):
-            self.assertIn(n, svc_names)
-        for n in ("CreateFunction", "CreateEventSourceMapping", "UpdateEventSourceMapping"):
-            self.assertIn({"prefix": n}, svc_names)
-        for names in (iam_names, svc_names):
-            for bad in ("DeleteRolePolicy", "DetachRolePolicy"):
+    # -- event sample matching (small EventBridge pattern matcher)
+
+    def pattern(self, region: str) -> dict:
+        return self.render(region).x(next(iter(self.rules(region).values()))["Properties"]["EventPattern"])
+
+    @staticmethod
+    def ev(source, name, role, error=None):
+        d = {"eventName": name, "userIdentity": {"sessionContext": {"sessionIssuer": {"userName": role}}}}
+        if error:
+            d["errorCode"] = error
+        return {"source": source, "detail-type": "AWS API Call via CloudTrail", "detail": d}
+
+    def test_seoul_rule_matches_samples(self):
+        p = self.pattern("ap-northeast-2")
+        for src, name, role in (
+            ("aws.lambda", "CreateFunction20150331", "AlarmOpsDeployCentral"),
+            ("aws.lambda", "UpdateEventSourceMapping20150331", "AlarmOpsDeployCentral"),
+            ("aws.lambda", "CreateEventSourceMapping20150331", "AlarmOpsDeployCentral"),
+            ("aws.events", "PutRule", "AlarmOpsDeployBus"),
+            ("aws.events", "PutTargets", "AlarmOpsDeployCentral"),
+        ):
+            with self.subTest(name=name, role=role):
+                self.assertTrue(matches(p, self.ev(src, name, role)))
+
+    def test_seoul_rule_does_not_match_other_roles_or_sources(self):
+        p = self.pattern("ap-northeast-2")
+        for src, name, role in (
+            ("aws.lambda", "CreateFunction20150331", "SomeAdmin"),
+            ("aws.events", "PutRule", "SomeAdmin"),
+            ("aws.events", "PutTargets", "SomeAdmin"),
+            ("aws.s3", "PutRule", "AlarmOpsDeployCentral"),
+            ("aws.s3", "CreateFunction20150331", "AlarmOpsDeployBus"),
+        ):
+            with self.subTest(src=src, name=name, role=role):
+                self.assertFalse(matches(p, self.ev(src, name, role)))
+
+    def test_us_east_1_rule_matches_and_rejects_samples(self):
+        p = self.pattern("us-east-1")
+        self.assertTrue(matches(p, self.ev("aws.iam", "CreatePolicyVersion", "AlarmOpsDeployCentral", "AccessDenied")))
+        self.assertFalse(matches(p, self.ev("aws.iam", "DeleteRolePolicy", "AlarmOpsDeployCentral")))
+        self.assertFalse(matches(p, self.ev("aws.iam", "CreateRole", "AlarmOpsDeployBus")))
+
+    def test_matcher_negative_control(self):
+        wrong = {"source": ["aws.iam"], "detail": {"eventName": ["CreateRole"], "userIdentity": {"sessionContext": {"sessionIssuer": {"userName": ["Other"]}}}}}
+        self.assertFalse(matches(wrong, self.ev("aws.iam", "CreateRole", "AlarmOpsDeployCentral")))
+        self.assertTrue(matches({"detail": {"errorCode": [{"exists": True}]}}, self.ev("aws.iam", "X", "r", "AccessDenied")))
+        self.assertFalse(matches({"detail": {"errorCode": [{"exists": True}]}}, self.ev("aws.iam", "X", "r")))
+        self.assertTrue(matches({"detail": {"eventName": [{"prefix": "Create"}]}}, self.ev("aws.iam", "CreateRole", "r")))
+        self.assertFalse(matches({"detail": {"eventName": [{"prefix": "Create"}]}}, self.ev("aws.iam", "XCreate", "r")))
+
+    def test_dropped_events_are_not_in_any_pattern(self):
+        for region in ("us-east-1", "ap-northeast-2"):
+            names = self.pattern(region)["detail"]["eventName"]
+            for bad in ("DeleteRolePolicy", "DetachRolePolicy", "DeleteFunction", "DeleteEventSourceMapping"):
                 self.assertNotIn(bad, names)
                 self.assertNotIn({"prefix": bad}, names)
-        for src in ("aws.lambda", "aws.events"):
-            self.assertIn(src, svc["source"])
 
     def test_targets_have_input_transformer_with_summary_fields(self):
         for region in ("us-east-1", "ap-northeast-2"):

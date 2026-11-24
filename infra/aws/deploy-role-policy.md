@@ -839,10 +839,11 @@
 ```
 
 - **넣지 않은 이벤트:** `DeleteRolePolicy`, `DetachRolePolicy`는 규칙 1에 넣지 않았다. 권한을 줄이는 쪽이고 정상 스택 업데이트마다 나와 소음이다.
+- Lambda `DeleteFunction*`·`DeleteEventSourceMapping*`는 넣지 않았다. 권한 확대가 아니라 서비스 중단(가용성 영향)이고 이 규칙의 목적(권한·신뢰 변경 탐지) 밖이다. 가용성 영향은 범위 밖으로 둔다.
 - `CreateFunction` prefix는 `CreateFunctionUrlConfig`도 잡는다. 함수 URL 생성도 보고 싶은 변경이라 그대로 둔다.
-- 메일 본문은 InputTransformer로 요약한다: 규칙 이름, eventName, errorCode(비어 있으면 성공), 실행 역할, 대상(roleName·policyArn·functionName·name·rule·queueUrl 중 있는 것), eventTime, sourceIPAddress, userAgent, awsRegion, eventID. 원시 이벤트 전체는 넣지 않는다. 자세한 내용은 eventID로 CloudTrail에서 찾는다.
+- 메일 본문은 InputTransformer로 요약한다: 규칙 이름, eventName, errorCode(비어 있으면 성공), 실행 역할, 대상(roleName·policyArn·functionName·name·rule·queueUrl·eventSourceMappingUuid 중 있는 것. `UpdateEventSourceMapping`의 식별자 경로 `requestParameters.uUID`는 CloudTrail 실제 이벤트로 확인 필요), eventTime, sourceIPAddress, userAgent, awsRegion, eventID. 원시 이벤트 전체는 넣지 않는다. 자세한 내용은 eventID로 CloudTrail에서 찾는다.
 - **추적 전제:** `AWS API Call via CloudTrail` 이벤트를 받으려면 그 리전에 관리 이벤트를 기록하는 추적이 필요하다(CT 조직 추적으로 충분한지는 계정마다 다를 수 있음).
-- **완료 조건:** 배포 후 각 리전에서 시험 호출로 메일 수신을 확인한다. 거부되는 호출은 배포 역할이 아닌 주체로 부르면 규칙에 안 잡히므로 시험 호출로 쓸 수 없다. 절차는 SNS 토픽 publish 시험 + 실제 배포 1회 후 메일 수신 확인이다.
+- **완료 조건:** 배포 후 각 리전에서 시험 호출로 메일 수신을 확인한다. 거부되는 호출은 배포 역할이 아닌 주체로 부르면 규칙에 안 잡히므로 시험 호출로 쓸 수 없다. 절차는 SNS 토픽 publish 시험 + 실제 배포 1회 후 메일 수신 확인이다. 거부 경로 실측은 운영 중 불가하다(배포 역할로 일부러 거부 호출을 만들지 않는다). 허용 이벤트 1건(정상 배포) 수신으로 경로를 확인한다.
 - 대상: SNS 토픽(구독은 보안 담당 이메일). 이메일 직접 대상은 EventBridge가 지원하지 않으므로 SNS를 거친다.
 - **SNS 토픽은 규칙과 같은 리전에 둔다.** 리전마다 토픽을 하나씩 둔다(us-east-1에도 토픽을 둔다). 다른 리전의 버스나 토픽으로 넘기지 않는다. 토픽 정책에서 `events.amazonaws.com`의 `sns:Publish`를 허용한다.
 - 정상 배포 때도 울린다. 알림이 `plan` 승인 때 읽은 변경과 맞는지 대조하고, 맞지 않으면 신뢰 정책을 확인한다.
