@@ -333,7 +333,7 @@ jobs:
     if: github.ref == 'refs/heads/main' && needs.plan.outputs.changeset != ''
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    # Second approval: the reviewer has seen the plan summary.
+    # Runs right after plan (D-59: no required reviewer in the PoC). The plan summary stays in the run for later review.
     environment: central
     permissions:
       contents: read
