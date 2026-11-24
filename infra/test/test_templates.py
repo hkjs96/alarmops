@@ -541,6 +541,35 @@ class PinnedActions(unittest.TestCase):
                     self.assertRegex(st["uses"], SHA_USES, f"{fn}:{job}")
 
 
+def assert_auto_conditions(tc, cond):
+    """workflow_run may deploy only after ci succeeded for a push to main of this repository."""
+    cond = " ".join(cond.split())
+    for needle in (
+        "github.event_name == 'workflow_dispatch'",
+        "github.event.workflow_run.conclusion == 'success'",
+        "github.event.workflow_run.event == 'push'",
+        "github.event.workflow_run.head_branch == 'main'",
+        "github.event.workflow_run.head_repository.full_name == github.repository",
+    ):
+        tc.assertIn(needle, cond)
+
+
+def assert_head_sha_checkouts(tc, wf):
+    n = 0
+    for name, st in all_steps(wf):
+        if str(st.get("uses", "")).startswith("actions/checkout"):
+            n += 1
+            tc.assertEqual(st["with"]["ref"], "${{ github.event.workflow_run.head_sha || github.sha }}", name)
+    tc.assertGreater(n, 0)
+
+
+def assert_gate_failsafe(tc, run):
+    tc.assertIn('"$HEAD_SHA^" "$HEAD_SHA"', run)
+    tc.assertIn("deploy=true", run)
+    tc.assertIn("fail-safe", run)
+    tc.assertIn('"$EVENT" != "workflow_run"', run)
+
+
 class DeployWorkflow(unittest.TestCase):
     def setUp(self):
         self.text = (WORKFLOWS / "deploy-central.yml").read_text(encoding="utf-8")
@@ -553,17 +582,34 @@ class DeployWorkflow(unittest.TestCase):
     def test_triggers_and_workflow_permissions(self):
         wf = self.wf
         on = wf.get("on", wf.get(True))
-        self.assertEqual(list(on), ["workflow_dispatch"])
+        self.assertEqual(sorted(on), ["workflow_dispatch", "workflow_run"])
+        self.assertEqual(on["workflow_run"], {"workflows": ["ci"], "types": ["completed"], "branches": ["main"]})
         self.assertEqual(wf["permissions"], {"contents": "read"})
         self.assertIn("vars.CENTRAL_DEPLOY_ROLE_ARN", self.text)
         self.assertNotIn("secrets.", self.text)
         self.assertNotIn("AWS_ACCESS_KEY_ID", self.text)
         for name, job in self.jobs.items():
             self.assertIn("github.ref == 'refs/heads/main'", job["if"], name)
+        assert_auto_conditions(self, self.jobs["gate"]["if"])
+        for name in ("build", "checks"):
+            self.assertEqual(self.jobs[name]["needs"], "gate", name)
+            self.assertIn("needs.gate.outputs.deploy == 'true'", self.jobs[name]["if"], name)
+
+    def test_gate_paths_and_head_sha_checkout(self):
+        assert_head_sha_checkouts(self, self.wf)
+        r = " ".join(st.get("run", "") for st in self.jobs["gate"]["steps"])
+        for path in ("infra/aws/", "services/", "packages/core/", "deploy-central", "bundle_manifest"):
+            self.assertIn(path, r)
+        assert_gate_failsafe(self, r)
+        self.assertEqual(self.jobs["gate"]["permissions"], {"contents": "read"})
+        self.assertNotIn("environment", self.jobs["gate"])
+        self.assertEqual(self.wf["concurrency"], {"group": "deploy-central", "cancel-in-progress": False})
+        self.assertIn("--no-fail-on-empty-changeset", self.text)
+        self.assertIn("environment: central", self.text)
 
     def test_job_split_and_permissions_per_job(self):
-        self.assertEqual(sorted(self.jobs), ["apply", "build", "checks", "plan"])
-        for name in ("build", "checks"):
+        self.assertEqual(sorted(self.jobs), ["apply", "build", "checks", "gate", "plan"])
+        for name in ("gate", "build", "checks"):
             self.assertEqual(self.jobs[name]["permissions"], {"contents": "read"}, name)
             self.assertNotIn("environment", self.jobs[name], name)
         for name in ("plan", "apply"):
@@ -631,9 +677,22 @@ class DeployConsoleWorkflow(unittest.TestCase):
     def test_guards(self):
         wf = self.wf
         on = wf.get("on", wf.get(True))
-        self.assertEqual(list(on), ["workflow_dispatch"])
+        self.assertEqual(sorted(on), ["workflow_dispatch", "workflow_run"])
+        self.assertEqual(on["workflow_run"], {"workflows": ["ci"], "types": ["completed"], "branches": ["main"]})
         self.assertEqual(wf["permissions"], {"contents": "read"})
-        self.assertEqual(list(wf["jobs"]), ["deploy"])
+        self.assertEqual(list(wf["jobs"]), ["gate", "deploy"])
+        gate = wf["jobs"]["gate"]
+        assert_auto_conditions(self, gate["if"])
+        self.assertEqual(gate["permissions"], {"contents": "read"})
+        self.assertNotIn("environment", gate)
+        self.assertEqual(wf["jobs"]["deploy"]["needs"], "gate")
+        self.assertIn("needs.gate.outputs.deploy == 'true'", wf["jobs"]["deploy"]["if"])
+        assert_head_sha_checkouts(self, wf)
+        r = " ".join(st.get("run", "") for st in gate["steps"])
+        for path in ("apps/", "packages/", "tools/vercel-cli/", "package[^/]*", "deploy-console"):
+            self.assertIn(path, r)
+        assert_gate_failsafe(self, r)
+        self.assertEqual(wf["concurrency"], {"group": "deploy-console", "cancel-in-progress": False})
         job = wf["jobs"]["deploy"]
         self.assertEqual(job["permissions"], {"contents": "read"})
         self.assertEqual(job["environment"], "production")

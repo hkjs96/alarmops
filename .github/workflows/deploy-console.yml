@@ -3,9 +3,14 @@ name: deploy-console
 # Deploys apps/console to Vercel (production) from GitHub Actions (D-53, issue #46). Vercel's own Git auto-deploy must be
 # OFF for the project (docs/GO-LIVE.md, step 3), otherwise this gate can be bypassed.
 #
-# Gates, in order: workflow_dispatch by a person -> main only -> `production` environment (required reviewer, branch
-# main only) -> the pulled production environment passes check-console-deploy-env.mjs -> deploy -> smoke check.
-# An agent never runs it.
+# Started two ways: (1) automatically by workflow_run when `ci` succeeded for a push to main in this repository (a merged
+# PR), (2) by hand with workflow_dispatch. The merge approval is the human gate; nobody clicks a second approval.
+# Gates, in order: trigger (workflow_dispatch, or ci success + push + main + same repository) -> main only -> for
+# workflow_run, the merged commit changed a console path (job `gate`) -> `production` environment (branch main only; the
+# required reviewer is removed by a person in Settings -> Environments -> production, not by this file) -> the pulled
+# production environment passes check-console-deploy-env.mjs -> deploy -> smoke check.
+# The OIDC/environment name `production` must not change. A workflow_run deploys exactly ci's head_sha (checkout is pinned
+# to it), never a later main. workflow_run runs queue in the `deploy-console` concurrency group.
 #
 # Secrets: VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID are `production` ENVIRONMENT secrets (Settings ->
 # Environments -> production -> Secrets), not repository secrets: only a job that passed the environment's rules can read
@@ -25,6 +30,11 @@ name: deploy-console
 
 on:
   workflow_dispatch:
+  # Automatic: after `ci` succeeded for a push to main (a merged PR) in this repository. Never for pull requests or forks.
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: read
@@ -39,17 +49,54 @@ env:
   VERCEL_BIN: tools/vercel-cli/node_modules/.bin/vercel
 
 jobs:
+  # Decides whether a workflow_run needs a deploy at all: only when the merged commit touched console paths. A manual
+  # run always deploys. Fail-safe: no parent commit or a failing git diff means deploy. No secrets, no environment.
+  gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    if: >-
+      github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository))
+    permissions:
+      contents: read
+    outputs:
+      deploy: ${{ steps.paths.outputs.deploy }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Decide from the files this commit changed
+        id: paths
+        env:
+          EVENT: ${{ github.event_name }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -uo pipefail
+          if [ "$EVENT" != "workflow_run" ]; then echo "deploy=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          if ! files=$(git diff --name-only --no-renames "$HEAD_SHA^" "$HEAD_SHA") || [ -z "$files" ]; then
+            echo "Cannot judge the diff; deploying (fail-safe)."; echo "deploy=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if printf '%s\n' "$files" | grep -Eq '^(apps/|packages/|tools/vercel-cli/|package[^/]*\.json$|\.github/workflows/deploy-console\.yml$)'; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No console path changed in $HEAD_SHA; skipping the deploy." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+          fi
+
   deploy:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment: production
     # workflow_dispatch can start any branch's copy of this file; only main may deploy.
-    if: github.ref == 'refs/heads/main'
+    needs: gate
+    if: github.ref == 'refs/heads/main' && needs.gate.outputs.deploy == 'true'
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           persist-credentials: false
       # package.json engines.node is ">=20" and there is no .nvmrc; CI uses 20, so does this.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0

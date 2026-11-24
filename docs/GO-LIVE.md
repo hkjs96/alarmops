@@ -489,9 +489,10 @@ http://localhost:3107/auth/dev-login?as=admin
 
 실행 조건:
 
-- `workflow_dispatch`만
+- `main` 병합 후 `ci`가 성공하면 자동 실행(`workflow_run`). 콘솔 경로(`apps/`, `packages/`, `tools/vercel-cli/`, `package*.json`, 이 워크플로 파일)가 바뀐 커밋만 배포하고 나머지는 건너뛴다. 수동 실행(`workflow_dispatch`)도 된다
+- 자동 실행은 `ci`가 이 저장소의 `main` push에서 성공했을 때만, 그 커밋(`head_sha`)을 배포한다
 - `main`에서만
-- 환경 `production`(승인)
+- 환경 `production`(필수 승인자는 사람이 Settings → Environments에서 제거할 수 있다. 환경 이름은 바꾸지 않는다)
 - 권한 `contents: read`
 
 워크플로 순서:
@@ -669,8 +670,8 @@ http://localhost:3107/auth/dev-login?as=admin
 
 - [ ] **실행**
 
-1. Actions → `deploy-central` 실행. 브랜치는 `main`을 고른다.
-2. `build`와 `checks`가 끝나면 `plan` 작업 승인을 누른다.
+1. `main`에 병합하고 `ci`가 성공하면 `deploy-central`이 자동으로 시작한다(`infra/aws/`, `services/`, `packages/core/`, `package*.json`, 워크플로 파일, `bundle_manifest.py`가 바뀐 커밋만). 직접 하려면 Actions → `deploy-central` 실행, 브랜치는 `main`을 고른다. 바뀐 것이 없으면 변경 세트가 비어 `apply` 없이 성공으로 끝난다.
+2. `build`와 `checks`가 끝나면 `plan` 작업 승인을 누른다(`central` 환경의 필수 승인자를 제거했으면 승인 없이 진행한다).
 3. `plan`이 끝나면 요약의 **IAM 변경 표**를 읽는다.
    - 표 제목은 `IAM changes (read these first)`다.
    - 볼 것: 역할 이름이 모두 `AlarmOpsCentral-`로 시작하거나 이 스택의 함수 역할이다. 모르는 IAM 리소스가 있으면 승인하지 않고 허브에 묻는다.
