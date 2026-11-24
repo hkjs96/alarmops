@@ -20,7 +20,7 @@
 - 출처: https://code.claude.com/docs/en/sub-agents
 
 ## 수정 초안 (11/24, #115 첫 실행에서 나온 것)
-`docs/process/dev-process.workflow.js`를 `.claude/workflows/dev-process.js`로 옮긴다(사람). 바뀐 점:
+`.claude/workflows/dev-process.js`에 반영됨(#119). 바뀐 점:
 - 만드는 쪽은 반려 사유를 원문으로 확인해 맞으면 고치고, 틀리면 `반박:`으로 근거를 남긴다(검수자 오판 2건이 그대로 반영된 일이 있었다).
 - 검수자는 [차단]마다 파일:줄 근거를 붙인다. 근거 없는 [차단]은 무효.
 - 재검수는 이전 [차단]의 해결 여부와 새 보안 결함·명세 위반·검사 불가 기준만 [차단]으로 본다. 나머지는 [권고]로 다음 단계에 넘긴다.
