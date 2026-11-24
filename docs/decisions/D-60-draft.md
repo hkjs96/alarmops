@@ -31,6 +31,21 @@
 - **동시 실행:** 코드 작성 에이전트는 최대 2개(기존 규칙). 검수 에이전트는 읽기 전용이라 이 제한에서 뺀다.
 - **산출물 위치:** PR 댓글에 단계별로 남긴다. 증거 파일은 CI 산출물(artifact)로 둔다.
 
+## 실행 방식: git worktree와 워크플로
+Claude Code 문서로 확인한 내용:
+- 서브에이전트에 `isolation: worktree`를 주면 저장소 사본(임시 git worktree)에서 돈다. 변경이 없으면 자동으로 지워진다. 기본 분기점은 부모 세션의 HEAD가 아니라 **기본 브랜치**다.
+- 사람이 `claude --worktree <이름>`으로 병렬 세션을 띄울 수도 있다.
+- 출처: https://code.claude.com/docs/en/sub-agents , https://code.claude.com/docs/en/common-workflows#run-parallel-sessions-with-worktrees
+
+지금 상태: backend·console·infra는 이미 `isolation: worktree`다. qa-ux·security는 읽기 전용이라 worktree가 없다.
+
+D-60에서 쓰는 방식:
+- **개발 에이전트 = 자기 worktree·자기 브랜치.** 동시에 2개까지 돌려도 파일이 충돌하지 않는다.
+- **검수자 = PR head를 새로 체크아웃한 깨끗한 worktree.** 구현자의 작업 폴더(임시 파일, 로컬 수정, 실행 흔적)를 보지 못하게 해서 독립성을 지킨다. 5단계 verifier는 이 worktree에서 앱을 띄운다.
+- **단계 연결은 브랜치로 한다.** worktree는 기본 브랜치에서 갈라지므로, 3단계 개발 에이전트에게 "2단계 테스트 커밋이 있는 브랜치에서 시작"을 명시해야 한다. 이것을 빠뜨리면 테스트가 없는 상태에서 개발하게 된다.
+- **오케스트레이션은 워크플로 스크립트로 한다.** 1~6단계를 순서가 정해진 스크립트로 돌린다(Claude Code Workflow). 단계마다 다른 에이전트, 다른 worktree를 쓰고, 넘어가는 조건(검수 [차단] 0, CI 결과)을 스크립트가 판정한다. 허브가 대화로 단계를 넘기는 것보다 단계를 건너뛸 여지가 적다. 다만 워크플로는 에이전트를 많이 띄워 비용이 크다. 그래서 큰 PR에만 쓰고, 작은 PR은 허브가 직접 진행한다.
+- **주의:** worktree마다 `npm ci`가 필요해 시간과 디스크가 든다. 회사 PC(Windows)에서는 경로 길이 제한에 걸릴 수 있다. 첫 적용 때 확인한다.
+
 ## 측정 (PoC 동안 PR마다)
 - 단계별로 검수가 잡은 결함 수
 - 병합 후 새어 나간 결함 수(배포 후 발견)
