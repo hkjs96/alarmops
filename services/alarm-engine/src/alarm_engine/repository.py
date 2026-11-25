@@ -6,7 +6,7 @@ implementation (enabled only when DATABASE_URL is set). Every query is scoped by
 
 from __future__ import annotations
 
-import itertools
+import uuid
 from dataclasses import dataclass, replace
 from dataclasses import field as dc_field
 from datetime import UTC, datetime, timedelta
@@ -218,11 +218,9 @@ class Repository(Protocol):
                               result: dict) -> str: ...
 
 
-_ids = itertools.count(1)
-
-
 def new_id(prefix: str) -> str:
-    return f"{prefix}_{next(_ids):06d}"
+    # Process-independent: a per-process counter restarts at 1 on every Lambda cold start and collides with existing PKs.
+    return f"{prefix}_{uuid.uuid4().hex}"
 
 
 _ACTIVE_REMEDIATION = ("PENDING_APPROVAL", "APPROVED", "EXECUTING")
