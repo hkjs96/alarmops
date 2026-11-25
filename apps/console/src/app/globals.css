@@ -694,3 +694,44 @@ div.co-refused { margin-top: 6px; }
   .ob-steps li, .ob-step { width: 100%; }
   .ob-actions .btn { flex: 1 1 100%; }
 }
+
+/* ---------- Monitoring (#139): tables, chips, skeleton. Tokens only. ---------- */
+.subnav .mon-n { margin-left: 6px; font: 700 13px var(--mono); color: var(--mut); }
+.t.mon { table-layout: auto; }
+.t.mon th { font-size: 13px; }
+.t.mon td { overflow-wrap: anywhere; }
+.t.mon .mon-res { display: grid; gap: 2px; min-width: 0; }
+.t.mon .mon-key { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.t.mon .sub { display: block; font-size: 13px; }
+.t.mon .c-n, .t.mon .c-sev, .t.mon .c-state, .t.mon .c-seen, .t.mon .c-since { white-space: nowrap; }
+.t.mon .mon-acts { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; }
+.t.mon .mon-act { display: grid; gap: 4px; justify-items: start; }
+.t.mon .btn.sm { height: 36px; min-height: 36px; padding: 0 12px; }
+.mon-hint { font-size: 13px; color: var(--amber); font-weight: 600; }
+.mon-err { display: block; margin-top: 8px; font-size: 13px; color: var(--red); font-weight: 600; max-width: 460px; }
+.mon-done { font-weight: 600; font-size: 13px; }
+.mon-outside { margin: 0 0 12px; }
+.mon-chip { min-height: 44px; height: auto; padding: 6px 12px; font-size: 13px; color: var(--ink); border-color: var(--amber); background: var(--amber-t); }
+.mon-skel-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
+.mon-skel-rows { display: grid; gap: 6px; }
+.mon-skel { background: var(--hair); border: 1px solid var(--rule); animation: mon-pulse 1.4s ease-in-out infinite; }
+@keyframes mon-pulse { 50% { opacity: 0.55; } }
+@media (prefers-reduced-motion: reduce) { .mon-skel { animation: none; } }
+@container page (max-width: 899px) { .t.mon .c-type, .t.mon .c-seen, .t.mon .c-since { display: none; } }
+@media (max-width: 760px) {
+  .t.mon thead { display: none; }
+  .t.mon, .t.mon tbody { display: block; }
+  .t.mon tbody tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; padding: 12px 14px; border-bottom: 1px solid var(--grid); align-items: center; }
+  .t.mon tbody tr:last-child { border-bottom: 0; }
+  .t.mon tr.hot { box-shadow: inset 3px 0 0 var(--red); }
+  .t.mon td { padding: 0; border: 0; background: none !important; display: block; }
+  .t.mon .c-res, .t.mon .c-org, .t.mon .c-act, .t.mon .c-reason { grid-column: 1 / -1; }
+  .t.mon .c-type, .t.mon .c-seen, .t.mon .c-since { display: block; }
+  .t.mon td[data-label]::before { content: attr(data-label) ": "; color: var(--mut); font-size: 13px; }
+  .t.mon .btn.sm { min-height: 44px; min-width: 44px; flex: 1 1 140px; }
+  .t.mon .mon-act { flex: 1 1 140px; }
+  .t.mon .mon-act .btn { width: 100%; }
+  .t.mon .mon-key { max-width: 100%; }
+  .tw:has(.t.mon) { overflow-x: visible; }
+  .mon-skel-tiles { grid-template-columns: minmax(0, 1fr); }
+}

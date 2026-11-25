@@ -678,3 +678,49 @@ export interface VerifyBulkResult { sent: number; notSet: { contactId: string; c
 /** GET /verify/{token}: channel only, never the address */
 export interface VerifyPeek { pending: true; channel: VerifyChannel }
 export interface VerifyDone { verified: true; channel: VerifyChannel }
+
+/* ------------------------------------------------------------------------------------------------------------------
+ * Monitoring (API-CONTRACT 8.5, D-16, D-33). Fields below are the ones docs/ui/screens/monitoring.md and the issue
+ * (#139) agree with the backend; anything the API may not send yet is optional.
+ * -------------------------------------------------------------------------------------------------------------- */
+export type MonitoringState = "MONITORED" | "NEEDS_REVIEW" | "NOT_MONITORED" | "DELETED";
+export type MonitoringAction = "stop" | "keep" | "tag_on";
+export interface ResourceItem {
+  id: string;
+  name: string;
+  resourceKey: string;
+  resourceType: string;
+  region: string;
+  /** the AWS account the resource lives in. `tagWriterEnabled` decides whether Re-tag is offered (D-07, D-16). */
+  account: { id?: string; awsAccountId: string; alias?: string | null; tagWriterEnabled?: boolean } | null;
+  org: OrgChain;
+  monitoringState: MonitoringState;
+  needsReviewSince: string | null;
+  needsReviewReason: string | null;
+  alarmCount: number;
+  lastSeenAt: string | null;
+}
+/** `outside` is null when no scope filter is on (API-CONTRACT 8.0 "필터 밖 수치") */
+export interface MonitoringOutside { needsReview: number; inAlarm: number }
+export interface ResourceListResponse extends Paginated<ResourceItem> { outside: MonitoringOutside | null }
+export interface ResourceListQuery {
+  customer?: string; project?: string; service?: string; mine?: boolean; type?: string; monitoringState?: MonitoringState; limit?: number; cursor?: string;
+}
+export type AlarmState = "OK" | "ALARM" | "INSUFFICIENT_DATA";
+export interface ManagedAlarmItem {
+  id: string;
+  resourceId: string;
+  resourceName: string;
+  resourceType: string;
+  /** the metric, e.g. CPUUtilization */
+  metricKey: string;
+  threshold: number | null;
+  unit?: string | null;
+  thresholdSource?: ThresholdSource | null;
+  state: AlarmState;
+  severity: Severity;
+  org: OrgChain;
+}
+export interface ManagedAlarmListResponse extends Paginated<ManagedAlarmItem> { outside: MonitoringOutside | null }
+/** POST /resources/{id}/monitoring → 202 */
+export interface MonitoringCommandResult { commandId: string; status: "queued" }
