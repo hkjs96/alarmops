@@ -1002,7 +1002,7 @@ D-60에서 쓰는 방식:
   | `gate:in-progress` | 검수·수정 중 | 없음 |
   | `gate:needs-ci` | 현재 커밋의 CI가 돌고 있음 | 없음 |
   | `gate:blocked` | [차단] 남음·CI 실패·감사 BLOCKED | 없음(허브가 처리) |
-  | `gate:needs-human-step` | 병합 전에 사람 작업 필요(bootstrap 업데이트 등) | 안내대로 작업 |
+  | `gate:needs-human-step` | 병합 전에 사람 작업 필요(bootstrap 업데이트, **IAM 역할 신뢰 정책(`AssumeRolePolicyDocument`) 변경 → deploy-role-policy.md 4장 임시 권한** 등) | 안내대로 작업. 신뢰 정책 변경은 임시 권한을 붙인 뒤 병합한다(11/25 #129 배포가 이것 없이 `UPDATE_ROLLBACK_FAILED`) |
   | `gate:ready` | **현재 커밋** 기준 CI 통과 + 보안 [차단] 0 + 감사 READY | 병합 승인 |
   - `gate:ready` 뒤에 새 커밋이 올라오면 허브가 `gate:needs-ci`로 되돌린다(현재 커밋 기준).
   - 감사가 끝나면 PR에 **판정 근거 댓글 1개**를 남긴다: 기준별 연결 표, CI 실행 링크, 변형 검사 결과, 남은 위험, "AI 판정이며 사람 검토가 아님" 표시.
