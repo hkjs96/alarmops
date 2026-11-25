@@ -9,7 +9,7 @@ Run from the repo root:  python -m unittest discover -s infra/test -v
 
 from __future__ import annotations
 
-import json
+import re
 import subprocess
 import unittest
 
@@ -23,6 +23,33 @@ WRITERS = ["install.sh", "verify.sh", "cleanup.sh"]
 RUN = "run-0001"
 
 
+def alarm(name, queue, tags, dim="QueueName"):
+    return {"AlarmName": name, "Namespace": "AWS/SQS", "MetricName": "ApproximateNumberOfMessagesVisible",
+            "Dimensions": [{"Name": dim, "Value": queue}], "tags": tags}
+
+
+def rich_scenario(q1, q2, q1_tags=None, stack_tags=None):
+    """Customer account holding the run's queues next to things cleanup must never touch.
+
+    Only alarm-own-q1 may be deleted for run-one. alarm-own-instance carries the SAME VALUE as the
+    queue name but under dimension InstanceId, so only a check of the dimension NAME can exclude it.
+    """
+    mine = {"AlarmOpsRehearsal": "true"} if q1_tags is None else q1_tags
+    return dict(
+        stacks=[{"StackName": STACK, "StackStatus": "CREATE_COMPLETE",
+                 "Tags": [{"Key": "AlarmOpsRehearsal", "Value": "true"}] if stack_tags is None else stack_tags}],
+        queues={q1: {"tags": mine}, q2: {"tags": {"AlarmOpsRehearsal": "true"}},
+                "customer-prod-queue": {"tags": {"Team": "x"}}, "untagged-queue": {}},
+        alarms=[
+            alarm("alarm-own-q1", q1, {"ManagedBy": "AlarmOps"}),
+            alarm("alarm-untagged-q1", q1, {}),
+            alarm("alarm-manager-q1", q1, {"ManagedBy": "AlarmManager"}),
+            alarm("alarm-own-q2", q2, {"ManagedBy": "AlarmOps"}),
+            alarm("alarm-own-otherq", "customer-prod-queue", {"ManagedBy": "AlarmOps"}),
+            alarm("alarm-own-instance", q1, {"ManagedBy": "AlarmOps"}, dim="InstanceId"),
+        ])
+
+
 class Base(unittest.TestCase):
     def setUp(self):
         self.sb = Sandbox()
@@ -30,6 +57,15 @@ class Base(unittest.TestCase):
 
     def args(self, script, **kw):
         return self.sb.good_args(script, run_id=kw.pop("run_id", RUN), **kw)
+
+    def assertAllScoped(self, calls=None, expect_some=True):
+        """Every recorded aws call (sts identity checks included) names this profile and ap-northeast-2."""
+        calls = self.sb.calls() if calls is None else calls
+        if expect_some:
+            self.assertTrue(calls, "no aws call recorded; the check would be vacuous")
+        for c in calls:
+            self.assertEqual(option_values(c["argv"], "--profile"), [PROFILE], c["argv"])
+            self.assertEqual(option_values(c["argv"], "--region"), [REGION], c["argv"])
 
     def assertRejected(self, script, res, msg=""):
         self.assertNotEqual(res.code, 0, f"{script} must exit non-zero {msg}\n{res.text}")
@@ -94,10 +130,13 @@ class AccountGuard(Base):
                 res = self.sb.run(script, self.args(script))
                 self.assertRejected(script, res)
                 self.assertEqual(self.sb.writes(), [], "no write call before the account is trusted")
+                self.assertAllScoped(expect_some=False)   # the sts call made before rejecting counts too
 
     def test_identity_differs_from_local_table(self):
         self.sb.set_scenario(account="777777777777")   # table says rehearsal-a is ACCT
         self.reject_all()
+        self.assertIn(("sts", "get-caller-identity"), [(c["service"], c["op"]) for c in self.sb.calls()])
+        self.assertAllScoped()
 
     def test_profile_missing_from_local_table(self):
         self.sb.set_accounts(profiles={"rehearsal-b": "555555555555"})
@@ -146,20 +185,21 @@ class AccountGuard(Base):
 
 class ProfileAndRegionOnEveryCall(Base):
     def test_every_recorded_call_carries_the_same_profile_and_region(self):
-        self.make_run(stacks=[{"StackName": STACK, "StackStatus": "CREATE_COMPLETE",
-                               "Tags": [{"Key": "AlarmOpsRehearsal", "Value": "true"}]}])
-        self.sb.set_scenario(stacks=[{"StackName": STACK, "StackStatus": "CREATE_COMPLETE",
-                                      "Tags": [{"Key": "AlarmOpsRehearsal", "Value": "true"}]}])
+        """Runs the destructive paths too: delete-alarms, delete-queue, delete-stack must be exercised."""
+        runs = [self.make_run("run-one"), self.make_run("run-two")]
+        self.assertTrue(all(len(r) == 1 for r in runs), "verify must create one test queue per run")
+        (q1,), (q2,) = runs
+        self.sb.set_scenario(**rich_scenario(q1, q2))
         self.sb.run("preflight.sh", self.args("preflight.sh"))
         self.sb.run("install.sh", self.args("install.sh"))
         self.sb.run("verify.sh", self.args("verify.sh", run_id="run-0002"))
-        self.sb.run("cleanup.sh", self.args("cleanup.sh", extra=["--stack"]))
+        self.sb.run("cleanup.sh", self.args("cleanup.sh", run_id="run-one", extra=["--stack"]))
         calls = self.sb.calls()
         self.assertGreater(len(calls), 8)
-        for c in calls:
-            with self.subTest(call=c["argv"]):
-                self.assertEqual(option_values(c["argv"], "--profile"), [PROFILE])
-                self.assertEqual(option_values(c["argv"], "--region"), [REGION])
+        ops = {c["op"] for c in calls}
+        for needed in ("delete-alarms", "delete-queue", "delete-stack", "create-queue"):
+            self.assertIn(needed, ops, f"scenario did not reach {needed}; the sweep would miss it")
+        self.assertAllScoped(calls)
 
 
 class Preflight(Base):
@@ -222,11 +262,6 @@ class SecretHandling(Base):
         self.assertEqual(self.sb.writes(), [])
 
 
-def alarm(name, queue, tags, dim="QueueName"):
-    return {"AlarmName": name, "Namespace": "AWS/SQS", "MetricName": "ApproximateNumberOfMessagesVisible",
-            "Dimensions": [{"Name": dim, "Value": queue}], "tags": tags}
-
-
 class CleanupScope(Base):
     def prepare(self):
         q1 = self.make_run("run-one")
@@ -237,18 +272,7 @@ class CleanupScope(Base):
         return q1[0], q2[0]
 
     def scenario(self, q1, q2, q1_tags=None):
-        mine = {"AlarmOpsRehearsal": "true"} if q1_tags is None else q1_tags
-        return dict(
-            queues={q1: {"tags": mine}, q2: {"tags": {"AlarmOpsRehearsal": "true"}},
-                    "customer-prod-queue": {"tags": {"Team": "x"}}, "untagged-queue": {}},
-            alarms=[
-                alarm("alarm-own-q1", q1, {"ManagedBy": "AlarmOps"}),
-                alarm("alarm-untagged-q1", q1, {}),
-                alarm("alarm-manager-q1", q1, {"ManagedBy": "AlarmManager"}),
-                alarm("alarm-own-q2", q2, {"ManagedBy": "AlarmOps"}),
-                alarm("alarm-own-otherq", "customer-prod-queue", {"ManagedBy": "AlarmOps"}),
-                alarm("alarm-own-instance", "i-0abc", {"ManagedBy": "AlarmOps"}, dim="InstanceId"),
-            ])
+        return rich_scenario(q1, q2, q1_tags)
 
     def deleted_alarms(self):
         blobs = [call_blob(c) for c in self.sb.calls() if c["op"] == "delete-alarms"]
@@ -266,12 +290,14 @@ class CleanupScope(Base):
         res = self.sb.run("cleanup.sh", self.args("cleanup.sh", run_id="run-one"))
         self.assertEqual(res.code, 0, res.text)
         self.assertEqual(self.deleted_alarms(), {"alarm-own-q1"})
+        self.assertAllScoped()
 
     def test_deletes_only_the_tagged_queue_of_the_run(self):
         q1, q2 = self.prepare()
         self.sb.set_scenario(**self.scenario(q1, q2))
         self.sb.run("cleanup.sh", self.args("cleanup.sh", run_id="run-one"))
         self.assertEqual(self.deleted_queues(), {q1})
+        self.assertAllScoped()
 
     def test_queue_without_rehearsal_tag_is_kept_even_if_in_the_run_log(self):
         q1, q2 = self.prepare()
@@ -384,6 +410,24 @@ class VerifySimulation(Base):
         p = self.sb.log_dir / PROFILE / f"{RUN}.md"
         self.assertTrue(p.is_file(), p)
         self.assertEqual(mode(p), 0o600)
+
+
+class GoLiveDoc(unittest.TestCase):
+    """D-16: a tag that disappears must not delete the alarm; the console shows it as needing review."""
+
+    def sentences(self):
+        text = (REPO / "docs" / "GO-LIVE.md").read_text(encoding="utf-8")
+        return [s for s in re.split(r"(?<=[.!?。])\s+|\n", text) if "태그를 떼" in s]
+
+    def test_tag_removal_sentence_follows_d16(self):
+        found = self.sentences()
+        self.assertTrue(found, "GO-LIVE.md should still say what happens when the tag is removed")
+        for s in found:
+            with self.subTest(sentence=s):
+                self.assertIsNone(re.search(r"태그를 떼면\s*(맞춰서\s*)?(정리|삭제|지운|지워)", s),
+                                  "old behaviour (delete on untag) contradicts D-16")
+                self.assertTrue("확인 필요" in s or "NEEDS_REVIEW" in s, "must mention the review state")
+                self.assertTrue("남" in s or "지우지 않" in s, "must say the alarm stays")
 
 
 class GitIgnore(unittest.TestCase):

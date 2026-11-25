@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import stat
 import subprocess
@@ -65,7 +66,11 @@ class Sandbox:
         self.bin = self.dir / "bin"
         self.bin.mkdir()
         wrapper = self.bin / "aws"
-        wrapper.write_text(f'#!/usr/bin/env bash\nexec "{sys.executable}" "{FAKE_AWS_PY}" "$@"\n')
+        # Forward slashes + shell quoting: a Windows path such as C:\\Users\\x\\python.exe would otherwise be
+        # at the mercy of bash backslash rules. Git Bash accepts C:/... paths. (Windows run: not verified here.)
+        py, fake = shlex.quote(Path(sys.executable).as_posix()), shlex.quote(FAKE_AWS_PY.as_posix())
+        with open(wrapper, "w", encoding="utf-8", newline="\n") as f:   # LF even on Windows: bash chokes on CRLF
+            f.write(f'#!/usr/bin/env bash\nexec {py} {fake} "$@"\n')
         wrapper.chmod(0o755)
         self.calls_file = self.dir / "aws-calls.jsonl"
         self.scenario_file = self.dir / "scenario.json"
@@ -117,7 +122,7 @@ class Sandbox:
 
     def run(self, script: str, args: list[str], extra_env=None, external_id=EID) -> Result:
         kw = {}
-        if hasattr(os, "umask"):
+        if os.name == "posix":   # preexec_fn is POSIX-only; os.umask exists on Windows too, so do not test for it
             kw["preexec_fn"] = lambda: os.umask(0)   # a 600 log must come from the script, not the umask
         cp = subprocess.run(["bash", str(SCRIPTS / script), *args], env=self.env(extra_env, external_id),
                             stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=120,
@@ -169,4 +174,9 @@ def call_blob(c: dict) -> str:
 
 
 def mode(path: Path) -> int:
-    return stat.S_IMODE(path.stat().st_mode)
+    """Permission bits. On Windows Python's stat() only knows read-only, so ask Git Bash's stat instead."""
+    if os.name == "posix":
+        return stat.S_IMODE(path.stat().st_mode)
+    out = subprocess.run(["bash", "-c", 'stat -c %a "$1"', "_", path.as_posix()],
+                         capture_output=True, text=True, check=True).stdout.strip()
+    return int(out, 8)
