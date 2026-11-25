@@ -4,7 +4,7 @@
 
 Each trust.json is the AssumeRolePolicyDocument of one role (`aws iam get-role --query Role.AssumeRolePolicyDocument`).
 Every Statement's Principal must be made only of:
-  - AWS: an ARN that starts with arn:<partition>:iam::<account-id>:   (same account)
+  - AWS: a role ARN of this account (arn:<partition>:iam::<account-id>:role/...); not :root, not a user
   - Service: one of the allowed services                               (the ones central.yaml uses)
   - Federated: exactly the Vercel OIDC provider ARN
 Anything else is an error: "*", NotPrincipal, an empty Principal, another account, an unknown service, a unique ID
@@ -29,7 +29,8 @@ def check_document(doc, account, provider, services):
         stmts = [stmts]
     if not isinstance(stmts, list) or not stmts:
         return [(0, "-", "-", False, "no Statement")]
-    same_acct = re.compile(r"^arn:aws[a-z-]*:iam::" + re.escape(account) + r":")
+    # a role of this account only: ":root" (or a user) would let any IAM identity of the account with sts:AssumeRole in.
+    same_acct = re.compile(r"^arn:aws[a-z-]*:iam::" + re.escape(account) + r":role/[\w+=,.@/-]+$")
     for i, st in enumerate(stmts):
         if not isinstance(st, dict):
             rows.append((i, "-", "-", False, "Statement is not an object"))
@@ -50,7 +51,7 @@ def check_document(doc, account, provider, services):
                     rows.append((i, ptype, str(v), False, "not a string"))
                 elif ptype == "AWS":
                     ok = bool(same_acct.match(v))
-                    rows.append((i, ptype, v, ok, "same account" if ok else "not an ARN of this account"))
+                    rows.append((i, ptype, v, ok, "role of this account" if ok else "not a role ARN of this account (root, user, other account)"))
                 elif ptype == "Service":
                     ok = v in services
                     rows.append((i, ptype, v, ok, "allowed service" if ok else "service not used by the templates"))

@@ -45,9 +45,14 @@ class Check(unittest.TestCase):
         self.assertIn("| role0 |", cp.stdout)
         self.assertEqual(cp.stdout.count("ok:"), 3)
 
-    def test_same_account_root_and_list_pass(self):
-        cp = self.run_check(doc({"AWS": [f"arn:aws:iam::{ACCT}:root", f"arn:aws:iam::{ACCT}:role/x"]}))
+    def test_same_account_role_list_passes(self):
+        cp = self.run_check(doc({"AWS": [f"arn:aws:iam::{ACCT}:role/x", f"arn:aws:iam::{ACCT}:role/path/y"]}))
         self.assertEqual(cp.returncode, 0, cp.stdout)
+
+    def test_same_account_root_or_user_fails(self):
+        # ":root" trusts every IAM identity of the account that has sts:AssumeRole; only exact roles are expected.
+        self.assert_fail(doc({"AWS": f"arn:aws:iam::{ACCT}:root"}))
+        self.assert_fail(doc({"AWS": f"arn:aws:iam::{ACCT}:user/alice"}))
 
     def test_other_account_fails_even_when_mixed_with_good_ones(self):
         cp = self.assert_fail(doc({"AWS": [f"arn:aws:iam::{ACCT}:role/x", "arn:aws:iam::999999999999:role/x"]}))
