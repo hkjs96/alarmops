@@ -40,6 +40,11 @@ from alarm_engine.thresholds import LayerValues
 
 logger = logging.getLogger(__name__)
 STALE_RUN_AFTER = timedelta(minutes=20)
+#: A sync runs inside one Lambda invocation (<= the engine timeout, 120 s by default). A RUNNING row whose heartbeat is
+#: older than the timeout plus this margin belongs to a process that is gone, so it is closed at once instead of
+#: blocking SQS redeliveries for STALE_RUN_AFTER.
+DEAD_RUN_MARGIN = timedelta(seconds=30)
+DEFAULT_ENGINE_TIME_LIMIT_S = 120
 
 
 class DiscoveryError(Exception):
@@ -112,7 +117,9 @@ class ResourceResult:
 
 class Engine:
     def __init__(self, repo: Repository, sessions: SessionFactory, discovery: Discovery,
-                 alarm_actions: dict[str, list[str]] | None = None, alarm_limit: int = DEFAULT_ALARM_LIMIT):
+                 alarm_actions: dict[str, list[str]] | None = None, alarm_limit: int = DEFAULT_ALARM_LIMIT,
+                 dead_run_after: timedelta | None = None):
+        self.dead_run_after = dead_run_after or timedelta(seconds=DEFAULT_ENGINE_TIME_LIMIT_S) + DEAD_RUN_MARGIN
         self.alarm_limit = alarm_limit          # per account+region metric alarm quota (AWS default 5,000)
         self._alarm_counts: dict[tuple[str, str], dict[str, int]] = {}   # cleared per sync pass
         self._batch = False
@@ -245,22 +252,30 @@ class Engine:
         ))
 
     # ── account
-    def sync_account(self, account_id: str, mode: str) -> dict:
+    def sync_account(self, account_id: str, mode: str, command_id: str | None = None) -> dict:
+        """`command_id` (the SQS command, without a `-d<n>` deferral suffix) is recorded in the run's counts so a
+        duplicate of an already finished command is skipped."""
         self._alarm_counts.clear()
         self._batch = True
         try:
-            return self._sync_account(account_id, mode)
+            return self._sync_account(account_id, mode, command_id)
         finally:
             self._batch = False
             self._alarm_counts.clear()
 
-    def _sync_account(self, account_id: str, mode: str) -> dict:
+    def _sync_account(self, account_id: str, mode: str, command_id: str | None = None) -> dict:
         account = self.repo.get_account(account_id)
-        self.repo.fail_stale_sync_runs(STALE_RUN_AFTER)
-        run = self.repo.claim_sync_run(account.customer_id, account.id, mode, STALE_RUN_AFTER)
+        # D-43: a delayed child runs minutes after the fan-out; the customer may be suspended/terminated by now.
+        if not self.repo.is_account_active(account.id):
+            return {"skipped": "INACTIVE"}
+        if command_id and self.repo.sync_command_done(account.customer_id, account.id, command_id):
+            return {"skipped": "DUPLICATE"}      # redelivered / re-sent copy of a command that already finished
+        self.repo.fail_stale_sync_runs(self.dead_run_after)    # heartbeat stopped: that process is gone
+        run = self.repo.claim_sync_run(account.customer_id, account.id, mode, self.dead_run_after, command_id)
         if run is None:    # another live run holds this account (ON_DEMAND, inline reconcile or a scheduled child)
             return {"skipped": "BUSY"}
-        counts: dict[str, Any] = {"created": 0, "updated": 0, "refreshed": 0, "deleted": 0, "needsReview": 0, "externalChange": 0,
+        counts: dict[str, Any] = {"commandId": command_id} if command_id else {}
+        counts |= {"created": 0, "updated": 0, "refreshed": 0, "deleted": 0, "needsReview": 0, "externalChange": 0,
                   "errors": 0, "readOnly": False}
         try:
             return self._sync_body(account, run, counts)

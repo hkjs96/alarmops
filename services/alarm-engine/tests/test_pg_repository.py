@@ -250,3 +250,27 @@ def test_existing_duplicate_running_rows_mean_busy_then_stale_cleanup_replaces_t
     assert states["run_dup1"] == "FAILED" and states["run_dup2"] == "FAILED"
     assert pg.claim_sync_run("cus_p_c", "acc_p_dup", "DAILY", timedelta(minutes=20)) is not None
     assert _running(pg, "acc_p_dup") == 1
+
+
+def test_is_account_active_follows_the_d43_rule(pg):
+    for cid, status in (("cus_p_a2", "ACTIVE"), ("cus_p_t2", "TERMINATED")):
+        pg._exec('''INSERT INTO "Customer" (id, name, slug, status, "updatedAt") VALUES (%s,%s,%s,%s::"CustomerStatus",now())
+                    ON CONFLICT DO NOTHING''', cid, cid, cid, status)
+    _acct(pg, "acc_p_ia1", "cus_p_a2", "700000000001")
+    _acct(pg, "acc_p_ia2", "cus_p_t2", "700000000002")
+    _acct(pg, "acc_p_ia3", "cus_p_a2", "700000000003", disabled=True)
+    assert pg.is_account_active("acc_p_ia1")
+    assert not pg.is_account_active("acc_p_ia2") and not pg.is_account_active("acc_p_ia3")
+    assert not pg.is_account_active("acc_p_missing")
+
+
+def test_sync_command_done_uses_counts_command_id_and_only_finished_runs(pg):
+    pg._exec('''INSERT INTO "Customer" (id, name, slug, "updatedAt") VALUES ('cus_p_c','C','pc',now())
+                ON CONFLICT DO NOTHING''')
+    _acct(pg, "acc_p_cd", "cus_p_c", "800000000001")
+    rid = pg.claim_sync_run("cus_p_c", "acc_p_cd", "DAILY", timedelta(minutes=20), "sched-DAILY-t-acc_p_cd")
+    assert rid is not None
+    assert not pg.sync_command_done("cus_p_c", "acc_p_cd", "sched-DAILY-t-acc_p_cd")     # RUNNING is not done
+    pg.finish_sync_run("cus_p_c", rid, "SUCCEEDED", {"commandId": "sched-DAILY-t-acc_p_cd"})
+    assert pg.sync_command_done("cus_p_c", "acc_p_cd", "sched-DAILY-t-acc_p_cd")
+    assert not pg.sync_command_done("cus_other", "acc_p_cd", "sched-DAILY-t-acc_p_cd")

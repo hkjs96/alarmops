@@ -102,14 +102,17 @@ Parameters:
   SyncBusyMaxDeferrals:
     Type: Number
     Default: 5
-    MinValue: 1
-    MaxValue: 20
-    Description: Times a busy scheduled sync child is sent back. The engine refuses to start unless this x SyncBusyDeferSeconds > 1320 s.
+    AllowedValues: [2, 3, 4, 5, 6, 8, 10, 12, 15, 20]
+    Description: >-
+      Times a busy scheduled sync child is sent back. This x SyncBusyDeferSeconds must be > 1320 s (stale-run window
+      1200 s + engine timeout 120 s); the Rule SyncBusyBudget enforces it (CloudFormation Rules cannot multiply, so both
+      parameters take a fixed value list and the Rule lists the allowed pairs). The engine also rejects a violating
+      setting at run time (the periodic sync only; every other command keeps working).
   SyncBusyDeferSeconds:
     Type: Number
     Default: 300
-    MinValue: 1
-    MaxValue: 900
+    AllowedValues: [120, 180, 300, 450, 600, 900]
+    Description: Delay of each busy-deferral copy (SQS DelaySeconds, at most 900). See SyncBusyMaxDeferrals.
   EngineMaxConcurrency:
     Type: Number
     Default: 5
@@ -155,6 +158,29 @@ Parameters:
     Description: ALARMOPS_REMEDIATION_EXECUTION for the engine (D-15). Stays false until the Slack approval path is live.
 
 Rules:
+  # SyncBusyMaxDeferrals x SyncBusyDeferSeconds > 1320 (= 1200 s stale window + 120 s engine timeout, the maximum the
+  # EngineTimeoutSeconds parameter allows). Allowed pairs per delay: 120 -> >=12, 180 -> >=8, 300 -> >=5, 450 -> >=3,
+  # 600 -> >=3, 900 -> >=2.
+  SyncBusyBudget:
+    Assertions:
+      - Assert:
+          Fn::Or:
+            - Fn::And:
+                - !Equals [!Ref SyncBusyDeferSeconds, "120"]
+                - !Contains [["12", "15", "20"], !Ref SyncBusyMaxDeferrals]
+            - Fn::And:
+                - !Equals [!Ref SyncBusyDeferSeconds, "180"]
+                - !Contains [["8", "10", "12", "15", "20"], !Ref SyncBusyMaxDeferrals]
+            - Fn::And:
+                - !Equals [!Ref SyncBusyDeferSeconds, "300"]
+                - !Contains [["5", "6", "8", "10", "12", "15", "20"], !Ref SyncBusyMaxDeferrals]
+            - Fn::And:
+                - !Contains [["450", "600"], !Ref SyncBusyDeferSeconds]
+                - !Contains [["3", "4", "5", "6", "8", "10", "12", "15", "20"], !Ref SyncBusyMaxDeferrals]
+            - Fn::And:
+                - !Equals [!Ref SyncBusyDeferSeconds, "900"]
+                - !Contains [["2", "3", "4", "5", "6", "8", "10", "12", "15", "20"], !Ref SyncBusyMaxDeferrals]
+        AssertDescription: SyncBusyMaxDeferrals x SyncBusyDeferSeconds must be greater than 1320 seconds.
   SesNeedsFromAddress:
     RuleCondition: !Not [!Equals [!Ref SesIdentityArn, ""]]
     Assertions:
@@ -738,6 +764,7 @@ Resources:
           REMEDIATOR_CALLER_ROLE_ARN: !If [RemediationEnabled, !GetAtt RemediatorCallerRole.Arn, !Ref "AWS::NoValue"]
           # #123: the engine sends the fan-out children and deferred copies back to its own queue.
           COMMANDS_QUEUE_URL: !Ref CommandsQueue
+          ENGINE_TIMEOUT_SECONDS: !Ref EngineTimeoutSeconds   # the engine derives its dead-run window from this
           SYNC_FANOUT_SPREAD_SECONDS: !Ref SyncFanoutSpreadSeconds
           SYNC_BUSY_MAX_DEFERRALS: !Ref SyncBusyMaxDeferrals
           SYNC_BUSY_DEFER_SECONDS: !Ref SyncBusyDeferSeconds

@@ -136,7 +136,20 @@ def _sender_or_default(sender: CommandSender | None) -> CommandSender:
     if sender is not None:
         return sender
     from alarm_engine import wiring
-    return wiring.get_command_sender()
+    try:
+        return wiring.get_command_sender()
+    except RuntimeError as e:        # COMMANDS_QUEUE_URL missing: periodic-sync path only (message has no secret)
+        raise InvalidCommand(f"periodic sync unavailable: {e}") from e
+
+
+def _sync_settings():
+    """Periodic-sync settings. A bad value rejects only the commands that need them (fan-out, deferral); every other
+    command keeps working. The reason names variables and numbers only (no secret) and is logged by the caller."""
+    from alarm_engine import wiring
+    try:
+        return wiring.sync_settings_from_env()
+    except ValueError as e:
+        raise InvalidCommand(f"periodic sync refused, invalid settings: {e}") from e
 
 
 def _send_all(sender: CommandSender, entries: list[dict]) -> None:
@@ -155,8 +168,7 @@ def _entry(i: int, cmd: dict, delay: int) -> dict:
 
 
 def _fan_out(engine: Engine, cmd: dict, mode: str, sender: CommandSender | None) -> dict:
-    from alarm_engine import wiring
-    settings = wiring.sync_settings_from_env()
+    settings = _sync_settings()
     accounts = engine.repo.list_active_accounts()
     n = len(accounts)
     step = min(settings.fanout_spread_seconds, 900 / n) if n else 0
@@ -169,8 +181,7 @@ def _fan_out(engine: Engine, cmd: dict, mode: str, sender: CommandSender | None)
 
 
 def _defer_or_skip(cmd: dict, p: dict, mode: str, sender: CommandSender | None) -> dict:
-    from alarm_engine import wiring
-    settings = wiring.sync_settings_from_env()
+    settings = _sync_settings()
     deferrals = p.get("deferrals") or 0
     if deferrals >= settings.max_deferrals:
         logger.warning("SYNC_ACCOUNT %s SKIPPED_BUSY: account still busy after %d deferrals", cmd["commandId"], deferrals)
@@ -199,8 +210,18 @@ def dispatch(engine: Engine, cmd: dict, liveness_sink: Callable[[str, str, dict]
             if mode not in ("DAILY", "TAG_RECONCILE", "ON_DEMAND"):
                 raise InvalidCommand(f"bad mode {mode}")
             started = time.monotonic()
-            counts = engine.sync_account(_account_of(engine, cmd), mode)
+            deferrals = p.get("deferrals") or 0
+            base_id = cmd["commandId"]
+            if deferrals and base_id.endswith(f"-d{deferrals}"):
+                base_id = base_id[:-len(f"-d{deferrals}")]      # a deferred copy dedupes under the original id
+            counts = engine.sync_account(_account_of(engine, cmd), mode, base_id)
             logger.info("SYNC_ACCOUNT %s mode=%s took %.1fs", cmd["commandId"], mode, time.monotonic() - started)
+            if counts.get("skipped") == "INACTIVE":     # D-43: suspended/terminated/disabled since it was queued
+                logger.warning("SYNC_ACCOUNT %s SKIPPED_INACTIVE (customer/account no longer active)", cmd["commandId"])
+                return {"status": "SKIPPED_INACTIVE", "counts": counts}
+            if counts.get("skipped") == "DUPLICATE":
+                logger.info("SYNC_ACCOUNT %s SKIPPED_DUPLICATE (command already finished)", cmd["commandId"])
+                return {"status": "SKIPPED_DUPLICATE", "counts": counts}
             if counts.get("skipped") == "BUSY":
                 if mode in SCHEDULED_MODES:
                     return _defer_or_skip(cmd, p, mode, sender)

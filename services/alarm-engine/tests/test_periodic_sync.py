@@ -480,7 +480,7 @@ def simulate(monkeypatch, n: int, sync_s: int, batch: int, spread: int, *, visib
     eng = engine_of(repo)
     clock = [0.0]
 
-    def fake_sync(account_id: str, mode: str) -> dict:
+    def fake_sync(account_id: str, mode: str, command_id: str | None = None) -> dict:
         clock[0] += sync_s
         return {"created": 0}
 
@@ -642,12 +642,18 @@ def test_build_engine_accepts_valid_settings(start_env):
 
 
 @pytest.mark.parametrize("deferrals,secs", [(4, 330), (4, 300), (1, 900)])
-def test_build_engine_refuses_to_start_when_the_deferral_budget_is_too_small(start_env, monkeypatch, deferrals, secs):
+def test_build_engine_does_not_refuse_to_start_on_a_too_small_deferral_budget(start_env, monkeypatch, deferrals, secs):
+    """[차단 4] a bad periodic-sync setting must not stop the engine: only the periodic path rejects (tests below)."""
     from alarm_engine import wiring
     monkeypatch.setenv("SYNC_BUSY_MAX_DEFERRALS", str(deferrals))
     monkeypatch.setenv("SYNC_BUSY_DEFER_SECONDS", str(secs))
-    with pytest.raises((ValueError, RuntimeError)):
-        wiring.build_engine()
+    assert wiring.build_engine() is start_env
+
+
+def test_build_engine_does_not_need_the_queue_url(start_env, monkeypatch):
+    from alarm_engine import wiring
+    monkeypatch.delenv("COMMANDS_QUEUE_URL")
+    assert wiring.build_engine() is start_env
 
 
 def test_build_engine_accepts_the_boundary_just_above_the_limit(start_env, monkeypatch):
@@ -657,12 +663,192 @@ def test_build_engine_accepts_the_boundary_just_above_the_limit(start_env, monke
     assert wiring.build_engine() is start_env
 
 
-def test_lambda_handler_init_fails_the_whole_batch_and_caches_nothing_on_bad_settings(start_env, monkeypatch, caplog):
+def test_bad_settings_reject_only_the_periodic_sync_commands_and_log_the_reason(start_env, monkeypatch, caplog):
+    """[차단 4] fan-out and deferral are refused with a logged reason; a normal command in the same batch still works."""
     monkeypatch.setenv("SYNC_BUSY_MAX_DEFERRALS", "4")
     monkeypatch.setenv("SYNC_BUSY_DEFER_SECONDS", "330")
-    recs = [record(fanout(), "m1"), record(fanout("DAILY"), "m2")]
+    monkeypatch.setenv("DATABASE_URL", "postgresql://u:SECRETPW@db.invalid/x")
+    repo = InMemoryRepository()
+    acc = make_account()
+    repo.accounts[acc.id] = acc
+    eng = Engine(repo, FakeSessions(), FakeDiscovery())
+    add_run(repo, acc)                                              # busy -> the child wants to defer
+    sender = FakeSender()
+    on_demand = {"schemaVersion": 1, "commandId": "c-ok", "type": "CHECK_CONNECTION", "customerId": acc.customer_id,
+                 "cloudAccountId": acc.id, "payload": {}}
+    recs = [record(fanout(), "m1"), record(child(acc, "DAILY"), "m2"), record(on_demand, "m3")]
     with caplog.at_level(logging.ERROR):
-        out = handler.lambda_handler({"Records": recs}, None)
-    assert [f["itemIdentifier"] for f in out["batchItemFailures"]] == ["m1", "m2"]
-    assert handler._ENGINE is None
-    assert "engine init failed" in caplog.text
+        out = handler.handle_batch(eng, {"Records": recs}, sender=sender)
+    assert out == {"batchItemFailures": []}                         # poison, not retried, nothing sent
+    assert sender.entries == []
+    assert caplog.text.count("periodic sync refused, invalid settings") == 2
+    assert "1320" in caplog.text and "SECRETPW" not in caplog.text
+    assert [r for r in caplog.records if "c-ok" in r.getMessage() and r.levelno >= logging.ERROR] == []   # m3 handled
+
+
+def test_lambda_handler_builds_and_caches_the_engine_despite_bad_periodic_settings(start_env, monkeypatch):
+    monkeypatch.setenv("SYNC_BUSY_MAX_DEFERRALS", "4")
+    monkeypatch.setenv("SYNC_BUSY_DEFER_SECONDS", "330")
+    monkeypatch.setattr(handler, "handle_batch", lambda *a, **k: {"batchItemFailures": []})
+    assert handler.lambda_handler({"Records": [record(fanout(), "m1")]}, None) == {"batchItemFailures": []}
+    assert handler._ENGINE is start_env
+
+
+def test_missing_queue_url_rejects_only_the_fanout(monkeypatch, caplog):
+    from alarm_engine import wiring
+    monkeypatch.setattr(wiring, "_SENDER", None)
+    monkeypatch.delenv("COMMANDS_QUEUE_URL", raising=False)
+    repo = InMemoryRepository()
+    add_accounts(repo, 1)
+    eng = engine_of(repo)
+    with caplog.at_level(logging.ERROR):
+        out = handler.handle_batch(eng, {"Records": [record(fanout(), "m1")]})
+    assert out == {"batchItemFailures": []} and "COMMANDS_QUEUE_URL" in caplog.text
+
+
+def test_engine_time_limit_comes_from_the_environment_not_a_constant():
+    from alarm_engine import wiring
+    assert not hasattr(wiring, "ENGINE_TIME_LIMIT_S")
+    assert wiring.engine_time_limit_s({}) == 120
+    assert wiring.engine_time_limit_s({"ENGINE_TIMEOUT_SECONDS": "60"}) == 60
+    assert wiring.engine_time_limit_s({"ENGINE_TIMEOUT_SECONDS": "0"}) == 120        # out of range -> default
+    # the start-check budget follows it: 4 x 300 = 1200 > 1200 + 60 is false, but 5 x 300 > 1200 + 60 is true
+    with pytest.raises(ValueError):
+        wiring.sync_settings_from_env({"ENGINE_TIMEOUT_SECONDS": "120", "SYNC_BUSY_MAX_DEFERRALS": "4",
+                                       "SYNC_BUSY_DEFER_SECONDS": "330"})
+    assert wiring.sync_settings_from_env({"ENGINE_TIMEOUT_SECONDS": "10", "SYNC_BUSY_MAX_DEFERRALS": "4",
+                                          "SYNC_BUSY_DEFER_SECONDS": "330"})            # 1320 > 1200 + 10
+
+
+# ── [차단 1] 지연된 자식은 실행 시점에 다시 활성 여부를 확인한다 (D-43) ───────────────────────────────────────────────
+
+@pytest.mark.parametrize("mode", ["DAILY", "TAG_RECONCILE", "ON_DEMAND"])
+@pytest.mark.parametrize("how", ["suspended", "terminated", "disabled", "purged"])
+def test_child_of_an_account_deactivated_after_fanout_is_skipped_not_synced(one, mode, how, caplog):
+    repo, acc, eng = one
+    sender = FakeSender()
+    handler.handle_batch(eng, {"Records": [record(fanout())]}, sender=sender)       # fan-out saw it active
+    queued = sender.commands()[0]
+    queued["payload"]["mode"] = mode
+    if how in ("suspended", "terminated"):
+        repo.customer_status[acc.customer_id] = how.upper()
+    elif how == "disabled":
+        repo.disabled_accounts.add(acc.id)
+    else:
+        repo.purged_accounts.add(acc.id)
+    eng.discovery.resources = [ec2()]
+    with caplog.at_level(logging.WARNING):
+        out = handler.handle_batch(eng, {"Records": [record(queued)]}, sender=sender)
+    assert out == {"batchItemFailures": []}
+    assert repo.runs == {} and repo.resources == {}                                  # nothing synced
+    assert "SKIPPED_INACTIVE" in caplog.text
+    assert handler.dispatch(eng, queued, sender=FakeSender())["status"] == "SKIPPED_INACTIVE"
+
+
+def test_deferred_copy_of_a_deactivated_account_is_skipped_too(one):
+    repo, acc, eng = one
+    repo.customer_status[acc.customer_id] = "TERMINATED"
+    sender = FakeSender()
+    assert handler.dispatch(eng, child(acc, "DAILY", deferrals=2), sender=sender)["status"] == "SKIPPED_INACTIVE"
+    assert sender.entries == []                                                      # not re-deferred
+
+
+# ── [차단 2] 같은 commandId 중복 자식은 한 번만 실행된다 (counts.commandId, 마이그레이션 없음) ─────────────────────────
+
+def test_second_copy_of_a_finished_child_command_is_skipped(one):
+    repo, acc, eng = one
+    cmd = child(acc, "DAILY")
+    eng.discovery.resources = [ec2()]
+    assert handler.dispatch(eng, cmd, sender=FakeSender())["status"] == "OK"
+    assert len(repo.runs) == 1
+    (run,) = repo.runs.values()
+    assert run.status in ("SUCCEEDED", "PARTIAL") and run.counts["commandId"] == cmd["commandId"]
+    out = handler.dispatch(eng, cmd, sender=FakeSender())
+    assert out["status"] == "SKIPPED_DUPLICATE" and len(repo.runs) == 1
+
+
+def test_resent_fanout_children_run_once_per_account(one):
+    """The fan-out record is redelivered after a partial send failure: every child exists twice in the queue."""
+    repo, acc, eng = one
+    sender = FakeSender()
+    handler.handle_batch(eng, {"Records": [record(fanout())]}, sender=sender)
+    handler.handle_batch(eng, {"Records": [record(fanout(), "m2")]}, sender=sender)            # redelivery
+    kids = sender.commands()
+    assert len(kids) == 2 and kids[0]["commandId"] == kids[1]["commandId"]
+    eng.discovery.resources = [ec2()]
+    out = handler.handle_batch(eng, {"Records": [record(k, f"k{i}") for i, k in enumerate(kids)]}, sender=sender)
+    assert out == {"batchItemFailures": []}
+    assert len(repo.runs) == 1
+
+
+def test_deferred_copy_dedupes_under_the_original_command_id(one):
+    repo, acc, eng = one
+    cmd = child(acc, "DAILY")
+    eng.discovery.resources = [ec2()]
+    handler.dispatch(eng, cmd, sender=FakeSender())
+    deferred = child(acc, "DAILY", deferrals=1)
+    deferred["commandId"] += "-d1"
+    assert handler.dispatch(eng, deferred, sender=FakeSender())["status"] == "SKIPPED_DUPLICATE"
+
+
+def test_a_failed_run_of_the_same_command_is_retried_not_deduped(one):
+    repo, acc, eng = one
+    cmd = child(acc, "DAILY")
+    rid = repo.claim_sync_run(acc.customer_id, acc.id, "DAILY", timedelta(minutes=20), cmd["commandId"])
+    repo.finish_sync_run(acc.customer_id, rid, "FAILED", {"commandId": cmd["commandId"]}, "boom")
+    assert handler.dispatch(eng, cmd, sender=FakeSender())["status"] == "OK"
+    assert len(repo.runs) == 2
+
+
+def test_command_dedupe_is_scoped_to_account_and_customer(one):
+    repo, acc, _ = one
+    rid = repo.claim_sync_run(acc.customer_id, acc.id, "DAILY", timedelta(minutes=20), "x")
+    repo.finish_sync_run(acc.customer_id, rid, "SUCCEEDED", {"commandId": "x"})
+    assert repo.sync_command_done(acc.customer_id, acc.id, "x")
+    assert not repo.sync_command_done("cus_other", acc.id, "x")
+    assert not repo.sync_command_done(acc.customer_id, "acc_other", "x")
+
+
+# ── [차단 3] 크래시·시간 초과 뒤 재전달은 죽은 런을 닫고 새 런을 만든다 ────────────────────────────────────────────────
+
+def _on_demand(acc, cid="c-od"):
+    return {"schemaVersion": 1, "commandId": cid, "type": "SYNC_ACCOUNT", "customerId": acc.customer_id,
+            "cloudAccountId": acc.id, "payload": {"mode": "ON_DEMAND"}}
+
+
+def test_on_demand_redelivery_after_a_crash_replaces_the_dead_run(one):
+    repo, acc, eng = one
+    dead = add_run(repo, acc, started_ago=timedelta(minutes=13), heartbeat_ago=timedelta(minutes=12), rid="dead")
+    eng.discovery.resources = [ec2()]
+    out = handler.handle_batch(eng, {"Records": [record(_on_demand(acc))]}, sender=FakeSender())
+    assert out == {"batchItemFailures": []}
+    assert dead.status == "FAILED"
+    fresh = [r for rid, r in repo.runs.items() if rid != "dead"]
+    assert len(fresh) == 1 and fresh[0].status in ("SUCCEEDED", "PARTIAL") and fresh[0].mode == "ON_DEMAND"
+
+
+def test_a_heartbeating_run_still_blocks_on_demand(one):
+    repo, acc, eng = one
+    live = add_run(repo, acc, started_ago=timedelta(minutes=1), heartbeat_ago=timedelta(seconds=100), rid="live")
+    assert handler.dispatch(eng, _on_demand(acc), sender=FakeSender())["status"] == "SKIPPED_BUSY"
+    assert live.status == "RUNNING" and len(repo.runs) == 1
+
+
+def test_dead_threshold_is_engine_timeout_plus_margin(one):
+    repo, acc, eng = one
+    assert eng.dead_run_after == timedelta(seconds=150)
+    add_run(repo, acc, started_ago=timedelta(seconds=200), heartbeat_ago=timedelta(seconds=149), rid="a")
+    assert eng.sync_account(acc.id, "ON_DEMAND") == {"skipped": "BUSY"}
+    repo.runs["a"].heartbeat_at = now() - timedelta(seconds=151)
+    assert eng.sync_account(acc.id, "ON_DEMAND").get("skipped") is None
+
+
+def test_inline_tag_reconcile_takes_over_a_dead_run_when_not_debounced(one, monkeypatch):
+    repo, acc, eng = one
+    monkeypatch.setattr(events, "RECONCILE_DEBOUNCE", timedelta(0))
+    dead = add_run(repo, acc, mode="TAG_RECONCILE", started_ago=timedelta(minutes=13),
+                   heartbeat_ago=timedelta(minutes=12), rid="dead")
+    eng.discovery.resources = [ec2()]
+    out = events.handle_tag_event(eng, tag_event())
+    assert dead.status == "FAILED" and out.get("accountSync", {}).get("skipped") is None
+    assert len(repo.runs) == 2

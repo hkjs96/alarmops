@@ -278,3 +278,47 @@ def test_each_schedule_rule_sends_its_own_mode_as_a_valid_sync_all_accounts_comm
     assert parsed["type"] == "SYNC_ALL_ACCOUNTS" and parsed["customerId"] == "system"
     other = "DAILY" if mode == "TAG_RECONCILE" else "TAG_RECONCILE"
     assert other not in body
+
+
+# ── [차단 4] 미룸 총량 부등식을 템플릿 Rules 가 배포 전에 강제한다 ─────────────────────────────────────────────────────
+
+def _eval_rule(expr, params: dict):
+    """Tiny evaluator for the Rules functions used by SyncBusyBudget (Fn::Or/And/Equals/Contains, Ref)."""
+    if not isinstance(expr, dict):
+        return expr
+    ((fn, args),) = expr.items()
+    if fn == "Ref":
+        return params[args]
+    vals = [_eval_rule(a, params) for a in args]
+    if fn == "Fn::Or":
+        return any(vals)
+    if fn == "Fn::And":
+        return all(vals)
+    if fn == "Fn::Equals":
+        return vals[0] == vals[1]
+    if fn == "Fn::Contains":
+        return vals[1] in vals[0]
+    raise AssertionError(fn)
+
+
+def test_rule_sync_busy_budget_admits_exactly_the_pairs_above_the_stale_window_plus_engine_timeout():
+    t = load_cfn(CENTRAL)
+    (assertion,) = t["Rules"]["SyncBusyBudget"]["Assertions"]
+    deferrals = [str(v) for v in t["Parameters"]["SyncBusyMaxDeferrals"]["AllowedValues"]]
+    delays = [str(v) for v in t["Parameters"]["SyncBusyDeferSeconds"]["AllowedValues"]]
+    limit = 1200 + t["Parameters"]["EngineTimeoutSeconds"]["MaxValue"]          # 1320
+    assert str(t["Parameters"]["SyncBusyMaxDeferrals"]["Default"]) in deferrals
+    assert str(t["Parameters"]["SyncBusyDeferSeconds"]["Default"]) in delays
+    assert max(int(d) for d in delays) <= 900
+    for n in deferrals:
+        for d in delays:
+            ok = _eval_rule(assertion["Assert"], {"SyncBusyMaxDeferrals": n, "SyncBusyDeferSeconds": d})
+            assert ok == (int(n) * int(d) > limit), (n, d)
+    assert t["Parameters"]["SyncBusyMaxDeferrals"]["Default"] * t["Parameters"]["SyncBusyDeferSeconds"]["Default"] > limit
+
+
+def test_engine_gets_its_timeout_from_the_same_parameter_as_the_function_timeout():
+    t = load_cfn(CENTRAL)
+    fn = t["Resources"]["AlarmEngineFunction"]["Properties"]
+    assert fn["Timeout"] == {"Ref": "EngineTimeoutSeconds"}
+    assert fn["Environment"]["Variables"]["ENGINE_TIMEOUT_SECONDS"] == {"Ref": "EngineTimeoutSeconds"}
