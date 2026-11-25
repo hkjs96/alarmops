@@ -180,7 +180,7 @@ D-40은 `public`의 모든 테이블에 RLS(행 단위 보안)를 켜고 **정�
 4. **어디서:** 회사 PC의 Git Bash에서 `psql`로 운영 DB에 접속한다(권장: 비밀번호가 SQL 문장이나 편집기 기록에 남지 않는다. `psql`은 비밀번호를 내 PC에서 해시해 보낸다). `psql --version`이 나오지 않으면 PostgreSQL 클라이언트를 설치하거나 아래 대체 방법을 쓴다.
    **값:** 3단계의 `DIRECT_URL`에서 비밀번호를 뺀 주소로 접속하고(비밀번호는 물어볼 때 입력), 두 사용자의 비밀번호를 정한다. `\password`는 입력을 두 번 받고 화면에 보이지 않는다. 3번에서 만든 값을 붙여 넣는다.
    ```
-   psql "postgresql://postgres.<프로젝트ID>@aws-0-ap-northeast-2.pooler.supabase.com:5432/postgres?sslmode=require"
+   psql "postgresql://postgres.<프로젝트ID>@<Connect 화면의 호스트 그대로>:5432/postgres?sslmode=require"
    \password alarmops_engine
    \password alarmops_ingest
    \q
@@ -229,7 +229,7 @@ D-40은 `public`의 모든 테이블에 RLS(행 단위 보안)를 켜고 **정�
 1. **어디서:** AWS 콘솔(중앙 계정, SSO·MFA 로그인) > Secrets Manager > `EngineDbSecretArn` 비밀 > **Retrieve secret value** > **Edit** > **Plaintext**. (권장: 파일도 셸 기록도 남지 않는다.)
    **값:** 엔진용 한 줄을 붙여 넣는다. 줄바꿈 없이, 따옴표 없이, 비밀번호 관리자에서 복사한다.
    ```
-   postgresql://alarmops_engine.<프로젝트ID>:<엔진용 비밀번호>@aws-0-ap-northeast-2.pooler.supabase.com:5432/postgres?sslmode=require
+   postgresql://alarmops_engine.<프로젝트ID>:<엔진용 비밀번호>@<Connect 화면의 호스트 그대로>:5432/postgres?sslmode=require
    ```
    호스트는 3단계에서 본 주소의 호스트 그대로 쓴다. 저장한다. 이어서 `IngestDbSecretArn` 비밀에는 수집용 한 줄을 같은 방식으로 넣는다(사용자 `alarmops_ingest.<프로젝트ID>`, 포트 `6543`).
    **확인:** 두 비밀 모두 새 버전이 생겼고, 값에 `[YOUR-PASSWORD]`나 `<`가 남아 있지 않다. 엔진 비밀에 수집용 주소(또는 반대)를 넣지 않았는지 사용자 이름을 다시 읽는다. 값을 화면에 띄워 확인할 때는 화면 공유를 끈다. `docs/GO-LIVE.md` 4-4가 이 단계를 그대로 쓴다.
