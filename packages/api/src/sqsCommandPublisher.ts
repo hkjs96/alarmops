@@ -10,7 +10,7 @@ const MAX_BODY_BYTES = 256 * 1024 - 1024; // SQS limit 256 KiB; keep headroom
 const ID_RE = /^[A-Za-z0-9!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~]{1,128}$/; // SQS MessageDeduplicationId / MessageGroupId charset
 
 const accountOf = (url: string): string => url.split('/')[3] ?? '';
-const SENDABLE_TYPES: readonly string[] = ['OFFBOARD_ACCOUNT', 'CHECK_CONNECTION'];
+const SENDABLE_TYPES: readonly string[] = ['OFFBOARD_ACCOUNT', 'CHECK_CONNECTION', 'STOP_MONITORING', 'SET_MONITORING_TAG'];
 
 export interface SqsCommandPublisherOptions {
   queueUrl: string;

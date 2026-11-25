@@ -30,6 +30,35 @@ export interface IncidentFilter {
   unmappedOnly?: boolean;
 }
 
+// ── monitoring: resources and managed alarms (API-CONTRACT §8.5, D-16) ──
+export type MonitoringStateValue = 'MONITORED' | 'NEEDS_REVIEW' | 'NOT_MONITORED' | 'DELETED';
+export type AlarmStateValue = 'OK' | 'ALARM' | 'INSUFFICIENT_DATA';
+export type ValueSourceValue = 'CODE' | 'MSP' | 'CUSTOMER' | 'CONSOLE' | 'TAG';
+export const MONITORING_STATES: readonly MonitoringStateValue[] = ['MONITORED', 'NEEDS_REVIEW', 'NOT_MONITORED', 'DELETED'];
+/** A Resource with its place in the org tree (through its CloudAccount's service) and what the monitoring API needs of its account. */
+export interface ResourceRecord {
+  id: string; customerId: string; projectId: string | null; serviceId: string | null;
+  cloudAccountId: string; awsAccountId: string; accountAlias: string | null; alarmWriterEnabled: boolean; tagWriterEnabled: boolean;
+  region: string; resourceType: string; resourceKey: string; name: string | null; tags: Record<string, string>;
+  monitoringState: MonitoringStateValue; needsReviewSince: Date | null; needsReviewReason: string | null; lastSeenAt: Date;
+  alarmCount: number;
+  /** Customer ACTIVE, account not disabled, connection not purged (D-43). Monitoring commands are refused otherwise. */
+  accountActive: boolean;
+}
+export interface ManagedAlarmRecord {
+  id: string; customerId: string; projectId: string | null; serviceId: string | null;
+  resourceId: string; resourceName: string; resourceType: string; region: string; metricKey: string; alarmName: string;
+  severity: Severity; threshold: number; thresholdSource: ValueSourceValue; evalM: number; evalN: number; comparison: string; statistic: string; period: number;
+  state: AlarmStateValue | null; driftStatus: 'IN_SYNC' | 'DRIFTED' | 'MISSING' | 'EXTERNAL_CHANGE'; lastSyncedAt: Date | null;
+}
+export interface ResourceFilter { type?: string; monitoringState?: MonitoringStateValue }
+export interface ManagedAlarmFilter { resourceId?: string; state?: AlarmStateValue; severity?: Severity }
+/** Resources that need review and alarms in ALARM, inside the caller's scope but outside the node filter. */
+export interface MonitoringOutside { needsReview: number; inAlarm: number }
+export interface MonitoringPage<T> { rows: T[]; hasMore: boolean; outside: MonitoringOutside | null }
+/** Cursor of both lists: sort key (C collation) + id. */
+export interface MonitoringCursor { k: string; id: string }
+
 /** The scope part of a list request (customer/project/service slugs resolved to ids, or `mine`). null = no scope filter. */
 export interface NodeFilter {
   /** One customer (and below), or the `mine` set. */
@@ -289,6 +318,13 @@ export interface ApiRepository {
   slackChannelVerified(customerId: string): Promise<boolean>;
   /** Resource → org position, inside the scope. */
   findResource(scope: ScopeFilter, resourceId: string): Promise<{ id: string; name: string; customerId: string; projectId: string | null; serviceId: string | null } | null>;
+
+  // ── monitoring (API-CONTRACT §8.5) ──
+  /** Resources inside the scope (+ node filter), sorted by name then id. `outside` is null without a node filter. */
+  queryResources(scope: ScopeFilter, node: NodeFilter | null, f: ResourceFilter, page: { limit: number; after?: MonitoringCursor }): Promise<MonitoringPage<ResourceRecord>>;
+  /** One resource and its managed alarms; the scope is in the query, so "unknown" and "not yours" are the same null. */
+  findResourceDetail(scope: ScopeFilter, resourceId: string): Promise<{ resource: ResourceRecord; alarms: ManagedAlarmRecord[] } | null>;
+  queryManagedAlarms(scope: ScopeFilter, node: NodeFilter | null, f: ManagedAlarmFilter, page: { limit: number; after?: MonitoringCursor }): Promise<MonitoringPage<ManagedAlarmRecord>>;
 
   // ── incidents ──
   /** One consistent read (one transaction): page + counts, so `counts.open + outside.open = badge` holds (§8.0). */
