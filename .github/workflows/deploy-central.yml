@@ -90,7 +90,7 @@ jobs:
           if ! files=$(git diff --name-only --no-renames "$HEAD_SHA^" "$HEAD_SHA") || [ -z "$files" ]; then
             echo "Cannot judge the diff; deploying (fail-safe)."; echo "deploy=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
-          if printf '%s\n' "$files" | grep -Eq '^(infra/aws/|services/|packages/core/|package[^/]*\.json$|\.github/workflows/deploy-central\.yml$|\.github/scripts/bundle_manifest\.py$)'; then
+          if printf '%s\n' "$files" | grep -Eq '^(infra/aws/|services/|packages/core/|package[^/]*\.json$|\.github/workflows/deploy-central\.yml$|\.github/scripts/(bundle_manifest|check_trust_principals)\.py$)'; then
             echo "deploy=true" >> "$GITHUB_OUTPUT"
           else
             echo "No central path changed in $HEAD_SHA; skipping the deploy." | tee -a "$GITHUB_STEP_SUMMARY"
@@ -389,6 +389,7 @@ jobs:
           done
           echo "Verified: change set code = build output (manifest $EXPECTED)" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Execute the approved change set
+        id: execute
         env:
           CHANGESET: ${{ needs.plan.outputs.changeset }}
           MODE: ${{ needs.plan.outputs.mode }}
@@ -399,6 +400,27 @@ jobs:
           else
             aws cloudformation wait stack-update-complete --stack-name "$STACK_NAME"
           fi
+      # After apply: the roles other parties trust (customer roles trust the engine and RemediatorCaller ARNs) must still be
+      # trusted only by this account, the templates' service principals and the Vercel OIDC provider. Reads need iam:GetRole
+      # (deploy role, central-bootstrap.yaml IamReadRoles on role/AlarmOpsCentral-*). Logic: .github/scripts/check_trust_principals.py.
+      - name: Check trust principals
+        if: always() && steps.execute.conclusion != 'skipped'
+        env:
+          PROVIDER: ${{ vars.VERCEL_OIDC_PROVIDER_ARN }}
+        run: |
+          set -uo pipefail
+          account=$(aws sts get-caller-identity --query Account --output text)
+          d="$RUNNER_TEMP/trust"; mkdir -p "$d"
+          items=()
+          for role in AlarmOpsCentral-RemediatorCaller AlarmOpsCentral-VercelConsole AlarmOpsCentral-Engine; do
+            aws iam get-role --role-name "$role" --query Role.AssumeRolePolicyDocument --output json > "$d/$role.json" || { echo "::error::cannot read the trust policy of $role"; exit 1; }
+            items+=("$role=$d/$role.json")
+          done
+          rc=0
+          python3 -I .github/scripts/check_trust_principals.py "$account" "$PROVIDER" "${items[@]}" > "$d/result.txt" || rc=$?
+          grep -v '^::error::' "$d/result.txt" >> "$GITHUB_STEP_SUMMARY" || true
+          grep '^::error::' "$d/result.txt" || true
+          exit "$rc"
       # Outputs hold ARNs, URLs and the account id: none is a secret. Secret values are never read here.
       - name: Stack outputs to the job summary
         if: success()

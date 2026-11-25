@@ -724,7 +724,7 @@
 - `DenyPivotAndQueueData`: `sts:AssumeRole`·`TagSession`·`SetSourceIdentity`와 SQS 메시지 동작(`SendMessage`, `ReceiveMessage`, `DeleteMessage`, `PurgeQueue`, `StartMessageMoveTask`)을 `*`에 거부한다. `CreateRole`(그리고 임시로 받는 `UpdateAssumeRolePolicy`)이 있으면 배포 역할이 **자기를 신뢰하는 역할**을 만들거나 기존 역할의 신뢰를 바꾼 뒤 그 역할을 맡아 비밀을 읽거나 고객 역할에 닿을 수 있다. 명시적 Deny는 신뢰 정책 기반 허용보다 이긴다. 그래서 배포 역할 세션으로는 어떤 역할도 맡지 못한다. 배포 역할이 만든 역할은 CloudFormation이 아니라 서비스(Lambda, Vercel)가 맡는다.
   - **남는 경로(위험 수용).** 배포 역할이 만든 역할을 **외부**에서 맡는 경로는 막지 못한다. 외부 OIDC 공급자(`AssumeRoleWithWebIdentity`)나 외부 계정이 그 역할의 신뢰 정책에 들어 있으면, 배포 역할 세션 밖에서 맡을 수 있다. IAM은 `CreateRole`·`UpdateAssumeRolePolicy`가 쓰는 신뢰 정책의 **내용을 조건으로 제한하지 못하기** 때문이다(권한 경계는 만든 역할의 권한 상한만 건다).
   - 이 위험은 D-57에서 수용했다(사용자 결정).
-  - 보완책 세 가지: (1) CloudTrail 알림 규칙(4-2절), (2) plan 승인 전 신뢰 정책·큐 정책 본문 확인(4-1절), (3) 임시 `TrustChange` 정책의 자동 만료(4절 3번의 `aws:CurrentTime` 조건).
+  - 보완책 세 가지: (1) CloudTrail 알림 규칙(4-2절), (2) plan 승인 전 신뢰 정책·큐 정책 본문 확인(4-1절), (3) 임시 `TrustChange` 정책의 자동 만료(4절 4번의 `aws:CurrentTime` 조건, `trust-change.sh grant`가 계산).
 - `DenyForceDeleteSecret`: 비밀을 복구 기간 없이 지우는 삭제(`ForceDeleteWithoutRecovery=true`)를 거부한다. `UpdateSecret`은 허용하지 않는다. 템플릿의 비밀에는 이름·설명뿐이라 필요 없고, 바꿀 일은 사람이 한다.
 - `DenySecretValues`: 비밀 값 읽기·쓰기 거부.
 - 경계 쪽 `NeverAssumeCustomerRemediatorExceptCaller`: 만든 역할 중 `AlarmOpsCentral-RemediatorCaller` 말고는 고객 `AlarmOps-Remediator`를 맡지 못한다.
@@ -739,7 +739,18 @@
 3. 붙이기 전에 **바뀐 신뢰 JSON이 `central.yaml`과 같은지** 확인한다.
    - 변경 세트 세부 정보의 `AssumeRolePolicyDocument`를 파일로 복사하고, `central.yaml`의 해당 역할 `AssumeRolePolicyDocument`를 `${AWS::AccountId}` 등 값을 풀어 쓴 JSON과 `diff`로 비교한다.
    - 차이가 있으면(특히 `Principal`, `Federated`, 외부 계정, `sub`) 중단하고 보안 담당과 정한다.
-4. 배포 역할에 **그 역할 하나만** 대상으로 하는 임시 인라인 정책 `AlarmOpsDeployCentral-TrustChange`를 붙인다. **붙인 시각 + 1시간**이 지나면 효력이 없어지도록 `aws:CurrentTime` 조건을 넣는다. `<붙인 시각 + 1시간(UTC, ISO 8601)>`은 사람이 값을 채운다(예: 형식 `YYYY-MM-DDThh:mm:ssZ`).
+4. **붙이기(grant).** 사람이 별도 터미널에서 SSO 로그인한 뒤 스크립트를 실행한다. 에이전트는 실행하지 않는다.
+
+```bash
+infra/scripts/trust-change.sh grant --profile <프로필> --role AlarmOpsCentral-<바뀌는 역할 이름>
+```
+
+   - 스크립트가 배포 역할 `AlarmOpsDeployCentral`에 **그 역할 하나만** 대상으로 하는 임시 인라인 정책 `AlarmOpsDeployCentral-TrustChange`를 붙인다. 만료 시각(지금 + 1시간, UTC)은 스크립트가 `date -u -d '+1 hour'`로 계산해 `aws:CurrentTime` 조건에 넣는다. 사람이 값을 채우지 않는다.
+   - 계정 번호를 화면에 보여 주고 12자리를 다시 입력해야 진행한다. 프로필은 `--profile` 인자로만 받는다(`dev` 또는 `central[-이름]`). 환경변수 `AWS_*` 자격 증명이나 에이전트 세션이면 거부한다. 리전은 `ap-northeast-2`로 고정한다.
+   - `--role`은 `^AlarmOpsCentral-[A-Za-z0-9-]+$` 또는 `^alarmops-central-[A-Za-z0-9-]+$`만 받는다. `AlarmOpsDeploy*`와 `AlarmOps-*`(고객 연결 역할)는 거부한다.
+   - 붙인 뒤 대상 역할의 현재 신뢰 정책을 출력한다. 3번에서 확인한 값과 다르면 바로 `revoke` 한다.
+   - 실행 기록은 `trust-change-logs/<프로필>.log`(저장소에 올리지 않는 로컬 파일)에 남는다.
+   - 붙는 정책은 아래와 같다(참고용. 직접 붙이지 않는다).
 
 ```json
 {
@@ -749,13 +760,10 @@
       "Sid": "TrustChangeOneRole",
       "Effect": "Allow",
       "Action": "iam:UpdateAssumeRolePolicy",
-      "Resource": [
-        "arn:<PARTITION>:iam::<ACCOUNT_ID>:role/AlarmOpsCentral-<바뀌는 역할 이름>",
-        "arn:<PARTITION>:iam::<ACCOUNT_ID>:role/alarmops-central-<바뀌는 역할 이름>"
-      ],
+      "Resource": "arn:aws:iam::<ACCOUNT_ID>:role/<바뀌는 역할 이름>",
       "Condition": {
         "DateLessThan": {
-          "aws:CurrentTime": "<붙인 시각 + 1시간(UTC, ISO 8601)>"
+          "aws:CurrentTime": "<지금 + 1시간(UTC, YYYY-MM-DDThh:mm:ssZ)>"
         }
       }
     }
@@ -763,12 +771,22 @@
 }
 ```
 
-   - `Resource`는 두 패턴(`role/AlarmOpsCentral-*`, `role/alarmops-central-*`) 안으로만 고정한다. `*` 자리에 바뀌는 역할의 정확한 이름을 채우고, 해당하지 않는 줄은 지운다.
-   - `AlarmOpsDeployCentral`·`AlarmOpsDeployBus`·`AlarmOps-*`(고객 연결 역할 이름 패턴)는 넣지 않는다.
+   - `Resource`는 역할 ARN **하나**다. 와일드카드가 없다. `AlarmOpsDeployCentral`·`AlarmOpsDeployBus`·`AlarmOps-*`(고객 연결 역할 이름 패턴)는 스크립트가 거부한다.
 
-5. `apply`를 승인하고 끝나기를 기다린다. 실패하면 롤백이 같은 동작을 부를 수 있으니 스택이 `UPDATE_COMPLETE`나 `UPDATE_ROLLBACK_COMPLETE`가 될 때까지(롤백 가능성이 끝날 때까지) 정책을 떼지 않는다. 1시간 안에 끝나지 않으면 정책이 만료되므로 새 시각으로 다시 붙인다.
-6. 끝나면 임시 정책을 **삭제**한다(만료는 안전장치이고 삭제는 사람이 한다). 이 정책은 `DenyPivotAndQueueData`에 걸리지 않는다(역할을 맡는 동작이 아니다).
-7. 붙인 뒤(`apply` 끝난 뒤) 바뀐 역할의 **신뢰 정책에 외부 계정(`<ACCOUNT_ID>` 외 계정)이나 외부 OIDC `sub`(`token.actions.githubusercontent.com` 등 `Federated` 주체)가 없는지** IAM 콘솔 → 역할 → 신뢰 관계에서 읽어 확인한다. 있으면 즉시 신뢰 정책을 되돌리고 보안 담당에게 알린다.
+5. `apply`가 끝나기를 기다린다. 실패하면 롤백이 같은 동작을 부를 수 있으니 스택이 `UPDATE_COMPLETE`나 `UPDATE_ROLLBACK_COMPLETE`가 될 때까지(롤백 가능성이 끝날 때까지) 정책을 떼지 않는다. 1시간 안에 끝나지 않으면 정책이 만료되므로 `grant`를 다시 실행한다(새 만료 시각으로 덮어쓴다).
+6. **떼기(revoke).** 끝나면 임시 정책을 삭제한다(만료는 안전장치이고 삭제는 사람이 한다).
+
+```bash
+infra/scripts/trust-change.sh revoke --profile <프로필> --role AlarmOpsCentral-<바뀐 역할 이름>
+```
+
+   - 같은 계정 재입력 관문을 거친다. 스크립트는 터미널(TTY)에서만 실행된다.
+   - `revoke`는 **정책 이름**(`AlarmOpsDeployCentral-TrustChange`)으로 지운다. `--role` 값은 이름 검사와 기록에만 쓰이므로, 어느 역할로 붙였든 정책이 지워진다.
+   - 정책 이름이 하나뿐이라 `grant`를 다시 하면 이전 정책을 **덮어쓴다**. 그래서 한 번에 역할 하나만 바꿀 수 있다. 역할이 둘이면 하나를 끝내고 `revoke`한 뒤 다음 역할을 `grant`한다.
+   - 스택 `alarmops-central`이 `*_IN_PROGRESS`이거나 `UPDATE_ROLLBACK_FAILED`이면 **거부**하고 이유를 출력한다. `UPDATE_ROLLBACK_FAILED`이면 사람이 콘솔에서 스택 → 스택 작업 → **업데이트 롤백 계속**(Continue update rollback)을 한다(막힌 리소스를 건너뛰는 선택은 원인을 본 뒤에만). 롤백이 끝난 뒤 다시 `revoke` 한다.
+   - 그 밖의 상태면 `delete-role-policy`를 실행한다. 정책이 이미 없으면 그렇다고 알리고 정상 종료한다. 이 정책은 `DenyPivotAndQueueData`에 걸리지 않는다(역할을 맡는 동작이 아니다).
+7. `apply`가 끝나면 워크플로의 **"Check trust principals"** 단계가 `AlarmOpsCentral-RemediatorCaller`, `AlarmOpsCentral-VercelConsole`, `AlarmOpsCentral-Engine`의 신뢰 정책을 자동으로 읽는다. Principal이 같은 계정 ARN, 템플릿이 쓰는 Service(`lambda.amazonaws.com`), `VERCEL_OIDC_PROVIDER_ARN`과 정확히 같은 Federated가 아니면 단계가 실패하고 결과 표가 요약에 남는다(`.github/scripts/check_trust_principals.py`). 실패하면 즉시 신뢰 정책을 되돌리고 보안 담당에게 알린다. 이 세 역할 밖의 역할을 바꿨다면 그 역할의 신뢰 관계는 IAM 콘솔에서 사람이 한 번 읽는다.
+8. 상시 권한으로 두는 안은 기각했다. 고객 역할이 엔진·RemediatorCaller ARN을 신뢰하므로(`customer-stack/template.yaml`), 신뢰 정책을 바꿀 수 있는 상시 권한은 고객 계정 접근으로 이어진다. 그래서 절차는 유지하고 손이 가는 부분만 스크립트로 줄였다.
 
 ## 4-1. plan 승인 전 확인
 

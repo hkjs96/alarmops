@@ -745,6 +745,42 @@ class DeployWorkflow(unittest.TestCase):
             if str(st.get("uses", "")).startswith("actions/checkout"):
                 self.assertIs(st["with"]["persist-credentials"], False, name)
 
+    def test_trust_principal_check_runs_right_after_execute_in_apply_only(self):
+        steps = self.jobs["apply"]["steps"]
+        runs = [st.get("run", "") for st in steps]
+        i_exec = next(i for i, r in enumerate(runs) if "execute-change-set" in r)
+        i_chk = next(i for i, st in enumerate(steps) if st.get("name") == "Check trust principals")
+        i_out = next(i for i, st in enumerate(steps) if "outputs to the job summary" in st.get("name", ""))
+        self.assertEqual(i_chk, i_exec + 1)
+        self.assertLess(i_chk, i_out)
+        run = runs[i_chk]
+        self.assertIn("python3 -I .github/scripts/check_trust_principals.py", run)
+        for role in ("AlarmOpsCentral-RemediatorCaller", "AlarmOpsCentral-VercelConsole", "AlarmOpsCentral-Engine"):
+            self.assertIn(role, run)
+        self.assertIn("iam get-role", run)
+        self.assertNotIn("update-assume-role-policy", run)
+        self.assertEqual(steps[i_chk]["env"], {"PROVIDER": "${{ vars.VERCEL_OIDC_PROVIDER_ARN }}"})
+        # runs after a failed apply too (rollback may have touched trust policies), but never when execute was skipped
+        self.assertEqual(steps[i_exec].get("id"), "execute")
+        self.assertEqual(steps[i_chk]["if"], "always() && steps.execute.conclusion != 'skipped'")
+        self.assertNotIn("continue-on-error", steps[i_chk])
+        self.assertNotIn("lambda.amazonaws.com", run)   # expectations live in the script, per role
+        self.assertIn("exit \"$rc\"", run)
+        self.assertNotIn("check_trust_principals", self.runs("plan"))
+        # permissions stay exactly the same: the read is covered by the deploy role's IamReadRoles statement
+        self.assertEqual(self.jobs["apply"]["permissions"], {"contents": "read", "id-token": "write"})
+        self.assertRegex(self.jobs["gate"]["steps"][-1]["run"], r"check_trust_principals")
+
+    def test_trust_check_roles_are_inside_the_deploy_role_iam_read_scope(self):
+        boot = (ROOT / "aws" / "central-bootstrap.yaml").read_text(encoding="utf-8")
+        block = boot[boot.index('Sid: "IamReadRoles"'):]
+        block = block[:block.index("Sid:", 20)]
+        self.assertIn('"iam:GetRole"', block)
+        self.assertIn("role/AlarmOpsCentral-*", block)
+        central = (ROOT / "aws" / "central.yaml").read_text(encoding="utf-8")
+        for role in ("AlarmOpsCentral-RemediatorCaller", "AlarmOpsCentral-VercelConsole", "AlarmOpsCentral-Engine"):
+            self.assertIn(f"RoleName: {role}", central)
+
 
 class DeployConsoleWorkflow(unittest.TestCase):
     def setUp(self):
