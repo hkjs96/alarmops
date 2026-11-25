@@ -9,18 +9,26 @@ import { fileURLToPath } from 'node:url';
 import { originFrom, parsePrevious } from './rollback-console.mjs';
 
 const script = fileURLToPath(new URL('./rollback-console.mjs', import.meta.url));
-const INSPECT = `Vercel CLI 65.16.0
-> Fetching deployment "https://console.example.com" in my-team
+const INSPECT = [
+  'Vercel CLI 65.16.0',
+  'Fetched deployment "console-abc123-my-team.vercel.app" in my-team [1s]',
+  '',
+  '  General',
+  '',
+  '    id\t\tdpl_AbCdEf123456GhIj',
+  '    name\tconsole',
+  '    target\tproduction',
+  '    status\t\u25cf Ready',
+  '    url\t\thttps://console-abc123-my-team.vercel.app',
+  '    created\tTue Nov 24 2026 10:00:00 GMT+0900 [2m ago]',
+  '',
+  '  Aliases',
+  '',
+  '    \u2576 https://console.example.com',
+  '',
+].join('\n');
+const withLine = (key, value) => INSPECT.replace(new RegExp(`(\\n    ${key}\\t+)[^\\n]*`), `$1${value}`);
 
-  General
-
-    id      dpl_AbCdEf123456GhIj
-    name    console
-    target  production
-    status  ● Ready
-    url     https://console-abc123-my-team.vercel.app
-    created Tue Nov 24 2026 10:00:00 GMT+0900 [2m ago]
-`;
 
 test('previous: id and url from inspect output', () => {
   assert.deepEqual(parsePrevious(INSPECT), { id: 'dpl_AbCdEf123456GhIj', url: 'https://console-abc123-my-team.vercel.app' });
@@ -29,6 +37,27 @@ test('previous: id and url from inspect output', () => {
 test('previous: ANSI colours and CRLF do not matter', () => {
   const t = INSPECT.replace(/\n/g, '\r\n').replace('dpl_AbCdEf123456GhIj', '\x1b[1mdpl_AbCdEf123456GhIj\x1b[22m');
   assert.equal(parsePrevious(t).id, 'dpl_AbCdEf123456GhIj');
+});
+
+test('previous: only target production + status Ready is a target', () => {
+  for (const t of [
+    withLine('target', 'preview'),
+    withLine('target', 'staging'),
+    withLine('status', '\u25cf Error'),
+    withLine('status', '\u25cf Building'),
+    withLine('status', '\u25cf Queued'),
+    withLine('status', '\u25cf Canceled'),
+    withLine('status', 'UNKNOWN'),
+    INSPECT.replace(/\n    status\t[^\n]*/, ''),
+    INSPECT.replace(/\n    target\t[^\n]*/, ''),
+  ])
+    assert.deepEqual(parsePrevious(t), { id: '', url: '' }, t);
+});
+
+test('previous: other formats mean none (JSON, bad id, non-vercel url)', () => {
+  assert.deepEqual(parsePrevious('{"id":"dpl_AbCdEf123456GhIj","target":"production","readyState":"READY"}'), { id: '', url: '' });
+  assert.deepEqual(parsePrevious(withLine('id', 'abc; rm -rf /')), { id: '', url: '' });
+  assert.deepEqual(parsePrevious(withLine('url', 'https://evil.example.com')), { id: '', url: '' });
 });
 
 test('previous: nothing usable means empty (first deploy, inspect failed, odd output)', () => {

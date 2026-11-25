@@ -840,7 +840,8 @@ class DeployConsoleWorkflow(unittest.TestCase):
                 "Pull the production environment from Vercel",
                 "Record the current production deployment",
                 "Deploy the prebuilt output",
-                "Put the previous deployment back (smoke check failed)",
+                "Look at production after a failed deploy",
+                "Put the previous deployment back (smoke check or deploy failed)",
             ],
         )
         by_name = {st.get("name"): st for st in self.wf["jobs"]["deploy"]["steps"]}
@@ -863,8 +864,22 @@ class DeployConsoleWorkflow(unittest.TestCase):
         rec = next(i for i, n in enumerate(names) if n == "Record the current production deployment")
         self.assertLess(rec, steps.index(deploy))
         self.assertLess(names.index("Pick the previous deployment"), steps.index(deploy))
-        # promote first (keeps auto-assignment), rollback only as fallback; no previous deployment or failure -> ::error:: and exit 1
-        self.assertLess(rb["run"].index("promote"), rb["run"].index("rollback \"$PREV_URL\""))
+        # also after a failed deploy step (output unreadable but production may have changed), only with a recorded previous one
+        self.assertIn("steps.deploy.outcome == 'failure'", rb["if"])
+        self.assertIn("steps.previous.outputs.prev_id != ''", rb["if"])
+        look = next(st for st in steps if st.get("name") == "Look at production after a failed deploy")
+        self.assertIn("steps.previous.outputs.prev_id != ''", look["if"])
+        self.assertLess(steps.index(deploy), steps.index(look))
+        self.assertLess(steps.index(look), steps.index(rb))
+        self.assertIn("unchanged", rb["run"])  # deploy failed but production still serves the previous one: no promote
+        # the deploy step leaves a person note when its output cannot be read
+        self.assertIn("GITHUB_STEP_SUMMARY", deploy["run"])
+        self.assertIn("Promote", deploy["run"])
+        # promote first (keeps auto-assignment), rollback only as fallback, both by deployment id (dpl_...), never by URL
+        self.assertLess(rb["run"].index("promote"), rb["run"].index("rollback \"$PREV_ID\""))
+        self.assertIn('promote "$PREV_ID"', rb["run"])
+        self.assertNotIn('"$PREV_URL" --timeout', rb["run"])
+        self.assertIn("dpl_", rb["run"])
         self.assertIn("::error::", rb["run"])
         self.assertIn("no previous production deployment", rb["run"])
         self.assertIn("automatic rollback failed", rb["run"])
