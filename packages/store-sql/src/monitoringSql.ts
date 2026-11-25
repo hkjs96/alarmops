@@ -12,10 +12,11 @@ import { scopeSql } from './apiRepo.js';
 /** Visible resources (scope in the WHERE), with the columns every monitoring read needs. `sk` = sort key. */
 const visibleResources = (p: Params, scope: ScopeFilter, extraWhere = 'true'): string =>
   `SELECT r."id", r."customerId", s."projectId" AS "projectId", s."id" AS "serviceId", r."cloudAccountId", ca."awsAccountId", ca."alias" AS "accountAlias",
-          ca."alarmWriterEnabled", ca."tagWriterEnabled", r."region", r."resourceType", r."resourceKey", r."name", r."tags", r."monitoringState",
+          ca."alarmWriterEnabled", ca."tagWriterEnabled", (cu."status" = 'ACTIVE' AND NOT ca."disabled" AND ca."connectionPurgedAt" IS NULL) AS "accountActive", r."region", r."resourceType", r."resourceKey", r."name", r."tags", r."monitoringState",
           r."needsReviewSince", r."needsReviewReason", r."lastSeenAt", COALESCE(r."name", r."resourceKey") AS "sk"
      FROM "Resource" r
      JOIN "CloudAccount" ca ON ca."id" = r."cloudAccountId" AND ca."customerId" = r."customerId"
+     JOIN "Customer" cu ON cu."id" = r."customerId"
      LEFT JOIN "Service" s ON s."id" = ca."serviceId" AND s."customerId" = r."customerId"
     WHERE ${scopeSql(p, scope, 'r', { project: 's."projectId"', service: 's."id"' })} AND ${extraWhere}`;
 
@@ -38,7 +39,7 @@ const toResource = (r: SqlRow): ResourceRecord => ({
   cloudAccountId: r.cloudAccountId, awsAccountId: String(r.awsAccountId).trim(), accountAlias: r.accountAlias ?? null, alarmWriterEnabled: !!r.alarmWriterEnabled, tagWriterEnabled: !!r.tagWriterEnabled,
   region: r.region, resourceType: r.resourceType, resourceKey: r.resourceKey, name: r.name ?? null, tags: (typeof r.tags === 'string' ? JSON.parse(r.tags) : r.tags) ?? {},
   monitoringState: r.monitoringState, needsReviewSince: d(r.needsReviewSince), needsReviewReason: r.needsReviewReason ?? null, lastSeenAt: dReq(r.lastSeenAt),
-  alarmCount: Number(r.alarmCount ?? 0),
+  alarmCount: Number(r.alarmCount ?? 0), accountActive: r.accountActive === true,
 });
 
 const ALARM_COLS = `m."id", m."customerId", v."projectId", v."serviceId", m."resourceId", COALESCE(v."name", v."resourceKey") AS "resourceName", v."resourceType", m."region", m."metricKey", m."alarmName",

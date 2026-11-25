@@ -244,6 +244,12 @@ def dispatch(engine: Engine, cmd: dict, liveness_sink: Callable[[str, str, dict]
         if t == "SET_SEVERITY":
             engine.set_severity(cus, p["managedAlarmId"], p["severity"])
             return {"status": "OK"}
+        if t in ("SET_MONITORING_TAG", "STOP_MONITORING"):
+            # D-43: a command that waited in the queue must not write to a customer/account that was suspended, terminated or disabled meanwhile
+            row = engine.repo.get_resource(cus, p["resourceId"])
+            if row is not None and not engine.repo.is_account_active(row.cloud_account_id):
+                logger.warning("%s %s SKIPPED_INACTIVE (customer/account no longer active)", t, cmd["commandId"])
+                return {"status": "SKIPPED_INACTIVE"}
         if t == "SET_MONITORING_TAG":
             if p.get("value") != "on":
                 raise InvalidCommand("only value 'on' is allowed")

@@ -256,6 +256,26 @@ export function monitoringContract(make: MakeApiFixture): void {
       expect((await stop(haeun, 'res_h2', 'tag_on')).status).toBe(409); // a MONITORED resource has its tag
     });
 
+    it('D-43: a suspended or terminated customer and a disabled account get 409 ACCOUNT_DISABLED for stop and tag_on; nothing is queued', async () => {
+      const disable = async (): Promise<void> => {
+        const sql = (w.fx as unknown as { sql?: { query(t: string, p?: unknown[]): Promise<unknown[]> } }).sql;
+        if (sql) await sql.query(`UPDATE "CloudAccount" SET "disabled" = true WHERE "id" = 'ca_111111111111'`);
+        else (w.fx.repo as unknown as MemoryApiStore).accounts.get('111111111111')!.disabled = true;
+      };
+      for (const how of ['SUSPENDED', 'TERMINATED', 'disabled'] as const) {
+        await open();
+        if (how === 'disabled') await disable(); else await w.fx.setCustomerStatus('cus_mirae', how);
+        for (const action of ['stop', 'tag_on']) {
+          const r = await stop(haeun, 'res_a', action);
+          expect(r.status, `${how} ${action}`).toBe(409);
+          expect(body(r).error.code).toBe('ACCOUNT_DISABLED');
+        }
+        expect(w.commands.sent, how).toEqual([]);
+        expect((await w.fx.audits()).filter((a) => a.action.startsWith('resource.')), how).toEqual([]);
+        await w.fx.close();
+      }
+    });
+
     it('keep is not supported yet: 409 NOT_SUPPORTED, nothing queued', async () => {
       await open();
       const r = await stop(haeun, 'res_a', 'keep');

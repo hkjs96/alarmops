@@ -42,6 +42,8 @@ export interface ResourceRecord {
   region: string; resourceType: string; resourceKey: string; name: string | null; tags: Record<string, string>;
   monitoringState: MonitoringStateValue; needsReviewSince: Date | null; needsReviewReason: string | null; lastSeenAt: Date;
   alarmCount: number;
+  /** Customer ACTIVE, account not disabled, connection not purged (D-43). Monitoring commands are refused otherwise. */
+  accountActive: boolean;
 }
 export interface ManagedAlarmRecord {
   id: string; customerId: string; projectId: string | null; serviceId: string | null;

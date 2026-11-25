@@ -136,6 +136,7 @@ export async function postMonitoring(req: ApiRequest, deps: Deps, id: string): P
   const r = found.resource;
   const act = action as Action;
   if (act === 'keep') throw new ApiError(409, 'NOT_SUPPORTED', 'Keep monitoring is not available yet. The resource stays in Needs review until you re-tag it or stop monitoring.');
+  if (!r.accountActive) throw new ApiError(409, 'ACCOUNT_DISABLED', 'This customer or AWS account is no longer active (suspended, terminated or disabled); no command was queued.');
   if (act === 'stop' && r.monitoringState !== 'NEEDS_REVIEW') throw invalidTransition('Only a resource that needs review can be taken out of monitoring.');
   if (act === 'tag_on' && r.monitoringState !== 'NEEDS_REVIEW' && r.monitoringState !== 'NOT_MONITORED') throw invalidTransition('This resource does not need the Monitoring tag.');
   if (act === 'stop' && !r.alarmWriterEnabled) throw new ApiError(403, 'CAPABILITY_DISABLED', 'The AlarmWriter role is not enabled for this AWS account.', { role: 'alarmWriter' });
