@@ -1,13 +1,16 @@
 """Gate of deploy-central / deploy-console: deploy only when something changed SINCE THE LAST SUCCESSFUL DEPLOY.
-Standard library only; run as `python3 -I .github/scripts/deploy_gate.py <deploy-workflow-file> <deploy-job> <path-regex>`.
+Standard library only; run as `python3 -I .github/scripts/deploy_gate.py <deploy-workflow-file> <deploy-job> <path-regex> [<noop-job>]`.
 
 Why not "the files of the merged commit": two merges one minute apart can cancel the first `ci` run (concurrency), so that
 commit is never deployed; judging only the second commit then skips the first one's changes for good.
 
 Base commit = the head_sha of the newest run of the SAME workflow on main whose real deploy job (<deploy-job>: `apply` /
-`deploy`) ended in success. A run where only `gate` ran and the rest was skipped is not a base. The deploy workflows set
+`deploy`) ended in success. A run where only `gate` ran and the rest was skipped is not a base. Exception (optional
+<noop-job>, deploy-central: `plan`): <noop-job> success and <deploy-job> skipped also counts. apply's `if` is only
+"main and the change set is non-empty", and plan needs a successful build, so that combination means "change set empty":
+the stack already equals that commit. A failed or cancelled plan/apply never counts. The deploy workflows set
 `run-name` to the commit they deploy (a workflow_run run's own head_sha is the latest main commit, not ci's head_sha), so
-the commit is read from the run's display_title. Decision (decide()):
+the commit is read from the run's display_title, which must be exactly `<workflow name without .yml> <40-hex sha>`. Decision (decide()):
   no base                      -> deploy   (fail-safe)
   base is not an ancestor      -> deploy   (fail-safe; also when git cannot tell)
   diff <base>..<head> fails    -> deploy   (fail-safe)
@@ -27,25 +30,26 @@ SHA_RE = re.compile(r"[0-9a-f]{40}")
 MAX_RUNS_CHECKED = 30
 
 
-def sha_from_title(title):
-    """The commit a run deployed, from its run-name (`<workflow> <40-hex sha>`); None when the title has none."""
-    m = SHA_RE.fullmatch((title or "").strip().rsplit(" ", 1)[-1])
-    return m.group(0) if m else None
+def sha_from_title(title, stem):
+    """The commit a run deployed, from its run-name `<stem> <40-hex sha>` (full match); None for any other title."""
+    m = re.fullmatch(re.escape(stem) + r" ([0-9a-f]{40})", title or "")
+    return m.group(1) if m else None
 
 
-def find_base(runs, jobs_of, deploy_job, current_run_id=None):
+def find_base(runs, jobs_of, deploy_job, stem, current_run_id=None, noop_job=None):
     """runs: newest first (API order). jobs_of(run_id) -> list of job dicts. Returns a sha or None."""
     checked = 0
     for run in runs:
         if str(run.get("id")) == str(current_run_id) or run.get("conclusion") != "success":
             continue
-        sha = sha_from_title(run.get("display_title"))
+        sha = sha_from_title(run.get("display_title"), stem)
         if not sha:
             continue
         checked += 1
         if checked > MAX_RUNS_CHECKED:
             return None
-        if any(j.get("name") == deploy_job and j.get("conclusion") == "success" for j in jobs_of(run["id"])):
+        c = {j.get("name"): j.get("conclusion") for j in jobs_of(run["id"])}
+        if c.get(deploy_job) == "success" or (noop_job and c.get(noop_job) == "success" and c.get(deploy_job) == "skipped"):
             return sha
     return None
 
@@ -87,7 +91,8 @@ def gh_json(path):
 
 
 def main(argv, env):
-    workflow, deploy_job, path_re = argv
+    workflow, deploy_job, path_re, *rest = argv
+    noop_job = rest[0] if rest else None
     out = env.get("GITHUB_OUTPUT")
 
     def emit(deploy, reason):
@@ -106,7 +111,7 @@ def main(argv, env):
             raise ValueError("HEAD_SHA is not a commit sha")
         runs = gh_json(f"repos/{repo}/actions/workflows/{workflow}/runs?branch=main&status=success&per_page=50")["workflow_runs"]
         base = find_base(runs, lambda i: gh_json(f"repos/{repo}/actions/runs/{i}/jobs?per_page=100")["jobs"],
-                         deploy_job, env.get("GITHUB_RUN_ID"))
+                         deploy_job, workflow.removesuffix(".yml"), env.get("GITHUB_RUN_ID"), noop_job)
         deploy, reason = decide(base, head, git_is_ancestor, git_changed_files, path_re)
     except Exception as e:  # any failure to judge deploys
         deploy, reason = True, f"Cannot judge ({type(e).__name__}: {e}); deploying (fail-safe)."
@@ -114,7 +119,7 @@ def main(argv, env):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 4:
+    if len(sys.argv) not in (4, 5):
         print(__doc__.split("\n")[1], file=sys.stderr)
         sys.exit(2)
     main(sys.argv[1:], os.environ)

@@ -650,6 +650,8 @@ def assert_gate_since_last_deploy(tc, wf, workflow_file, deploy_job):
     tc.assertIs(checkout["with"]["persist-credentials"], False)
     r = " ".join(st.get("run", "") for st in gate["steps"])
     tc.assertIn(f"python3 -I .github/scripts/deploy_gate.py {workflow_file} {deploy_job} ", r)
+    # central: plan success + apply skipped (empty change set) also counts as deployed; console has no such case
+    tc.assertEqual(r.rstrip().endswith("' plan"), workflow_file == "deploy-central.yml")
     tc.assertNotIn("$HEAD_SHA^", r)
     env = [st["env"] for st in gate["steps"] if "env" in st][0]
     tc.assertEqual(env["EVENT"], "${{ github.event_name }}")

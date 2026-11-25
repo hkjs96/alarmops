@@ -91,7 +91,7 @@ jobs:
           EVENT: ${{ github.event_name }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           GH_TOKEN: ${{ github.token }}
-        run: python3 -I .github/scripts/deploy_gate.py deploy-central.yml apply '^(infra/aws/|services/|packages/core/|package[^/]*\.json$|\.github/workflows/deploy-central\.yml$|\.github/scripts/(bundle_manifest|check_trust_principals)\.py$)'
+        run: python3 -I .github/scripts/deploy_gate.py deploy-central.yml apply '^(infra/aws/|services/|packages/core/|package[^/]*\.json$|\.github/workflows/deploy-central\.yml$|\.github/scripts/(bundle_manifest|check_trust_principals)\.py$)' plan
 
   build:
     needs: gate

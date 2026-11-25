@@ -91,8 +91,13 @@ class Decide(unittest.TestCase):
 
 
 class FindBase(unittest.TestCase):
-    def run_(self, sha, conclusion="success"):
-        return {"id": int(sha[0]) * 1000, "conclusion": conclusion, "display_title": f"deploy-central {sha}"}
+    STEM = "deploy-central"
+
+    def run_(self, sha, conclusion="success", title=None):
+        return {"id": int(sha[0]) * 1000, "conclusion": conclusion, "display_title": title or f"deploy-central {sha}"}
+
+    def find(self, runs, jobs, deploy_job="apply", **kw):
+        return dg.find_base(runs, lambda i: jobs[i], deploy_job, self.STEM, **kw)
 
     def test_newest_run_whose_deploy_job_succeeded(self):
         r1, r2, r3 = self.run_("1" * 40), self.run_("2" * 40), self.run_("3" * 40)
@@ -100,24 +105,109 @@ class FindBase(unittest.TestCase):
                 r2["id"]: [{"name": "gate", "conclusion": "success"}, {"name": "apply", "conclusion": "skipped"}],
                 r3["id"]: [{"name": "gate", "conclusion": "success"}, {"name": "build", "conclusion": "skipped"}]}
         # r3 (gate only) and r2 (apply skipped) are not bases
-        self.assertEqual(dg.find_base([r3, r2, r1], lambda i: jobs[i], "apply"), "1" * 40)
+        self.assertEqual(self.find([r3, r2, r1], jobs), "1" * 40)
+
+    def test_empty_change_set_run_is_a_base_when_noop_job_given(self):
+        # plan success + apply skipped = empty change set = the stack equals that commit
+        r = self.run_("2" * 40)
+        jobs = {r["id"]: [{"name": "gate", "conclusion": "success"}, {"name": "plan", "conclusion": "success"},
+                          {"name": "apply", "conclusion": "skipped"}]}
+        self.assertEqual(self.find([r], jobs, noop_job="plan"), "2" * 40)
+        self.assertIsNone(self.find([r], jobs))  # console: no such case
+
+    def test_failed_or_skipped_plan_is_never_a_base(self):
+        for plan in ("failure", "cancelled", "skipped"):
+            r = self.run_("2" * 40)
+            jobs = {r["id"]: [{"name": "plan", "conclusion": plan}, {"name": "apply", "conclusion": "skipped"}]}
+            self.assertIsNone(self.find([r], jobs, noop_job="plan"), plan)
+
+    def test_failed_apply_after_good_plan_is_not_a_base(self):
+        r = self.run_("2" * 40)
+        for apply in ("failure", "cancelled"):
+            jobs = {r["id"]: [{"name": "plan", "conclusion": "success"}, {"name": "apply", "conclusion": apply}]}
+            self.assertIsNone(self.find([r], jobs, noop_job="plan"), apply)
 
     def test_deploy_job_name_must_match(self):
         r = self.run_("1" * 40)
-        self.assertIsNone(dg.find_base([r], lambda i: [{"name": "deploy", "conclusion": "success"}], "apply"))
+        self.assertIsNone(self.find([r], {r["id"]: [{"name": "deploy", "conclusion": "success"}]}))
 
     def test_current_run_and_untitled_runs_are_ignored(self):
         cur, old = self.run_("1" * 40), {"id": 7, "conclusion": "success", "display_title": "Merge pull request #1"}
-        ok = lambda i: [{"name": "apply", "conclusion": "success"}]
-        self.assertIsNone(dg.find_base([cur, old], ok, "apply", current_run_id=cur["id"]))
+        ok = {cur["id"]: [{"name": "apply", "conclusion": "success"}], 7: [{"name": "apply", "conclusion": "success"}]}
+        self.assertIsNone(self.find([cur, old], ok, current_run_id=cur["id"]))
+
+    def test_title_ending_in_hex_is_not_a_base(self):
+        # an old commit message (display_title before run-name existed) that happens to end in 40 hex characters
+        ok = lambda r: {r["id"]: [{"name": "apply", "conclusion": "success"}]}
+        for title in (f"Revert {A}", f"deploy-central {A} extra", f" deploy-central {A}", f"deploy-console {A}",
+                      f"x deploy-central {A}", f"deploy-central {A.upper()}"):
+            r = self.run_("1" * 40, title=title)
+            self.assertIsNone(self.find([r], ok(r)), title)
 
     def test_no_runs_no_base(self):
-        self.assertIsNone(dg.find_base([], lambda i: [], "apply"))
+        self.assertIsNone(self.find([], {}))
 
     def test_sha_from_title(self):
-        self.assertEqual(dg.sha_from_title(f"deploy-console {A}"), A)
-        self.assertIsNone(dg.sha_from_title("deploy-console abc"))
-        self.assertIsNone(dg.sha_from_title(None))
+        self.assertEqual(dg.sha_from_title(f"deploy-console {A}", "deploy-console"), A)
+        self.assertIsNone(dg.sha_from_title(f"deploy-console {A}", "deploy-central"))
+        self.assertIsNone(dg.sha_from_title("deploy-console abc", "deploy-console"))
+        self.assertIsNone(dg.sha_from_title(None, "deploy-console"))
+
+
+class MainWithMockedApi(unittest.TestCase):
+    """main() end to end with gh_json and the git helpers replaced: the API queries and the decision wiring."""
+
+    def run_main(self, argv, runs, jobs, ancestor=True, files=("README.md",), event="workflow_run"):
+        self.calls = []
+
+        def fake_gh(path):
+            self.calls.append(path)
+            if "/jobs" in path:
+                return {"jobs": jobs[int(path.split("/runs/")[1].split("/")[0])]}
+            return {"workflow_runs": runs}
+
+        saved = (dg.gh_json, dg.git_is_ancestor, dg.git_changed_files)
+        dg.gh_json = fake_gh
+        dg.git_is_ancestor = lambda b, h: ancestor
+        dg.git_changed_files = lambda b, h: list(files)
+        d = Path(tempfile.mkdtemp())
+        try:
+            dg.main(argv, {"EVENT": event, "HEAD_SHA": B, "GITHUB_REPOSITORY": "o/r", "GITHUB_RUN_ID": "99",
+                           "GITHUB_OUTPUT": str(d / "out")})
+        finally:
+            dg.gh_json, dg.git_is_ancestor, dg.git_changed_files = saved
+        return (d / "out").read_text()
+
+    def test_query_filters_and_skip(self):
+        run = {"id": 5, "conclusion": "success", "display_title": f"deploy-central {A}"}
+        out = self.run_main(["deploy-central.yml", "apply", CENTRAL, "plan"], [run],
+                            {5: [{"name": "apply", "conclusion": "success"}]})
+        self.assertEqual(out, "deploy=false\n")
+        q = self.calls[0]
+        self.assertTrue(q.startswith("repos/o/r/actions/workflows/deploy-central.yml/runs?"), q)
+        self.assertIn("branch=main", q)
+        self.assertIn("status=success", q)
+        self.assertEqual(self.calls[1], "repos/o/r/actions/runs/5/jobs?per_page=100")
+
+    def test_changed_path_deploys(self):
+        run = {"id": 5, "conclusion": "success", "display_title": f"deploy-central {A}"}
+        out = self.run_main(["deploy-central.yml", "apply", CENTRAL], [run],
+                            {5: [{"name": "apply", "conclusion": "success"}]}, files=["services/a.ts"])
+        self.assertEqual(out, "deploy=true\n")
+
+    def test_no_base_deploys_and_empty_changeset_run_counts_as_base(self):
+        run = {"id": 5, "conclusion": "success", "display_title": f"deploy-central {A}"}
+        noop = {5: [{"name": "plan", "conclusion": "success"}, {"name": "apply", "conclusion": "skipped"}]}
+        self.assertEqual(self.run_main(["deploy-central.yml", "apply", CENTRAL], [run], noop), "deploy=true\n")
+        self.assertEqual(self.run_main(["deploy-central.yml", "apply", CENTRAL, "plan"], [run], noop), "deploy=false\n")
+
+    def test_own_run_is_excluded_and_base_not_ancestor_deploys(self):
+        own = {"id": 99, "conclusion": "success", "display_title": f"deploy-central {A}"}
+        jobs = {99: [{"name": "apply", "conclusion": "success"}]}
+        self.assertEqual(self.run_main(["deploy-central.yml", "apply", CENTRAL], [own], jobs), "deploy=true\n")
+        run = dict(own, id=5)
+        self.assertEqual(self.run_main(["deploy-central.yml", "apply", CENTRAL], [run], {5: jobs[99]}, ancestor=False),
+                         "deploy=true\n")
 
 
 class Cli(unittest.TestCase):
