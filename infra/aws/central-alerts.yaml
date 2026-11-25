@@ -2,7 +2,7 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
   AlarmOps CloudTrail alert rules for the central deploy roles (deploy-role-policy.md 4-2, issue 115).
   Deploy this one template as stack alarmops-central-alerts in each of the two regions, by a human.
-  The IAM rule is created in the global IAM event region only; every other region gets the service rule.
+  Per region: the global IAM event region gets the IAM direct-call rule, the IAM denied rule and the IAM trust rule (role creation or trust change by any path); every other region gets the service direct-call rule, the service denied rule and the deploy rule (one mail per CloudFormation deployment).
   The deploy roles must not be able to change these resources (isolation test: infra/test/test_central_alerts.py).
 
 Parameters:
@@ -53,7 +53,7 @@ Resources:
     Condition: IsUsEast1
     Properties:
       Name: !Sub "${ResourcePrefix}-iam-change"
-      Description: IAM role changes made by the central deploy role
+      Description: IAM role changes made by the central deploy role by a direct call (not through CloudFormation)
       State: ENABLED
       EventPattern:
         source:
@@ -75,6 +75,8 @@ Resources:
               sessionIssuer:
                 userName:
                   - AlarmOpsDeployCentral
+          sourceIPAddress:
+            - anything-but: cloudformation.amazonaws.com
       Targets:
         - Id: alert-topic
           Arn: !Ref AlertTopic
@@ -104,18 +106,135 @@ Resources:
                 "eventID (search it in CloudTrail)": "<eventId>"
               }
 
+  IamDeniedRule:
+    Type: AWS::Events::Rule
+    Condition: IsUsEast1
+    Properties:
+      Name: !Sub "${ResourcePrefix}-iam-denied"
+      Description: URGENT - IAM role change DENIED for the central deploy role (any path, including through CloudFormation)
+      State: ENABLED
+      EventPattern:
+        source:
+          - aws.iam
+          - aws.cloudformation
+        detail-type:
+          - AWS API Call via CloudTrail
+        detail:
+          eventName:
+            - CreateRole
+            - UpdateAssumeRolePolicy
+            - PutRolePolicy
+            - AttachRolePolicy
+            - PutRolePermissionsBoundary
+            - DeleteRolePermissionsBoundary
+            - CreatePolicyVersion
+            - SetDefaultPolicyVersion
+            - ExecuteChangeSet
+            - CreateStack
+            - UpdateStack
+            - DeleteStack
+          userIdentity:
+            sessionContext:
+              sessionIssuer:
+                userName:
+                  - AlarmOpsDeployCentral
+          errorCode:
+            - exists: true
+      Targets:
+        - Id: alert-topic
+          Arn: !Ref AlertTopic
+          InputTransformer:
+            InputPathsMap:
+              eventName: $.detail.eventName
+              errorCode: $.detail.errorCode
+              eventTime: $.detail.eventTime
+              sourceIp: $.detail.sourceIPAddress
+              userAgent: $.detail.userAgent
+              region: $.detail.awsRegion
+              eventId: $.detail.eventID
+              actor: $.detail.userIdentity.sessionContext.sessionIssuer.userName
+              stackName: $.detail.requestParameters.stackName
+              changeSetName: $.detail.requestParameters.changeSetName
+              roleName: $.detail.requestParameters.roleName
+              policyArn: $.detail.requestParameters.policyArn
+            InputTemplate: |-
+              {
+                "severity": "URGENT - denied call by the deploy role",
+                "rule": "<aws.events.rule-name>",
+                "eventName": "<eventName>",
+                "errorCode (empty = succeeded)": "<errorCode>",
+                "actor": "<actor>",
+                "target": {"stackName": "<stackName>", "changeSetName": "<changeSetName>", "roleName": "<roleName>", "policyArn": "<policyArn>"},
+                "eventTime": "<eventTime>",
+                "sourceIPAddress": "<sourceIp>",
+                "userAgent": "<userAgent>",
+                "awsRegion": "<region>",
+                "eventID (search it in CloudTrail)": "<eventId>"
+              }
+
+  IamTrustRule:
+    Type: AWS::Events::Rule
+    Condition: IsUsEast1
+    Properties:
+      Name: !Sub "${ResourcePrefix}-iam-trust"
+      Description: Trust relationship of an IAM role created or changed by the central deploy role, by any path including CloudFormation (catches external trust roles)
+      State: ENABLED
+      EventPattern:
+        source:
+          - aws.iam
+        detail-type:
+          - AWS API Call via CloudTrail
+        detail:
+          eventName:
+            - CreateRole
+            - UpdateAssumeRolePolicy
+          userIdentity:
+            sessionContext:
+              sessionIssuer:
+                userName:
+                  - AlarmOpsDeployCentral
+      Targets:
+        - Id: alert-topic
+          Arn: !Ref AlertTopic
+          InputTransformer:
+            InputPathsMap:
+              eventName: $.detail.eventName
+              errorCode: $.detail.errorCode
+              eventTime: $.detail.eventTime
+              sourceIp: $.detail.sourceIPAddress
+              userAgent: $.detail.userAgent
+              region: $.detail.awsRegion
+              eventId: $.detail.eventID
+              actor: $.detail.userIdentity.sessionContext.sessionIssuer.userName
+              roleName: $.detail.requestParameters.roleName
+            InputTemplate: |-
+              {
+                "rule": "<aws.events.rule-name>",
+                "eventName": "<eventName>",
+                "errorCode (empty = succeeded)": "<errorCode>",
+                "actor": "<actor>",
+                "target": {"roleName": "<roleName>"},
+                "eventTime": "<eventTime>",
+                "sourceIPAddress": "<sourceIp>",
+                "userAgent": "<userAgent>",
+                "awsRegion": "<region>",
+                "eventID (search it in CloudTrail)": "<eventId>"
+              }
+
   ServiceChangeRule:
     Type: AWS::Events::Rule
     Condition: IsNotUsEast1
     Properties:
       Name: !Sub "${ResourcePrefix}-service-change"
-      Description: Queue, function and bus permission changes made by the central deploy roles
+      Description: Queue, function and bus permission changes made by the central deploy roles by a direct call (not through CloudFormation)
       State: ENABLED
       EventPattern:
         source:
           - aws.sqs
           - aws.lambda
           - aws.events
+          - aws.apigateway
+          - aws.secretsmanager
         detail-type:
           - AWS API Call via CloudTrail
         detail:
@@ -132,12 +251,24 @@ Resources:
             - PutTargets
             - RemoveTargets
             - DeleteRule
+            - prefix: DeleteFunction
+            - RemovePermission
+            - CreateRoute
+            - UpdateRoute
+            - DeleteRoute
+            - CreateIntegration
+            - UpdateIntegration
+            - UpdateStage
+            - CreateSecret
+            - DeleteSecret
           userIdentity:
             sessionContext:
               sessionIssuer:
                 userName:
                   - AlarmOpsDeployCentral
                   - AlarmOpsDeployBus
+          sourceIPAddress:
+            - anything-but: cloudformation.amazonaws.com
       Targets:
         - Id: alert-topic
           Arn: !Ref AlertTopic
@@ -163,6 +294,147 @@ Resources:
                 "errorCode (empty = succeeded)": "<errorCode>",
                 "actor": "<actor>",
                 "target": {"functionName": "<functionName>", "name": "<name>", "rule": "<ruleName>", "queueUrl": "<queueUrl>", "eventSourceMappingUuid": "<mappingUuid>"},
+                "eventTime": "<eventTime>",
+                "sourceIPAddress": "<sourceIp>",
+                "userAgent": "<userAgent>",
+                "awsRegion": "<region>",
+                "eventID (search it in CloudTrail)": "<eventId>"
+              }
+
+  ServiceDeniedRule:
+    Type: AWS::Events::Rule
+    Condition: IsNotUsEast1
+    Properties:
+      Name: !Sub "${ResourcePrefix}-service-denied"
+      Description: URGENT - queue, function or bus change DENIED for the central deploy roles (any path, including through CloudFormation)
+      State: ENABLED
+      EventPattern:
+        source:
+          - aws.sqs
+          - aws.lambda
+          - aws.events
+          - aws.apigateway
+          - aws.secretsmanager
+          - aws.cloudformation
+        detail-type:
+          - AWS API Call via CloudTrail
+        detail:
+          eventName:
+            - SetQueueAttributes
+            - prefix: UpdateFunctionCode
+            - prefix: UpdateFunctionConfiguration
+            - prefix: AddPermission
+            - PutPermission
+            - prefix: CreateFunction
+            - prefix: CreateEventSourceMapping
+            - prefix: UpdateEventSourceMapping
+            - PutRule
+            - PutTargets
+            - RemoveTargets
+            - DeleteRule
+            - prefix: DeleteFunction
+            - RemovePermission
+            - CreateRoute
+            - UpdateRoute
+            - DeleteRoute
+            - CreateIntegration
+            - UpdateIntegration
+            - UpdateStage
+            - CreateSecret
+            - DeleteSecret
+            - ExecuteChangeSet
+            - CreateStack
+            - UpdateStack
+            - DeleteStack
+          userIdentity:
+            sessionContext:
+              sessionIssuer:
+                userName:
+                  - AlarmOpsDeployCentral
+                  - AlarmOpsDeployBus
+          errorCode:
+            - exists: true
+      Targets:
+        - Id: alert-topic
+          Arn: !Ref AlertTopic
+          InputTransformer:
+            InputPathsMap:
+              eventName: $.detail.eventName
+              errorCode: $.detail.errorCode
+              eventTime: $.detail.eventTime
+              sourceIp: $.detail.sourceIPAddress
+              userAgent: $.detail.userAgent
+              region: $.detail.awsRegion
+              eventId: $.detail.eventID
+              actor: $.detail.userIdentity.sessionContext.sessionIssuer.userName
+              stackName: $.detail.requestParameters.stackName
+              changeSetName: $.detail.requestParameters.changeSetName
+              functionName: $.detail.requestParameters.functionName
+              name: $.detail.requestParameters.name
+              ruleName: $.detail.requestParameters.rule
+              queueUrl: $.detail.requestParameters.queueUrl
+              mappingUuid: $.detail.requestParameters.uUID
+            InputTemplate: |-
+              {
+                "severity": "URGENT - denied call by the deploy role",
+                "rule": "<aws.events.rule-name>",
+                "eventName": "<eventName>",
+                "errorCode (empty = succeeded)": "<errorCode>",
+                "actor": "<actor>",
+                "target": {"stackName": "<stackName>", "changeSetName": "<changeSetName>", "functionName": "<functionName>", "name": "<name>", "rule": "<ruleName>", "queueUrl": "<queueUrl>", "eventSourceMappingUuid": "<mappingUuid>"},
+                "eventTime": "<eventTime>",
+                "sourceIPAddress": "<sourceIp>",
+                "userAgent": "<userAgent>",
+                "awsRegion": "<region>",
+                "eventID (search it in CloudTrail)": "<eventId>"
+              }
+
+  DeployRule:
+    Type: AWS::Events::Rule
+    Condition: IsNotUsEast1
+    Properties:
+      Name: !Sub "${ResourcePrefix}-deploy"
+      Description: One mail per CloudFormation deployment started by the central deploy roles. Compare it with the CI run.
+      State: ENABLED
+      EventPattern:
+        source:
+          - aws.cloudformation
+        detail-type:
+          - AWS API Call via CloudTrail
+        detail:
+          eventName:
+            - ExecuteChangeSet
+            - CreateStack
+            - UpdateStack
+            - DeleteStack
+          userIdentity:
+            sessionContext:
+              sessionIssuer:
+                userName:
+                  - AlarmOpsDeployCentral
+                  - AlarmOpsDeployBus
+      Targets:
+        - Id: alert-topic
+          Arn: !Ref AlertTopic
+          InputTransformer:
+            InputPathsMap:
+              eventName: $.detail.eventName
+              errorCode: $.detail.errorCode
+              eventTime: $.detail.eventTime
+              sourceIp: $.detail.sourceIPAddress
+              userAgent: $.detail.userAgent
+              region: $.detail.awsRegion
+              eventId: $.detail.eventID
+              actor: $.detail.userIdentity.sessionContext.sessionIssuer.userName
+              stackName: $.detail.requestParameters.stackName
+              changeSetName: $.detail.requestParameters.changeSetName
+            InputTemplate: |-
+              {
+                "rule": "<aws.events.rule-name>",
+                "eventName": "<eventName>",
+                "errorCode (empty = succeeded)": "<errorCode>",
+                "actor": "<actor>",
+                "target": {"stackName": "<stackName>", "changeSetName": "<changeSetName>"},
                 "eventTime": "<eventTime>",
                 "sourceIPAddress": "<sourceIp>",
                 "userAgent": "<userAgent>",
