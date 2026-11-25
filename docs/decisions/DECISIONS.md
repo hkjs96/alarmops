@@ -203,6 +203,8 @@ PoC의 범위, 일정, 이름.
   - Vercel 콘솔은 **Vercel OIDC로 IAM 역할을 맡아** AWS를 부른다.
   - 장기 접근 키를 두지 않는다.
   - 역할 신뢰는 OIDC `sub`/`aud`로 이 Vercel 프로젝트·production 환경에 고정하고, 권한은 `alarm-commands` 큐 ARN의 `sqs:SendMessage` 하나
+  - **보정(사용자 결정):** Global·Team 발급자 방식 둘 다 지원한다. 신뢰 정책 조건 키 접두사(`oidc.vercel.com` 또는 `oidc.vercel.com/<팀>`)는 `VercelOidcProviderArn`에서 계산한다. aud·sub 값은 정확 일치(D-58: 계정 이동 시 어느 쪽이든)
+  - 막혔을 때: 콘솔 "The check could not be queued", CloudTrail `AssumeRoleWithWebIdentity` AccessDenied, `identityProvider`가 `…/oidc.vercel.com/<팀>` → 이 수정 이후 배포로 해결
 - **이유**: 유출될 장기 비밀이 없고 회전 부담이 없다(security 검토 sqs-command-publisher 권고)
 - **확정일**: 11/13 (사용자 결정)
 

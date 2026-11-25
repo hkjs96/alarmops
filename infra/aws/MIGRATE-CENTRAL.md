@@ -35,9 +35,10 @@
   - 누를 것: URL `https://token.actions.githubusercontent.com`, 대상 `sts.amazonaws.com`
   - 확인: 목록에 보인다.
 - [ ] **Vercel OIDC 공급자**
-  - 어디서: Vercel 프로젝트 Settings → Security → OIDC federation(발급자 모드 **Global**)과 같은 IAM 화면
+  - 어디서: Vercel 프로젝트 Settings → Security → OIDC federation(발급자 모드 **Global** 또는 **Team**)과 같은 IAM 화면
   - 누를 것: URL `https://oidc.vercel.com`, 대상 `https://vercel.com/<팀 슬러그>`
-  - 확인: 공급자 ARN(`arn:aws:iam::<새 계정 ID>:oidc-provider/oidc.vercel.com`)을 적어 둔다.
+  - Team 방식이면 URL을 `https://oidc.vercel.com/<팀 슬러그>`로 한다.
+  - 확인: 공급자 ARN(`arn:aws:iam::<새 계정 ID>:oidc-provider/oidc.vercel.com` 또는 `.../oidc.vercel.com/<팀 슬러그>`)을 적어 둔다.
 - [ ] **권한 경계 정책**
   - 어디서: IAM → 정책 → 정책 만들기
   - 누를 것: `infra/aws/deploy-role-policy.md`의 권한 경계 정책 JSON. **배포 역할보다 먼저** 만든다.

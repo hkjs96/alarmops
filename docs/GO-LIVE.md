@@ -600,12 +600,11 @@ http://localhost:3107/auth/dev-login?as=admin
 
 4. 순서대로 한다. AWS 쪽 공급자는 위 스택이 만들었다.
    1. 어디서: Vercel 프로젝트 Settings → Security → Secure backend access with OIDC federation
-   2. 발급자 모드를 **Global**로 둔다.
+   2. 발급자 모드는 **Global**이나 **Team** 어느 쪽이든 된다. 템플릿이 공급자 ARN에서 조건 키 접두사를 계산한다. Team이면 사람이 IAM에서 URL `https://oidc.vercel.com/<팀 슬러그>`, 대상 `https://vercel.com/<팀 슬러그>`로 공급자를 만들고 그 ARN을 `VercelOidcProviderArn`으로 쓴다(부트스트랩 스택은 Global만 만든다).
    3. 스택 파라미터 `VercelTeamSlug`가 이 팀 슬러그와 같은지 확인한다(공급자 대상이 `https://vercel.com/<팀 슬러그>`다).
    4. 공급자 ARN은 스택 출력 `VercelOidcProviderArn`이다. 4-2의 스크립트가 변수 `VERCEL_OIDC_PROVIDER_ARN`에 넣는다.
-      - ARN 모양: `arn:aws:iam::<중앙 계정 ID>:oidc-provider/oidc.vercel.com`
-
-   > **주의** 팀 발급자 모드는 이 템플릿의 신뢰 키와 맞지 않는다.
+      - ARN 모양(Global): `arn:aws:iam::<중앙 계정 ID>:oidc-provider/oidc.vercel.com`
+      - ARN 모양(Team): `arn:aws:iam::<중앙 계정 ID>:oidc-provider/oidc.vercel.com/<팀 슬러그>`(슬러그는 소문자·숫자·하이픈)
 
 - [ ] **Service Quotas**
 
@@ -777,7 +776,8 @@ http://localhost:3107/auth/dev-login?as=admin
 | `plan`: AWS 자격 증명 단계에서 실패 | 배포 역할의 신뢰 조건이 다르다. `sub`가 정확히 `repo:<GITHUB_REPO_SUBJECT>:environment:central`(불변 ID 형식)인지, 공급자의 대상이 `sts.amazonaws.com`인지 본다 |
 | `Not authorized to perform sts:AssumeRoleWithWebIdentity` | CloudTrail의 `AssumeRoleWithWebIdentity` 이벤트에서 `userIdentity.userName`의 실제 sub를 확인하고, 스택 `alarmops-central-bootstrap`의 파라미터 `GitHubRepo`를 그 값(`owner@ID/repo@ID`)으로 업데이트한다 |
 | `plan`: `Check the central bus stack exists`에서 실패 | 버스 스택이 없거나 이름이 `alarmops-central-bus`가 아니다. 4-1의 1~2번 |
-| `plan`: 파라미터 `VercelOidcProviderArn` 형식 오류 | ARN이 `…:oidc-provider/oidc.vercel.com`으로 끝나야 한다. 4-1의 4번 |
+| `plan`: 파라미터 `VercelOidcProviderArn` 형식 오류 | ARN이 `…:oidc-provider/oidc.vercel.com` 또는 `…:oidc-provider/oidc.vercel.com/<팀 슬러그>`로 끝나야 한다. 4-1의 4번 |
+| 콘솔 "The check could not be queued", CloudTrail `AssumeRoleWithWebIdentity` AccessDenied, `identityProvider`가 `…/oidc.vercel.com/<팀>` | 예전 템플릿이 조건 키를 Global(`oidc.vercel.com:aud`)로 고정해 Team 공급자와 맞지 않았다. 이 수정 이후 배포로 해결된다. `VercelOidcProviderArn`이 실제 공급자 ARN과 같은지 확인 |
 | `plan`: `SesFromAddress is required when SesIdentityArn is set` | `SES_FROM_ADDRESS`도 같이 넣는다 |
 | `apply`: 예약 동시성 관련 실패 | Lambda 동시 실행 한도가 140 미만이다. 4-1의 5번 |
 | `apply`: 코드 검증 단계에서 권한 거부 | 배포 역할에 `cloudformation:GetTemplate`이나 SAM 버킷 `s3:GetObject`가 없다. 4-1의 3번 |
