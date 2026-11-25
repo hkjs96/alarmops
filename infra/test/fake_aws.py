@@ -18,6 +18,12 @@ Scenario keys (all optional):
   simulate           {"with_request_tag": "allowed", "without_request_tag": "implicitDeny"}
   leak               string echoed into stderr of every non-sts call (a secret leaking via warnings)
   fail_writes        message; every non-read operation exits 255 with it in the error text
+  fail_reads         message; read operations in fail_read_ops (default: validate-template, list-roles,
+                     describe-trails) exit 255 with it in the error text (lets read-only scripts hit the
+                     error-response path). describe-stacks is never failed so its echo path stays testable.
+  fail_ops           ["service op", ...]; those calls exit 254 with a plain error (no secret)
+  metric_sums        {"Invocations": {"start": N, "step": S}}; the n-th get-metric-statistics call for that
+                     metric returns one datapoint with Sum = start + S*n (n counts from 0)
 """
 
 from __future__ import annotations
@@ -174,7 +180,11 @@ def main() -> None:
         echo.append("stderr-warning")
     if scen.get("fail_writes") and not is_read and service != "sts":
         echo.append("error-response")
-    secret = scen.get("leak") or scen.get("fail_writes")
+    read_fail_ops = scen.get("fail_read_ops") or ["validate-template", "list-roles", "describe-trails"]
+    fail_read = bool(scen.get("fail_reads")) and is_read and service != "sts" and op in read_fail_ops
+    if fail_read:
+        echo.append("error-response")
+    secret = scen.get("leak") or scen.get("fail_writes") or scen.get("fail_reads")
     rec = {"argv": argv, "service": service, "op": op, "files": read_files(argv), "stdin": stdin, "echo": echo}
     done = []
 
@@ -194,6 +204,11 @@ def main() -> None:
         sys.stderr.write(f"warning: request context ExternalId={scen['leak']}\n")
     if scen.get("fail_writes") and not is_read and service != "sts":
         error("AccessDenied", op, f"not allowed ({scen['fail_writes']})", 255)
+
+    if fail_read:
+        error("AccessDenied", op, f"not allowed ({scen['fail_reads']})", 255)
+    if f"{service} {op}" in (scen.get("fail_ops") or []):
+        error("InternalFailure", op, "simulated failure")
 
     key = f"{service} {op}"
     first = lambda name: (opts.get(name) or [None])[0]  # noqa: E731
@@ -293,7 +308,19 @@ def main() -> None:
             for a in actions for r in arns]}, opts)
 
     if key == "cloudwatch get-metric-statistics":
-        return emit({"Label": "x", "Datapoints": []}, opts)
+        name = first("--metric-name") or ""
+        spec = (scen.get("metric_sums") or {}).get(name)
+        points = []
+        if spec:
+            counter = os.environ["FAKE_AWS_LOG"] + ".metric-" + name
+            n = 0
+            if os.path.exists(counter):
+                with open(counter, encoding="utf-8") as f:
+                    n = int(f.read() or 0)
+            with open(counter, "w", encoding="utf-8") as f:
+                f.write(str(n + 1))
+            points = [{"Sum": spec.get("start", 0) + spec.get("step", 0) * n}]
+        return emit({"Label": "x", "Datapoints": points}, opts)
 
     # delete-*, tag-*, untag-*, wait, anything unknown: succeed quietly.
     if op.startswith(("delete-", "tag-", "untag-", "wait")) or key.endswith("deploy"):

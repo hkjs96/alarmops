@@ -34,11 +34,11 @@ def rich_scenario(q1, q2, q1_tags=None, stack_tags=None):
     Only alarm-own-q1 may be deleted for run-one. alarm-own-instance carries the SAME VALUE as the
     queue name but under dimension InstanceId, so only a check of the dimension NAME can exclude it.
     """
-    mine = {"AlarmOpsRehearsal": "true"} if q1_tags is None else q1_tags
+    mine = {"AlarmOpsRehearsal": "true", "AlarmOpsRehearsalRun": "run-one"} if q1_tags is None else q1_tags
     return dict(
         stacks=[{"StackName": STACK, "StackStatus": "CREATE_COMPLETE",
                  "Tags": [{"Key": "AlarmOpsRehearsal", "Value": "true"}] if stack_tags is None else stack_tags}],
-        queues={q1: {"tags": mine}, q2: {"tags": {"AlarmOpsRehearsal": "true"}},
+        queues={q1: {"tags": mine}, q2: {"tags": {"AlarmOpsRehearsal": "true", "AlarmOpsRehearsalRun": "run-two"}},
                 "customer-prod-queue": {"tags": {"Team": "x"}}, "untagged-queue": {}},
         alarms=[
             alarm("alarm-own-q1", q1, {"ManagedBy": "AlarmOps"}),
@@ -301,7 +301,7 @@ class SecretHandling(Base):
         self.assertTrue(self.sb.log_files(), "verify must write a log under rehearsal-logs")
 
     def test_external_id_never_shown_when_aws_calls_fail_with_it(self):
-        results = self.run_all(fail_writes=EID)
+        results = self.run_all(fail_writes=EID, fail_reads=EID)   # preflight has no writes: reads must fail too
         self.assert_scenario_really_ran("error-response")
         self.assert_describe_stacks_returned_secret()
         self.assert_no_leak(results)
@@ -371,13 +371,33 @@ class CleanupScope(Base):
 
     def test_queue_without_rehearsal_tag_is_kept_even_if_in_the_run_log(self):
         q1, q2 = self.prepare()
-        for tags in ({}, {"AlarmOpsRehearsal": "false"}, {"Monitoring": "on"}):
+        for tags in ({}, {"AlarmOpsRehearsal": "false"}, {"Monitoring": "on"},
+                     {"AlarmOpsRehearsal": "true"}, {"AlarmOpsRehearsal": "true", "AlarmOpsRehearsalRun": "other"}):
             with self.subTest(tags=tags):
                 self.sb.calls_file.unlink(missing_ok=True)
                 self.sb.set_scenario(**self.scenario(q1, q2, q1_tags=tags))
                 self.sb.run("cleanup.sh", self.args("cleanup.sh", run_id="run-one"))
                 self.assertEqual(self.deleted_queues(), set())
-                self.assertLessEqual(self.deleted_alarms(), {"alarm-own-q1"})   # never anything outside scope
+                self.assertEqual(self.deleted_alarms(), set(), "not owned: its alarms must stay too")
+
+    def test_ownership_is_checked_before_any_alarm_is_deleted(self):
+        q1, q2 = self.prepare()
+        self.sb.set_scenario(**self.scenario(q1, q2))
+        self.sb.run("cleanup.sh", self.args("cleanup.sh", run_id="run-one"))
+        ops = [c["op"] for c in self.sb.calls()]
+        self.assertIn("list-queue-tags", ops)
+        self.assertLess(ops.index("list-queue-tags"), ops.index("delete-alarms"))
+
+    def test_alarm_lookup_failure_stops_deleting_and_exits_nonzero(self):
+        q1, q2 = self.prepare()
+        for failing in ("cloudwatch describe-alarms", "cloudwatch list-tags-for-resource"):
+            with self.subTest(failing=failing):
+                self.sb.calls_file.unlink(missing_ok=True)
+                self.sb.set_scenario(**self.scenario(q1, q2), fail_ops=[failing])
+                res = self.sb.run("cleanup.sh", self.args("cleanup.sh", run_id="run-one"))
+                self.assertNotEqual(res.code, 0, res.text)
+                self.assertEqual(self.deleted_alarms(), set())
+                self.assertEqual(self.deleted_queues(), set())
 
     def test_unknown_run_id_deletes_nothing(self):
         q1, q2 = self.prepare()
@@ -481,6 +501,100 @@ class VerifySimulation(Base):
         p = self.sb.log_dir / PROFILE / f"{RUN}.md"
         self.assertTrue(p.is_file(), p)
         self.assertEqual(mode(p), 0o600)
+
+
+class TempFiles(Base):
+    def test_no_tmp_file_holding_the_external_id_survives(self):
+        for script, extra in (("preflight.sh", []), ("install.sh", []), ("verify.sh", []), ("cleanup.sh", ["--stack"])):
+            with self.subTest(script=script):
+                self.sb.set_scenario(stacks=[{"StackName": STACK, "StackStatus": "CREATE_COMPLETE",
+                                              "Tags": [{"Key": "AlarmOpsRehearsal", "Value": "true"}]}],
+                                     fail_writes=EID, leak=EID)
+                self.sb.run(script, self.args(script, extra=extra))
+                self.sb.set_scenario()
+                self.sb.run(script, self.args(script, extra=extra))
+                left = [p for p in (self.sb.dir / "tmp").rglob("*") if p.is_file()]
+                self.assertEqual([p for p in left if EID in p.read_text(errors="replace")], [], left)
+                self.assertEqual(left, [], "no temp file of any kind may remain")
+
+    def test_install_really_wrote_the_input_file_before_it_was_removed(self):
+        """Control: the file existed (its content was captured by the fake) and is gone afterwards."""
+        self.sb.set_scenario()
+        self.sb.run("install.sh", self.args("install.sh"))
+        stack_calls = [c for c in self.sb.writes() if c["service"] == "cloudformation"]
+        self.assertTrue(any(EID in call_blob(c) for c in stack_calls))
+
+
+class VerifyInteractive(Base):
+    """Feed y to the human gates through stdin."""
+    YES = "y\n" * 6
+
+    def run_verify(self, stdin="", **scen):
+        self.sb.set_scenario(**scen)
+        res = self.sb.run("verify.sh", self.args("verify.sh"), stdin_text=stdin)
+        return res, self.sb.report(RUN)
+
+    @staticmethod
+    def row(report, label):
+        return [l for l in report.splitlines() if label in l]
+
+    def test_noninteractive_skip_exits_2_and_says_so(self):
+        res, rep = self.run_verify()
+        self.assertEqual(res.code, 2, res.text)
+        self.assertIn("SKIP 있음", rep)
+        self.assertIn("SKIP 있음", res.out)
+
+    def test_baseline_prior_failures_alone_are_not_pass(self):
+        """Failures that existed before tag-queue (constant counters) must not satisfy (가)."""
+        res, rep = self.run_verify("y\ny\n", metric_sums={"Invocations": {"start": 5, "step": 0},
+                                                           "FailedInvocations": {"start": 3, "step": 0}})
+        row = self.row(rep, "(가)")
+        self.assertTrue(row)
+        self.assertFalse(any("PASS" in r for r in row), row)
+        self.assertTrue(any("TIMEOUT" in r for r in row), row)
+
+    def test_only_failed_growing_without_invocations_is_not_pass(self):
+        res, rep = self.run_verify("y\ny\n", metric_sums={"Invocations": {"start": 5, "step": 0},
+                                                           "FailedInvocations": {"start": 3, "step": 1}})
+        self.assertFalse(any("PASS" in r for r in self.row(rep, "(가)")))
+
+    def test_both_metrics_growing_after_tag_is_pass(self):
+        res, rep = self.run_verify("y\ny\n", metric_sums={"Invocations": {"start": 5, "step": 1},
+                                                           "FailedInvocations": {"start": 3, "step": 1}})
+        self.assertTrue(any("PASS" in r for r in self.row(rep, "(가)")), rep)
+
+    def test_baseline_is_measured_before_tag_queue(self):
+        self.run_verify("y\n", metric_sums={"Invocations": {"start": 1, "step": 1},
+                                            "FailedInvocations": {"start": 1, "step": 1}})
+        ops = [(c["service"], c["op"]) for c in self.sb.calls()]
+        self.assertLess(ops.index(("cloudwatch", "get-metric-statistics")), ops.index(("sqs", "tag-queue")))
+
+    def test_metric_lookup_failure_is_fail_not_zero(self):
+        res, rep = self.run_verify("y\ny\n", fail_ops=["cloudwatch get-metric-statistics"])
+        row = self.row(rep, "(가)")
+        self.assertTrue(any("FAIL" in r for r in row), row)
+        self.assertFalse(any("PASS" in r for r in row), row)
+
+    GROW = {"Invocations": {"start": 5, "step": 1}, "FailedInvocations": {"start": 3, "step": 1}}
+
+    def test_alarm_lookup_failure_is_not_reported_as_absent_or_pass(self):
+        for failing in ("cloudwatch describe-alarms", "cloudwatch list-tags-for-resource"):
+            with self.subTest(failing=failing):
+                alarms = [alarm("a1", "alarmops-rehearsal-" + RUN, {"ManagedBy": "AlarmOps"})]
+                res, rep = self.run_verify(self.YES, metric_sums=self.GROW, alarms=alarms, fail_ops=[failing])
+                row = self.row(rep, "(나)")
+                self.assertTrue(any("FAIL" in r and "오류" in r for r in row), row)
+                self.assertFalse(any("PASS" in r or "TIMEOUT" in r for r in row), row)
+                self.assertNotEqual(res.code, 0)
+
+    def test_untag_keeps_the_queues_alarm_set_and_other_alarms_do_not_matter(self):
+        q = "alarmops-rehearsal-" + RUN
+        alarms = [alarm("a1", q, {"ManagedBy": "AlarmOps"}), alarm("other", "x", {"ManagedBy": "AlarmOps"})]
+        res, rep = self.run_verify(self.YES, metric_sums=self.GROW, alarms=alarms)
+        row = self.row(rep, "(다)")
+        self.assertTrue(row, rep)
+        self.assertTrue(any("SKIP" in r or "TIMEOUT" in r for r in row), row)   # fake never deletes; no PASS
+        self.assertFalse(any("D-16" in r for r in row), row)
 
 
 class GoLiveDoc(unittest.TestCase):

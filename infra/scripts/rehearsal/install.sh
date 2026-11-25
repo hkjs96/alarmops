@@ -15,7 +15,7 @@ rh_log_open "install-$(date +%Y%m%d-%H%M%S)" truncate
 rh_say "# install $RH_PROFILE ($RH_ACCT) stack=$RH_STACK_NAME_CONST"
 
 # ExternalId 는 환경변수 → 600 임시 파일(--cli-input-json)로만 aws 에 전달한다.
-input="$(rh_tmpfile)"
+rh_tmpfile; input="$RH_TMPF"
 RH_CENTRAL_ROLE_ARN="$RH_CENTRAL_ROLE_ARN" RH_CENTRAL_BUS_ARN="$RH_CENTRAL_BUS_ARN" RH_STACK_NAME_CONST="$RH_STACK_NAME_CONST" \
 "$RH_PY" -c '
 import json, os
@@ -51,6 +51,7 @@ fi
 
 rc=0
 aws_r cloudformation "$op" --cli-input-json "$inp" --template-body "$tpl" >/dev/null || rc=$?
+rm -f "$input"   # ExternalId 가 든 파일은 호출 직후 지운다
 if [ "$rc" -ne 0 ]; then rh_say "FAIL: $op 실패(종료 코드 $rc)"; exit "$rc"; fi
 rh_say "$op 요청함. 완료를 기다린다"
 aws_r cloudformation wait "$waiter" --stack-name "$RH_STACK_NAME_CONST" || { rh_say "FAIL: $waiter 대기 실패"; exit 1; }

@@ -14,7 +14,7 @@ RH_POLL_INTERVAL="${REHEARSAL_POLL_INTERVAL:-30}"
 RH_WAIT_SECONDS="${REHEARSAL_WAIT_SECONDS:-900}"   # 디바운스 10분 + 여유 5분(R9)
 
 RH_PROFILE=""; RH_CONFIRM=""; RH_CONFIRM_GIVEN=0; RH_RUN_ID=""; RH_STACK=0; RH_STACK_NAME=""
-RH_LOG=""; RH_TMPS=()
+RH_LOG=""; RH_TMPS=(); RH_TMPF=""; RH_ALARMS=()
 RH_ALLOWED=" --profile "
 
 rh_die() { printf '오류: %s\n' "$1" >&2; exit "${2:-1}"; }
@@ -29,11 +29,11 @@ rh_cleanup_tmps() {
 }
 trap rh_cleanup_tmps EXIT
 
-rh_tmpfile() {  # 권한 600 임시 파일
-  local f
-  f="$(umask 077; mktemp)"
-  RH_TMPS+=("$f")
-  printf '%s' "$f"
+# 권한 600 임시 파일. 경로는 전역 RH_TMPF 로 돌려준다. 명령 치환($(...))으로 부르지 않는다:
+# 서브셸에서는 RH_TMPS 등록이 사라져 EXIT 트랩이 지우지 못한다.
+rh_tmpfile() {
+  RH_TMPF="$(umask 077; mktemp)"
+  RH_TMPS+=("$RH_TMPF")
 }
 
 rh_native_path() {
@@ -82,8 +82,8 @@ rh_parse_args() {
 # 모든 aws 호출은 이 래퍼로만. 출력은 ExternalId 마스킹을 거친다.
 aws_r() {
   local out rc=0 errf err
-  errf="$(rh_tmpfile)"
-  out="$(aws --profile "$RH_PROFILE" --region "$RH_REGION" "$@" 2>"$errf")" || rc=$?
+  rh_tmpfile; errf="$RH_TMPF"
+  out="$(aws --profile "$RH_PROFILE" --region "$RH_REGION" "$@" 2>"$errf" </dev/null)" || rc=$?   # stdin 을 넘기지 않는다(사람 응답을 aws 가 먹지 않게)
   if [ -n "$out" ]; then printf '%s\n' "$(rh_mask "$out")"; fi
   if [ -s "$errf" ]; then
     err="$(cat "$errf")"
@@ -187,9 +187,12 @@ rh_poll() {
   done
 }
 
-# 이 큐를 차원(QueueName)으로 가진 ManagedBy=AlarmOps 알람 이름을 한 줄씩 출력 (B2, B10)
+# 이 큐를 차원(QueueName)으로 가진 ManagedBy=AlarmOps 알람 이름을 전역 배열 RH_ALARMS 에 담는다 (B2, B10).
+# 조회가 하나라도 실패하면 1을 돌려준다(없음과 구분). 프로세스 치환·명령 치환으로 부르지 말고
+# 직접 호출해 종료 코드를 확인할 것.
 rh_run_alarms() {
-  local q="$1" js cand name arn tags
+  local q="$1" js cand name arn tags pc
+  RH_ALARMS=()
   js="$(aws_r cloudwatch describe-alarms)" || return 1
   cand="$(printf '%s' "$js" | "$RH_PY" -c '
 import json, sys
@@ -201,18 +204,21 @@ for a in json.load(sys.stdin).get("MetricAlarms", []):
   [ -n "$cand" ] || return 0
   while IFS=$'\t' read -r name arn; do
     [ -n "$name" ] || continue
-    tags="$(aws_r cloudwatch list-tags-for-resource --resource-arn "$arn")" || continue
-    if printf '%s' "$tags" | "$RH_PY" -c '
+    tags="$(aws_r cloudwatch list-tags-for-resource --resource-arn "$arn")" || { RH_ALARMS=(); return 1; }
+    pc=0
+    printf '%s' "$tags" | "$RH_PY" -c '
 import json, sys
-t = json.load(sys.stdin).get("Tags", [])
+try:
+    t = json.load(sys.stdin).get("Tags", [])
+except Exception:
+    sys.exit(2)
 sys.exit(0 if any(x.get("Key") == "ManagedBy" and x.get("Value") == "AlarmOps" for x in t) else 1)
-'; then printf '%s\n' "$name"; fi
+' || pc=$?
+    case "$pc" in
+      0) RH_ALARMS+=("$name") ;;
+      1) ;;
+      *) RH_ALARMS=(); return 1 ;;
+    esac
   done <<<"$cand"
-}
-
-rh_alarm_total() {
-  aws_r cloudwatch describe-alarms | "$RH_PY" -c '
-import json, sys
-print(len(json.load(sys.stdin).get("MetricAlarms", [])))
-' | tr -d '\r'
+  return 0
 }

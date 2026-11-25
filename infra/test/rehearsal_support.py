@@ -120,12 +120,13 @@ class Sandbox:
         env.update(extra or {})
         return env
 
-    def run(self, script: str, args: list[str], extra_env=None, external_id=EID) -> Result:
+    def run(self, script: str, args: list[str], extra_env=None, external_id=EID, stdin_text=None) -> Result:
         kw = {}
         if os.name == "posix":   # preexec_fn is POSIX-only; os.umask exists on Windows too, so do not test for it
             kw["preexec_fn"] = lambda: os.umask(0)   # a 600 log must come from the script, not the umask
         cp = subprocess.run(["bash", str(SCRIPTS / script), *args], env=self.env(extra_env, external_id),
-                            stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=120,
+                            stdin=subprocess.DEVNULL if stdin_text is None else None,
+                            input=stdin_text, capture_output=True, text=True, timeout=120,
                             cwd=str(self.dir), **kw)
         return Result(cp)
 
