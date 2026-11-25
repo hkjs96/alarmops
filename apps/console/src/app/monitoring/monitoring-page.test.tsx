@@ -86,7 +86,14 @@ describe("Monitoring screen", () => {
   });
 
   it("an unknown customer is Not found, like one that is out of range", async () => {
-    await expect(render("resources", { customer: "nobody" })).rejects.toThrow("notFound");
+    // The error is caught and compared by hand: vitest 3's `.rejects.toThrow` fails inside its own stack handling on this
+    // mocked notFound (TypeError: indexOf of undefined), vitest 2 does not. What is asserted is the same.
+    const caught = async (sp: Record<string, string>): Promise<unknown> => { try { await render("resources", sp); } catch (e) { return e; } return null; };
+    for (const sp of [{ customer: "nobody" }, { customer: "mirae", project: "nobody" }, { customer: "Not A Slug" }]) {
+      const e = await caught(sp);
+      expect(e, JSON.stringify(sp)).toBeInstanceOf(Error);
+      expect((e as Error).message).toBe("notFound");
+    }
   });
 
   it("an API failure is an error card with Retry, not a blank page", async () => {
