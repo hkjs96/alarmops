@@ -109,7 +109,7 @@ describe("every server action goes through callAction", () => {
       "confirmVerificationAction", "createAccountAction", "createContactAction", "createCustomerAction", "createProjectAction",
       "createServiceAction", "escalateIncident", "executeBulk", "listAccountsAction", "listContactsAction", "markOffboardingStep", "previewBulk",
       "removeOwnSteps", "removeResponder", "resolveIncident", "revealContact", "saveCallOrder", "setCapabilityAction", "setLegalHold",
-      "setResponderRole", "undoBulk", "verifyBulkAction", "verifyContactAction",
+      "setMonitoring", "setResponderRole", "undoBulk", "verifyBulkAction", "verifyContactAction",
     ]);
   });
   it("no client file calls one of them outside callAction(() => …)", () => {

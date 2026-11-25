@@ -8,6 +8,7 @@ import type { SP } from "@/lib/query";
 import { parseScopeParams, scopeQuery } from "@/lib/scope";
 import { namesOf, scopeKey, type CoScope } from "@/lib/call-order/model";
 import { SubNav } from "@/components/SubNav";
+import { ScopeEcho } from "@/components/ShellContext";
 import { CallOrderTable } from "./CallOrderTable";
 import { CallOrderPanel } from "./CallOrderPanel";
 import { DraftsLine } from "./DraftsLine";
@@ -67,6 +68,7 @@ export async function CallOrderScreen({ sp, panel }: { sp: SP; panel?: CoScope }
           <div>
             <h1 tabIndex={-1}>Call order</h1>
             <div className="desc">Who gets called, in what order</div>
+            <p className="sm mut">Showing <ScopeEcho />.</p>
           </div>
         </div>
         <SubNav />

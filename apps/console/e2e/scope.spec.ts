@@ -199,9 +199,11 @@ test.describe("filter", () => {
   test("the filter follows the user to the other screens, and the tree works there", async ({ page }) => {
     const errors = watchErrors(page);
     await signIn(page, "/incidents?customer=daon&project=commerce");
-    for (const name of ["Customers", "Monitoring", "Call order", "People", "Maintenance"]) {
+    // Each step waits for its own path first: every screen keeps the filter, so the filter alone would also match the previous page.
+    for (const [name, path] of [["Customers", "/customers"], ["Monitoring", "/monitoring"], ["Call order", "/call-order"], ["People", "/people"], ["Maintenance", "/maintenance"]] as const) {
       await page.getByRole("navigation", { name: "Main", exact: true }).getByRole("link", { name, exact: true }).click();
-      await expect(page).toHaveURL(/customer=daon&project=commerce/);
+      await expect(page).toHaveURL(new RegExp(`^[^?]*${path}[^?]*\\?customer=daon&project=commerce`));
+      await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
       await expect(page.getByTestId("scope-echo")).toHaveText("Daon Retail › Commerce");
       await expect(page.locator(".stree")).toBeVisible();
     }

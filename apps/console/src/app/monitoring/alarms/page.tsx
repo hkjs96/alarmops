@@ -1,5 +1,6 @@
-import { StubPage } from "@/components/StubPage";
+import type { SP } from "@/lib/query";
+import { MonitoringScreen } from "../MonitoringScreen";
 
-export default function Page() {
-  return <StubPage title="Monitoring" spec="docs/ui/screens/monitoring.md" />;
+export default async function Page({ searchParams }: { searchParams: Promise<SP> }) {
+  return <MonitoringScreen tab="alarms" sp={await searchParams} />;
 }
