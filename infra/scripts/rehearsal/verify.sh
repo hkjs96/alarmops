@@ -111,6 +111,8 @@ if [ -n "$url" ] && rh_ask "(가) 이 계정이 허용 목록(bus-allowlist)에 
   if rh_ask "이제 중앙에서 bus-allowlist add 로 이 계정을 허용한 뒤 계속합니까?"; then B_STATE=GO; fi
 else
   rh_row "(가) 미허용 계정 차단" SKIP "사람 확인 없음 또는 큐 없음"
+  # 이미 허용 목록에 있는 계정(다시 돌리는 경우): (가)는 SKIP으로 남기고 (나)부터 진행할 수 있다.
+  if [ -n "$url" ] && rh_ask "이 계정이 이미 허용 목록(bus-allowlist)에 있습니까? (가)는 건너뛰고 (나)부터 진행합니다"; then B_STATE=GO; fi
 fi
 
 # (나) 태그 → 알람 생성
