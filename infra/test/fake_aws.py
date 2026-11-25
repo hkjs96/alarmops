@@ -22,7 +22,7 @@ Scenario keys (all optional):
                      describe-trails) exit 255 with it in the error text (lets read-only scripts hit the
                      error-response path). describe-stacks is never failed so its echo path stays testable.
   fail_ops           ["service op", ...]; those calls exit 254 with a plain error (no secret)
-  metric_sums        {"Invocations": {"start": N, "step": S}}; the n-th get-metric-statistics call for that
+  metric_sums        {"Invocations": {"start": N, "step": S, "empty_first": bool}}; the n-th get-metric-statistics call for that
                      metric returns one datapoint with Sum = start + S*n (n counts from 0)
 """
 
@@ -319,7 +319,8 @@ def main() -> None:
                     n = int(f.read() or 0)
             with open(counter, "w", encoding="utf-8") as f:
                 f.write(str(n + 1))
-            points = [{"Sum": spec.get("start", 0) + spec.get("step", 0) * n}]
+            if not (spec.get("empty_first") and n == 0):   # empty_first: no datapoints on the first call
+                points = [{"Sum": spec.get("start", 0) + spec.get("step", 0) * n}]
         return emit({"Label": "x", "Datapoints": points}, opts)
 
     # delete-*, tag-*, untag-*, wait, anything unknown: succeed quietly.
