@@ -22,6 +22,8 @@ Scenario keys (all optional):
                      describe-trails) exit 255 with it in the error text (lets read-only scripts hit the
                      error-response path). describe-stacks is never failed so its echo path stays testable.
   fail_ops           ["service op", ...]; those calls exit 254 with a plain error (no secret)
+  role_trust         {roleName: trust policy document}   iam get-role
+  role_policies      {roleName: [inline policy names]}   iam list-role-policies
   metric_sums        {"Invocations": {"start": N, "step": S, "empty_first": bool}}; the n-th get-metric-statistics call for that
                      metric returns one datapoint with Sum = start + S*n (n counts from 0)
 """
@@ -294,6 +296,16 @@ def main() -> None:
             res = [r for r in res if any(t["Key"] == keys[0] and (not want or t["Value"] in want)
                                          for t in r["Tags"])]
         return emit({"ResourceTagMappingList": res}, opts)
+
+    if key == "iam get-role":
+        n = first("--role-name") or ""
+        doc = (scen.get("role_trust") or {}).get(n) or {
+            "Version": "2012-10-17",
+            "Statement": [{"Effect": "Allow", "Principal": {"Service": "lambda.amazonaws.com"}, "Action": "sts:AssumeRole"}]}
+        return emit({"Role": {"RoleName": n, "Arn": f"arn:aws:iam::{account}:role/{n}",
+                              "AssumeRolePolicyDocument": doc}}, opts)
+    if key == "iam list-role-policies":
+        return emit({"PolicyNames": (scen.get("role_policies") or {}).get(first("--role-name") or "", [])}, opts)
 
     if key == "iam simulate-principal-policy":
         sim = scen.get("simulate", {"with_request_tag": "allowed", "without_request_tag": "implicitDeny"})

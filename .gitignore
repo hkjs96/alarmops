@@ -15,3 +15,4 @@ docs/qa/shots/
 # rehearsal harness (#122): local account table and run logs
 infra/scripts/rehearsal/accounts.local.json
 rehearsal-logs/
+trust-change-logs/
