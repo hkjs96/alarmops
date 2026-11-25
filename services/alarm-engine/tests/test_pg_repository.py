@@ -295,3 +295,42 @@ def test_sync_command_done_uses_counts_command_id_and_only_finished_runs(pg):
     assert rid4 is not None
     pg.finish_sync_run("cus_p_c", rid4, "PARTIAL", {"commandId": "cmd-P"})
     assert pg.sync_command_done("cus_p_c", "acc_p_cd", "cmd-P")
+
+
+# --- regression: ID generation must not depend on the process (Lambda cold starts restarted a counter at 1) ---
+
+_CHILD = r'''
+import sys
+sys.path.insert(0, sys.argv[2])
+from alarm_engine.engine import Engine
+from alarm_engine.pg_repository import PgRepository
+from conftest import FakeDiscovery, FakeSessions, ec2
+repo = PgRepository(sys.argv[1])
+Engine(repo, FakeSessions(), FakeDiscovery(resources=[ec2(sys.argv[3])])).sync_account("acc_p_uid", "DAILY")
+'''
+
+
+def _run_fresh_process(pg, instance_id: str) -> None:
+    import subprocess
+    import sys
+    url = URL.rsplit("/", 1)[0] + "/" + pg.conn.info.dbname
+    src = Path(__file__).resolve().parents[1] / "src"
+    env = {**os.environ, "PYTHONPATH": str(src)}
+    out = subprocess.run([sys.executable, "-c", _CHILD, url, str(Path(__file__).parent), instance_id],
+                         capture_output=True, text=True, env=env)
+    assert out.returncode == 0, out.stderr[-2000:]
+
+
+def test_new_process_does_not_collide_with_existing_resource_ids(pg):
+    _acct(pg, "acc_p_uid", "cus_1", "900000000001")
+    # a row left by the old counter scheme (res_000001), as in production
+    pg._exec('''INSERT INTO "Resource" (id, "customerId", "cloudAccountId", region, "resourceType", "resourceArn",
+                "resourceKey", "lastSeenAt", "updatedAt") VALUES ('res_000001','cus_1','acc_p_uid','ap-northeast-2','EC2',
+                'arn:aws:ec2:ap-northeast-2:123456789012:instance/i-legacy','i-legacy',now(),now())''')
+    _run_fresh_process(pg, "i-first")      # fresh process 1
+    _run_fresh_process(pg, "i-second")     # fresh process 2: a counter would reuse the first id
+    _run_fresh_process(pg, "i-legacy")     # legacy row is found by its natural key, not duplicated
+    rows = pg.list_resources("acc_p_uid")
+    assert sorted(r.resource_key for r in rows) == ["i-first", "i-legacy", "i-second"]
+    assert len({r.id for r in rows}) == 3
+    assert next(r for r in rows if r.resource_key == "i-legacy").id == "res_000001"
