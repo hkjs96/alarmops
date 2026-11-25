@@ -34,9 +34,9 @@ def alarm_limit_from_env(env: Mapping[str, str] | None = None) -> int:
 
 def make_engine(repo: Repository, sessions: SessionFactory) -> Engine:
     """Engine with the real collectors (Reader role). Tests pass fake sessions (Stubber clients)."""
-    from alarm_engine.collectors import AwsDiscovery
     from datetime import timedelta
 
+    from alarm_engine.collectors import AwsDiscovery
     from alarm_engine.engine import DEAD_RUN_MARGIN
     return Engine(repo, sessions, AwsDiscovery(sessions), alarm_limit=alarm_limit_from_env(),
                   dead_run_after=timedelta(seconds=engine_time_limit_s()) + DEAD_RUN_MARGIN)

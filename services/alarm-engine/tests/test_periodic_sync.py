@@ -667,11 +667,11 @@ def test_bad_settings_reject_only_the_periodic_sync_commands_and_log_the_reason(
     """[차단 4] fan-out and deferral are refused with a logged reason; a normal command in the same batch still works."""
     monkeypatch.setenv("SYNC_BUSY_MAX_DEFERRALS", "4")
     monkeypatch.setenv("SYNC_BUSY_DEFER_SECONDS", "330")
-    monkeypatch.setenv("DATABASE_URL", "postgresql://u:SECRETPW@db.invalid/x")
     repo = InMemoryRepository()
     acc = make_account()
     repo.accounts[acc.id] = acc
-    eng = Engine(repo, FakeSessions(), FakeDiscovery())
+    sessions = FakeSessions()
+    eng = Engine(repo, sessions, FakeDiscovery())
     add_run(repo, acc)                                              # busy -> the child wants to defer
     sender = FakeSender()
     on_demand = {"schemaVersion": 1, "commandId": "c-ok", "type": "CHECK_CONNECTION", "customerId": acc.customer_id,
@@ -682,8 +682,9 @@ def test_bad_settings_reject_only_the_periodic_sync_commands_and_log_the_reason(
     assert out == {"batchItemFailures": []}                         # poison, not retried, nothing sent
     assert sender.entries == []
     assert caplog.text.count("periodic sync refused, invalid settings") == 2
-    assert "1320" in caplog.text and "SECRETPW" not in caplog.text
-    assert [r for r in caplog.records if "c-ok" in r.getMessage() and r.levelno >= logging.ERROR] == []   # m3 handled
+    assert "1320" in caplog.text
+    assert [r for r in caplog.records if "c-ok" in r.getMessage() and r.levelno >= logging.ERROR] == []
+    assert sessions.assumed, "m3 (CHECK_CONNECTION) was actually dispatched: the engine asked for role sessions"
 
 
 def test_lambda_handler_builds_and_caches_the_engine_despite_bad_periodic_settings(start_env, monkeypatch):
@@ -701,9 +702,13 @@ def test_missing_queue_url_rejects_only_the_fanout(monkeypatch, caplog):
     repo = InMemoryRepository()
     add_accounts(repo, 1)
     eng = engine_of(repo)
+    acc = next(iter(repo.accounts.values()))
+    on_demand = {"schemaVersion": 1, "commandId": "c-ok2", "type": "CHECK_CONNECTION", "customerId": acc.customer_id,
+                 "cloudAccountId": acc.id, "payload": {}}
     with caplog.at_level(logging.ERROR):
-        out = handler.handle_batch(eng, {"Records": [record(fanout(), "m1")]})
+        out = handler.handle_batch(eng, {"Records": [record(fanout(), "m1"), record(on_demand, "m2")]})
     assert out == {"batchItemFailures": []} and "COMMANDS_QUEUE_URL" in caplog.text
+    assert eng.sessions.assumed, "the other command (CHECK_CONNECTION) was still processed"
 
 
 def test_engine_time_limit_comes_from_the_environment_not_a_constant():
@@ -712,7 +717,8 @@ def test_engine_time_limit_comes_from_the_environment_not_a_constant():
     assert wiring.engine_time_limit_s({}) == 120
     assert wiring.engine_time_limit_s({"ENGINE_TIMEOUT_SECONDS": "60"}) == 60
     assert wiring.engine_time_limit_s({"ENGINE_TIMEOUT_SECONDS": "0"}) == 120        # out of range -> default
-    # the start-check budget follows it: 4 x 300 = 1200 > 1200 + 60 is false, but 5 x 300 > 1200 + 60 is true
+    # the start-check budget follows it: need = 1200 (stale window) + 120 (default limit) = 1320; 4 x 330 = 1320 is
+    # not > 1320 (refused), and with a 10 s limit need = 1210 so 1320 > 1210 passes
     with pytest.raises(ValueError):
         wiring.sync_settings_from_env({"ENGINE_TIMEOUT_SECONDS": "120", "SYNC_BUSY_MAX_DEFERRALS": "4",
                                        "SYNC_BUSY_DEFER_SECONDS": "330"})

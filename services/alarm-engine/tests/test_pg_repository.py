@@ -261,6 +261,10 @@ def test_is_account_active_follows_the_d43_rule(pg):
     _acct(pg, "acc_p_ia3", "cus_p_a2", "700000000003", disabled=True)
     assert pg.is_account_active("acc_p_ia1")
     assert not pg.is_account_active("acc_p_ia2") and not pg.is_account_active("acc_p_ia3")
+    _acct(pg, "acc_p_ia4", "cus_p_a2", "700000000004")
+    assert pg.is_account_active("acc_p_ia4")
+    pg._exec('''UPDATE "CloudAccount" SET "connectionPurgedAt" = now() WHERE id = 'acc_p_ia4' ''')
+    assert not pg.is_account_active("acc_p_ia4")                     # purged connection (drop the IS NULL clause -> True)
     assert not pg.is_account_active("acc_p_missing")
 
 
@@ -274,3 +278,20 @@ def test_sync_command_done_uses_counts_command_id_and_only_finished_runs(pg):
     pg.finish_sync_run("cus_p_c", rid, "SUCCEEDED", {"commandId": "sched-DAILY-t-acc_p_cd"})
     assert pg.sync_command_done("cus_p_c", "acc_p_cd", "sched-DAILY-t-acc_p_cd")
     assert not pg.sync_command_done("cus_other", "acc_p_cd", "sched-DAILY-t-acc_p_cd")
+    # a run that finished under a DIFFERENT commandId on the same account does not answer for this one
+    assert not pg.sync_command_done("cus_p_c", "acc_p_cd", "sched-DAILY-other-id")
+    rid2 = pg.claim_sync_run("cus_p_c", "acc_p_cd", "DAILY", timedelta(minutes=20), "cmd-B")
+    assert rid2 is not None
+    assert pg._one('SELECT counts->>'+"'commandId'"+' AS c FROM "AlarmSyncRun" WHERE id = %s', rid2)["c"] == "cmd-B"
+    pg.finish_sync_run("cus_p_c", rid2, "SUCCEEDED", {"commandId": "cmd-B"})
+    assert pg.sync_command_done("cus_p_c", "acc_p_cd", "cmd-B")
+    assert not pg.sync_command_done("cus_p_c", "acc_p_cd", "cmd-C")   # only cmd-B ended; cmd-C was never run
+    # FAILED is not done, PARTIAL is
+    rid3 = pg.claim_sync_run("cus_p_c", "acc_p_cd", "DAILY", timedelta(minutes=20), "cmd-F")
+    assert rid3 is not None
+    pg.finish_sync_run("cus_p_c", rid3, "FAILED", {"commandId": "cmd-F"})
+    assert not pg.sync_command_done("cus_p_c", "acc_p_cd", "cmd-F")
+    rid4 = pg.claim_sync_run("cus_p_c", "acc_p_cd", "DAILY", timedelta(minutes=20), "cmd-P")
+    assert rid4 is not None
+    pg.finish_sync_run("cus_p_c", rid4, "PARTIAL", {"commandId": "cmd-P"})
+    assert pg.sync_command_done("cus_p_c", "acc_p_cd", "cmd-P")
