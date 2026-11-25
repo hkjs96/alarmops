@@ -2,7 +2,7 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
   AlarmOps CloudTrail alert rules for the central deploy roles (deploy-role-policy.md 4-2, issue 115).
   Deploy this one template as stack alarmops-central-alerts in each of the two regions, by a human.
-  Per region: the global IAM event region gets the IAM direct-call rule and the IAM denied rule; every other region gets the service direct-call rule, the service denied rule and the deploy rule (one mail per CloudFormation deployment).
+  Per region: the global IAM event region gets the IAM direct-call rule, the IAM denied rule and the IAM trust rule (role creation or trust change by any path); every other region gets the service direct-call rule, the service denied rule and the deploy rule (one mail per CloudFormation deployment).
   The deploy roles must not be able to change these resources (isolation test: infra/test/test_central_alerts.py).
 
 Parameters:
@@ -116,6 +116,7 @@ Resources:
       EventPattern:
         source:
           - aws.iam
+          - aws.cloudformation
         detail-type:
           - AWS API Call via CloudTrail
         detail:
@@ -128,6 +129,10 @@ Resources:
             - DeleteRolePermissionsBoundary
             - CreatePolicyVersion
             - SetDefaultPolicyVersion
+            - ExecuteChangeSet
+            - CreateStack
+            - UpdateStack
+            - DeleteStack
           userIdentity:
             sessionContext:
               sessionIssuer:
@@ -148,6 +153,8 @@ Resources:
               region: $.detail.awsRegion
               eventId: $.detail.eventID
               actor: $.detail.userIdentity.sessionContext.sessionIssuer.userName
+              stackName: $.detail.requestParameters.stackName
+              changeSetName: $.detail.requestParameters.changeSetName
               roleName: $.detail.requestParameters.roleName
               policyArn: $.detail.requestParameters.policyArn
             InputTemplate: |-
@@ -157,7 +164,56 @@ Resources:
                 "eventName": "<eventName>",
                 "errorCode (empty = succeeded)": "<errorCode>",
                 "actor": "<actor>",
-                "target": {"roleName": "<roleName>", "policyArn": "<policyArn>"},
+                "target": {"stackName": "<stackName>", "changeSetName": "<changeSetName>", "roleName": "<roleName>", "policyArn": "<policyArn>"},
+                "eventTime": "<eventTime>",
+                "sourceIPAddress": "<sourceIp>",
+                "userAgent": "<userAgent>",
+                "awsRegion": "<region>",
+                "eventID (search it in CloudTrail)": "<eventId>"
+              }
+
+  IamTrustRule:
+    Type: AWS::Events::Rule
+    Condition: IsUsEast1
+    Properties:
+      Name: !Sub "${ResourcePrefix}-iam-trust"
+      Description: Trust relationship of an IAM role created or changed by the central deploy role, by any path including CloudFormation (catches external trust roles)
+      State: ENABLED
+      EventPattern:
+        source:
+          - aws.iam
+        detail-type:
+          - AWS API Call via CloudTrail
+        detail:
+          eventName:
+            - CreateRole
+            - UpdateAssumeRolePolicy
+          userIdentity:
+            sessionContext:
+              sessionIssuer:
+                userName:
+                  - AlarmOpsDeployCentral
+      Targets:
+        - Id: alert-topic
+          Arn: !Ref AlertTopic
+          InputTransformer:
+            InputPathsMap:
+              eventName: $.detail.eventName
+              errorCode: $.detail.errorCode
+              eventTime: $.detail.eventTime
+              sourceIp: $.detail.sourceIPAddress
+              userAgent: $.detail.userAgent
+              region: $.detail.awsRegion
+              eventId: $.detail.eventID
+              actor: $.detail.userIdentity.sessionContext.sessionIssuer.userName
+              roleName: $.detail.requestParameters.roleName
+            InputTemplate: |-
+              {
+                "rule": "<aws.events.rule-name>",
+                "eventName": "<eventName>",
+                "errorCode (empty = succeeded)": "<errorCode>",
+                "actor": "<actor>",
+                "target": {"roleName": "<roleName>"},
                 "eventTime": "<eventTime>",
                 "sourceIPAddress": "<sourceIp>",
                 "userAgent": "<userAgent>",
@@ -177,6 +233,8 @@ Resources:
           - aws.sqs
           - aws.lambda
           - aws.events
+          - aws.apigateway
+          - aws.secretsmanager
         detail-type:
           - AWS API Call via CloudTrail
         detail:
@@ -193,6 +251,16 @@ Resources:
             - PutTargets
             - RemoveTargets
             - DeleteRule
+            - prefix: DeleteFunction
+            - RemovePermission
+            - CreateRoute
+            - UpdateRoute
+            - DeleteRoute
+            - CreateIntegration
+            - UpdateIntegration
+            - UpdateStage
+            - CreateSecret
+            - DeleteSecret
           userIdentity:
             sessionContext:
               sessionIssuer:
@@ -245,6 +313,9 @@ Resources:
           - aws.sqs
           - aws.lambda
           - aws.events
+          - aws.apigateway
+          - aws.secretsmanager
+          - aws.cloudformation
         detail-type:
           - AWS API Call via CloudTrail
         detail:
@@ -261,6 +332,20 @@ Resources:
             - PutTargets
             - RemoveTargets
             - DeleteRule
+            - prefix: DeleteFunction
+            - RemovePermission
+            - CreateRoute
+            - UpdateRoute
+            - DeleteRoute
+            - CreateIntegration
+            - UpdateIntegration
+            - UpdateStage
+            - CreateSecret
+            - DeleteSecret
+            - ExecuteChangeSet
+            - CreateStack
+            - UpdateStack
+            - DeleteStack
           userIdentity:
             sessionContext:
               sessionIssuer:
@@ -282,6 +367,8 @@ Resources:
               region: $.detail.awsRegion
               eventId: $.detail.eventID
               actor: $.detail.userIdentity.sessionContext.sessionIssuer.userName
+              stackName: $.detail.requestParameters.stackName
+              changeSetName: $.detail.requestParameters.changeSetName
               functionName: $.detail.requestParameters.functionName
               name: $.detail.requestParameters.name
               ruleName: $.detail.requestParameters.rule
@@ -294,7 +381,7 @@ Resources:
                 "eventName": "<eventName>",
                 "errorCode (empty = succeeded)": "<errorCode>",
                 "actor": "<actor>",
-                "target": {"functionName": "<functionName>", "name": "<name>", "rule": "<ruleName>", "queueUrl": "<queueUrl>", "eventSourceMappingUuid": "<mappingUuid>"},
+                "target": {"stackName": "<stackName>", "changeSetName": "<changeSetName>", "functionName": "<functionName>", "name": "<name>", "rule": "<ruleName>", "queueUrl": "<queueUrl>", "eventSourceMappingUuid": "<mappingUuid>"},
                 "eventTime": "<eventTime>",
                 "sourceIPAddress": "<sourceIp>",
                 "userAgent": "<userAgent>",
