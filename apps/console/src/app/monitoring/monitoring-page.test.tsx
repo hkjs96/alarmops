@@ -8,6 +8,7 @@ vi.mock("server-only", () => ({}));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push() {}, replace() {}, refresh() {} }), usePathname: () => "/monitoring/resources", notFound: () => { throw new Error("notFound"); } }));
 vi.mock("@/lib/auth", () => ({ requireSession: async () => ({ sub: state.sub }) }));
+vi.mock("@/components/ShellContext", async (orig) => ({ ...(await orig<typeof import("@/components/ShellContext")>()), ScopeEcho: () => "<scope>" }));
 let store = createStore();
 vi.mock("@/lib/api", () => ({
   isMock: () => true,

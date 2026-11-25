@@ -11,6 +11,7 @@ import { parseScopeParams, scopeQuery } from "@/lib/scope";
 import type { SP } from "@/lib/query";
 import { AlarmsTable, ResourcesTable } from "./MonitoringTables";
 import { NeedsReviewTable } from "./NeedsReviewTable";
+import { ScopeEcho } from "@/components/ShellContext";
 
 const plus = (n: number, more: boolean) => (more ? `${n}+` : String(n));
 
@@ -55,7 +56,7 @@ export async function MonitoringScreen({ tab, sp }: { tab: MonitoringTab; sp: SP
   return (
     <div className="page">
       <div className="ph">
-        <div><h1 tabIndex={-1}>Monitoring</h1></div>
+        <div><h1 tabIndex={-1}>Monitoring</h1><p className="sm mut">Showing <ScopeEcho />.</p></div>
       </div>
 
       <nav className="tabs subnav" aria-label="Monitoring sections">
