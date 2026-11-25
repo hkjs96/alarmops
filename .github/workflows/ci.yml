@@ -173,7 +173,7 @@ jobs:
       - name: Template structure tests (roles, trust, Deny rules)
         run: python -m unittest discover -s infra/test -v
       - name: Workflow script tests (console deploy environment check, bus allow list)
-        run: node --test .github/scripts/check-console-deploy-env.test.mjs .github/scripts/smoke-console.test.mjs .github/scripts/strip-deploy-env.test.mjs .github/scripts/bus-allowlist.test.mjs .github/scripts/ci-changes.test.mjs
+        run: node --test .github/scripts/check-console-deploy-env.test.mjs .github/scripts/smoke-console.test.mjs .github/scripts/rollback-console.test.mjs .github/scripts/strip-deploy-env.test.mjs .github/scripts/bus-allowlist.test.mjs .github/scripts/ci-changes.test.mjs
 
   e2e:
     needs: changes
@@ -307,7 +307,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Workflow script tests (drift check, connection string check)
-        run: node --test .github/scripts/check-migration-drift.test.mjs .github/scripts/mask-db-urls.test.mjs .github/scripts/check-console-deploy-env.test.mjs .github/scripts/smoke-console.test.mjs .github/scripts/strip-deploy-env.test.mjs .github/scripts/bus-allowlist.test.mjs
+        run: node --test .github/scripts/check-migration-drift.test.mjs .github/scripts/mask-db-urls.test.mjs .github/scripts/check-console-deploy-env.test.mjs .github/scripts/smoke-console.test.mjs .github/scripts/rollback-console.test.mjs .github/scripts/strip-deploy-env.test.mjs .github/scripts/bus-allowlist.test.mjs
       - name: Prisma generate
         run: npx prisma generate
         working-directory: db

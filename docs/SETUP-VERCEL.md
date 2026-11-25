@@ -346,7 +346,9 @@ DB가 서울이라 함수도 서울에 둔다. 기본값(`iad1`, 미국 동부)�
 
 ## 11. 스모크 검사가 실패했을 때 되돌리기
 
-> **주의** 실패한 배포는 이미 production에 올라가 있다. 바로 되돌린다.
+> **참고** 이제 워크플로가 먼저 되돌린다(D-59). 스모크가 실패하면 `deploy-console`이 배포 전에 기록해 둔 직전 production 배포를 `vercel promote`로 되살리고 같은 스모크를 다시 돌린다. 실행은 **그래도 빨간색**으로 끝난다(사람이 알아야 한다). 실행 요약(Summary)에 결과가 적혀 있다. 요약에 `Rollback FAILED` 또는 `no previous production deployment`가 있을 때만 아래 1번부터 사람이 한다(Production 칸의 **Promote**/**Instant Rollback**). 요약에 `vercel rollback`으로 되돌렸다고 되어 있으면 4번(되돌리기 해제)도 한다. `promote`로 되돌렸으면 4번은 필요 없다.
+
+> **주의** 실패한 배포는 이미 production에 올라가 있다. 자동 되돌리기가 실패했다면 바로 되돌린다.
 
 1. **어디서:** Vercel 프로젝트 첫 화면의 **Production Deployment** 칸.
    **누를 것:** **Instant Rollback** → 창에서 직전 정상 배포를 고른다(더 오래된 배포는 **Choose another deployment**) → **Continue** → 내용 확인 → **Confirm Rollback**.
@@ -394,6 +396,7 @@ DB가 서울이라 함수도 서울에 둔다. 기본값(`iad1`, 미국 동부)�
 | `SSO_ALLOWED_EMAILS entry #N is not an exact e-mail address` | N번째 주소를 고치거나 Secret으로 다시 만든다 |
 | `unexpected output from vercel deploy (...)` | 허브에 실행 링크를 알린다. 11단계 2번으로 확인 |
 | `smoke: GET /login answered 503, expected 200` | 실행 중 `CONSOLE_ORIGIN`이 빠졌다. 8단계 확인 후 11단계 |
+| 실행 요약에 `Rollback FAILED` 또는 `no previous production deployment` | 자동 되돌리기가 실패했다. 11단계 1번을 사람이 한다(Deployments → 마지막 정상 production 배포 → Promote) |
 | `smoke: GET /login contains a mock marker (...)` | `MOCK_API`가 들어갔다. 지우고 11단계 |
 | `smoke: POST /api/internal/tick answered 503: TICK_SECRET is not configured ...` | `TICK_SECRET`이 없거나 32자 미만. 넣고 11단계 → 9단계 |
 | `smoke: POST /api/internal/tick answered 401 but not with the console error body (...)` | Deployment Protection이 막고 있다. 10단계 |
