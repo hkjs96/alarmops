@@ -257,7 +257,9 @@ class Engine:
     def _sync_account(self, account_id: str, mode: str) -> dict:
         account = self.repo.get_account(account_id)
         self.repo.fail_stale_sync_runs(STALE_RUN_AFTER)
-        run = self.repo.start_sync_run(account.customer_id, account.id, mode)
+        run = self.repo.claim_sync_run(account.customer_id, account.id, mode, STALE_RUN_AFTER)
+        if run is None:    # another live run holds this account (ON_DEMAND, inline reconcile or a scheduled child)
+            return {"skipped": "BUSY"}
         counts: dict[str, Any] = {"created": 0, "updated": 0, "refreshed": 0, "deleted": 0, "needsReview": 0, "externalChange": 0,
                   "errors": 0, "readOnly": False}
         try:

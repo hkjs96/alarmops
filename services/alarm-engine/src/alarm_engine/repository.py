@@ -198,6 +198,8 @@ class Repository(Protocol):
     def claim_threshold_change(self, customer_id: str, change_id: str, command_id: str) -> ThresholdChangeRow | None: ...
     def finish_threshold_change(self, customer_id: str, change_id: str, status: str, error: str | None = None) -> None: ...
     def start_sync_run(self, customer_id: str, cloud_account_id: str, mode: str) -> str: ...
+    def claim_sync_run(self, customer_id: str, cloud_account_id: str, mode: str, stale_after: timedelta) -> str | None: ...
+    def list_active_accounts(self) -> list[CloudAccount]: ...
     def heartbeat_sync_run(self, customer_id: str, run_id: str) -> None: ...
     def finish_sync_run(self, customer_id: str, run_id: str, status: str, counts: dict,
                         error: str | None = None) -> None: ...
@@ -250,6 +252,10 @@ class InMemoryRepository:
                     and a.id not in self.disabled_accounts and a.id not in self.purged_accounts:
                 return a
         return None
+
+    def list_active_accounts(self) -> list[CloudAccount]:
+        return [a for a in self.accounts.values() if self.customer_status.get(a.customer_id, "ACTIVE") == "ACTIVE"
+                and a.id not in self.disabled_accounts and a.id not in self.purged_accounts]
 
     def sync_run_started_since(self, cloud_account_id: str, within: timedelta) -> bool:
         return any(r.cloud_account_id == cloud_account_id and r.started_at > now() - within for r in self.runs.values())
@@ -339,6 +345,13 @@ class InMemoryRepository:
         rid = new_id("run")
         self.runs[rid] = SyncRunRow(rid, customer_id, cloud_account_id, mode, heartbeat_at=now())
         return rid
+
+    def claim_sync_run(self, customer_id: str, cloud_account_id: str, mode: str, stale_after: timedelta) -> str | None:
+        for r in self.runs.values():
+            if r.cloud_account_id == cloud_account_id and r.customer_id == customer_id and r.status == "RUNNING" \
+                    and (r.heartbeat_at or r.started_at) > now() - stale_after:
+                return None
+        return self.start_sync_run(customer_id, cloud_account_id, mode)
 
     def heartbeat_sync_run(self, customer_id: str, run_id: str) -> None:
         r = self.runs.get(run_id)
