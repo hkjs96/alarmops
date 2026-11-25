@@ -1,11 +1,15 @@
-"""Issue #123: checks on the contract doc, the diff, and the infra templates (static; no AWS).
+"""Issue #123: static checks on the contract doc and the infra templates (no AWS, no git history).
 
-Diff-based checks compare against origin/main and are skipped when that ref is not available (shallow checkouts).
-They live under services/ because this role may not edit infra/; move the infra part to infra/test when convenient.
+Everything here reads the files in the working tree, so it gives the same answer on a PR branch, after a squash merge
+and on main. Checks that need the PR diff (first contract commit, literals in added lines, no new migration, CentralRole
+and bootstrap additions) live in services/alarm-engine/scripts/review_pr_diff.py, run during PR review / by CI with
+fetch-depth 0. They are not permanent tests because the diff is empty once the PR is merged.
+Nothing is skipped: a missing tool fails the test.
 """
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import subprocess
@@ -14,38 +18,12 @@ from pathlib import Path
 import pytest
 import yaml
 
+from alarm_engine import handler
+
 ROOT = Path(__file__).resolve().parents[3]
 CENTRAL = ROOT / "infra" / "aws" / "central.yaml"
 BOOTSTRAP = ROOT / "infra" / "aws" / "central-bootstrap.yaml"
 CONTRACT = ROOT / "docs" / "API-CONTRACT.md"
-
-
-def git(*args: str) -> str | None:
-    try:
-        r = subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True, timeout=60)
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    return r.stdout if r.returncode == 0 else None
-
-
-BASE = "origin/main"
-HAVE_BASE = git("rev-parse", "--verify", BASE) is not None
-needs_base = pytest.mark.skipif(not HAVE_BASE, reason="origin/main not available (shallow checkout)")
-
-
-def changed_files() -> set[str]:
-    return set((git("diff", "--name-only", f"{BASE}...HEAD") or "").split())
-
-
-def added_lines(paths: list[str]) -> list[tuple[str, str]]:
-    out = git("diff", "-U0", f"{BASE}...HEAD", "--", *paths) or ""
-    cur, rows = "", []
-    for ln in out.splitlines():
-        if ln.startswith("+++ b/"):
-            cur = ln[6:]
-        elif ln.startswith("+") and not ln.startswith("+++"):
-            rows.append((cur, ln[1:]))
-    return rows
 
 
 def load_cfn(path: Path) -> dict:
@@ -95,52 +73,6 @@ def test_contract_section6_documents_the_new_command_and_the_delay_formula():
     assert re.search(r"5\s*[×x*]\s*300|1500초|25분", s)
 
 
-@needs_base
-def test_first_contract_commit_touches_only_section6_and_comes_before_the_code():
-    commits = (git("rev-list", "--reverse", f"{BASE}..HEAD") or "").split()
-    doc_commit = next((c for c in commits if "docs/API-CONTRACT.md" in (git("show", "--name-only", "--format=", c) or "")),
-                      None)
-    if doc_commit is None:
-        pytest.fail("no commit on this branch changes docs/API-CONTRACT.md")
-    files = (git("show", "--name-only", "--format=", doc_commit) or "").split()
-    assert files == ["docs/API-CONTRACT.md"]
-    s6_start = next(i for i, ln in enumerate((git("show", f"{doc_commit}^:docs/API-CONTRACT.md") or "").splitlines(), 1)
-                    if ln.startswith("## 6. "))
-    old = (git("show", f"{doc_commit}^:docs/API-CONTRACT.md") or "").splitlines()
-    s6_end = next(i for i, ln in enumerate(old, 1) if i > s6_start and ln.startswith("## 7. "))
-    diff = git("diff", "-U0", f"{doc_commit}^", doc_commit, "--", "docs/API-CONTRACT.md") or ""
-    for m in re.finditer(r"^@@ -(\d+)(?:,(\d+))? ", diff, re.M):
-        a, n = int(m.group(1)), int(m.group(2) or 1)
-        assert s6_start <= a and a + max(n, 1) - 1 <= s6_end, f"hunk at old line {a} is outside section 6"
-    first_code = next((c for c in commits
-                       if any(f.startswith(("services/alarm-engine/src", "infra/")) for f in
-                              (git("show", "--name-only", "--format=", c) or "").split())), None)
-    assert first_code is None or commits.index(doc_commit) < commits.index(first_code)
-
-
-# ── [하드코딩 금지] / [마이그레이션 없음] ──────────────────────────────────────────────────────────────────────────
-
-@needs_base
-def test_no_account_ids_queue_urls_arn_or_region_literals_in_added_source_lines():
-    rows = added_lines(["services/alarm-engine/src", "infra/aws/central.yaml", "infra/aws/central-bootstrap.yaml"])
-    bad = []
-    for path, ln in rows:
-        code = ln.strip()
-        if code.startswith("#"):
-            continue
-        if (re.search(r"(?<!\d)\d{12}(?!\d)", code) or re.search(r"https://sqs\.|sqs\.[a-z0-9-]+\.amazonaws", code)
-                or re.search(r"arn:aws[a-z-]*:", code) or re.search(r"\b[a-z]{2}-[a-z]+-\d\b", code)):
-            bad.append(f"{path}: {code}")
-    assert bad == []
-
-
-@needs_base
-def test_no_new_migration_and_no_check_script_change():
-    files = changed_files()
-    assert not [f for f in files if f.startswith("db/prisma/migrations/")]
-    assert "db/scripts/check.mjs" not in files
-
-
 # ── [infra 규칙] ──────────────────────────────────────────────────────────────────────────────────────────────────
 
 C = load_cfn(CENTRAL)
@@ -180,9 +112,11 @@ def test_two_schedule_rules_on_the_default_bus_with_their_own_dlq():
     assert C["Parameters"]["SyncDailySchedule"]["Default"] == "cron(0 18 * * ? *)"      # 03:00 KST
 
 
-@pytest.mark.skipif(shutil.which("cfn-lint") is None, reason="cfn-lint not installed")
 def test_cfn_lint_passes_on_the_central_template():
-    r = subprocess.run(["cfn-lint", str(CENTRAL)], capture_output=True, text=True, timeout=300)
+    """cfn-lint is pinned in requirements-dev.txt; if it is missing this fails (never skips)."""
+    exe = shutil.which("cfn-lint")
+    assert exe is not None, "cfn-lint is not installed (requirements-dev.txt)"
+    r = subprocess.run([exe, str(CENTRAL)], capture_output=True, text=True, timeout=300)
     assert r.returncode == 0, r.stdout + r.stderr
 
 
@@ -229,15 +163,6 @@ def test_tag_events_dlq_policy_is_unchanged():
     assert p["Queues"] == [{"Ref": "TagEventsRuleDlq"}]
     allow = next(s for s in p["PolicyDocument"]["Statement"] if s["Effect"] == "Allow")
     assert allow["Condition"] == {"ArnEquals": {"aws:SourceArn": arn("TagEventRule")}}
-    if HAVE_BASE:
-        old = git("show", f"{BASE}:infra/aws/central.yaml")
-        assert old is not None
-        start = old.index("  TagEventsRuleDlqPolicy:")
-        end = old.index("\n  AlertEventsQueuePolicy:", start)
-        now_text = CENTRAL.read_text(encoding="utf-8")
-        s2 = now_text.index("  TagEventsRuleDlqPolicy:")
-        e2 = now_text.index("\n  AlertEventsQueuePolicy:", s2)
-        assert now_text[s2:e2] == old[start:end]
 
 
 # ── [infra 경보] ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -281,18 +206,6 @@ def test_central_role_gains_exactly_one_permission_sqs_send_on_the_commands_queu
     assert len(sends) == 1
     s = sends[0]
     assert s["Effect"] == "Allow" and as_list(s["Action"]) == ["sqs:SendMessage"] and s["Resource"] == arn("CommandsQueue")
-    if HAVE_BASE:
-        old_text = git("show", f"{BASE}:infra/aws/central.yaml")
-        assert old_text is not None
-        tmp = Path(__file__).parent / ".base_central.yaml"
-        try:
-            tmp.write_text(old_text, encoding="utf-8")
-            old = engine_statements(load_cfn(tmp))
-        finally:
-            tmp.unlink(missing_ok=True)
-        added = [x for x in stmts if x not in old]
-        assert added == [s]
-        assert all(x in stmts for x in old)
 
 
 def test_bootstrap_adds_only_the_default_bus_sync_rule_resource():
@@ -315,6 +228,53 @@ def test_bootstrap_adds_only_the_default_bus_sync_rule_resource():
     walk(B)
     pre = "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/"
     assert sorted(resources) == sorted([pre + "${BusName}/${ResourcePrefix}-*", pre + "${ResourcePrefix}-sync-*"])
-    if HAVE_BASE:
-        old = git("show", f"{BASE}:infra/aws/central-bootstrap.yaml") or ""
-        assert text.count("iam:PassRole") == old.count("iam:PassRole")
+
+
+# ── [EngineBatchSize] 템플릿이 시뮬레이션의 전제(BatchSize 1)를 실제로 배포한다 ───────────────────────────────────────
+
+def test_engine_batch_size_is_a_parameter_defaulting_to_one_and_the_event_source_uses_it():
+    p = C["Parameters"]["EngineBatchSize"]
+    assert p["Type"] == "Number" and p["Default"] == 1 and p["MinValue"] == 1 and p["MaxValue"] == 10
+    sources = [ev["Properties"] for f in RES.values() if f["Type"] == "AWS::Serverless::Function"
+               for ev in (f["Properties"].get("Events") or {}).values()
+               if ev["Type"] == "SQS" and ev["Properties"]["Queue"] == {"Fn::GetAtt": "CommandsQueue.Arn"}]
+    assert len(sources) == 1
+    assert sources[0]["BatchSize"] == {"Ref": "EngineBatchSize"}
+    assert sources[0]["FunctionResponseTypes"] == ["ReportBatchItemFailures"]
+
+
+# ── [스케줄 규칙 → 명령] 규칙이 보내는 JSON이 handler.parse 를 통과한다 ───────────────────────────────────────────────
+
+SAMPLE_TIME = "2026-11-25T09:00:00Z"
+
+
+def render_input(target: dict, event: dict) -> str:
+    """What EventBridge sends: each <name> in InputTemplate is replaced by the value at its JSONPath in the event."""
+    tr = target["InputTransformer"]
+    out = tr["InputTemplate"]
+    assert isinstance(out, str), "InputTemplate must be a plain string"
+    for name, path in tr["InputPathsMap"].items():
+        assert path.startswith("$.") and path.count(".") == 1, path
+        out = out.replace(f"<{name}>", str(event[path[2:]]))
+    assert "<" not in out, f"unresolved placeholder: {out}"
+    return out
+
+
+@pytest.mark.parametrize("rule_name,mode", [("${ResourcePrefix}-sync-hourly", "TAG_RECONCILE"),
+                                            ("${ResourcePrefix}-sync-daily", "DAILY")])
+def test_each_schedule_rule_sends_its_own_mode_as_a_valid_sync_all_accounts_command(rule_name, mode):
+    rule = next(r for r in sync_rules().values() if r["Properties"]["Name"]["Fn::Sub"] == rule_name)
+    target = rule["Properties"]["Targets"][0]
+    assert "$.time" in target["InputTransformer"]["InputPathsMap"].values()
+    body = render_input(target, {"time": SAMPLE_TIME, "id": "evt-1"})
+    cmd = json.loads(body)
+    assert cmd["type"] == "SYNC_ALL_ACCOUNTS"
+    assert cmd["customerId"] == "system"
+    assert cmd["schemaVersion"] == 1
+    assert cmd["payload"] == {"mode": mode}
+    assert cmd["commandId"] == f"sched-{mode}-{SAMPLE_TIME}"
+    assert len(body.encode()) < 1024
+    parsed = handler.parse(body)
+    assert parsed["type"] == "SYNC_ALL_ACCOUNTS" and parsed["customerId"] == "system"
+    other = "DAILY" if mode == "TAG_RECONCILE" else "TAG_RECONCILE"
+    assert other not in body

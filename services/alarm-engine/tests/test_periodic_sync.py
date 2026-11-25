@@ -613,3 +613,56 @@ def test_command_sender_without_queue_url_fails_at_build_time():
     from alarm_engine import wiring
     with pytest.raises(RuntimeError, match="COMMANDS_QUEUE_URL"):
         wiring.build_command_sender({}, lambda *a, **k: FakeSqs())
+
+
+# ── [시작 시 실패] build_engine / lambda_handler 초기화가 설정 검사를 실제로 부른다 ─────────────────────────────────
+
+@pytest.fixture
+def start_env(monkeypatch):
+    """build_engine with every external piece replaced: no boto3 client, no DB; make_engine returns a sentinel."""
+    import boto3
+
+    from alarm_engine import pg_repository, wiring
+    sentinel = object()
+    monkeypatch.setattr(handler, "_ENGINE", None)
+    monkeypatch.delenv("AWS_LAMBDA_FUNCTION_NAME", raising=False)
+    monkeypatch.delenv("DATABASE_URL_SECRET_ARN", raising=False)
+    monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@db.invalid/x")
+    monkeypatch.setenv("COMMANDS_QUEUE_URL", "https://queue.example.invalid/alarm-commands")
+    monkeypatch.setenv("AWS_REGION", "eu-test-1")
+    monkeypatch.setattr(boto3, "client", lambda *a, **k: object())
+    monkeypatch.setattr(pg_repository, "PgRepository", lambda url: object())
+    monkeypatch.setattr(wiring, "make_engine", lambda repo, sessions: sentinel)
+    return sentinel
+
+
+def test_build_engine_accepts_valid_settings(start_env):
+    from alarm_engine import wiring
+    assert wiring.build_engine() is start_env
+
+
+@pytest.mark.parametrize("deferrals,secs", [(4, 330), (4, 300), (1, 900)])
+def test_build_engine_refuses_to_start_when_the_deferral_budget_is_too_small(start_env, monkeypatch, deferrals, secs):
+    from alarm_engine import wiring
+    monkeypatch.setenv("SYNC_BUSY_MAX_DEFERRALS", str(deferrals))
+    monkeypatch.setenv("SYNC_BUSY_DEFER_SECONDS", str(secs))
+    with pytest.raises((ValueError, RuntimeError)):
+        wiring.build_engine()
+
+
+def test_build_engine_accepts_the_boundary_just_above_the_limit(start_env, monkeypatch):
+    from alarm_engine import wiring
+    monkeypatch.setenv("SYNC_BUSY_MAX_DEFERRALS", "4")
+    monkeypatch.setenv("SYNC_BUSY_DEFER_SECONDS", "331")        # 1324 s > 1320 s
+    assert wiring.build_engine() is start_env
+
+
+def test_lambda_handler_init_fails_the_whole_batch_and_caches_nothing_on_bad_settings(start_env, monkeypatch, caplog):
+    monkeypatch.setenv("SYNC_BUSY_MAX_DEFERRALS", "4")
+    monkeypatch.setenv("SYNC_BUSY_DEFER_SECONDS", "330")
+    recs = [record(fanout(), "m1"), record(fanout("DAILY"), "m2")]
+    with caplog.at_level(logging.ERROR):
+        out = handler.lambda_handler({"Records": recs}, None)
+    assert [f["itemIdentifier"] for f in out["batchItemFailures"]] == ["m1", "m2"]
+    assert handler._ENGINE is None
+    assert "engine init failed" in caplog.text
