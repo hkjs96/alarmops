@@ -19,8 +19,8 @@ export function MonitoringStateBadge({ state }: { state: MonitoringState }) {
   const m = MON[state];
   return <span className={`st ${m.cls}`}><Mark shape={m.shape} />{m.label}</span>;
 }
-export function AlarmStateBadge({ state }: { state: AlarmState }) {
-  const m = ALM[state];
+export function AlarmStateBadge({ state }: { state: AlarmState | null }) {
+  const m = ALM[state ?? "INSUFFICIENT_DATA"];
   return <span className={`st ${m.cls}`}><Mark shape={m.shape} />{m.label}</span>;
 }
 
@@ -63,7 +63,7 @@ export function ResourcesTable({ items, now }: { items: ResourceItem[]; now: num
             <tr key={r.id} data-testid="resource-row">
               <td className="c-res"><ResourceCell name={r.name} resourceKey={r.resourceKey} /></td>
               <td className="c-type" data-label="Type">{r.resourceType}<span className="sub mut"> · {r.region}</span></td>
-              <td className="c-org"><OrgPath org={r.org} />{r.account ? <span className="sub mono mut">{r.account.alias ? `${r.account.alias} · ` : ""}{r.account.awsAccountId}</span> : null}</td>
+              <td className="c-org"><OrgPath org={r.org} />{r.account ? <span className="sub mono mut">{[r.account.alias, r.account.awsAccountId].filter(Boolean).join(" · ") || "—"}</span> : null}</td>
               <td className="c-state"><MonitoringStateBadge state={r.monitoringState} /></td>
               <td className="c-n" data-label="Alarms">{r.alarmCount}</td>
               <td className="c-seen" data-label="Last seen">{r.lastSeenAt ? `${age(r.lastSeenAt, now)} ago` : "—"}</td>
@@ -92,7 +92,7 @@ export function AlarmsTable({ items }: { items: ManagedAlarmItem[] }) {
               <td className="c-res"><span className="mon-res"><span className="ttl">{a.resourceName}</span><span className="mono sm mut">{a.metricKey} · {a.resourceType}</span></span></td>
               <td className="c-org"><OrgPath org={a.org} /></td>
               <td className="c-thr" data-label="Threshold">
-                {a.threshold === null ? <span className="mut">—</span> : <span className="mono">{a.threshold}{a.unit ?? ""}</span>}
+                {a.threshold === null ? <span className="mut">—</span> : <span className="mono">{a.threshold}</span>}
                 {a.thresholdSource ? <> <SourceChip source={a.thresholdSource} /></> : null}
               </td>
               <td className="c-sev"><SevBadge severity={a.severity} /></td>

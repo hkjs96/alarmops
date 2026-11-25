@@ -5,7 +5,8 @@
  * Deterministic switches (the real API has none of these):
  *   a resource whose id ends in `_503`  → POST answers 503 COMMANDS_UNAVAILABLE
  *   `tag_on` on an account without TagWriter → 403 CAPABILITY_DISABLED
- *   `stop` / `keep` / `tag_on` on a resource that is not NEEDS_REVIEW → 409 INVALID_TRANSITION
+ *   `keep` → 409 NOT_SUPPORTED; `stop` outside NEEDS_REVIEW, `tag_on` outside NEEDS_REVIEW / NOT_MONITORED → 409 INVALID_TRANSITION
+ *   `stop` on an account without AlarmWriter → 403 CAPABILITY_DISABLED (details.role alarmWriter)
  *   `stop` is queued; the "engine" deletes the alarms ENGINE_DELAY_MS later (the next list shows NOT_MONITORED)
  */
 import { ApiError, type ConsoleApi } from "../client";
@@ -66,13 +67,13 @@ export function createMonitoringStore(customers: FxCustomer[]): MonitoringStore 
   };
   const resources: FxResource[] = DEFS.map(([id, name, type, region, path, state, reason, hours, alarms, tw], n) => ({
     id, name, resourceKey: `arn:aws:${type.toLowerCase()}:${region}:${100000000000 + n * 7}:${name}`, resourceType: type, region,
-    account: { id: `acc_${path[0]}`, awsAccountId: String(100000000000 + n * 7).padStart(12, "0"), alias: `${path[0]}-prd`, tagWriterEnabled: tw },
+    account: { id: `acc_${path[0]}`, awsAccountId: String(100000000000 + n * 7).padStart(12, "0"), alias: `${path[0]}-prd`, alarmWriterEnabled: n !== 6, tagWriterEnabled: tw },
     org: chain(path), monitoringState: state, needsReviewSince: state === "NEEDS_REVIEW" ? iso(now - hours * HOUR) : null, needsReviewReason: reason,
     alarmCount: alarms, lastSeenAt: iso(now - (n + 1) * 6 * 60_000),
   }));
   const alarms: ManagedAlarmItem[] = resources.flatMap((r) =>
     (METRICS[r.resourceType] ?? []).slice(0, r.alarmCount).map((m, i): ManagedAlarmItem => ({
-      id: `al_${r.id}_${i}`, resourceId: r.id, resourceName: r.name, resourceType: r.resourceType, metricKey: m[0], threshold: m[1], unit: m[2] || null,
+      id: `al_${r.id}_${i}`, resourceId: r.id, resourceName: r.name, resourceType: r.resourceType, metricKey: m[0], threshold: m[1], 
       thresholdSource: SOURCES[(i + r.name.length) % SOURCES.length]!, severity: SEVS[(i + r.name.length) % SEVS.length]!,
       state: (IN_ALARM.has(`${r.id}:${i}`) ? "ALARM" : i === 3 && r.monitoringState === "MONITORED" ? "INSUFFICIENT_DATA" : "OK") as AlarmState, org: r.org,
     })),
@@ -138,9 +139,12 @@ export function createMonitoringApi(x: Ctx): MonitoringApi {
       settle();
       const r = s.resources.find((k) => k.id === id);
       if (!r) throw notFound();
-      if (id.endsWith("_503")) throw x.err(503, "COMMANDS_UNAVAILABLE", "The command queue is not configured.");
+      if (action === "keep") throw x.err(409, "NOT_SUPPORTED", "keep has no command in the engine.");
+      const okState = action === "stop" ? r.monitoringState === "NEEDS_REVIEW" : r.monitoringState === "NEEDS_REVIEW" || r.monitoringState === "NOT_MONITORED";
+      if (!okState || r.stopAt !== undefined) throw x.err(409, "INVALID_TRANSITION", "This resource is not in a state that allows this.");
       if (action === "tag_on" && !r.account?.tagWriterEnabled) throw x.err(403, "CAPABILITY_DISABLED", "TagWriter is not enabled for this account.", { role: "tagWriter" });
-      if (r.monitoringState !== "NEEDS_REVIEW" || r.stopAt !== undefined) throw x.err(409, "INVALID_TRANSITION", "This resource is not waiting for review.");
+      if (action === "stop" && !r.account?.alarmWriterEnabled) throw x.err(403, "CAPABILITY_DISABLED", "AlarmWriter is not enabled for this account.", { role: "alarmWriter" });
+      if (id.endsWith("_503")) throw x.err(503, "COMMANDS_UNAVAILABLE", "The command queue is not configured.");
       if (action === "stop") r.stopAt = Date.now() + STOP_DELAY_MS;
       else { r.monitoringState = "MONITORED"; r.needsReviewSince = null; r.needsReviewReason = null; }
       return { commandId: `cmd_${++s.seq}`, status: "queued" as const };

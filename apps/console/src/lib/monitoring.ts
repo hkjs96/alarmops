@@ -46,6 +46,9 @@ export const reasonText = (r: string | null): string => (r ? (REASON[r] ?? r.rep
 /** Re-tag writes the Monitoring tag, which needs the account's TagWriter role (D-07, D-16). Missing information = off. */
 export const canRetag = (r: Pick<ResourceItem, "account">): boolean => r.account?.tagWriterEnabled === true;
 
+/** Stop deletes the resource's alarms, which needs the account's AlarmWriter role. Missing information = off. */
+export const canStop = (r: Pick<ResourceItem, "account">): boolean => r.account?.alarmWriterEnabled === true;
+
 export const stopPrompt = (r: Pick<ResourceItem, "name" | "alarmCount">): string => `Delete ${r.alarmCount} alarm${r.alarmCount === 1 ? "" : "s"} for ${r.name}? This cannot be undone.`;
 
 const DONE: Record<MonitoringAction, string> = { stop: "Stop queued", keep: "Kept", tag_on: "Re-tag queued" };
@@ -55,10 +58,11 @@ export const doneText = (a: MonitoringAction): string => DONE[a];
 export function monitoringError(f: Failure, action: MonitoringAction, name: string): string {
   const what = action === "stop" ? `Monitoring of ${name} was not stopped` : action === "keep" ? `${name} was not kept` : `${name} was not re-tagged`;
   switch (f.code) {
-    case "CAPABILITY_DISABLED":
-      return action === "tag_on"
-        ? `${what}. The TagWriter role is not enabled for this AWS account. Enable it under Customers › Onboarding, then try again.`
-        : `${what}. A role this needs is not enabled for the AWS account. Enable it under Customers › Onboarding, then try again.`;
+    case "CAPABILITY_DISABLED": {
+      const role = f.details?.role === "alarmWriter" ? "AlarmWriter" : f.details?.role === "tagWriter" ? "TagWriter" : action === "tag_on" ? "TagWriter" : action === "stop" ? "AlarmWriter" : "required";
+      return `${what}. The ${role} role is not enabled for this AWS account. Enable it under Customers › Onboarding, then try again.`;
+    }
+    case "NOT_SUPPORTED": return `${what}. Keeping a resource under review is not available yet.`;
     case "ROLE_REQUIRED": case "FORBIDDEN": case "READ_ONLY":
       return `${what}. Changing monitoring needs the Operator role.`;
     case "COMMANDS_UNAVAILABLE": return `${what}. The command queue is not available yet, so nothing was changed. Ask whoever manages the console’s deployment.`;

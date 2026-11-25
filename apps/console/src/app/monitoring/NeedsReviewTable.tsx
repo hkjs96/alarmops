@@ -5,7 +5,7 @@ import { Button, ConfirmDialog, Mark } from "@alarmops/design-system";
 import type { MonitoringAction, ResourceItem } from "@/lib/api/types";
 import { age } from "@/lib/format";
 import { callAction } from "@/lib/session-ended";
-import { canRetag, doneText, monitoringError, reasonText, stopPrompt } from "@/lib/monitoring";
+import { canRetag, canStop, doneText, monitoringError, reasonText, stopPrompt } from "@/lib/monitoring";
 import { OrgPath, ResourceCell } from "./MonitoringTables";
 import { setMonitoring } from "./actions";
 
@@ -16,7 +16,7 @@ export const POLL_MAX = 15;
 type Row = { done?: MonitoringAction; error?: string; busy?: MonitoringAction };
 
 /**
- * Needs review (D-16): Resource · Since · Reason · Alarms kept · Re-tag / Keep monitoring / Stop monitoring.
+ * Needs review (D-16): Resource · Since · Reason · Alarms kept · Re-tag / Stop monitoring. There is no Keep button: the engine has no command for it (API answers 409 NOT_SUPPORTED), so it would only mislead.
  * Stop deletes the resource's alarms, so it asks first and names how many go. Nothing is assumed from a 202: the row
  * says "Stop queued" and the list is read again until the resource has left it.
  */
@@ -80,8 +80,10 @@ export function NeedsReviewTable({ items, now, canWrite, readOnlyReason }: { ite
                           <Button size="sm" disabled={off || noRetag(r)} onClick={() => run(r, "tag_on")} aria-describedby={noRetag(r) ? `rt-${r.id}` : undefined}>Re-tag</Button>
                           {noRetag(r) ? <span id={`rt-${r.id}`} className="mon-hint" data-testid="retag-hint">Enable TagWriter role</span> : null}
                         </span>
-                        <Button size="sm" disabled={off} onClick={() => run(r, "keep")}>Keep monitoring</Button>
-                        <Button size="sm" variant="danger" disabled={off} onClick={() => { setSay(""); setConfirm(r); }}>Stop monitoring</Button>
+                        <span className="mon-act">
+                          <Button size="sm" variant="danger" disabled={off || !canStop(r)} onClick={() => { setSay(""); setConfirm(r); }} aria-describedby={canStop(r) ? undefined : `st-${r.id}`}>Stop monitoring</Button>
+                          {canStop(r) ? null : <span id={`st-${r.id}`} className="mon-hint" data-testid="stop-hint">Enable AlarmWriter role</span>}
+                        </span>
                       </span>
                     )}
                     {st.error ? <span className="mon-err" role="alert" data-testid="row-error">{st.error}</span> : null}

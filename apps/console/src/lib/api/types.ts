@@ -692,7 +692,7 @@ export interface ResourceItem {
   resourceType: string;
   region: string;
   /** the AWS account the resource lives in. `tagWriterEnabled` decides whether Re-tag is offered (D-07, D-16). */
-  account: { id?: string; awsAccountId: string; alias?: string | null; tagWriterEnabled?: boolean } | null;
+  account: { id?: string; awsAccountId: string | null; alias?: string | null; alarmWriterEnabled?: boolean; tagWriterEnabled?: boolean } | null;
   org: OrgChain;
   monitoringState: MonitoringState;
   needsReviewSince: string | null;
@@ -715,9 +715,9 @@ export interface ManagedAlarmItem {
   /** the metric, e.g. CPUUtilization */
   metricKey: string;
   threshold: number | null;
-  unit?: string | null;
   thresholdSource?: ThresholdSource | null;
-  state: AlarmState;
+  /** null when the alarm has not reported yet */
+  state: AlarmState | null;
   severity: Severity;
   org: OrgChain;
 }

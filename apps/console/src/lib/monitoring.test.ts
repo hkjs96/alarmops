@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canRetag, monitoringError, monitoringStats, outsideText, reasonText, stopPrompt } from "./monitoring";
+import { canRetag, canStop, monitoringError, monitoringStats, outsideText, reasonText, stopPrompt } from "./monitoring";
 import type { ManagedAlarmItem, ResourceItem } from "./api/types";
 
 const f = (code: string, extra: Record<string, unknown> = {}) => ({ code, message: "raw", requestId: "req_9", ...extra });
@@ -9,6 +9,14 @@ describe("monitoring error sentences", () => {
     const s = monitoringError(f("CAPABILITY_DISABLED"), "tag_on", "checkout-alb");
     expect(s).toContain("checkout-alb was not re-tagged");
     expect(s).toContain("TagWriter role is not enabled");
+  });
+  it("403 CAPABILITY_DISABLED names the role from details.role", () => {
+    expect(monitoringError(f("CAPABILITY_DISABLED", { details: { role: "alarmWriter" } }), "stop", "ledger-db")).toContain("AlarmWriter role is not enabled");
+    expect(monitoringError(f("CAPABILITY_DISABLED", { details: { role: "tagWriter" } }), "tag_on", "x")).toContain("TagWriter role is not enabled");
+  });
+  it("502 and NOT_SUPPORTED are sentences", () => {
+    expect(monitoringError(f("COMMAND_PUBLISH_FAILED"), "stop", "x")).toContain("could not be queued");
+    expect(monitoringError(f("NOT_SUPPORTED"), "keep", "x")).toContain("not available yet");
   });
   it("503 COMMANDS_UNAVAILABLE says nothing was changed", () => {
     expect(monitoringError(f("COMMANDS_UNAVAILABLE"), "stop", "ledger-db")).toBe("Monitoring of ledger-db was not stopped. The command queue is not available yet, so nothing was changed. Ask whoever manages the console’s deployment.");
@@ -41,6 +49,8 @@ describe("monitoring numbers and words", () => {
     expect(reasonText("tag_removed")).toBe("Monitoring tag was removed");
     expect(reasonText(null)).toBe("—");
     expect(canRetag({ account: { awsAccountId: "1", tagWriterEnabled: true } })).toBe(true);
+    expect(canStop({ account: { awsAccountId: null, alarmWriterEnabled: true } })).toBe(true);
+    expect(canStop({ account: { awsAccountId: null } })).toBe(false);
     expect(canRetag({ account: { awsAccountId: "1" } })).toBe(false);
     expect(canRetag({ account: null })).toBe(false);
   });
