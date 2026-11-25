@@ -563,6 +563,20 @@ class VerifyInteractive(Base):
                                                            "FailedInvocations": {"start": 3, "step": 1}})
         self.assertTrue(any("PASS" in r for r in self.row(rep, "(가)")), rep)
 
+    def test_no_datapoints_is_zero_not_a_shell_error(self):
+        """11/25 rehearsal-b: a rule with no datapoints gave an empty value and `[: : integer expression expected`."""
+        res, rep = self.run_verify("y\ny\n")
+        self.assertNotIn("integer expression expected", res.text)
+        row = self.row(rep, "(가)")
+        self.assertTrue(any("TIMEOUT" in r for r in row), row)
+        self.assertIn("기준 0/0", " ".join(row))
+
+    def test_empty_baseline_then_growth_is_pass(self):
+        res, rep = self.run_verify("y\ny\n", metric_sums={"Invocations": {"start": 0, "step": 1, "empty_first": True},
+                                                           "FailedInvocations": {"start": 0, "step": 1, "empty_first": True}})
+        self.assertNotIn("integer expression expected", res.text)
+        self.assertTrue(any("PASS" in r for r in self.row(rep, "(가)")), rep)
+
     def test_baseline_is_measured_before_tag_queue(self):
         self.run_verify("y\n", metric_sums={"Invocations": {"start": 1, "step": 1},
                                             "FailedInvocations": {"start": 1, "step": 1}})

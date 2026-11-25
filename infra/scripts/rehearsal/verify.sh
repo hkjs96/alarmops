@@ -54,7 +54,7 @@ metric_sum() {  # $1 = Invocations | FailedInvocations. 합계를 METRIC_VAL 에
     --start-time "$START" --end-time "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     --period 60 --statistics Sum --query 'Datapoints[].Sum' --output text)" || rc=$?
   [ "$rc" -eq 0 ] || return "$rc"
-  METRIC_VAL="$(printf '%s' "$raw" | awk '{ s = 0; for (i = 1; i <= NF; i++) s += $i; print int(s) }')"
+  METRIC_VAL="$(printf '%s' "$raw" | awk 'BEGIN { s = 0 } { for (i = 1; i <= NF; i++) if ($i ~ /^[0-9.]+$/) s += $i } END { print int(s) }')"  # 데이터 없음(빈 출력)·None 은 0
 }
 METRIC_ERR=0; BASE_INV=0; BASE_FAIL=0; CUR_INV=0; CUR_FAIL=0
 # 기준값(태그 직전)보다 Invocations 와 FailedInvocations 가 둘 다 늘었는가. 조회 오류면 폴링을 멈춘다(METRIC_ERR=1).
