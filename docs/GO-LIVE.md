@@ -693,6 +693,7 @@ http://localhost:3107/auth/dev-login?as=admin
 > **참고 (11/24 실제로 해 본 순서)** 비밀 값 한 줄은 이렇게 만든다.
 > 1. Supabase 프로젝트 맨 위 **Connect** → **Session pooler** 주소를 메모장에 복사한다.
 > 2. `postgres.` → `alarmops_engine.`(수집은 `alarmops_ingest.`), `[YOUR-PASSWORD]` → 그 사용자 비밀번호(대괄호까지 지움), 끝에 `?sslmode=require`.
+>    - 사용자 이름의 `.<프로젝트ID>`와 호스트(`aws-0`/`aws-1`, 리전)는 **Connect 화면 값 그대로** 둔다. 문서 예시 값을 쓰면 pooler가 거절하고 Postgres 로그에는 아무것도 남지 않는다. 엔진 로그에는 `engine init failed: OperationalError`만 보이고 콘솔 연결 확인은 "queued but no result"가 된다(11/25 실제).
 > 3. 수집용은 포트를 `:5432` → `:6543`으로 바꾼다.
 > 4. Secrets Manager(서울) → 비밀 → **비밀 값 검색** → **편집** → **일반 텍스트**에 임시 값을 지우고 붙인다. 메모장은 저장하지 않고 닫는다.
 
