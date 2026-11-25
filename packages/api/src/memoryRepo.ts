@@ -134,6 +134,7 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
       alarmWriterEnabled: acc.alarmWriterEnabled, tagWriterEnabled: acc.tagWriterEnabled,
       region: s.region, resourceType: s.resourceType, resourceKey: s.resourceKey, name: s.name, tags: { ...s.tags },
       monitoringState: s.monitoringState, needsReviewSince: s.needsReviewSince, needsReviewReason: s.needsReviewReason, lastSeenAt: s.lastSeenAt,
+      accountActive: (this.customers.get(s.customerId)?.status ?? 'ACTIVE') === 'ACTIVE' && !acc.disabled && !acc.connectionPurged,
       alarmCount: [...this.alarmSeeds.values()].filter((a) => a.resourceId === s.id).length,
     };
   }
