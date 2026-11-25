@@ -297,8 +297,12 @@ class CentralTemplate(unittest.TestCase):
         self.assertEqual(sts["ReadEngineDbSecret"]["Resource"], {"Ref": "EngineDbSecret"})
         self.assertEqual(sorted(sts["ConsumeAlarmCommands"]["Action"]),
                          ["sqs:ChangeMessageVisibility", "sqs:DeleteMessage", "sqs:GetQueueAttributes", "sqs:ReceiveMessage"])
-        senders = [x for x in c_statements("CentralRole") if "sqs:SendMessage" in str(x.get("Action"))
-                   or "sqs:*" in str(x.get("Action")) or x.get("Action") == "*"]
+        # Every statement (Fn::If branches too) whose Action or NotAction pattern could match sqs:SendMessage.
+        from fnmatch import fnmatchcase
+        def could_send(x: dict) -> bool:
+            pats = [a for a in as_list(x.get("Action")) + as_list(x.get("NotAction")) if isinstance(a, str)]
+            return any(fnmatchcase("sqs:sendmessage", a.lower()) for a in pats) or "NotAction" in x
+        senders = [x for x in c_all_statements("CentralRole") if could_send(x)]
         self.assertEqual(len(senders), 1, senders)
         self.assertEqual(senders[0]["Sid"], "SendSyncCommands")
         self.assertEqual(senders[0]["Effect"], "Allow")
