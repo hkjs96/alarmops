@@ -781,14 +781,18 @@
 
 ## 4-2. 실고객 연결 전 필수
 
-배포 역할의 IAM·큐·함수 변경을 알리는 **CloudTrail 알림 규칙 2개**(리전별 1개씩)를 둔다. central-alerts.yaml로 구현(#115)했다(`infra/aws/central-alerts.yaml`). 실고객을 연결하기 전에 끝나야 한다. 규칙 1은 `AlarmOpsDeployCentral` 세션이 부른 호출만, 규칙 2는 `AlarmOpsDeployCentral`과 `AlarmOpsDeployBus` 세션이 부른 호출을 잡는다.
+배포 역할의 IAM·큐·함수 변경을 알리는 **CloudTrail 알림 규칙**을 둔다(us-east-1에 2개, 서울에 3개, 아래 "규칙 3종의 목적"). central-alerts.yaml로 구현(#115)했다(`infra/aws/central-alerts.yaml`). 실고객을 연결하기 전에 끝나야 한다. 규칙 1은 `AlarmOpsDeployCentral` 세션이 부른 호출만, 규칙 2는 `AlarmOpsDeployCentral`과 `AlarmOpsDeployBus` 세션이 부른 호출을 잡는다. 규칙 1·2는 **CloudFormation을 거치지 않은 직접 호출**(`sourceIPAddress`가 `cloudformation.amazonaws.com`이 아닌 것)만 즉시 알린다.
 
 **규칙 1: us-east-1 (IAM은 글로벌 이벤트라 us-east-1로 온다).** 대상 이벤트: `CreateRole`, `UpdateAssumeRolePolicy`, `PutRolePolicy`, `AttachRolePolicy`, `PutRolePermissionsBoundary`, `DeleteRolePermissionsBoundary`, `CreatePolicyVersion`, `SetDefaultPolicyVersion`(마지막 세 개는 배포 역할 정책이 Deny하는 호출이라 거부된 시도가 잡힌다)
 
 ```json
 {
-  "source": ["aws.iam"],
-  "detail-type": ["AWS API Call via CloudTrail"],
+  "source": [
+    "aws.iam"
+  ],
+  "detail-type": [
+    "AWS API Call via CloudTrail"
+  ],
   "detail": {
     "eventName": [
       "CreateRole",
@@ -803,10 +807,17 @@
     "userIdentity": {
       "sessionContext": {
         "sessionIssuer": {
-          "userName": ["AlarmOpsDeployCentral"]
+          "userName": [
+            "AlarmOpsDeployCentral"
+          ]
         }
       }
-    }
+    },
+    "sourceIPAddress": [
+      {
+        "anything-but": "cloudformation.amazonaws.com"
+      }
+    ]
   }
 }
 ```
@@ -815,18 +826,36 @@
 
 ```json
 {
-  "source": ["aws.sqs", "aws.lambda", "aws.events"],
-  "detail-type": ["AWS API Call via CloudTrail"],
+  "source": [
+    "aws.sqs",
+    "aws.lambda",
+    "aws.events"
+  ],
+  "detail-type": [
+    "AWS API Call via CloudTrail"
+  ],
   "detail": {
     "eventName": [
       "SetQueueAttributes",
-      { "prefix": "UpdateFunctionCode" },
-      { "prefix": "UpdateFunctionConfiguration" },
-      { "prefix": "AddPermission" },
+      {
+        "prefix": "UpdateFunctionCode"
+      },
+      {
+        "prefix": "UpdateFunctionConfiguration"
+      },
+      {
+        "prefix": "AddPermission"
+      },
       "PutPermission",
-      { "prefix": "CreateFunction" },
-      { "prefix": "CreateEventSourceMapping" },
-      { "prefix": "UpdateEventSourceMapping" },
+      {
+        "prefix": "CreateFunction"
+      },
+      {
+        "prefix": "CreateEventSourceMapping"
+      },
+      {
+        "prefix": "UpdateEventSourceMapping"
+      },
       "PutRule",
       "PutTargets",
       "RemoveTargets",
@@ -835,7 +864,158 @@
     "userIdentity": {
       "sessionContext": {
         "sessionIssuer": {
-          "userName": ["AlarmOpsDeployCentral", "AlarmOpsDeployBus"]
+          "userName": [
+            "AlarmOpsDeployCentral",
+            "AlarmOpsDeployBus"
+          ]
+        }
+      }
+    },
+    "sourceIPAddress": [
+      {
+        "anything-but": "cloudformation.amazonaws.com"
+      }
+    ]
+  }
+}
+```
+
+**규칙 3종의 목적과 운영법 (소음 줄이기).** 정상 자동 배포 한 번에 개별 리소스 이벤트가 메일 약 11통이 되어 읽히지 않았다. 탐지력은 유지하고 소음만 줄이도록 목적별로 나눴다. CloudFormation 경유 개별 변경은 배포 메일 1통으로 대체하고, 직접 호출과 거부는 즉시 알린다.
+
+| 종류 | 규칙 이름 | 리전 | 잡는 것 | 긴급도 |
+|---|---|---|---|---|
+| 직접 호출 | `AlarmOpsGuard-iam-change`(규칙 1), `AlarmOpsGuard-service-change`(규칙 2) | us-east-1, 서울 | 위 이벤트 중 `sourceIPAddress`가 `cloudformation.amazonaws.com`이 아닌 호출. 사람이 콘솔·CLI로 부른 것이거나 탈취된 세션 | 즉시 확인 |
+| 거부된 시도 | `AlarmOpsGuard-iam-denied`, `AlarmOpsGuard-service-denied` | us-east-1, 서울 | 같은 이벤트 중 `errorCode`가 있는 호출. 출처 IP 조건이 없어 CloudFormation 경유 거부도 잡는다. 메일 첫 줄이 `"severity": "URGENT - denied call by the deploy role"` | 긴급 |
+| 배포 1회 | `AlarmOpsGuard-deploy` | 서울만 | CloudFormation `ExecuteChangeSet`·`CreateStack`·`UpdateStack`·`DeleteStack`(배포 역할 세션). 메일 1통에 stackName·changeSetName·eventTime·sourceIPAddress·eventID | 대조 |
+
+- **운영법:** 배포 메일(`AlarmOpsGuard-deploy`)이 오면 GitHub Actions 실행과 대조한다. 실행 시각·스택 이름이 맞으면 그 배포의 개별 리소스 변경 메일은 오지 않는 것이 정상이다. 배포 메일이 왔는데 대응하는 Actions 실행이 없으면 즉시 조사한다. 직접 호출 메일과 거부 메일은 정상 운영에서 오지 않으므로 오면 곧바로 조사한다.
+- **탐지력이 유지되는 근거:** 배포 역할이 CloudFormation으로 하는 모든 변경은 `ExecuteChangeSet`(또는 `CreateStack`·`UpdateStack`) 이벤트로 드러나고, 변경 내용은 `plan` 승인 때 본 change set과 대조한다. CloudFormation을 거치지 않고 부른 것은 직접 호출 규칙이, 거부된 것은 출처와 관계없이 거부 규칙이 잡는다.
+- **알려진 한계:** `sourceIPAddress`는 호출자가 CloudFormation 서비스일 때 `cloudformation.amazonaws.com`이다. 배포 역할의 변경이 CloudFormation 경유로 일어나는 한 개별 리소스 메일은 오지 않는다.
+- 이 서울 배포 규칙은 us-east-1에 두지 않는다(`IsNotUsEast1`). CloudFormation 이벤트는 스택이 있는 리전에서 온다.
+
+**규칙 3: 거부된 시도 (리전별, 규칙 1·2와 같은 `eventName`·`userName`).** 위 `eventName` 목록과 같고 `errorCode`가 있는 이벤트를 출처 IP와 관계없이 잡는다.
+
+us-east-1 (`AlarmOpsGuard-iam-denied`):
+
+```json
+{
+  "source": [
+    "aws.iam"
+  ],
+  "detail-type": [
+    "AWS API Call via CloudTrail"
+  ],
+  "detail": {
+    "eventName": [
+      "CreateRole",
+      "UpdateAssumeRolePolicy",
+      "PutRolePolicy",
+      "AttachRolePolicy",
+      "PutRolePermissionsBoundary",
+      "DeleteRolePermissionsBoundary",
+      "CreatePolicyVersion",
+      "SetDefaultPolicyVersion"
+    ],
+    "userIdentity": {
+      "sessionContext": {
+        "sessionIssuer": {
+          "userName": [
+            "AlarmOpsDeployCentral"
+          ]
+        }
+      }
+    },
+    "errorCode": [
+      {
+        "exists": true
+      }
+    ]
+  }
+}
+```
+
+서울 (`AlarmOpsGuard-service-denied`):
+
+```json
+{
+  "source": [
+    "aws.sqs",
+    "aws.lambda",
+    "aws.events"
+  ],
+  "detail-type": [
+    "AWS API Call via CloudTrail"
+  ],
+  "detail": {
+    "eventName": [
+      "SetQueueAttributes",
+      {
+        "prefix": "UpdateFunctionCode"
+      },
+      {
+        "prefix": "UpdateFunctionConfiguration"
+      },
+      {
+        "prefix": "AddPermission"
+      },
+      "PutPermission",
+      {
+        "prefix": "CreateFunction"
+      },
+      {
+        "prefix": "CreateEventSourceMapping"
+      },
+      {
+        "prefix": "UpdateEventSourceMapping"
+      },
+      "PutRule",
+      "PutTargets",
+      "RemoveTargets",
+      "DeleteRule"
+    ],
+    "userIdentity": {
+      "sessionContext": {
+        "sessionIssuer": {
+          "userName": [
+            "AlarmOpsDeployCentral",
+            "AlarmOpsDeployBus"
+          ]
+        }
+      }
+    },
+    "errorCode": [
+      {
+        "exists": true
+      }
+    ]
+  }
+}
+```
+
+**배포 1회 규칙 (서울, `AlarmOpsGuard-deploy`).**
+
+```json
+{
+  "source": [
+    "aws.cloudformation"
+  ],
+  "detail-type": [
+    "AWS API Call via CloudTrail"
+  ],
+  "detail": {
+    "eventName": [
+      "ExecuteChangeSet",
+      "CreateStack",
+      "UpdateStack",
+      "DeleteStack"
+    ],
+    "userIdentity": {
+      "sessionContext": {
+        "sessionIssuer": {
+          "userName": [
+            "AlarmOpsDeployCentral",
+            "AlarmOpsDeployBus"
+          ]
         }
       }
     }
@@ -851,12 +1031,12 @@
 - **완료 조건:** 배포 후 각 리전에서 시험 호출로 메일 수신을 확인한다. 거부되는 호출은 배포 역할이 아닌 주체로 부르면 규칙에 안 잡히므로 시험 호출로 쓸 수 없다. 절차는 SNS 토픽 publish 시험 + 실제 배포 1회 후 메일 수신 확인이다. 거부 경로 실측은 운영 중 불가하다(배포 역할로 일부러 거부 호출을 만들지 않는다). 허용 이벤트 1건(정상 배포) 수신으로 경로를 확인한다.
 - 대상: SNS 토픽(구독은 보안 담당 이메일). 이메일 직접 대상은 EventBridge가 지원하지 않으므로 SNS를 거친다.
 - **SNS 토픽은 규칙과 같은 리전에 둔다.** 리전마다 토픽을 하나씩 둔다(us-east-1에도 토픽을 둔다). 다른 리전의 버스나 토픽으로 넘기지 않는다. 토픽 정책에서 `events.amazonaws.com`의 `sns:Publish`를 허용한다.
-- 정상 배포 때도 울린다. 알림이 `plan` 승인 때 읽은 변경과 맞는지 대조하고, 맞지 않으면 신뢰 정책을 확인한다.
+- 정상 배포(CloudFormation 경유)에는 `AlarmOpsGuard-deploy` 메일 1통만 온다. 그 메일을 `plan` 승인 때 읽은 변경·Actions 실행과 대조하고, 맞지 않으면 신뢰 정책을 확인한다.
 - 알림 규칙과 SNS는 배포 역할이 만들지 않는다. 사람이 만든다(배포 역할이 자기 알림을 끌 수 없게).
 
 **배포 절차 (사람, 리전마다 한 번씩).** 같은 템플릿 `infra/aws/central-alerts.yaml`을 두 리전에 같은 스택 이름 `alarmops-central-alerts`로 올린다. 이 스택은 GitHub Actions가 배포하지 않는다.
 
-1. 대상 리전은 `us-east-1`(IAM 규칙 `AlarmOpsGuard-iam-change`)과 `ap-northeast-2`(서비스 규칙 `AlarmOpsGuard-service-change`)다. 리전에 따라 템플릿이 규칙을 고른다.
+1. 대상 리전은 `us-east-1`(IAM 규칙 `AlarmOpsGuard-iam-change`·`AlarmOpsGuard-iam-denied`)과 `ap-northeast-2`(서비스 규칙 `AlarmOpsGuard-service-change`·`AlarmOpsGuard-service-denied`, 배포 규칙 `AlarmOpsGuard-deploy`)다. 리전에 따라 템플릿이 규칙을 고른다.
 2. 스택 이름은 정확히 `alarmops-central-alerts`로 한다. 부트스트랩의 `CentralStackName`·`BusStackName` 값과 달라야 한다. 같으면 배포 역할이 이 스택을 바꾸거나 지울 수 있다. 두 파라미터가 이 이름이면 bootstrap Rules `StackNamesAreDifferent`가 스택 생성·갱신을 막는다(#115). bootstrap 스택을 갱신해야 반영된다.
 3. 파라미터 `AlertEmail`에 보안 담당 이메일을 넣는다. `ResourcePrefix`는 `AlarmOpsGuard`로 고정이다.
 4. 스택이 `CREATE_COMPLETE`가 되면 두 리전 모두에서 구독 확인 메일의 링크를 눌러 구독을 `Confirmed`로 만든다(`aws sns list-subscriptions-by-topic`으로 확인).

@@ -912,6 +912,7 @@ npm ci --ignore-scripts && npm run build:lambda -w @alarmops/ingest && npm run b
   - 시험 알림이 도착한다.
   - CloudTrail 관리 이벤트 추적이 있다(리전마다 관리 이벤트를 기록하는 추적).
   - 실측: 시험 알림 후 실제 배포 1회를 하고 각 리전에서 규칙 메일 수신 확인(eventName·eventID 포함).
+  - 알림 소음 개선(직접 호출·거부 규칙 분리, 서울 배포 규칙 추가) 후에는 두 리전 스택을 새 템플릿으로 업데이트(사람). 업데이트 뒤 정상 배포 1회에 `AlarmOpsGuard-deploy` 메일 1통만 오는지 확인한다.
 
 ### 7-2. 허용 목록에 계정 추가 (10분)
 

@@ -153,6 +153,11 @@ def doc_pattern_4_2(index: int) -> dict:
     return blocks[0][index]
 
 
+DOC_IAM_DIRECT, DOC_SVC_DIRECT, DOC_IAM_DENIED, DOC_SVC_DENIED, DOC_DEPLOY = range(5)
+
+CFN_IP, EXTERNAL_IP = "cloudformation.amazonaws.com", "203.0.113.7"
+
+
 def matches(pattern, event) -> bool:
     """Minimal EventBridge matcher: list = any element matches; dict leaf rules {prefix}, {exists}; nested dicts recurse;
     an array-valued event field matches if any of its values matches."""
@@ -162,6 +167,10 @@ def matches(pattern, event) -> bool:
                 return isinstance(val, str) and val.startswith(rule["prefix"])
             if "exists" in rule:
                 return (val is not _MISSING) == bool(rule["exists"])
+            if "anything-but" in rule:
+                excluded = rule["anything-but"]
+                excluded = excluded if isinstance(excluded, list) else [excluded]
+                return val is not _MISSING and val not in excluded
             raise ValueError(f"unsupported rule {rule}")
         return val is not _MISSING and val == rule
 
@@ -200,7 +209,7 @@ def protected_samples() -> dict[str, list[str]]:
     """Concrete resource ARNs per service that stand for rule/AlarmOpsGuard-*, topic AlarmOpsGuard-alerts, stack/<STACK_NAME>/*."""
     out: dict[str, list[str]] = {"events": [], "sns": [], "cloudformation": []}
     for region in ("ap-northeast-2", "us-east-1"):
-        for rule in ("iam-change", "service-change"):
+        for rule in ("iam-change", "iam-denied", "service-change", "service-denied", "deploy"):
             out["events"].append(f"arn:{PARTITION}:events:{region}:{ACCOUNT}:rule/{GUARD_PREFIX}-{rule}")
         out["sns"].append(f"arn:{PARTITION}:sns:{region}:{ACCOUNT}:{TOPIC_NAME}")
         out["cloudformation"].append(f"arn:{PARTITION}:cloudformation:{region}:{ACCOUNT}:stack/{STACK_NAME}/11111111-2222-3333-4444-555555555555")
@@ -379,51 +388,144 @@ class CentralAlerts(unittest.TestCase):
 
     # -- event patterns
 
-    def test_us_east_1_pattern_equals_doc_first_block(self):
-        r = self.render("us-east-1")
-        rules = self.rules("us-east-1")
-        self.assertEqual(len(rules), 1)
-        pattern = r.x(next(iter(rules.values()))["Properties"]["EventPattern"])
-        self.assertEqual(pattern, doc_pattern_4_2(0))
-        names = pattern["detail"]["userIdentity"]["sessionContext"]["sessionIssuer"]["userName"]
-        self.assertEqual(names, ["AlarmOpsDeployCentral"])
+    def rule(self, region: str, rid: str) -> dict:
+        return self.rules(region)[rid]
 
-    def test_seoul_pattern_equals_doc_second_block(self):
-        r = self.render("ap-northeast-2")
-        rules = self.rules("ap-northeast-2")
-        self.assertEqual(len(rules), 1)
-        pattern = r.x(next(iter(rules.values()))["Properties"]["EventPattern"])
-        self.assertEqual(pattern, doc_pattern_4_2(1))
-        names = pattern["detail"]["userIdentity"]["sessionContext"]["sessionIssuer"]["userName"]
-        self.assertIn("AlarmOpsDeployCentral", names)
-        self.assertIn("AlarmOpsDeployBus", names)
+    def pat(self, region: str, rid: str) -> dict:
+        return self.render(region).x(self.rule(region, rid)["Properties"]["EventPattern"])
+
+    def test_patterns_equal_doc_blocks(self):
+        for region, rid, idx in (
+            ("us-east-1", "IamChangeRule", DOC_IAM_DIRECT),
+            ("us-east-1", "IamDeniedRule", DOC_IAM_DENIED),
+            ("ap-northeast-2", "ServiceChangeRule", DOC_SVC_DIRECT),
+            ("ap-northeast-2", "ServiceDeniedRule", DOC_SVC_DENIED),
+            ("ap-northeast-2", "DeployRule", DOC_DEPLOY),
+        ):
+            with self.subTest(rule=rid):
+                self.assertEqual(self.pat(region, rid), doc_pattern_4_2(idx))
+
+    def test_user_names(self):
+        def names(region, rid):
+            return self.pat(region, rid)["detail"]["userIdentity"]["sessionContext"]["sessionIssuer"]["userName"]
+        self.assertEqual(names("us-east-1", "IamChangeRule"), ["AlarmOpsDeployCentral"])
+        self.assertEqual(names("us-east-1", "IamDeniedRule"), ["AlarmOpsDeployCentral"])
+        for rid in ("ServiceChangeRule", "ServiceDeniedRule", "DeployRule"):
+            self.assertEqual(names("ap-northeast-2", rid), ["AlarmOpsDeployCentral", "AlarmOpsDeployBus"])
+
+    def test_direct_rules_exclude_cloudformation_source_ip(self):
+        for region, rid in (("us-east-1", "IamChangeRule"), ("ap-northeast-2", "ServiceChangeRule")):
+            self.assertEqual(self.pat(region, rid)["detail"]["sourceIPAddress"], [{"anything-but": CFN_IP}])
+
+    def test_denied_rules_have_error_code_and_no_source_ip_condition(self):
+        for region, rid in (("us-east-1", "IamDeniedRule"), ("ap-northeast-2", "ServiceDeniedRule")):
+            d = self.pat(region, rid)["detail"]
+            self.assertEqual(d["errorCode"], [{"exists": True}])
+            self.assertNotIn("sourceIPAddress", d)
+
+    def test_denied_rules_share_event_names_and_users_with_direct_rules(self):
+        for region, direct, denied in (("us-east-1", "IamChangeRule", "IamDeniedRule"), ("ap-northeast-2", "ServiceChangeRule", "ServiceDeniedRule")):
+            a, b = self.pat(region, direct), self.pat(region, denied)
+            self.assertEqual(a["source"], b["source"])
+            self.assertEqual(a["detail"]["eventName"], b["detail"]["eventName"])
+            self.assertEqual(a["detail"]["userIdentity"], b["detail"]["userIdentity"])
+
+    def test_denied_mail_starts_with_urgent_severity(self):
+        for region, rid in (("us-east-1", "IamDeniedRule"), ("ap-northeast-2", "ServiceDeniedRule")):
+            tmpl = self.rule(region, rid)["Properties"]["Targets"][0]["InputTransformer"]["InputTemplate"]
+            first = tmpl.strip().splitlines()[1].strip()
+            self.assertEqual(first, '"severity": "URGENT - denied call by the deploy role",')
+        for region, rid in (("us-east-1", "IamChangeRule"), ("ap-northeast-2", "ServiceChangeRule"), ("ap-northeast-2", "DeployRule")):
+            tmpl = self.rule(region, rid)["Properties"]["Targets"][0]["InputTransformer"]["InputTemplate"]
+            self.assertNotIn("severity", tmpl)
+
+    def test_deploy_rule_mail_summary_fields(self):
+        it = self.rule("ap-northeast-2", "DeployRule")["Properties"]["Targets"][0]["InputTransformer"]
+        self.assertEqual(it["InputPathsMap"]["stackName"], "$.detail.requestParameters.stackName")
+        self.assertEqual(it["InputPathsMap"]["changeSetName"], "$.detail.requestParameters.changeSetName")
+        for var in ("<stackName>", "<changeSetName>", "<eventTime>", "<sourceIp>", "<eventId>"):
+            self.assertIn(var, it["InputTemplate"])
 
     # -- event sample matching (small EventBridge pattern matcher)
 
-    def pattern(self, region: str) -> dict:
-        return self.render(region).x(next(iter(self.rules(region).values()))["Properties"]["EventPattern"])
-
     @staticmethod
-    def ev(source, name, role, error=None):
+    def ev(source, name, role, error=None, ip=None):
         d = {"eventName": name, "userIdentity": {"sessionContext": {"sessionIssuer": {"userName": role}}}}
         if error:
             d["errorCode"] = error
+        if ip:
+            d["sourceIPAddress"] = ip
         return {"source": source, "detail-type": "AWS API Call via CloudTrail", "detail": d}
 
-    def test_seoul_rule_matches_samples(self):
-        p = self.pattern("ap-northeast-2")
-        for src, name, role in (
-            ("aws.lambda", "CreateFunction20150331", "AlarmOpsDeployCentral"),
-            ("aws.lambda", "UpdateEventSourceMapping20150331", "AlarmOpsDeployCentral"),
-            ("aws.lambda", "CreateEventSourceMapping20150331", "AlarmOpsDeployCentral"),
-            ("aws.events", "PutRule", "AlarmOpsDeployBus"),
-            ("aws.events", "PutTargets", "AlarmOpsDeployCentral"),
-        ):
-            with self.subTest(name=name, role=role):
-                self.assertTrue(matches(p, self.ev(src, name, role)))
+    SEOUL_SAMPLES = (
+        ("aws.lambda", "CreateFunction20150331", "AlarmOpsDeployCentral"),
+        ("aws.lambda", "UpdateFunctionCode20150331v2", "AlarmOpsDeployCentral"),
+        ("aws.lambda", "UpdateFunctionConfiguration20150331v2", "AlarmOpsDeployCentral"),
+        ("aws.lambda", "UpdateEventSourceMapping20150331", "AlarmOpsDeployCentral"),
+        ("aws.lambda", "CreateEventSourceMapping20150331", "AlarmOpsDeployCentral"),
+        ("aws.sqs", "SetQueueAttributes", "AlarmOpsDeployCentral"),
+        ("aws.events", "PutRule", "AlarmOpsDeployBus"),
+        ("aws.events", "PutTargets", "AlarmOpsDeployCentral"),
+    )
+    IAM_SAMPLES = (
+        ("aws.iam", "PutRolePolicy", "AlarmOpsDeployCentral"),
+        ("aws.iam", "CreateRole", "AlarmOpsDeployCentral"),
+        ("aws.iam", "AttachRolePolicy", "AlarmOpsDeployCentral"),
+    )
 
-    def test_seoul_rule_does_not_match_other_roles_or_sources(self):
-        p = self.pattern("ap-northeast-2")
+    def test_cfn_success_events_match_neither_direct_nor_denied_rules(self):
+        for region, direct, denied, samples in (
+            ("ap-northeast-2", "ServiceChangeRule", "ServiceDeniedRule", self.SEOUL_SAMPLES),
+            ("us-east-1", "IamChangeRule", "IamDeniedRule", self.IAM_SAMPLES),
+        ):
+            for src, name, role in samples:
+                e = self.ev(src, name, role, ip=CFN_IP)
+                with self.subTest(name=name, role=role):
+                    self.assertFalse(matches(self.pat(region, direct), e))
+                    self.assertFalse(matches(self.pat(region, denied), e))
+
+    def test_same_events_from_external_ip_match_direct_rules(self):
+        for region, direct, denied, samples in (
+            ("ap-northeast-2", "ServiceChangeRule", "ServiceDeniedRule", self.SEOUL_SAMPLES),
+            ("us-east-1", "IamChangeRule", "IamDeniedRule", self.IAM_SAMPLES),
+        ):
+            for src, name, role in samples:
+                e = self.ev(src, name, role, ip=EXTERNAL_IP)
+                with self.subTest(name=name, role=role):
+                    self.assertTrue(matches(self.pat(region, direct), e))
+                    self.assertFalse(matches(self.pat(region, denied), e))  # succeeded: not a denied attempt
+
+    def test_denied_rules_match_cfn_and_direct_denials(self):
+        for region, denied, samples in (
+            ("ap-northeast-2", "ServiceDeniedRule", self.SEOUL_SAMPLES),
+            ("us-east-1", "IamDeniedRule", self.IAM_SAMPLES),
+        ):
+            for src, name, role in samples:
+                for ip in (CFN_IP, EXTERNAL_IP):
+                    with self.subTest(name=name, ip=ip):
+                        self.assertTrue(matches(self.pat(region, denied), self.ev(src, name, role, "AccessDenied", ip)))
+        # CFN-routed denial is not mailed by the direct rule, only by the denied rule
+        e = self.ev("aws.iam", "PutRolePolicy", "AlarmOpsDeployCentral", "AccessDenied", CFN_IP)
+        self.assertFalse(matches(self.pat("us-east-1", "IamChangeRule"), e))
+
+    def test_denied_rules_reject_other_roles_and_sources(self):
+        p = self.pat("ap-northeast-2", "ServiceDeniedRule")
+        self.assertFalse(matches(p, self.ev("aws.lambda", "CreateFunction20150331", "SomeAdmin", "AccessDenied", EXTERNAL_IP)))
+        self.assertFalse(matches(p, self.ev("aws.s3", "PutRule", "AlarmOpsDeployCentral", "AccessDenied", EXTERNAL_IP)))
+        self.assertFalse(matches(self.pat("us-east-1", "IamDeniedRule"), self.ev("aws.iam", "CreateRole", "AlarmOpsDeployBus", "AccessDenied")))
+
+    def test_deploy_rule_matches_deploy_roles_only(self):
+        p = self.pat("ap-northeast-2", "DeployRule")
+        for name in ("ExecuteChangeSet", "CreateStack", "UpdateStack", "DeleteStack"):
+            for role in ("AlarmOpsDeployCentral", "AlarmOpsDeployBus"):
+                with self.subTest(name=name, role=role):
+                    self.assertTrue(matches(p, self.ev("aws.cloudformation", name, role, ip=EXTERNAL_IP)))
+            self.assertFalse(matches(p, self.ev("aws.cloudformation", name, "SomeAdmin")))
+        self.assertFalse(matches(p, self.ev("aws.cloudformation", "CreateChangeSet", "AlarmOpsDeployCentral")))
+        self.assertFalse(matches(p, self.ev("aws.lambda", "ExecuteChangeSet", "AlarmOpsDeployCentral")))
+
+    def test_seoul_direct_rule_does_not_match_other_roles_or_sources(self):
+        p = self.pat("ap-northeast-2", "ServiceChangeRule")
         for src, name, role in (
             ("aws.lambda", "CreateFunction20150331", "SomeAdmin"),
             ("aws.events", "PutRule", "SomeAdmin"),
@@ -432,28 +534,34 @@ class CentralAlerts(unittest.TestCase):
             ("aws.s3", "CreateFunction20150331", "AlarmOpsDeployBus"),
         ):
             with self.subTest(src=src, name=name, role=role):
-                self.assertFalse(matches(p, self.ev(src, name, role)))
+                self.assertFalse(matches(p, self.ev(src, name, role, ip=EXTERNAL_IP)))
 
-    def test_us_east_1_rule_matches_and_rejects_samples(self):
-        p = self.pattern("us-east-1")
-        self.assertTrue(matches(p, self.ev("aws.iam", "CreatePolicyVersion", "AlarmOpsDeployCentral", "AccessDenied")))
-        self.assertFalse(matches(p, self.ev("aws.iam", "DeleteRolePolicy", "AlarmOpsDeployCentral")))
-        self.assertFalse(matches(p, self.ev("aws.iam", "CreateRole", "AlarmOpsDeployBus")))
+    def test_us_east_1_direct_rule_matches_and_rejects_samples(self):
+        p = self.pat("us-east-1", "IamChangeRule")
+        self.assertTrue(matches(p, self.ev("aws.iam", "CreatePolicyVersion", "AlarmOpsDeployCentral", "AccessDenied", EXTERNAL_IP)))
+        self.assertFalse(matches(p, self.ev("aws.iam", "DeleteRolePolicy", "AlarmOpsDeployCentral", ip=EXTERNAL_IP)))
+        self.assertFalse(matches(p, self.ev("aws.iam", "CreateRole", "AlarmOpsDeployBus", ip=EXTERNAL_IP)))
 
     def test_matcher_negative_control(self):
         wrong = {"source": ["aws.iam"], "detail": {"eventName": ["CreateRole"], "userIdentity": {"sessionContext": {"sessionIssuer": {"userName": ["Other"]}}}}}
         self.assertFalse(matches(wrong, self.ev("aws.iam", "CreateRole", "AlarmOpsDeployCentral")))
         self.assertTrue(matches({"detail": {"errorCode": [{"exists": True}]}}, self.ev("aws.iam", "X", "r", "AccessDenied")))
         self.assertFalse(matches({"detail": {"errorCode": [{"exists": True}]}}, self.ev("aws.iam", "X", "r")))
+        anything = {"detail": {"sourceIPAddress": [{"anything-but": CFN_IP}]}}
+        self.assertFalse(matches(anything, self.ev("aws.iam", "X", "r", ip=CFN_IP)))
+        self.assertTrue(matches(anything, self.ev("aws.iam", "X", "r", ip=EXTERNAL_IP)))
         self.assertTrue(matches({"detail": {"eventName": [{"prefix": "Create"}]}}, self.ev("aws.iam", "CreateRole", "r")))
         self.assertFalse(matches({"detail": {"eventName": [{"prefix": "Create"}]}}, self.ev("aws.iam", "XCreate", "r")))
 
     def test_dropped_events_are_not_in_any_pattern(self):
         for region in ("us-east-1", "ap-northeast-2"):
-            names = self.pattern(region)["detail"]["eventName"]
-            for bad in ("DeleteRolePolicy", "DetachRolePolicy", "DeleteFunction", "DeleteEventSourceMapping"):
-                self.assertNotIn(bad, names)
-                self.assertNotIn({"prefix": bad}, names)
+            for rid in self.rules(region):
+                if rid == "DeployRule":
+                    continue
+                names = self.pat(region, rid)["detail"]["eventName"]
+                for bad in ("DeleteRolePolicy", "DetachRolePolicy", "DeleteFunction", "DeleteEventSourceMapping"):
+                    self.assertNotIn(bad, names)
+                    self.assertNotIn({"prefix": bad}, names)
 
     def test_targets_have_input_transformer_with_summary_fields(self):
         for region in ("us-east-1", "ap-northeast-2"):
@@ -478,14 +586,28 @@ class CentralAlerts(unittest.TestCase):
 
     # -- which resources exist in which region
 
-    def test_region_selects_the_rule(self):
-        for region, key, other in (("us-east-1", "iam-change", "service-change"), ("ap-northeast-2", "service-change", "iam-change")):
+    def test_region_selects_the_rules(self):
+        for region, expected in (
+            ("us-east-1", {"IamChangeRule": "iam-change", "IamDeniedRule": "iam-denied"}),
+            ("ap-northeast-2", {"ServiceChangeRule": "service-change", "ServiceDeniedRule": "service-denied", "DeployRule": "deploy"}),
+            ("eu-west-1", {"ServiceChangeRule": "service-change", "ServiceDeniedRule": "service-denied", "DeployRule": "deploy"}),
+        ):
             r = self.render(region)
-            names = [r.x(x["Properties"]["Name"]) for x in self.rules(region).values()]
-            self.assertEqual(len(names), 1, region)
-            self.assertIn(key, names[0])
-            self.assertNotIn(other, names[0])
-            self.assertTrue(names[0].startswith(f"{GUARD_PREFIX}-"), names[0])
+            rules = self.rules(region)
+            self.assertEqual(set(rules), set(expected), region)
+            for rid, key in expected.items():
+                name = r.x(rules[rid]["Properties"]["Name"])
+                self.assertEqual(name, f"{GUARD_PREFIX}-{key}")
+
+    def test_every_rule_arn_is_protected_by_the_isolation_samples(self):
+        samples = set(protected_samples()["events"])
+        for region in ("us-east-1", "ap-northeast-2", "eu-west-1"):
+            r = self.render(region)
+            for rule in self.rules(region).values():
+                arn = f"arn:{PARTITION}:events:{region}:{ACCOUNT}:rule/{r.x(rule['Properties']['Name'])}"
+                if region != "eu-west-1":
+                    self.assertIn(arn, samples)
+                self.assertTrue(_glob(f"arn:{PARTITION}:events:*:{ACCOUNT}:rule/{GUARD_PREFIX}-*", arn, False))
 
     def test_rule_targets_the_topic_of_the_same_stack(self):
         for region in ("us-east-1", "ap-northeast-2"):
