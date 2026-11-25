@@ -14,7 +14,7 @@ name: ci
 #   infra/**                                       infra
 #   .github/scripts/**                             infra, db (both run the script tests)
 #   docs/**, root *.md, .env.example, .gitignore,  nothing (docs_only). Exceptions that tests read:
-#     .claude/worktrees/**                         docs/specs/alarm-rules.md -> engine, docs/SETUP-PROD-DB.md -> infra,
+#     .claude/worktrees/**                         docs/specs/alarm-rules.md -> engine, docs/SETUP-PROD-DB.md -> infra, docs/GO-LIVE.md -> infra,
 #                                                  tools/vercel-cli/** -> infra, the offboard-account.command.json
 #                                                  fixtures (packages/api, alarm-engine) -> test + engine.
 #   *.md inside an area                            follows that area's rule (e.g. infra/aws/*.md -> infra)
