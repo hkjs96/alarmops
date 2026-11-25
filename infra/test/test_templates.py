@@ -7,6 +7,7 @@ Needs only PyYAML (installed with cfn-lint).
 from __future__ import annotations
 
 import json
+import re
 import unittest
 from pathlib import Path
 
@@ -228,6 +229,7 @@ class ReaderCollectorAdditions(unittest.TestCase):
 
 C = _load(ROOT / "aws" / "central.yaml")
 CR = C["Resources"]
+BOOT = _load(ROOT / "aws" / "central-bootstrap.yaml")
 
 
 def c_statements(role: str) -> list[dict]:
@@ -317,22 +319,79 @@ class CentralTemplate(unittest.TestCase):
         self.assertEqual(as_list(p["Action"]), ["sts:AssumeRole"])
         self.assertEqual(p["Resource"], {"Fn::Sub": "arn:${AWS::Partition}:iam::*:role/AlarmOps-Remediator"})
 
-    # ---- Vercel OIDC role (D-49)
+    # ---- Vercel OIDC role (D-49): Global and Team issuer modes; condition-key prefix computed from the provider ARN
+    @staticmethod
+    def _render_vercel_trust(provider_arn, in_account=True, slug="acme-team", project="alarmops"):
+        """Evaluate the Fn::If / Fn::Sub / Select / Split subset used by the trust document and parse the JSON."""
+        env = {"VercelOidcProviderArn": provider_arn, "VercelTeamSlug": slug, "VercelProjectName": project}
+
+        def ev(x, local):
+            if isinstance(x, str):
+                return x
+            (k, v), = x.items()
+            if k == "Ref":
+                return env[v]
+            if k == "Fn::If":
+                assert v[0] == "VercelProviderInThisAccount"
+                return ev(v[1] if in_account else v[2], local)
+            if k == "Fn::Split":
+                return ev(v[1], local).split(v[0])
+            if k == "Fn::Select":
+                return ev(v[1], local)[int(v[0])]
+            if k == "Fn::Sub":
+                tmpl, extra = (v, {}) if isinstance(v, str) else (v[0], {n: ev(e, local) for n, e in v[1].items()})
+                scope = {**env, **extra}
+                return re.sub(r"\$\{([A-Za-z0-9]+)\}", lambda m: scope[m.group(1)], tmpl)
+            raise AssertionError(f"unsupported intrinsic {k}")
+
+        doc = CR["VercelConsoleRole"]["Properties"]["AssumeRolePolicyDocument"]
+        return json.loads(ev(doc, {}))
+
+    def test_vercel_provider_arn_pattern_accepts_global_and_team_only(self):
+        for pat in (C["Parameters"]["VercelOidcProviderArn"]["AllowedPattern"],
+                    BOOT["Parameters"]["VercelOidcProviderArn"]["AllowedPattern"]):
+            for ok in ("arn:aws:iam::123456789012:oidc-provider/oidc.vercel.com",
+                       "arn:aws:iam::123456789012:oidc-provider/oidc.vercel.com/acme-team",
+                       "arn:aws:iam::123456789012:oidc-provider/oidc.vercel.com/a1"):
+                self.assertRegex(ok, pat)
+            for bad in ("arn:aws:iam::123456789012:oidc-provider/oidc.vercel.com/",
+                        "arn:aws:iam::123456789012:oidc-provider/oidc.vercel.com/Acme",
+                        "arn:aws:iam::123456789012:oidc-provider/oidc.vercel.com/-a",
+                        "arn:aws:iam::123456789012:oidc-provider/oidc.vercel.com/a/b",
+                        "arn:aws:iam::123456789012:oidc-provider/oidc.vercel.com/a*",
+                        "arn:aws:iam::123456789012:oidc-provider/oidc.vercelxcom",
+                        "arn:aws:iam::123456789012:oidc-provider/evil.example.com/acme",
+                        "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com",
+                        "arn:aws:iam::123456789012:oidc-provider/oidc.vercel.com/a" + "b" * 63):
+                self.assertNotRegex(bad, pat)
+        self.assertRegex("", BOOT["Parameters"]["VercelOidcProviderArn"]["AllowedPattern"])
+        self.assertNotRegex("", C["Parameters"]["VercelOidcProviderArn"]["AllowedPattern"])
+
     def test_vercel_trust_is_pinned_to_project_production_and_team_audience(self):
         P = C["Parameters"]
-        self.assertEqual(P["VercelOidcProviderArn"]["AllowedPattern"],
-                         r"^arn:aws[a-z-]*:iam::[0-9]{12}:oidc-provider/oidc\.vercel\.com$")
         for n in ("VercelTeamSlug", "VercelProjectName", "VercelOidcProviderArn"):
             self.assertNotIn("Default", P[n])
-        (st,) = CR["VercelConsoleRole"]["Properties"]["AssumeRolePolicyDocument"]["Statement"]
-        self.assertEqual(st["Principal"], {"Federated": {"Fn::If": [
-            "VercelProviderInThisAccount", {"Ref": "VercelOidcProviderArn"}, {"Ref": "AWS::NoValue"}]}})
+        for arn, prefix in (
+                ("arn:aws:iam::123456789012:oidc-provider/oidc.vercel.com/acme-team", "oidc.vercel.com/acme-team"),
+                ("arn:aws:iam::123456789012:oidc-provider/oidc.vercel.com", "oidc.vercel.com")):
+            with self.subTest(provider=arn):
+                doc = self._render_vercel_trust(arn)
+                (st,) = doc["Statement"]
+                self.assertEqual(doc["Version"], "2012-10-17")
+                self.assertEqual(st["Effect"], "Allow")
+                self.assertEqual(st["Principal"], {"Federated": arn})
+                self.assertEqual(st["Action"], "sts:AssumeRoleWithWebIdentity")
+                self.assertEqual(st["Condition"], {"StringEquals": {
+                    f"{prefix}:aud": "https://vercel.com/acme-team",
+                    f"{prefix}:sub": "owner:acme-team:project:alarmops:environment:production"}})
+                self.assertNotIn("*", json.dumps(st))
+                self.assertNotIn("StringLike", json.dumps(st))
+
+    def test_vercel_trust_has_no_principal_when_provider_is_in_another_account(self):
+        doc = self._render_vercel_trust("arn:aws:iam::123456789012:oidc-provider/oidc.vercel.com/acme-team", in_account=False)
+        (st,) = doc["Statement"]
+        self.assertEqual(st["Principal"], {})
         self.assertEqual(st["Action"], "sts:AssumeRoleWithWebIdentity")
-        self.assertEqual(st["Condition"], {"StringEquals": {
-            "oidc.vercel.com:aud": {"Fn::Sub": "https://vercel.com/${VercelTeamSlug}"},
-            "oidc.vercel.com:sub": {"Fn::Sub": "owner:${VercelTeamSlug}:project:${VercelProjectName}:environment:production"}}})
-        self.assertNotIn("*", str(st))
-        self.assertNotIn("StringLike", str(st))
 
     def test_vercel_role_has_one_permission_plus_optional_scoped_ses(self):
         sts = c_all_statements("VercelConsoleRole")

@@ -34,8 +34,10 @@ Parameters:
     Description: Name of the bus created by central-bus.yaml (stack output BusName). Must exist before this stack.
   VercelOidcProviderArn:
     Type: String
-    AllowedPattern: '^arn:aws[a-z-]*:iam::[0-9]{12}:oidc-provider/oidc\.vercel\.com$'
-    Description: IAM OIDC provider registered by a person for issuer https://oidc.vercel.com (Vercel "Global" issuer mode).
+    AllowedPattern: '^arn:aws[a-z-]*:iam::[0-9]{12}:oidc-provider/oidc\.vercel\.com(/[a-z0-9][a-z0-9-]{0,62})?$'
+    Description: >-
+      IAM OIDC provider registered by a person. Global issuer mode: ...:oidc-provider/oidc.vercel.com.
+      Team issuer mode: ...:oidc-provider/oidc.vercel.com/<team slug>. The trust condition keys are derived from this ARN.
   VercelTeamSlug:
     Type: String
     AllowedPattern: '^[A-Za-z0-9_-]{1,64}$'
@@ -687,16 +689,19 @@ Resources:
       RoleName: AlarmOpsCentral-VercelConsole
       Description: Vercel console (production) sends alarm commands. Nothing else.
       MaxSessionDuration: 3600
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal: { Federated: !If [VercelProviderInThisAccount, !Ref VercelOidcProviderArn, !Ref "AWS::NoValue"] }
-            Action: sts:AssumeRoleWithWebIdentity
-            Condition:
-              StringEquals:
-                "oidc.vercel.com:aud": !Sub "https://vercel.com/${VercelTeamSlug}"
-                "oidc.vercel.com:sub": !Sub "owner:${VercelTeamSlug}:project:${VercelProjectName}:environment:production"
+      # Condition keys are "<provider path>:aud|sub": oidc.vercel.com (Global) or oidc.vercel.com/<team> (Team issuer).
+      # CloudFormation cannot compute map keys, so the document is a JSON string (Sub) with the prefix taken from the provider ARN.
+      # Without a provider in this account the Principal is empty, which IAM rejects: nobody can assume the role.
+      AssumeRolePolicyDocument: !If
+        - VercelProviderInThisAccount
+        - !Sub
+          - |
+            {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"${VercelOidcProviderArn}"},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"${OidcKeyPrefix}:aud":"https://vercel.com/${VercelTeamSlug}","${OidcKeyPrefix}:sub":"owner:${VercelTeamSlug}:project:${VercelProjectName}:environment:production"}}}]}
+          - OidcKeyPrefix: !Select [1, !Split ["oidc-provider/", !Ref VercelOidcProviderArn]]
+        - !Sub
+          - |
+            {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"${OidcKeyPrefix}:aud":"https://vercel.com/${VercelTeamSlug}","${OidcKeyPrefix}:sub":"owner:${VercelTeamSlug}:project:${VercelProjectName}:environment:production"}}}]}
+          - OidcKeyPrefix: !Select [1, !Split ["oidc-provider/", !Ref VercelOidcProviderArn]]
       Policies:
         - PolicyName: console
           PolicyDocument:
