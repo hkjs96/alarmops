@@ -157,7 +157,7 @@ def test_sync_run_started_since_is_account_scoped_and_windowed(pg):
 def _acct(pg, aid: str, cus: str, aws: str, **cols) -> None:
     pg._exec('''INSERT INTO "CloudAccount" (id, "customerId", "awsAccountId", "externalId", "readerRoleArn",
                 "eventForwarderRoleArn", "alarmWriterRoleArn", "alarmWriterEnabled", "updatedAt")
-                VALUES (%s,%s,%s,'ext','arn:r','arn:fw','arn:w',true,now())''', aid, cus, aws)
+                VALUES (%s,%s,%s,%s,'arn:r','arn:fw','arn:w',true,now())''', aid, cus, aws, f"ext-{aid}")
     for col, val in cols.items():
         pg._exec(f'UPDATE "CloudAccount" SET "{col}" = %s WHERE id = %s', val, aid)
 
@@ -170,14 +170,14 @@ def _running(pg, acct: str) -> int:
 def test_list_active_accounts_matches_the_fan_out_rule(pg):
     for cid, status in (("cus_p_act", "ACTIVE"), ("cus_p_sus", "SUSPENDED")):
         pg._exec('''INSERT INTO "Customer" (id, name, slug, status, "updatedAt") VALUES (%s,%s,%s,%s::"CustomerStatus",now())''',
-                 cid, cid, cid, status)
+                 cid, cid, cid.replace("_", "-"), status)
     _acct(pg, "acc_p_ok1", "cus_p_act", "300000000001")
     _acct(pg, "acc_p_ok2", "cus_p_act", "300000000002")
     _acct(pg, "acc_p_sus", "cus_p_sus", "300000000003")
     _acct(pg, "acc_p_dis", "cus_p_act", "300000000004", disabled=True)
     pg._exec('''INSERT INTO "CloudAccount" (id, "customerId", "awsAccountId", "externalId", "readerRoleArn",
                 "eventForwarderRoleArn", "alarmWriterRoleArn", "connectionPurgedAt", "updatedAt")
-                VALUES ('acc_p_pur','cus_p_act','300000000005','e','arn:r','arn:fw','arn:w',now(),now())''')
+                VALUES ('acc_p_pur','cus_p_act','300000000005','ext-acc_p_pur','arn:r','arn:fw','arn:w',now(),now())''')
     got = {(a.id, a.customer_id) for a in pg.list_active_accounts() if a.id.startswith("acc_p_")}
     assert got == {("acc_p_ok1", "cus_p_act"), ("acc_p_ok2", "cus_p_act")}
 
@@ -255,7 +255,7 @@ def test_existing_duplicate_running_rows_mean_busy_then_stale_cleanup_replaces_t
 def test_is_account_active_follows_the_d43_rule(pg):
     for cid, status in (("cus_p_a2", "ACTIVE"), ("cus_p_t2", "TERMINATED")):
         pg._exec('''INSERT INTO "Customer" (id, name, slug, status, "updatedAt") VALUES (%s,%s,%s,%s::"CustomerStatus",now())
-                    ON CONFLICT DO NOTHING''', cid, cid, cid, status)
+                    ON CONFLICT DO NOTHING''', cid, cid, cid.replace("_", "-"), status)
     _acct(pg, "acc_p_ia1", "cus_p_a2", "700000000001")
     _acct(pg, "acc_p_ia2", "cus_p_t2", "700000000002")
     _acct(pg, "acc_p_ia3", "cus_p_a2", "700000000003", disabled=True)
