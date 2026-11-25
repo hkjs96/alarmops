@@ -168,6 +168,29 @@ def option_values(argv: list[str], name: str) -> list[str]:
     return out
 
 
+def alarm_names(c: dict) -> list[str]:
+    """Exact alarm names a delete-alarms call targets: every value after --alarm-names (until the next
+    option), plus AlarmNames of any JSON given via file:// or stdin. Values are kept verbatim (no substring
+    matching), so wildcards or names outside the scenario show up as unexpected members."""
+    argv, out = c["argv"], []
+    for i, a in enumerate(argv):
+        if a == "--alarm-names":
+            j = i + 1
+            while j < len(argv) and not argv[j].startswith("--"):
+                out.append(argv[j])
+                j += 1
+        elif a.startswith("--alarm-names="):
+            out.append(a.split("=", 1)[1])
+    for text in [*c.get("files", {}).values(), c.get("stdin", "")]:
+        try:
+            doc = json.loads(text)
+        except ValueError:
+            continue
+        if isinstance(doc, dict) and isinstance(doc.get("AlarmNames"), list):
+            out.extend(str(n) for n in doc["AlarmNames"])
+    return out
+
+
 def call_blob(c: dict) -> str:
     """argv + resolved file:// contents + stdin of one recorded call."""
     return " ".join(c["argv"]) + " " + " ".join(c.get("files", {}).values()) + " " + c.get("stdin", "")

@@ -15,7 +15,7 @@ import unittest
 
 from rehearsal_support import (
     ACCT, BAD_ENV, DENIED, EID, PROFILE, REGION, REPO, SCRIPTS, STACK, Sandbox,
-    call_blob, mode, option_values,
+    alarm_names, call_blob, mode, option_values,
 )
 
 ALL = ["preflight.sh", "install.sh", "verify.sh", "cleanup.sh"]
@@ -131,27 +131,56 @@ class AmbientCredentialGuard(Base):
 
 
 class AccountGuard(Base):
-    def reject_all(self, scripts=ALL, **kw):
+    """Every script is armed so that, were the guard missing, it WOULD write or delete: cleanup gets a real
+    run log plus a customer account holding that run's queue/alarms/stack; verify/install have normal inputs.
+    Each rejection is therefore only explainable by the account/confirmation check itself."""
+
+    def setUp(self):
+        super().setUp()
+        q1, q2 = self.make_run("run-one"), self.make_run("run-two")   # run logs exist; accounts still valid
+        self.assertEqual((len(q1), len(q2)), (1, 1), "verify must create one test queue per run")
+        self.q1, self.q2 = q1[0], q2[0]
+
+    def arm(self, **overrides):
+        """Scenario for the next runs: deletable things exist for run-one (account may be overridden)."""
+        self.sb.set_scenario(**{**rich_scenario(self.q1, self.q2), **overrides})
+
+    def args_for(self, script, **kw):
+        return self.args(script, run_id="run-one" if script == "cleanup.sh" else RUN,
+                         extra=["--stack"] if script == "cleanup.sh" else [], **kw)
+
+    def test_armed_cleanup_really_deletes_with_valid_inputs(self):
+        """Control: without this, the rejection tests below could pass because cleanup has nothing to do."""
+        self.arm()
+        self.sb.calls_file.unlink(missing_ok=True)
+        res = self.sb.run("cleanup.sh", self.args_for("cleanup.sh"))
+        self.assertEqual(res.code, 0, res.text)
+        ops = {c["op"] for c in self.sb.writes()}
+        self.assertTrue({"delete-alarms", "delete-queue", "delete-stack"} <= ops, ops)
+
+    def reject_all(self, scripts=ALL, confirm=ACCT):
         for script in scripts:
             with self.subTest(script=script):
                 self.sb.calls_file.unlink(missing_ok=True)
-                res = self.sb.run(script, self.args(script))
+                res = self.sb.run(script, self.args_for(script, confirm=confirm))
                 self.assertRejected(script, res)
-                self.assertEqual(self.sb.writes(), [], "no write call before the account is trusted")
+                self.assertEqual(self.sb.writes(), [], "no write or delete call before the account is trusted")
                 self.assertAllScoped(expect_some=False)   # the sts call made before rejecting counts too
 
     def test_identity_differs_from_local_table(self):
-        self.sb.set_scenario(account="777777777777")   # table says rehearsal-a is ACCT
+        self.arm(account="777777777777")   # table says rehearsal-a is ACCT
         self.reject_all()
         self.assertIn(("sts", "get-caller-identity"), [(c["service"], c["op"]) for c in self.sb.calls()])
         self.assertAllScoped()
 
     def test_profile_missing_from_local_table(self):
         self.sb.set_accounts(profiles={"rehearsal-b": "555555555555"})
+        self.arm()
         self.reject_all()
 
     def test_local_table_missing(self):
         self.sb.accounts_file.unlink()
+        self.arm()
         self.reject_all()
 
     def test_account_equals_central_dev_or_deny_list(self):
@@ -159,34 +188,31 @@ class AccountGuard(Base):
                                 ("deny", {"denyAccounts": [DENIED, ACCT]})):
             with self.subTest(case=label):
                 self.sb.set_accounts(**override)
+                self.arm()
                 self.reject_all()
 
     def test_account_equals_central_role_or_bus_arn_account(self):
         """All four scripts, not just install."""
         self.sb.set_accounts(centralRoleArn=f"arn:aws:iam::{ACCT}:role/AlarmOps-Central-Assume")
+        self.arm()
         self.reject_all(ALL)
         self.sb.set_accounts(centralEventBusArn=f"arn:aws:events:{REGION}:{ACCT}:event-bus/alarmops-central")
+        self.arm()
         self.reject_all(ALL)
 
     def test_confirmation_input_must_be_the_same_12_digits(self):
-        for script in WRITERS:
-            for bad in ("999999999999", ACCT[:-1], ACCT + "1", "", "abcdefghijkl"):
-                with self.subTest(script=script, confirm=bad):
-                    self.sb.calls_file.unlink(missing_ok=True)
-                    res = self.sb.run(script, self.args(script, confirm=bad))
-                    self.assertRejected(script, res)
-                    self.assertEqual(self.sb.writes(), [])
+        self.arm()
+        for bad in ("999999999999", ACCT[:-1], ACCT + "1", "", "abcdefghijkl"):
+            with self.subTest(confirm=bad):
+                self.reject_all(WRITERS, confirm=bad)
 
     def test_missing_confirmation_is_refused(self):
-        for script in WRITERS:
-            with self.subTest(script=script):
-                self.sb.calls_file.unlink(missing_ok=True)
-                res = self.sb.run(script, self.args(script, confirm=None))
-                self.assertRejected(script, res)
-                self.assertEqual(self.sb.writes(), [])
+        self.arm()
+        self.reject_all(WRITERS, confirm=None)
 
     def test_matching_account_and_confirmation_proceed(self):
         """Control for the cases above."""
+        self.arm()
         res = self.sb.run("install.sh", self.args("install.sh"))
         self.assertEqual(res.code, 0, res.text)
         self.assertTrue([c for c in self.sb.writes() if c["service"] == "cloudformation"])
@@ -270,17 +296,22 @@ class SecretHandling(Base):
     def test_external_id_never_shown_when_aws_echoes_it(self):
         results = self.run_all(leak=EID)
         self.assert_scenario_really_ran("stderr-warning")
-        self.assertTrue(any("describe-stacks" in c["echo"] for c in self.calls_by["preflight.sh"]),
-                        "describe-stacks never returned the ExternalId")
+        self.assert_describe_stacks_returned_secret()
         self.assert_no_leak(results)
         self.assertTrue(self.sb.log_files(), "verify must write a log under rehearsal-logs")
 
     def test_external_id_never_shown_when_aws_calls_fail_with_it(self):
         results = self.run_all(fail_writes=EID)
         self.assert_scenario_really_ran("error-response")
-        self.assertTrue(any("describe-stacks" in c["echo"] for c in self.calls_by["preflight.sh"]),
-                        "describe-stacks never returned the ExternalId")
+        self.assert_describe_stacks_returned_secret()
         self.assert_no_leak(results)
+
+    def assert_describe_stacks_returned_secret(self):
+        """The fake marks 'describe-stacks' only when the response body it printed (after --query) really
+        contained the secret, so this proves a script received it, not merely that it called describe-stacks."""
+        hits = [(s, c) for s, calls in self.calls_by.items() for c in calls
+                if (c["service"], c["op"]) == ("cloudformation", "describe-stacks") and "describe-stacks" in c["echo"]]
+        self.assertTrue(hits, "no describe-stacks response carried the ExternalId to any script")
 
     def test_external_id_is_still_delivered_to_cloudformation(self):
         """Control: hiding the value must not mean dropping it (it travels in a file or stdin, not argv)."""
@@ -310,10 +341,14 @@ class CleanupScope(Base):
         return rich_scenario(q1, q2, q1_tags)
 
     def deleted_alarms(self):
-        blobs = [call_blob(c) for c in self.sb.calls() if c["op"] == "delete-alarms"]
-        names = ["alarm-own-q1", "alarm-untagged-q1", "alarm-manager-q1", "alarm-own-q2",
-                 "alarm-own-otherq", "alarm-own-instance"]
-        return {n for n in names if any(n in b for b in blobs)}
+        """Exact set of names passed to delete-alarms (verbatim, so '*' or unknown names are visible)."""
+        out = set()
+        for c in self.sb.calls():
+            if c["op"] == "delete-alarms":
+                names = alarm_names(c)
+                self.assertTrue(names, f"delete-alarms without recognisable --alarm-names: {c['argv']}")
+                out.update(names)
+        return out
 
     def deleted_queues(self):
         return {u.rsplit("/", 1)[-1] for c in self.sb.calls() if c["op"] == "delete-queue"
@@ -342,6 +377,7 @@ class CleanupScope(Base):
                 self.sb.set_scenario(**self.scenario(q1, q2, q1_tags=tags))
                 self.sb.run("cleanup.sh", self.args("cleanup.sh", run_id="run-one"))
                 self.assertEqual(self.deleted_queues(), set())
+                self.assertLessEqual(self.deleted_alarms(), {"alarm-own-q1"})   # never anything outside scope
 
     def test_unknown_run_id_deletes_nothing(self):
         q1, q2 = self.prepare()

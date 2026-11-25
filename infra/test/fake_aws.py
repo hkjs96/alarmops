@@ -105,13 +105,19 @@ def query(data, expr: str):
     return cur
 
 
-def emit(data, opts):
+RECORD = None   # callable writing this call's log line exactly once; set by main()
+
+
+def emit(data, opts, on_text=None):
+    """Print the response. on_text(text) sees the exact stdout body (after --query) before it is printed."""
     q = (opts.get("--query") or [None])[0]
     fmt = (opts.get("--output") or ["json"])[0]
     if q:
         try:
             data = query(data, q)
         except UnsupportedQuery:
+            if RECORD:
+                RECORD()
             # Tests fail on this marker file even if the script under test swallows our non-zero exit.
             with open(os.environ["FAKE_AWS_LOG"] + ".unsupported-query", "a", encoding="utf-8") as f:
                 f.write(q + "\n")
@@ -119,18 +125,23 @@ def emit(data, opts):
             sys.exit(97)
     if fmt == "text":
         if data is None:
-            print("None")
+            text = "None"
         elif isinstance(data, (list, tuple)):
-            print("\t".join(str(x) for x in data))
+            text = "\t".join(str(x) for x in data)
         elif isinstance(data, dict):
-            print("\t".join(str(v) for v in data.values()))
+            text = "\t".join(str(v) for v in data.values())
         else:
-            print(data)
+            text = str(data)
     else:
-        print(json.dumps(data, ensure_ascii=False))
+        text = json.dumps(data, ensure_ascii=False)
+    if on_text:
+        on_text(text)
+    print(text)
 
 
 def error(code: str, op: str, msg: str, rc: int = 254):
+    if RECORD:
+        RECORD()
     sys.stderr.write(f"\nAn error occurred ({code}) when calling the {op} operation: {msg}\n")
     sys.exit(rc)
 
@@ -163,12 +174,21 @@ def main() -> None:
         echo.append("stderr-warning")
     if scen.get("fail_writes") and not is_read and service != "sts":
         echo.append("error-response")
-    if (service, op) == ("cloudformation", "describe-stacks") and (scen.get("leak") or scen.get("fail_writes")) \
-            and (scen.get("leak") or scen.get("fail_writes")) in json.dumps(scen.get("stacks", [])):
-        echo.append("describe-stacks")
+    secret = scen.get("leak") or scen.get("fail_writes")
     rec = {"argv": argv, "service": service, "op": op, "files": read_files(argv), "stdin": stdin, "echo": echo}
-    with open(os.environ["FAKE_AWS_LOG"], "a", encoding="utf-8") as f:
-        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    done = []
+
+    def record():
+        if not done:
+            done.append(1)
+            with open(os.environ["FAKE_AWS_LOG"], "a", encoding="utf-8") as f:
+                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+    global RECORD
+    RECORD = record
+    # describe-stacks is logged only once its real response body is known (see `mark` below).
+    if (service, op) != ("cloudformation", "describe-stacks"):
+        record()
 
     if scen.get("leak") and service != "sts":
         sys.stderr.write(f"warning: request context ExternalId={scen['leak']}\n")
@@ -189,7 +209,13 @@ def main() -> None:
             stacks = [s for s in stacks if s.get("StackName") == name]
             if not stacks:
                 error("ValidationError", "DescribeStacks", f"Stack with id {name} does not exist")
-        return emit({"Stacks": stacks}, opts)
+
+        def mark(text):
+            # Only a response body that really carries the secret counts as the describe-stacks echo path.
+            if secret and secret in text:
+                echo.append("describe-stacks")
+            record()
+        return emit({"Stacks": stacks}, opts, on_text=mark)
     if key == "cloudformation validate-template":
         return emit({"Parameters": []}, opts)
     if key in ("cloudformation create-stack", "cloudformation update-stack"):
