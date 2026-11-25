@@ -297,7 +297,14 @@ class CentralTemplate(unittest.TestCase):
         self.assertEqual(sts["ReadEngineDbSecret"]["Resource"], {"Ref": "EngineDbSecret"})
         self.assertEqual(sorted(sts["ConsumeAlarmCommands"]["Action"]),
                          ["sqs:ChangeMessageVisibility", "sqs:DeleteMessage", "sqs:GetQueueAttributes", "sqs:ReceiveMessage"])
-        self.assertNotIn("sqs:SendMessage", str(c_statements("CentralRole")))
+        senders = [x for x in c_statements("CentralRole") if "sqs:SendMessage" in str(x.get("Action"))
+                   or "sqs:*" in str(x.get("Action")) or x.get("Action") == "*"]
+        self.assertEqual(len(senders), 1, senders)
+        self.assertEqual(senders[0]["Sid"], "SendSyncCommands")
+        self.assertEqual(senders[0]["Effect"], "Allow")
+        self.assertEqual(senders[0]["Action"], "sqs:SendMessage")
+        self.assertEqual(senders[0]["Resource"], {"Fn::GetAtt": "CommandsQueue.Arn"})
+        self.assertNotIn("Condition", senders[0])
 
     def test_remediator_caller_reachable_only_from_central_role(self):
         (st,) = CR["RemediatorCallerRole"]["Properties"]["AssumeRolePolicyDocument"]["Statement"]
@@ -346,17 +353,24 @@ class CentralTemplate(unittest.TestCase):
     def test_commands_queue_policy_shape(self):
         sts = queue_statements("CommandsQueuePolicy")
         vercel = {"Fn::GetAtt": "VercelConsoleRole.Arn"}
-        rule = {"Fn::GetAtt": "TagEventRule.Arn"}
+        rules = [{"Fn::GetAtt": f"{n}.Arn"} for n in ("TagEventRule", "SyncHourlyRule", "SyncDailyRule")]
+        by_repr = lambda xs: sorted(xs, key=repr)
         allow_events = sts["TagEventRuleSend"]
         self.assertEqual(allow_events["Effect"], "Allow")
         self.assertEqual(allow_events["Principal"], {"Service": "events.amazonaws.com"})
         self.assertEqual(allow_events["Action"], "sqs:SendMessage")
-        self.assertEqual(allow_events["Condition"], {"ArnEquals": {"aws:SourceArn": rule}})
+        self.assertEqual(list(allow_events["Condition"]), ["ArnEquals"])
+        self.assertEqual(list(allow_events["Condition"]["ArnEquals"]), ["aws:SourceArn"])
+        self.assertEqual(by_repr(allow_events["Condition"]["ArnEquals"]["aws:SourceArn"]), by_repr(rules))
         deny = sts["DenySendFromOthers"]
         self.assertEqual(deny["Effect"], "Deny")
         self.assertEqual(deny["Action"], "sqs:SendMessage")
-        self.assertEqual(deny["Condition"], {"ArnNotEquals": {"aws:PrincipalArn": vercel, "aws:SourceArn": rule}})
-        self.assertEqual(sts["ConsoleSendOnly"]["Principal"], {"AWS": vercel})
+        self.assertEqual(list(deny["Condition"]), ["ArnNotEquals"])
+        neq = deny["Condition"]["ArnNotEquals"]
+        self.assertEqual(sorted(neq), ["aws:PrincipalArn", "aws:SourceArn"])
+        self.assertEqual(by_repr(neq["aws:PrincipalArn"]), by_repr([vercel, {"Fn::GetAtt": "CentralRole.Arn"}]))
+        self.assertEqual(by_repr(neq["aws:SourceArn"]), by_repr(rules))
+        self.assertEqual(by_repr(sts["ConsoleAndEngineSend"]["Principal"]["AWS"]), by_repr([vercel, {"Fn::GetAtt": "CentralRole.Arn"}]))
         self.assertEqual(sts["DenyInsecureTransport"]["Condition"], {"Bool": {"aws:SecureTransport": "false"}})
         # nothing may allow everyone, and no SourceAccount-only trust
         for s in sts.values():
