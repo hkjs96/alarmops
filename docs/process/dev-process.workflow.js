@@ -129,4 +129,4 @@ const verified = await agent(ENV + `검증할 브랜치: ${impl.branch}(커밋 $
 
 return { issue: A.issue, branch: impl.branch, commit: impl.commit, testsBranch: tests.out.branch, testsCommit: tests.out.commit,
   criteria, review: reviewed.review, mutation: mutated, uncaughtMutations: uncaught, verify: verified,
-  next: '허브: PR 열기 → CI 대기 → pr-auditor(기준↔테스트↔CI↔검증, [audit] 기준은 git으로) → 사용자 병합 승인' }
+  next: '허브: PR 열기(gate:needs-ci) → CI 대기 → pr-auditor(기준↔테스트↔CI↔검증, [audit] 기준은 git으로) → 판정 근거 댓글 → gate:ready 또는 gate:blocked/needs-human-step → 사용자 병합 승인' }
