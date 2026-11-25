@@ -640,11 +640,27 @@ def assert_head_sha_checkouts(tc, wf):
     tc.assertGreater(n, 0)
 
 
-def assert_gate_failsafe(tc, run):
-    tc.assertIn('"$HEAD_SHA^" "$HEAD_SHA"', run)
-    tc.assertIn("deploy=true", run)
-    tc.assertIn("fail-safe", run)
-    tc.assertIn('"$EVENT" != "workflow_run"', run)
+def assert_gate_since_last_deploy(tc, wf, workflow_file, deploy_job):
+    """The gate judges the range since the last successful deploy (deploy_gate.py), not only the merged commit."""
+    gate = wf["jobs"]["gate"]
+    tc.assertEqual(gate["permissions"], {"contents": "read", "actions": "read"})
+    tc.assertEqual(wf["permissions"], {"contents": "read"})
+    checkout = gate["steps"][0]
+    tc.assertEqual(checkout["with"]["fetch-depth"], 0)  # the base commit can be many commits back
+    tc.assertIs(checkout["with"]["persist-credentials"], False)
+    r = " ".join(st.get("run", "") for st in gate["steps"])
+    tc.assertIn(f"python3 -I .github/scripts/deploy_gate.py {workflow_file} {deploy_job} ", r)
+    # central: plan success + apply skipped (empty change set) also counts as deployed; console has no such case
+    tc.assertEqual(r.rstrip().endswith("' plan"), workflow_file == "deploy-central.yml")
+    tc.assertNotIn("$HEAD_SHA^", r)
+    env = [st["env"] for st in gate["steps"] if "env" in st][0]
+    tc.assertEqual(env["EVENT"], "${{ github.event_name }}")
+    tc.assertEqual(env["HEAD_SHA"], "${{ github.event.workflow_run.head_sha }}")
+    tc.assertEqual(env["GH_TOKEN"], "${{ github.token }}")
+    # run-name must carry the deployed commit: the next gate reads it back
+    tc.assertEqual(wf["run-name"], f"{workflow_file[:-4]} ${{{{ github.event.workflow_run.head_sha || github.sha }}}}")
+    # the base is a run whose real deploy job succeeded: that job must exist under exactly this name
+    tc.assertIn(deploy_job, wf["jobs"])
 
 
 class DeployWorkflow(unittest.TestCase):
@@ -677,8 +693,7 @@ class DeployWorkflow(unittest.TestCase):
         r = " ".join(st.get("run", "") for st in self.jobs["gate"]["steps"])
         for path in ("infra/aws/", "services/", "packages/core/", "deploy-central", "bundle_manifest"):
             self.assertIn(path, r)
-        assert_gate_failsafe(self, r)
-        self.assertEqual(self.jobs["gate"]["permissions"], {"contents": "read"})
+        assert_gate_since_last_deploy(self, self.wf, "deploy-central.yml", "apply")
         self.assertNotIn("environment", self.jobs["gate"])
         self.assertEqual(self.wf["concurrency"], {"group": "deploy-central", "cancel-in-progress": False})
         self.assertIn("--no-fail-on-empty-changeset", self.text)
@@ -686,7 +701,8 @@ class DeployWorkflow(unittest.TestCase):
 
     def test_job_split_and_permissions_per_job(self):
         self.assertEqual(sorted(self.jobs), ["apply", "build", "checks", "gate", "plan"])
-        for name in ("gate", "build", "checks"):
+        self.assertEqual(self.jobs["gate"]["permissions"], {"contents": "read", "actions": "read"})
+        for name in ("build", "checks"):
             self.assertEqual(self.jobs[name]["permissions"], {"contents": "read"}, name)
             self.assertNotIn("environment", self.jobs[name], name)
         for name in ("plan", "apply"):
@@ -796,7 +812,6 @@ class DeployConsoleWorkflow(unittest.TestCase):
         self.assertEqual(list(wf["jobs"]), ["gate", "deploy"])
         gate = wf["jobs"]["gate"]
         assert_auto_conditions(self, gate["if"])
-        self.assertEqual(gate["permissions"], {"contents": "read"})
         self.assertNotIn("environment", gate)
         self.assertEqual(wf["jobs"]["deploy"]["needs"], "gate")
         self.assertIn("needs.gate.outputs.deploy == 'true'", wf["jobs"]["deploy"]["if"])
@@ -804,7 +819,7 @@ class DeployConsoleWorkflow(unittest.TestCase):
         r = " ".join(st.get("run", "") for st in gate["steps"])
         for path in ("apps/", "packages/", "tools/vercel-cli/", "package[^/]*", "deploy-console"):
             self.assertIn(path, r)
-        assert_gate_failsafe(self, r)
+        assert_gate_since_last_deploy(self, wf, "deploy-console.yml", "deploy")
         self.assertEqual(wf["concurrency"], {"group": "deploy-console", "cancel-in-progress": False})
         job = wf["jobs"]["deploy"]
         self.assertEqual(job["permissions"], {"contents": "read"})
