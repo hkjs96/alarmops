@@ -1,5 +1,9 @@
 name: deploy-central
 
+# run-name carries the commit this run deploys; the next gate reads it back to find the last deployed commit
+# (.github/scripts/deploy_gate.py). Do not change its shape.
+run-name: deploy-central ${{ github.event.workflow_run.head_sha || github.sha }}
+
 # Deploys infra/aws/central.yaml (SAM, Seoul) to the central AWS account. Started two ways: automatically by
 # workflow_run when `ci` succeeded for a push to main in this repository (a merged PR) and the merged commit changed a
 # central path (job `gate`), or by hand with workflow_dispatch (always deploys). The merge approval is the human gate.
@@ -62,40 +66,32 @@ env:
   BUS_STACK_NAME: alarmops-central-bus
 
 jobs:
-  # Decides whether a workflow_run needs a deploy at all: only when the merged commit touched central paths. A manual
-  # run always deploys. Fail-safe: no parent commit or a failing git diff means deploy. No secrets, no environment.
+  # Decides whether a workflow_run needs a deploy at all: only when the commits since the last successful deploy touched central paths. A manual
+  # run always deploys. Fail-safe: no earlier successful deploy, a base that is not an ancestor or a failing git diff means deploy. No secrets, no environment.
   gate:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     if: >-
       github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository))
+    # actions: read lets the gate list this workflow's earlier runs and their jobs (the last successful deploy).
     permissions:
       contents: read
+      actions: read
     outputs:
       deploy: ${{ steps.paths.outputs.deploy }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
-          fetch-depth: 2
+          fetch-depth: 0
           persist-credentials: false
-      - name: Decide from the files this commit changed
+      - name: Decide from the files changed since the last successful deploy
         id: paths
         env:
           EVENT: ${{ github.event_name }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
-        run: |
-          set -uo pipefail
-          if [ "$EVENT" != "workflow_run" ]; then echo "deploy=true" >> "$GITHUB_OUTPUT"; exit 0; fi
-          if ! files=$(git diff --name-only --no-renames "$HEAD_SHA^" "$HEAD_SHA") || [ -z "$files" ]; then
-            echo "Cannot judge the diff; deploying (fail-safe)."; echo "deploy=true" >> "$GITHUB_OUTPUT"; exit 0
-          fi
-          if printf '%s\n' "$files" | grep -Eq '^(infra/aws/|services/|packages/core/|package[^/]*\.json$|\.github/workflows/deploy-central\.yml$|\.github/scripts/(bundle_manifest|check_trust_principals)\.py$)'; then
-            echo "deploy=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "No central path changed in $HEAD_SHA; skipping the deploy." | tee -a "$GITHUB_STEP_SUMMARY"
-            echo "deploy=false" >> "$GITHUB_OUTPUT"
-          fi
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -I .github/scripts/deploy_gate.py deploy-central.yml apply '^(infra/aws/|services/|packages/core/|package[^/]*\.json$|\.github/workflows/deploy-central\.yml$|\.github/scripts/(bundle_manifest|check_trust_principals)\.py$)'
 
   build:
     needs: gate
