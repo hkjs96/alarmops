@@ -248,7 +248,8 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 
 | type | payload | 엔진 동작 | 필요한 역할 | 근거 |
 |---|---|---|---|---|
-| `SYNC_ACCOUNT` | `{ mode: "DAILY"|"TAG_RECONCILE"|"ON_DEMAND" }` | 발견 → 고아 정리 → 동기화, AlarmSyncRun 기록 | Reader (+AlarmWriter 있으면 쓰기) | alarm-sync §6 |
+| `SYNC_ACCOUNT` | `{ mode: "DAILY"|"TAG_RECONCILE"|"ON_DEMAND", deferrals?: int }` | 발견 → 고아 정리 → 동기화, AlarmSyncRun 기록 | Reader (+AlarmWriter 있으면 쓰기) | alarm-sync §6 |
+| `SYNC_ALL_ACCOUNTS` | `{ mode: "DAILY"|"TAG_RECONCILE" }` | **주기 동기화 팬아웃(#123).** 시스템 명령이라 `customerId`는 `"system"`이고 `cloudAccountId`는 없다. 엔진은 대상 계정마다 `SYNC_ACCOUNT` 하나를 이 큐에 다시 넣을 뿐 직접 동기화하지 않는다. 결과 `status: OK` | — (DB 읽기, SQS 송신) | D-43 |
 | `SYNC_RESOURCE` | `{ resourceId }` | 리소스 하나 동기화 | Reader, AlarmWriter | §5 |
 | `APPLY_THRESHOLD` | `{ managedAlarmId, threshold?, evalM?, evalN?, off?, thresholdChangeId }` | 같은 이름 알람 제자리 `PutMetricAlarm`, 콘솔 값을 알람에 저장 | AlarmWriter | D-08 |
 | `APPLY_CUSTOMER_DEFAULT` | `{ resourceType, metricKey }` | 영향 리소스 재해석·제자리 수정 | AlarmWriter | D-19 |
@@ -269,6 +270,12 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 - 엔진 테스트는 AWS 호출을 모두 목으로(backend 지침).
 - **`SYNC_ACCOUNT` 결과(수집기 29종, #48).** 타입별 수집 실패는 계정 전체를 멈추지 않는다: AlarmSyncRun `counts.typeErrors = { "<region>/<type>": "<오류>" }`, `counts.errors`에 합산, 상태 `PARTIAL`. 실패한 (리전, 타입)의 기존 행·알람은 **건드리지 않는다**("못 나열함" ≠ 태그 제거·삭제). 모든 수집기가 실패하면(예: AssumeRole 거부) 런이 `FAILED`이고 행은 그대로(4-9). `mode`(DAILY/TAG_RECONCILE/ON_DEMAND)는 AlarmSyncRun에 기록되며 엔진 동작은 같다(메트릭 점검·알림·히스토리는 엔진 밖).
 - **CloudTrail 태그 이벤트(#48).** 고객 스택 `TagChangeRule`이 중앙 버스로 보낸 EventBridge 봉투(`detail-type: "AWS API Call via CloudTrail"`)가 `alarm-commands` 큐로 들어오면 엔진이 명령과 같은 큐에서 처리한다(별도 큐 없음). 고객은 **봉투 최상위 `account`로만** 정한다(`detail.*`·요청 안 ARN 불신). 이벤트는 "어느 리소스·어느 태그 키"만 알려 주고 상태는 Reader로 태그를 다시 읽어 정한다: `Monitoring` 제거 → `NEEDS_REVIEW`(알람 불변, D-16), `Monitoring=on` → `MONITORED`+동기화, `Threshold_*` 변경 → 동기화. 행이 없는 리소스에 `Monitoring=on`이 붙으면 `TAG_RECONCILE` 계정 동기화 한 번. 정지·해지 고객은 무시(D-43). **인프라 의존:** 중앙 버스 규칙이 이 이벤트를 `alarm-commands` 큐로 전달해야 한다(infra 이슈).
+- **주기 동기화 생산자(#123).** 규칙 두 개(기본 버스, `rate(1 hour)`=`TAG_RECONCILE`, 매일 KST 03:00=`DAILY`)가 `SYNC_ALL_ACCOUNTS`를 이 큐에 넣는다. `commandId = sched-<mode>-<fire time>`(규칙 InputTransformer의 `$.time`). `customerId: "system"`은 이 type에서만 받고, 다른 type이 `"system"`을 쓰거나 이 type이 실제 고객 ID를 쓰면 InvalidCommand(재시도 없이 버림). 대상 계정은 `Customer.status='ACTIVE'`, `disabled` 아님, `connectionPurgedAt IS NULL`(D-43, CloudTrail 이벤트의 활성 계정 판정과 같다). 자식 `SYNC_ACCOUNT`의 `commandId = <팬아웃 commandId>-<cloudAccountId>`이고 1KiB 미만이며, 팬아웃 명령에는 계정 목록을 싣지 않는다. 송신은 `SendMessageBatch` 10개씩, 실패 항목은 한 번 더 보내고 그래도 남으면 팬아웃 레코드를 재전달시킨다(자식 `commandId`가 같아 해가 없다).
+- **팬아웃 분산.** 자식 i(0부터)의 `DelaySeconds = floor(i × min(SYNC_FANOUT_SPREAD_SECONDS, 900/N))`. `SYNC_FANOUT_SPREAD_SECONDS` 기본 10, 0~900만 받고 벗어나면 기본값과 경고 로그.
+- **계정당 실행 하나, 바쁨 처리.** 계정마다 heartbeat가 `STALE_RUN_AFTER`(20분) 안인 RUNNING 런이 있으면 새 런을 만들지 않는다(DB advisory lock으로 판정, 스키마 변경 없음). 이 경로는 `ON_DEMAND`·이벤트 인라인 `TAG_RECONCILE`·스케줄 자식이 모두 같다. 바쁘면 `SYNC_ACCOUNT` 결과 상태는 `SKIPPED_BUSY`이고 counts는 `{ skipped: "BUSY" }`다. 스케줄 자식(`DAILY`·`TAG_RECONCILE`)만 `deferrals < SYNC_BUSY_MAX_DEFERRALS`(기본 5)이면 같은 명령을 `deferrals+1`, `commandId` 끝 `-d<n>`, `DelaySeconds = SYNC_BUSY_DEFER_SECONDS`(기본 300, 최대 900)로 다시 보내고 결과 상태를 `DEFERRED`로 한다. 횟수를 다 쓰면 `SKIPPED_BUSY` 경고 로그만 남긴다(예외 없음, 수신 횟수 소모 없음). 미룸 총량 5×300초 = 1500초(25분)는 `STALE_RUN_AFTER`(1200초) + 엔진 제한 시간(120초)보다 커야 하고, 엔진은 시작 시 이 부등식을 검사해 어기면 시작을 거부한다. 그래서 heartbeat가 멈춘 런은 미룸 한도 안에 stale로 정리되고 새 런이 생긴다.
+- **`deferrals`는 선택 payload.** 정수(0 이상)만 받는다. 옛 엔진은 모르는 키라 무시하고 그대로 처리한다(되돌리기 안전).
+- **최대 반영 지연.** `Monitoring=on`이 붙었는데 리소스 행이 없고 이벤트가 디바운스로 무시된 경우, 다음 정시 `TAG_RECONCILE`까지 60분 + 팬아웃 분산 최대 15분(900초) + 바쁨 미룸 최대 25분(5×300초) + 큐 대기·실행 시간 = 기본값으로 약 100분 + 실행 시간. 최근 실행 스킵은 없다: 앞선 런의 mode·끝난 상태(SUCCEEDED·PARTIAL·FAILED)는 보지 않고 RUNNING(stale 아님)만 본다.
+- **환경변수.** `COMMANDS_QUEUE_URL`(송신 큐, 템플릿 `!Ref`, 코드에 하드코딩하지 않음), `SYNC_FANOUT_SPREAD_SECONDS`, `SYNC_BUSY_MAX_DEFERRALS`, `SYNC_BUSY_DEFER_SECONDS`. **인프라 의존:** 기본 버스 규칙 2개·전용 DLQ·큐 정책·엔진 송신 권한·`EngineBatchSize`(infra 이슈), 배포 역할의 기본 버스 `rule/<prefix>-sync-*` 권한(bootstrap, 사람이 스택 업데이트). 배포 순서는 엔진 → bootstrap → 규칙.
 
 ## 7. 알람 엔진 ↔ DB 계약 (B10)
 
