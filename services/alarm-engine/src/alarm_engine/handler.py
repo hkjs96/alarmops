@@ -39,6 +39,12 @@ class InvalidCommand(ValueError):
     pass
 
 
+class SyncConfigRejected(InvalidCommand):
+    """Periodic-sync command refused because of the engine's own configuration (bad budget, no queue URL), not because
+    the command is malformed. handle_batch reports it as a record failure so SQS retries and it lands in CommandsDlq
+    (alarmed) instead of silently dropping that hour's sync."""
+
+
 # Per-type required payload keys and their types (API-CONTRACT §6). Missing/mistyped → poison (not retried).
 _STR, _BOOL = (str,), (bool,)
 _NUM = (int, float)
@@ -139,7 +145,7 @@ def _sender_or_default(sender: CommandSender | None) -> CommandSender:
     try:
         return wiring.get_command_sender()
     except RuntimeError as e:        # COMMANDS_QUEUE_URL missing: periodic-sync path only (message has no secret)
-        raise InvalidCommand(f"periodic sync unavailable: {e}") from e
+        raise SyncConfigRejected(f"periodic sync unavailable: {e}") from e
 
 
 def _sync_settings():
@@ -149,7 +155,7 @@ def _sync_settings():
     try:
         return wiring.sync_settings_from_env()
     except ValueError as e:
-        raise InvalidCommand(f"periodic sync refused, invalid settings: {e}") from e
+        raise SyncConfigRejected(f"periodic sync refused, invalid settings: {e}") from e
 
 
 def _send_all(sender: CommandSender, entries: list[dict]) -> None:
@@ -339,6 +345,10 @@ def handle_batch(engine: Engine, event: dict, remaining_ms: Callable[[], int] | 
             out = dispatch(engine, cmd, sender=sender)
             logger.info("command %s %s customer=%s → %s", cmd["commandId"], cmd["type"], cmd["customerId"],
                         out.get("status"))
+        except SyncConfigRejected as e:    # engine misconfiguration: retry -> CommandsDlq -> alarm (not a silent drop)
+            logger.error("periodic sync command %s %s rejected by engine configuration, will retry then DLQ: %s",
+                         cmd["commandId"], cmd["type"], e)
+            failures.append({"itemIdentifier": rec["messageId"]})
         except InvalidCommand as e:
             logger.error("invalid command %s customer=%s: %s", cmd["commandId"], cmd["customerId"], e)
         except Exception as e:  # noqa: BLE001

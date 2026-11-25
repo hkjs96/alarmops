@@ -663,7 +663,7 @@ def test_build_engine_accepts_the_boundary_just_above_the_limit(start_env, monke
     assert wiring.build_engine() is start_env
 
 
-def test_bad_settings_reject_only_the_periodic_sync_commands_and_log_the_reason(start_env, monkeypatch, caplog):
+def test_bad_settings_fail_only_the_periodic_sync_records_and_log_the_reason(start_env, monkeypatch, caplog):
     """[차단 4] fan-out and deferral are refused with a logged reason; a normal command in the same batch still works."""
     monkeypatch.setenv("SYNC_BUSY_MAX_DEFERRALS", "4")
     monkeypatch.setenv("SYNC_BUSY_DEFER_SECONDS", "330")
@@ -679,7 +679,7 @@ def test_bad_settings_reject_only_the_periodic_sync_commands_and_log_the_reason(
     recs = [record(fanout(), "m1"), record(child(acc, "DAILY"), "m2"), record(on_demand, "m3")]
     with caplog.at_level(logging.ERROR):
         out = handler.handle_batch(eng, {"Records": recs}, sender=sender)
-    assert out == {"batchItemFailures": []}                         # poison, not retried, nothing sent
+    assert out == {"batchItemFailures": [{"itemIdentifier": "m1"}, {"itemIdentifier": "m2"}]}   # retry -> DLQ, not dropped
     assert sender.entries == []
     assert caplog.text.count("periodic sync refused, invalid settings") == 2
     assert "1320" in caplog.text
@@ -707,7 +707,7 @@ def test_missing_queue_url_rejects_only_the_fanout(monkeypatch, caplog):
                  "cloudAccountId": acc.id, "payload": {}}
     with caplog.at_level(logging.ERROR):
         out = handler.handle_batch(eng, {"Records": [record(fanout(), "m1"), record(on_demand, "m2")]})
-    assert out == {"batchItemFailures": []} and "COMMANDS_QUEUE_URL" in caplog.text
+    assert out == {"batchItemFailures": [{"itemIdentifier": "m1"}]} and "COMMANDS_QUEUE_URL" in caplog.text
     assert eng.sessions.assumed, "the other command (CHECK_CONNECTION) was still processed"
 
 
