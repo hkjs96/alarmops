@@ -5,11 +5,12 @@
  */
 import { createHash } from 'node:crypto';
 import { incidentMute, type DigestData, type PurgeLogEntry, type Contact, type Leave, type Override, type Rotation, type AuditInput, type DeliveryLog, type IncidentEventInput, type IncidentRow, type MaintenanceWindow, type PagingConfig } from '@alarmops/core';
-import { nodeVisible, type ApiRepository, type AlertMemberRow, type IdempotentEntry, type IncidentFilter, type IncidentPage, type NodeFilter, type NotifiedPerson, type OpenCounts, type OrgTree, type ScopeFilter, type StatusCounts, type UndoRecord, type UserInfo, type Principal, type ResponderOp, type ResponderWriteOutcome, type RespondersState, type RotationsWorld, type ChangeStatusOutcome, type CustomerStatusState, type CustomerStatusValue, type ExportIncidentRow, type RetentionView, type MarkStepOutcome, type OffboardStep, type OffboardStepKey, type OffboardingState, type RevealLogFilter, type RevealLogRow, type RevealWrite, type RevealWriteOutcome, type AccountPatch, type AccountWriteOutcome, type AuditTemplate, type CloudAccountRecord, type ContactPatch, type ContactScopeInfo, type ContactWriteOutcome, type ContactsWorld, type NewAccount, type NewContact, type VerificationIssue, type VerificationLimits, type IssueOutcome, type VerificationLink, type VerificationTaken, type VerifyChannelValue, type CustomerProfile, type CustomerProfilePatch, type CustomerUpdateOutcome, type OrgWriteOutcome, type ProjectRecord, type ServiceRecord, type BindGoogleOutcome, type EnrolOutcome, type NewUser, type UserFilter, type UserPatch, type UserRecord, type UserWriteOutcome, OFFBOARD_STEP_KEYS, normalizeEmail, emailDomain, isFreeMail } from '@alarmops/api';
+import { nodeVisible, type ApiRepository, type ManagedAlarmFilter, type ManagedAlarmRecord, type MonitoringCursor, type MonitoringPage, type ResourceFilter, type ResourceRecord, type AlertMemberRow, type IdempotentEntry, type IncidentFilter, type IncidentPage, type NodeFilter, type NotifiedPerson, type OpenCounts, type OrgTree, type ScopeFilter, type StatusCounts, type UndoRecord, type UserInfo, type Principal, type ResponderOp, type ResponderWriteOutcome, type RespondersState, type RotationsWorld, type ChangeStatusOutcome, type CustomerStatusState, type CustomerStatusValue, type ExportIncidentRow, type RetentionView, type MarkStepOutcome, type OffboardStep, type OffboardStepKey, type OffboardingState, type RevealLogFilter, type RevealLogRow, type RevealWrite, type RevealWriteOutcome, type AccountPatch, type AccountWriteOutcome, type AuditTemplate, type CloudAccountRecord, type ContactPatch, type ContactScopeInfo, type ContactWriteOutcome, type ContactsWorld, type NewAccount, type NewContact, type VerificationIssue, type VerificationLimits, type IssueOutcome, type VerificationLink, type VerificationTaken, type VerifyChannelValue, type CustomerProfile, type CustomerProfilePatch, type CustomerUpdateOutcome, type OrgWriteOutcome, type ProjectRecord, type ServiceRecord, type BindGoogleOutcome, type EnrolOutcome, type NewUser, type UserFilter, type UserPatch, type UserRecord, type UserWriteOutcome, OFFBOARD_STEP_KEYS, normalizeEmail, emailDomain, isFreeMail } from '@alarmops/api';
 import { PG, pgCode, type SqlExecutor } from './client.js';
 import { purgeLogOf } from './retentionSql.js';
 import { CONTACT_COLS, toContact, Params, d, dReq, incidentCols, iso, js, newId, num, toEvent, toIncident, toLog } from './rows.js';
 import { SqlTickStore, insertAudit, toWindow } from './tickRepo.js';
+import * as monitoring from './monitoringSql.js';
 
 class Abort<T> { constructor(readonly value: T) {} }
 
@@ -117,6 +118,12 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
     );
     return r ? { id: r.id as string, name: r.name as string, customerId: r.customerId as string, projectId: (r.projectId ?? null) as string | null, serviceId: (r.serviceId ?? null) as string | null } : null;
   }
+
+  // ───────────────────────────── monitoring (API-CONTRACT §8.5) ─────────────────────────────
+
+  queryResources(scope: ScopeFilter, node: NodeFilter | null, f: ResourceFilter, page: { limit: number; after?: MonitoringCursor }): Promise<MonitoringPage<ResourceRecord>> { return monitoring.queryResources(this.sql, scope, node, f, page); }
+  findResourceDetail(scope: ScopeFilter, resourceId: string) { return monitoring.findResourceDetail(this.sql, scope, resourceId); }
+  queryManagedAlarms(scope: ScopeFilter, node: NodeFilter | null, f: ManagedAlarmFilter, page: { limit: number; after?: MonitoringCursor }): Promise<MonitoringPage<ManagedAlarmRecord>> { return monitoring.queryManagedAlarms(this.sql, scope, node, f, page); }
 
   // ───────────────────────────── incidents ─────────────────────────────
 

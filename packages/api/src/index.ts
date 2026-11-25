@@ -16,3 +16,4 @@ export { normalizeEmail, emailDomain, userView } from './usersApi.js';
 export { isFreeMail } from './onboardingApi.js';
 export { slugFromName, freeSlug, roleArn, newExternalId } from './onboardingApi.js';
 export { revealStanding, revealFlags, REVEAL_LIMITS, REASON_MAX as REVEAL_REASON_MAX, VIEWER_RESPONDER_MAY_REVEAL } from './revealApi.js';
+export { resourceItem, alarmItem } from './monitoringApi.js';

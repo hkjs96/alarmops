@@ -63,7 +63,7 @@ Slack ──▶ POST /api/slack/interactive        문자·음성 업체 ──�
 | 404 | `NOT_FOUND` | 없음 또는 범위 밖 |
 | 403 | `NOT_A_RESPONDER` | 연락처 열람: 그 고객의 Responder가 아니고 ADMIN도 아님(D-35) |
 | 422 | `EMERGENCY_REASON_REQUIRED` | 연락처 비상 열람: Responder가 아닌 ADMIN이 `reason` 없이(또는 공백만) 호출(D-35) |
-| 409 | `VERSION_CONFLICT`, `ALREADY_EXISTS`, `INVALID_TRANSITION`, `TAG_WINS` | 경합, 중복 생성(4b5b079), 상태 전이 불가, 리소스 태그가 값 결정(D-08) |
+| 409 | `VERSION_CONFLICT`, `ALREADY_EXISTS`, `INVALID_TRANSITION`, `TAG_WINS`, `NOT_SUPPORTED` | 경합, 중복 생성(4b5b079), 상태 전이 불가, 리소스 태그가 값 결정(D-08) |
 | 409 | `WOULD_BE_UNREACHABLE`, `IN_USE`, `FROM_TEMPLATE` | Responders 쓰기: 고객이 UNREACHABLE이 됨(`?confirmUnreachable=true`로 확인 후 실행) / 단계가 그 사람을 지정함 / 템플릿에서 온 직원(§8.3 Responders) |
 | 413 | `PAYLOAD_TOO_LARGE` | 수집 본문 1MB 초과 |
 | 422 | `ROLE_UPDATE_REQUIRED` | 고객 스택이 옛 버전 |
@@ -523,9 +523,10 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 ### 8.5 리소스·임계치 (D-08, D-16, D-19)
 | 메서드 경로 | 설명 | 권한 |
 |---|---|---|
-| GET `/resources?customerId=&customer=&project=&service=&type=&monitoringState=&coverage=missing` | 커버리지 빈틈(P4-2). `NEEDS_REVIEW` 필터(D-16) | V |
-| GET `/resources/{id}` | 태그 사본, 알람, 값과 출처, 드리프트, 변경 이력 | V |
-| POST `/resources/{id}/monitoring` | `{ action: "tag_on" | "stop" | "keep" }` — tag_on은 TagWriter 필요(403 `CAPABILITY_DISABLED`), stop은 확인 필요 해제 | O |
+| GET `/resources?customerId=&customer=&project=&service=&mine=1&type=&monitoringState=&limit=&cursor=` | **구현됨(1차).** 항목 `{ id, name(Name 태그, 없으면 resourceKey), resourceKey, resourceType, region, account: { id, alias, awsAccountId, alarmWriterEnabled, tagWriterEnabled }, org: { customer, project, service }(OrgRef), monitoringState, needsReviewSince, needsReviewReason, alarmCount, lastSeenAt }`. 응답 `{ items, nextCursor, outside }` — `outside`는 범위 필터가 없으면 null, 있으면 `{ needsReview: 필터 밖 확인 필요 리소스 수, inAlarm: 필터 밖 ALARM 상태 ManagedAlarm 수 }`(`/managed-alarms`도 같은 값). `account.awsAccountId`는 INTERNAL만(포털은 null, R-2). 정렬 name, id(바이트 순). 잘못된 `monitoringState`·`type` 400. **미구현: `coverage=missing`** |
+| GET `/resources/{id}` | **구현됨(1차).** 목록 항목 + `tags`(사본) + `alarms[]`(아래 `/managed-alarms` 항목). 범위 밖·없는 ID는 같은 404(D-33). **미구현: 값 출처 층, 드리프트 상세, 변경 이력** | V |
+| POST `/resources/{id}/monitoring` | **구현됨(1차).** `{ action: "stop" \| "tag_on" \| "keep" }` → 202 `{ commandId, status: "queued" }`. 순서: 404 → 403 `ROLE_REQUIRED` → 400 → keep이면 409 `NOT_SUPPORTED` → 상태(409 `INVALID_TRANSITION`: stop은 `NEEDS_REVIEW`만, tag_on은 `NEEDS_REVIEW`·`NOT_MONITORED`만) → 계정 기능(403 `CAPABILITY_DISABLED`, `details.role`: stop=alarmWriter, tag_on=tagWriter) → 큐 없음 503 `COMMANDS_UNAVAILABLE` → 발행 실패 502 `COMMAND_PUBLISH_FAILED`. stop은 `STOP_MONITORING { resourceId, deleteAlarms: true }`, tag_on은 `SET_MONITORING_TAG { resourceId, value: "on" }`를 발행(감사 `resource.stop_monitoring` 등). API는 행을 바꾸지 않는다(엔진이 바꾼다). **keep은 엔진에 대응 명령이 없어 409 `NOT_SUPPORTED`** | O |
+| GET `/managed-alarms?customer=&project=&service=&mine=1&resourceId=&state=&severity=&limit=&cursor=` | **구현됨(1차, 읽기 전용).** 항목 `{ id, resourceId, resourceName, resourceType, region, metricKey, alarmName(리소스 + 지표, 임계치 없음 D-08), org, severity, threshold(number), thresholdSource, evalM, evalN, comparison, statistic, period, state(OK\|ALARM\|INSUFFICIENT_DATA\|null), driftStatus, lastSyncedAt }`, 응답 `{ items, nextCursor, outside }`. 정렬 alarmName, id | V |
 | GET `/resources/{id}/thresholds` | 지표별 `{ value, source: CODE|MSP|CUSTOMER|CONSOLE|TAG, layers: [...] , editable, lockedReason }` | V |
 | POST `/thresholds/preview` | `{ targets[], change }` → 영향 리소스·출처별 결과, 태그가 이기는 대상 표시 | O |
 | POST `/thresholds/apply` | preview와 같은 본문 + `previewId` → ThresholdChange 행 + `APPLY_THRESHOLD` 명령, `202 { changeIds[] }` | O |

@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "commandId": "cmd_0123456789abcdef01234567",
+  "type": "STOP_MONITORING",
+  "customerId": "cus_mirae",
+  "cloudAccountId": "acc_1",
+  "requestedBy": { "type": "USER", "id": "usr_haeun" },
+  "requestedAt": "2026-11-13T00:00:00.000Z",
+  "payload": { "resourceId": "res_a", "deleteAlarms": true }
+}
