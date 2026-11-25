@@ -2,14 +2,25 @@
  * In-memory ApiRepository on top of the tick store, so the API and the tick see one world.
  * Scope is applied inside every read, the same way the SQL adapter must do it. Tests and local runs only.
  */
-import { MemoryTickStore, incidentMute, type DigestData, type PurgeLogEntry, type RetentionStage, parseSnapshot, type AuditInput, type Contact, type IncidentRow, type PagingConfig } from '@alarmops/core';
+import { MemoryTickStore, incidentMute, type DigestData, type PurgeLogEntry, type RetentionStage, parseSnapshot, type AuditInput, type Contact, type IncidentRow, type PagingConfig, type Severity } from '@alarmops/core';
 import { inScope, nodeVisible, seesCustomer, type Role, type ScopeFilter } from './auth.js';
 import { emailDomain, normalizeEmail } from './usersApi.js';
 import { isFreeMail } from './onboardingApi.js';
 import type { UserInfo } from './audience.js';
+import type { AlarmStateValue, ManagedAlarmFilter, ManagedAlarmRecord, MonitoringCursor, MonitoringOutside, MonitoringPage, MonitoringStateValue, ResourceFilter, ResourceRecord, ValueSourceValue } from './repo.js';
 import type { CustomerProfile, CustomerProfilePatch, CustomerUpdateOutcome, OrgWriteOutcome, ProjectRecord, ServiceRecord, BindGoogleOutcome, EnrolOutcome, NewUser, UserFilter, UserPatch, UserRecord, UserWriteOutcome } from './repo.js';
 import type { AccountPatch, AccountWriteOutcome, AuditTemplate, CloudAccountRecord, ContactPatch, ContactScopeInfo, ContactWriteOutcome, ContactsWorld, NewAccount, NewContact, VerificationIssue, VerificationLimits, IssueOutcome, VerificationLink, VerificationTaken, VerifyChannelValue, ExportIncidentRow, RetentionView, RevealLogFilter, RevealLogRow, RevealWrite, RevealWriteOutcome } from './repo.js';
 import { OFFBOARD_STEP_KEYS, type ChangeStatusOutcome, type CustomerStatusState, type CustomerStatusValue, type MarkStepOutcome, type OffboardStepKey, type OffboardingState, type Principal, ResponderOp, ResponderWriteOutcome, RespondersState, RotationsWorld, AlertMemberRow, ApiRepository, IdempotentEntry, IncidentFilter, IncidentPage, NodeFilter, NotifiedPerson, OpenCounts, StatusCounts, UndoRecord } from './repo.js';
+
+/** Seed rows of the Monitoring API (memory store). The account is the tick store's account (`awsAccountId`); org position and capability flags are derived from it. */
+export interface MemoryResourceSeed {
+  id: string; customerId: string; awsAccountId: string; region: string; resourceType: string; resourceKey: string; name: string | null; tags: Record<string, string>;
+  monitoringState: MonitoringStateValue; needsReviewSince: Date | null; needsReviewReason: string | null; lastSeenAt: Date;
+}
+export interface MemoryAlarmSeed {
+  id: string; resourceId: string; metricKey: string; alarmName: string; severity: Severity; threshold: number; thresholdSource: ValueSourceValue; evalM: number; evalN: number;
+  comparison: string; statistic: string; period: number; state: AlarmStateValue | null; driftStatus: ManagedAlarmRecord['driftStatus']; lastSyncedAt?: Date | null;
+}
 
 export interface ContactScopeRow { contactId: string; customerId: string; scopeType: 'CUSTOMER' | 'PROJECT' | 'SERVICE'; scopeId: string; role: 'NOTIFY' | 'APPROVER' | 'PORTAL_USER' }
 
@@ -106,6 +117,78 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     if (!r) return null;
     const projectId = r.serviceId ? this.services.get(r.serviceId)?.projectId ?? null : null;
     return inScope(scope, { customerId: r.customerId, projectId, serviceId: r.serviceId }) ? { ...r, projectId } : null;
+  }
+
+  // ───────────── monitoring: resources and managed alarms (API-CONTRACT §8.5) ─────────────
+  /** Test seed of the Monitoring API: Resource and ManagedAlarm rows (the engine writes them in production). */
+  resourceSeeds = new Map<string, MemoryResourceSeed>();
+  alarmSeeds = new Map<string, MemoryAlarmSeed>();
+  private resourceRecord(s: MemoryResourceSeed): ResourceRecord | null {
+    const org = this.accounts.get(s.awsAccountId);
+    if (!org || org.customerId !== s.customerId) return null;
+    const acc = this.accountRecord(org);
+    const serviceId = org.serviceId;
+    const projectId = serviceId ? this.services.get(serviceId)?.projectId ?? null : null;
+    return {
+      id: s.id, customerId: s.customerId, projectId, serviceId, cloudAccountId: acc.id, awsAccountId: acc.awsAccountId, accountAlias: acc.alias,
+      alarmWriterEnabled: acc.alarmWriterEnabled, tagWriterEnabled: acc.tagWriterEnabled,
+      region: s.region, resourceType: s.resourceType, resourceKey: s.resourceKey, name: s.name, tags: { ...s.tags },
+      monitoringState: s.monitoringState, needsReviewSince: s.needsReviewSince, needsReviewReason: s.needsReviewReason, lastSeenAt: s.lastSeenAt,
+      alarmCount: [...this.alarmSeeds.values()].filter((a) => a.resourceId === s.id).length,
+    };
+  }
+  private alarmRecord(a: MemoryAlarmSeed, r: ResourceRecord): ManagedAlarmRecord {
+    const { customerId, projectId, serviceId, resourceType, region } = r;
+    return { ...a, customerId, projectId, serviceId, resourceType, region, resourceName: r.name ?? r.resourceKey, lastSyncedAt: a.lastSyncedAt ?? null };
+  }
+  private visibleResources(scope: ScopeFilter): ResourceRecord[] {
+    return [...this.resourceSeeds.values()].map((s) => this.resourceRecord(s)).filter((r): r is ResourceRecord => r !== null && inScope(scope, r));
+  }
+  private inNodeOf(node: NodeFilter | null) {
+    return (r: { customerId: string; projectId: string | null; serviceId: string | null }): boolean =>
+      !node || (node.customerIds.includes(r.customerId) && (!node.projectId || r.projectId === node.projectId) && (!node.serviceId || r.serviceId === node.serviceId));
+  }
+  private outsideOf(scope: ScopeFilter, node: NodeFilter | null): MonitoringOutside | null {
+    if (!node) return null;
+    const inNode = this.inNodeOf(node);
+    const out = this.visibleResources(scope).filter((r) => !inNode(r));
+    const ids = new Set(out.map((r) => r.id));
+    return {
+      needsReview: out.filter((r) => r.monitoringState === 'NEEDS_REVIEW').length,
+      inAlarm: [...this.alarmSeeds.values()].filter((a) => ids.has(a.resourceId) && a.state === 'ALARM').length,
+    };
+  }
+  private static page<T>(rows: T[], key: (x: T) => string, id: (x: T) => string, p: { limit: number; after?: MonitoringCursor }): { rows: T[]; hasMore: boolean } {
+    const cmp = (x: T, y: T): number => (key(x) < key(y) ? -1 : key(x) > key(y) ? 1 : id(x) < id(y) ? -1 : id(x) > id(y) ? 1 : 0); // plain code-unit order = the SQL side's COLLATE "C"
+    const sorted = [...rows].sort(cmp).filter((x) => !p.after || key(x) > p.after.k || (key(x) === p.after.k && id(x) > p.after.id));
+    return { rows: sorted.slice(0, p.limit), hasMore: sorted.length > p.limit };
+  }
+  async queryResources(scope: ScopeFilter, node: NodeFilter | null, f: ResourceFilter, page: { limit: number; after?: MonitoringCursor }): Promise<MonitoringPage<ResourceRecord>> {
+    this.reads.push('queryResources');
+    const inNode = this.inNodeOf(node);
+    const rows = this.visibleResources(scope).filter((r) => inNode(r) && (!f.type || r.resourceType === f.type) && (!f.monitoringState || r.monitoringState === f.monitoringState));
+    return { ...MemoryApiStore.page(rows, (r) => r.name ?? r.resourceKey, (r) => r.id, page), outside: this.outsideOf(scope, node) };
+  }
+  async findResourceDetail(scope: ScopeFilter, resourceId: string) {
+    this.reads.push('findResourceDetail');
+    const s = this.resourceSeeds.get(resourceId);
+    const resource = s ? this.resourceRecord(s) : null;
+    if (!resource || !inScope(scope, resource)) return null;
+    const alarms = [...this.alarmSeeds.values()].filter((a) => a.resourceId === resource.id).map((a) => this.alarmRecord(a, resource)).sort((x, y) => (x.alarmName < y.alarmName ? -1 : x.alarmName > y.alarmName ? 1 : 0));
+    return { resource, alarms };
+  }
+  async queryManagedAlarms(scope: ScopeFilter, node: NodeFilter | null, f: ManagedAlarmFilter, page: { limit: number; after?: MonitoringCursor }): Promise<MonitoringPage<ManagedAlarmRecord>> {
+    this.reads.push('queryManagedAlarms');
+    const inNode = this.inNodeOf(node);
+    const byId = new Map(this.visibleResources(scope).map((r) => [r.id, r]));
+    const rows: ManagedAlarmRecord[] = [];
+    for (const a of this.alarmSeeds.values()) {
+      const r = byId.get(a.resourceId);
+      if (!r || !inNode(r)) continue;
+      if ((f.resourceId && a.resourceId !== f.resourceId) || (f.state && a.state !== f.state) || (f.severity && a.severity !== f.severity)) continue;
+      rows.push(this.alarmRecord(a, r));
+    }
+    return { ...MemoryApiStore.page(rows, (a) => a.alarmName, (a) => a.id, page), outside: this.outsideOf(scope, node) };
   }
 
   private visible(scope: ScopeFilter): IncidentRow[] {

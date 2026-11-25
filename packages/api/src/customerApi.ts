@@ -21,10 +21,12 @@ interface AlarmCommandBase {
   requestedBy: { type: 'USER'; id: string };
   requestedAt: string;
 }
-/** The two commands this API sends: D-43 offboarding and the onboarding connection check (D-07, P4-1). */
+/** The commands this API sends: D-43 offboarding, the onboarding connection check (D-07, P4-1) and the Monitoring actions (D-16). Payloads match the engine's REQUIRED table in handler.py. */
 export type AlarmCommand =
   | (AlarmCommandBase & { type: 'OFFBOARD_ACCOUNT'; payload: { offboardingId: string } })
-  | (AlarmCommandBase & { type: 'CHECK_CONNECTION'; payload: Record<string, never> });
+  | (AlarmCommandBase & { type: 'CHECK_CONNECTION'; payload: Record<string, never> })
+  | (AlarmCommandBase & { type: 'STOP_MONITORING'; payload: { resourceId: string; deleteAlarms: true } })
+  | (AlarmCommandBase & { type: 'SET_MONITORING_TAG'; payload: { resourceId: string; value: 'on' } });
 
 /**
  * Port to the `alarm-commands` queue. Production adapter = `SqsCommandPublisher` (sqsCommandPublisher.ts; the console injects the SQS client). Publishing happens AFTER the database commit and may fail: see `PATCH /customers/{id}/status`.

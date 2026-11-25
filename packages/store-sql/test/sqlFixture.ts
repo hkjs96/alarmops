@@ -98,6 +98,23 @@ export async function sqlFixture(db: TestDb, seed: MemoryTickStore): Promise<Sql
     const a = seed.accounts.get(aws)!;
     await q(`INSERT INTO "Resource"("id", "customerId", "cloudAccountId", "region", "resourceType", "resourceArn", "resourceKey", "lastSeenAt", "updatedAt") VALUES ($1, $2, $3, 'ap-northeast-2', 'EC2', 'arn:x', 'i-1', now(), now())`, [`res_${aws}`, a.customerId, `ca_${aws}`]);
   }
+  // Monitoring API seed (MemoryApiStore.accountMeta / resourceSeeds / alarmSeeds)
+  for (const [aws, m] of api.accountMeta ?? []) {
+    await q(`UPDATE "CloudAccount" SET "alias" = $2, "alarmWriterEnabled" = $3, "tagWriterEnabled" = $4, "remediatorEnabled" = $5 WHERE "id" = $1`, [`ca_${aws}`, m.alias, m.alarmWriterEnabled, m.tagWriterEnabled, m.remediatorEnabled]);
+  }
+  for (const r of api.resourceSeeds?.values() ?? []) {
+    await q(
+      `INSERT INTO "Resource"("id", "customerId", "cloudAccountId", "region", "resourceType", "resourceArn", "resourceKey", "name", "tags", "monitoringState", "needsReviewSince", "needsReviewReason", "lastSeenAt", "updatedAt")
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::"MonitoringState", $11::timestamptz, $12, $13::timestamptz, now())`,
+      [r.id, r.customerId, `ca_${r.awsAccountId}`, r.region, r.resourceType, `arn:aws:x:::${r.id}`, r.resourceKey, r.name, JSON.stringify(r.tags), r.monitoringState, iso(r.needsReviewSince), r.needsReviewReason, iso(r.lastSeenAt)]);
+  }
+  for (const a of api.alarmSeeds?.values() ?? []) {
+    const r = api.resourceSeeds!.get(a.resourceId)!;
+    await q(
+      `INSERT INTO "ManagedAlarm"("id", "customerId", "resourceId", "cloudAccountId", "region", "metricKey", "alarmName", "alarmArn", "severity", "threshold", "thresholdSource", "evalM", "evalN", "evalSource", "comparison", "statistic", "period", "treatMissingData", "state", "driftStatus", "lastSyncedAt")
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::"Severity", $10, $11::"ValueSource", $12, $13, 'CODE', $14, $15, $16, 'missing', $17::"AlarmState", $18::"DriftStatus", $19::timestamptz)`,
+      [a.id, r.customerId, a.resourceId, `ca_${r.awsAccountId}`, r.region, a.metricKey, a.alarmName, `arn:aws:cloudwatch:::alarm:${a.alarmName}`, a.severity, a.threshold, a.thresholdSource, a.evalM, a.evalN, a.comparison, a.statistic, a.period, a.state, a.driftStatus, iso(a.lastSyncedAt ?? null)]);
+  }
   for (const c of seed.contacts.values()) await addContact(c);
   for (const [i, r] of seed.responders.entries()) {
     await q(`INSERT INTO "Responder"("customerId", "contactId", "role", "order") VALUES ($1, $2, $3::"ResponderRole", $4)`, [r.customerId, r.contactId, r.role, typeof r.order === 'number' && Number.isFinite(r.order) ? r.order : 0]);
