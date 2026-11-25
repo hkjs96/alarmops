@@ -85,6 +85,7 @@ while IFS= read -r -d '' f; do
     # ci-changes.test.mjs checks that every docs/ path the tests read is listed here.
     docs/specs/alarm-rules.md) set_flags engine ;;                        # services/alarm-engine/tests/test_golden_alarm_rules.py
     docs/SETUP-PROD-DB.md) set_flags infra ;;                             # infra/test/test_templates.py
+    docs/GO-LIVE.md) set_flags infra ;;                                   # infra/test/test_rehearsal_harness.py (and others)
     packages/api/test/fixtures/offboard-account.command.json) set_flags test e2e e2e_live engine ;;   # alarm-engine test_command_contract.py
     services/alarm-engine/tests/fixtures/offboard-account.command.json) set_flags test engine infra ;; # packages/api sqs-command-publisher test
     tools/vercel-cli/*) set_flags infra ;;                                # infra/test/test_templates.py

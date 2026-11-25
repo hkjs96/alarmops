@@ -735,16 +735,25 @@ http://localhost:3107/auth/dev-login?as=admin
 
 - [ ] **권한 실측**(#38)
 
-1. 시험 계정을 허용 목록에 넣는다. 7단계의 7-2와 같은 방법이다(`bus-allowlist`, `action=add`).
-2. 시험 계정에 고객 스택을 설치한다. 7단계의 7-3과 같은 방법이다. `EnableAlarmWriter`를 `true`로 한다.
-3. 확인:
-   - 알람 생성(Tags 포함)·삭제가 된다.
-   - `ManagedBy` 없는 알람은 거부된다.
-   - 시험 계정에서 태그를 바꾸면 `alarm-commands`로 이벤트가 들어와 엔진이 처리한다.
-   - 허용 목록에 없는 계정이 보낸 이벤트는 닿지 않는다.
-4. 결과를 허브에 알린다. 항목별로 "됐다/안 됐다"와 오류 코드만 보낸다.
+스크립트는 `infra/scripts/rehearsal/`에 있다. 사람이 시험 계정(B·C)에서만 실행한다(중앙 계정은 제외). 에이전트는 실행하지 않는다. 자세한 순서는 그 폴더의 `README.md`를 본다.
 
-> **참고** 각 항목을 어떤 명령·화면으로 확인하는지는 이 문서에 없다. #38을 맡은 허브에 확인 절차를 물어본다.
+1. 시험 계정을 콘솔에 등록한다(7-1, AlarmWriter 켬). 아직 허용 목록에는 넣지 않는다. 그리고 `accounts.local.json`을 만든다(저장소에 올리지 않는다).
+2. `bash infra/scripts/rehearsal/preflight.sh --profile rehearsal-b` (읽기만 한다)
+3. `REHEARSAL_EXTERNAL_ID=... bash infra/scripts/rehearsal/install.sh --profile rehearsal-b --confirm-account 12자리` (스택 `alarmops-customer`, `EnableAlarmWriter=true`). 끝나면 콘솔에서 연결 확인(7-4)이 OK인지 본다.
+4. `bash infra/scripts/rehearsal/verify.sh --profile rehearsal-b --confirm-account 12자리 --run-id 이름`. 스크립트가 멈추면 안내대로 사람이 한다.
+   - 허용 목록 추가 **전**에 먼저 돈다. 허용 목록에 없는 계정의 이벤트가 막히는지(`FailedInvocations`)를 본다. 중앙에서 처리되지 않았음은 사람이 콘솔에서 확인한다.
+   - 그다음 사람이 `bus-allowlist`(`action=add`)로 시험 계정을 넣고 스크립트를 계속한다.
+   - 태그를 붙이면 알람이 생긴다(`ManagedBy=AlarmOps`, 큐 차원). 반영까지 최대 15분(디바운스 10분 포함) 기다린다.
+   - 태그를 떼면 알람은 남고 콘솔이 확인 필요(NEEDS_REVIEW)로 표시한다. 사람이 콘솔에서 STOP_MONITORING을 실행하면 그 알람만 사라진다.
+   - `ManagedBy` 없는 알람 거부는 정책 시뮬레이션(실측 아님)으로 본다.
+   - **1회 수동 실측(B 계정 리허설 때 한 번, 선택 아님)**: 시뮬레이션이 못 보는 CloudWatch의 실제 태그 조건 처리와 조직 SCP를 확인한다. 사람이 CLI로 한다(하네스에 넣지 않는다).
+     1. `AlarmOps-AlarmWriter`의 권한 정책과 권한 경계를 콘솔(IAM → 역할)에서 그대로 확인한다.
+     2. 같은 권한 정책과 같은 권한 경계를 붙인 임시 역할 `AlarmOpsRehearsal-WriterReplica`를 만든다. 신뢰 대상만 본인 SSO 역할로 둔다. 태그 `AlarmOpsRehearsal=true`.
+     3. 그 역할로 `cloudwatch put-metric-alarm`을 두 번 부른다: `--tags Key=ManagedBy,Value=AlarmOps`를 붙이면 성공, 빼면 `AccessDenied`여야 한다. 알람 이름은 `AlarmOpsRehearsal-replica-test`.
+     4. 만든 알람을 지우고 임시 역할을 지운다. 결과(성공/AccessDenied)만 허브에 알린다.
+     5. 원본 정책과 다르게 만들면 의미가 없다. 확신이 없으면 하지 말고 허브에 묻는다.
+5. `bash infra/scripts/rehearsal/cleanup.sh --profile rehearsal-b --confirm-account 12자리 --run-id 이름 [--stack]`. 그 뒤 사람이 콘솔 계정 비활성화와 `bus-allowlist remove`를 한다(OFFBOARDING 순서).
+6. 결과를 허브에 알린다. 항목별로 "됐다/안 됐다/TIMEOUT/SKIP"과 오류 코드만 보낸다. 로그(`rehearsal-logs/`)는 올리지 않는다.
 
 ### 참고: 필요할 때만 하는 것
 
@@ -865,7 +874,7 @@ npm ci --ignore-scripts && npm run build:lambda -w @alarmops/ingest && npm run b
 - [x] 알람 엔진 리소스 수집기 29종(#48, #51 완료): `SYNC_ACCOUNT`가 리소스를 찾아 `Monitoring=on` 태그 대상에 알람을 만들고 맞춘다. 이게 있어야 "고객이 태그만 붙이면 알람이 생긴다"가 된다
 - [x] CloudTrail 태그 변경 → 즉시 동기화 연결(#51 완료)
 
-무엇이 되는가: 고객이 자기 AWS 리소스에 `Monitoring=on` 태그를 붙이면 엔진이 그 리소스의 CloudWatch 알람을 만든다. 태그를 떼면 맞춰서 정리한다.
+무엇이 되는가: 고객이 자기 AWS 리소스에 `Monitoring=on` 태그를 붙이면 엔진이 그 리소스의 CloudWatch 알람을 만든다. 태그를 떼면 알람은 남고 콘솔이 확인 필요(NEEDS_REVIEW)로 표시한다(D-16). 알람을 지우려면 사람이 콘솔에서 STOP_MONITORING을 실행한다.
 
 언제 눈으로 볼 수 있나: 코드는 끝났지만 실제 계정에는 아직 배포되지 않았다. 4단계(중앙 계정 배포)와 7단계(고객 연결)가 끝나야 돈다. 동작은 7단계의 태그 시험(7-6의 1~3번)에서 확인한다. 권한이 실제로 맞는지는 4-6(#38)에서 먼저 본다.
 
