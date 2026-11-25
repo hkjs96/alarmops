@@ -5,6 +5,8 @@
 
 실행: 저장소 루트에서 `python -m unittest discover -s infra/test`. 가짜 `aws`(`infra/test/fake_aws.py`)가 PATH 맨 앞에 놓이고 모든 호출을 기록한다. 실제 AWS에는 접속하지 않는다.
 
+가짜 aws의 `--query`는 JMESPath 축소 구현(`a.b`, `a[].b`, `a[*].b`, `a[0]`)이다. 그 밖의 식(필터·파이프·함수)은 가짜 aws가 종료 코드 97로 끝나고 테스트가 실패한다. 스크립트는 이 부분집합 안에서 `--query`를 쓰거나, 필터는 응답을 받아 셸·python에서 처리한다. 설치된 jmespath 유무로 판정이 달라지지 않는다.
+
 ## 스크립트와 플래그
 
 | 스크립트 | 플래그 |
@@ -38,7 +40,7 @@
  "profiles": {"rehearsal-a": "111111111111"}}
 ```
 
-프로필이 표에 없거나 표 파일이 없으면 거부한다.
+프로필이 표에 없거나 표 파일이 없으면 거부한다. 확인 계정이 `centralRoleArn`·`centralEventBusArn`의 계정과 같아도 4개 스크립트 모두 거부한다.
 
 ## 로그와 결과표
 

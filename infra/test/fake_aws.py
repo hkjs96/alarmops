@@ -7,6 +7,9 @@ JSON scenario file $FAKE_AWS_SCENARIO. Nothing here talks to a network.
 Recorded fields per call: argv, service, op, files (contents of every `file://` / `fileb://`
 argument, read at call time), stdin (when piped).
 
+Unsupported --query expressions exit 97 and are recorded in $FAKE_AWS_LOG.unsupported-query.
+Each record has `echo`: the secret-echo paths taken by that call.
+
 Scenario keys (all optional):
   account            sts get-caller-identity Account
   stacks             [{StackName, StackStatus, Tags:[{Key,Value}], Parameters:[...], ...}]
@@ -76,19 +79,18 @@ def read_files(argv: list[str]) -> dict:
     return out
 
 
-def query(data, expr: str):
-    """Tiny JMESPath subset: a.b, a[].b, a[*].b, a[0]. Uses jmespath when installed."""
-    try:
-        import jmespath  # type: ignore
+class UnsupportedQuery(Exception):
+    pass
 
-        return jmespath.search(expr, data)
-    except ImportError:
-        pass
+
+def query(data, expr: str):
+    """Tiny JMESPath subset: a.b, a[].b, a[*].b, a[0]. Deliberately NOT jmespath, so the verdict never
+    depends on what is installed. Anything else (filters, pipes, functions, multiselect) raises."""
     cur = data
-    for part in re.findall(r"[^.]+", expr):
+    for part in expr.split("."):
         m = re.fullmatch(r"([A-Za-z0-9_]*)(\[(\*|\d*)\])?", part)
-        if not m:
-            return data
+        if not m or not part:
+            raise UnsupportedQuery(expr)
         name, brk, idx = m.group(1), m.group(2), m.group(3)
         if name:
             if isinstance(cur, list):
@@ -107,7 +109,14 @@ def emit(data, opts):
     q = (opts.get("--query") or [None])[0]
     fmt = (opts.get("--output") or ["json"])[0]
     if q:
-        data = query(data, q)
+        try:
+            data = query(data, q)
+        except UnsupportedQuery:
+            # Tests fail on this marker file even if the script under test swallows our non-zero exit.
+            with open(os.environ["FAKE_AWS_LOG"] + ".unsupported-query", "a", encoding="utf-8") as f:
+                f.write(q + "\n")
+            sys.stderr.write(f"fake aws: unsupported --query expression: {q}\n")
+            sys.exit(97)
     if fmt == "text":
         if data is None:
             print("None")
@@ -146,12 +155,20 @@ def main() -> None:
             stdin = sys.stdin.read()
     except (OSError, ValueError):  # select on pipes is POSIX-only; Windows runs skip stdin capture
         stdin = ""
-    rec = {"argv": argv, "service": service, "op": op, "files": read_files(argv), "stdin": stdin}
-    with open(os.environ["FAKE_AWS_LOG"], "a", encoding="utf-8") as f:
-        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-
     account = scen.get("account", "111111111111")
     is_read = op.startswith(READ_PREFIXES)
+    # Which secret-echoing paths this call will take (lets tests prove the leak scenario really ran).
+    echo = []
+    if scen.get("leak") and service != "sts":
+        echo.append("stderr-warning")
+    if scen.get("fail_writes") and not is_read and service != "sts":
+        echo.append("error-response")
+    if (service, op) == ("cloudformation", "describe-stacks") and (scen.get("leak") or scen.get("fail_writes")) \
+            and (scen.get("leak") or scen.get("fail_writes")) in json.dumps(scen.get("stacks", [])):
+        echo.append("describe-stacks")
+    rec = {"argv": argv, "service": service, "op": op, "files": read_files(argv), "stdin": stdin, "echo": echo}
+    with open(os.environ["FAKE_AWS_LOG"], "a", encoding="utf-8") as f:
+        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
     if scen.get("leak") and service != "sts":
         sys.stderr.write(f"warning: request context ExternalId={scen['leak']}\n")

@@ -54,6 +54,14 @@ class Base(unittest.TestCase):
     def setUp(self):
         self.sb = Sandbox()
         self.addCleanup(self.sb.close)
+        self.addCleanup(self.assert_queries_supported)
+
+    def assert_queries_supported(self):
+        """The fake aws implements a JMESPath subset; an expression outside it must fail the test
+        (not silently return unfiltered data) regardless of what the script does with the exit code."""
+        marker = self.sb.calls_file.with_name(self.sb.calls_file.name + ".unsupported-query")
+        if marker.exists():
+            self.fail("fake aws met an unsupported --query expression:\n" + marker.read_text(encoding="utf-8"))
 
     def args(self, script, **kw):
         return self.sb.good_args(script, run_id=kw.pop("run_id", RUN), **kw)
@@ -154,10 +162,11 @@ class AccountGuard(Base):
                 self.reject_all()
 
     def test_account_equals_central_role_or_bus_arn_account(self):
+        """All four scripts, not just install."""
         self.sb.set_accounts(centralRoleArn=f"arn:aws:iam::{ACCT}:role/AlarmOps-Central-Assume")
-        self.reject_all(["install.sh"])
+        self.reject_all(ALL)
         self.sb.set_accounts(centralEventBusArn=f"arn:aws:events:{REGION}:{ACCT}:event-bus/alarmops-central")
-        self.reject_all(["install.sh"])
+        self.reject_all(ALL)
 
     def test_confirmation_input_must_be_the_same_12_digits(self):
         for script in WRITERS:
@@ -219,13 +228,33 @@ class SecretHandling(Base):
                "Parameters": [{"ParameterKey": "ExternalId", "ParameterValue": EID}]}]
 
     def run_all(self, **scen):
-        results = {}
+        results, self.calls_by = {}, {}
         self.sb.set_scenario(stacks=self.STACKS, **scen)
-        results["preflight.sh"] = self.sb.run("preflight.sh", self.args("preflight.sh"))
-        results["install.sh"] = self.sb.run("install.sh", self.args("install.sh"))
-        results["verify.sh"] = self.sb.run("verify.sh", self.args("verify.sh"))
-        results["cleanup.sh"] = self.sb.run("cleanup.sh", self.args("cleanup.sh", extra=["--stack"]))
+        for script, extra in (("preflight.sh", []), ("install.sh", []), ("verify.sh", []),
+                              ("cleanup.sh", ["--stack"])):
+            before = len(self.sb.calls())
+            results[script] = self.sb.run(script, self.args(script, extra=extra))
+            self.calls_by[script] = self.sb.calls()[before:]
         return results
+
+    def assert_scenario_really_ran(self, channel):
+        """Contrast check, before the absence check: the secret-echoing path was executed for every script
+        and each writer got as far as a write call. Otherwise an early exit on input validation would
+        make `EID not in output` pass vacuously."""
+        for script, calls in self.calls_by.items():
+            with self.subTest(contrast=script):
+                self.assertTrue(calls, f"{script} made no aws call")
+                self.assertTrue(any(channel in c["echo"] for c in calls),
+                                f"{script}: the {channel} path of the fake aws never ran")
+        want = {"install.sh": ("cloudformation", ("create-stack", "update-stack", "deploy", "create-change-set")),
+                "verify.sh": ("sqs", ("create-queue",)),
+                "cleanup.sh": ("cloudformation", ("delete-stack",))}
+        for script, (svc, ops) in want.items():
+            with self.subTest(write=script):
+                self.assertTrue([c for c in self.calls_by[script] if c["service"] == svc and c["op"] in ops],
+                                f"{script} never reached its write call ({svc} {ops})")
+        self.assertIn(("cloudformation", "describe-stacks"),
+                      [(c["service"], c["op"]) for c in self.calls_by["preflight.sh"]])
 
     def assert_no_leak(self, results):
         for script, res in results.items():
@@ -240,11 +269,17 @@ class SecretHandling(Base):
 
     def test_external_id_never_shown_when_aws_echoes_it(self):
         results = self.run_all(leak=EID)
+        self.assert_scenario_really_ran("stderr-warning")
+        self.assertTrue(any("describe-stacks" in c["echo"] for c in self.calls_by["preflight.sh"]),
+                        "describe-stacks never returned the ExternalId")
         self.assert_no_leak(results)
         self.assertTrue(self.sb.log_files(), "verify must write a log under rehearsal-logs")
 
     def test_external_id_never_shown_when_aws_calls_fail_with_it(self):
         results = self.run_all(fail_writes=EID)
+        self.assert_scenario_really_ran("error-response")
+        self.assertTrue(any("describe-stacks" in c["echo"] for c in self.calls_by["preflight.sh"]),
+                        "describe-stacks never returned the ExternalId")
         self.assert_no_leak(results)
 
     def test_external_id_is_still_delivered_to_cloudformation(self):
