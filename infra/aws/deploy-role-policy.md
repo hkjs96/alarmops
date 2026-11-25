@@ -780,7 +780,9 @@ infra/scripts/trust-change.sh grant --profile <프로필> --role AlarmOpsCentral
 infra/scripts/trust-change.sh revoke --profile <프로필> --role AlarmOpsCentral-<바뀐 역할 이름>
 ```
 
-   - 같은 계정 재입력 관문을 거친다.
+   - 같은 계정 재입력 관문을 거친다. 스크립트는 터미널(TTY)에서만 실행된다.
+   - `revoke`는 **정책 이름**(`AlarmOpsDeployCentral-TrustChange`)으로 지운다. `--role` 값은 이름 검사와 기록에만 쓰이므로, 어느 역할로 붙였든 정책이 지워진다.
+   - 정책 이름이 하나뿐이라 `grant`를 다시 하면 이전 정책을 **덮어쓴다**. 그래서 한 번에 역할 하나만 바꿀 수 있다. 역할이 둘이면 하나를 끝내고 `revoke`한 뒤 다음 역할을 `grant`한다.
    - 스택 `alarmops-central`이 `*_IN_PROGRESS`이거나 `UPDATE_ROLLBACK_FAILED`이면 **거부**하고 이유를 출력한다. `UPDATE_ROLLBACK_FAILED`이면 사람이 콘솔에서 스택 → 스택 작업 → **업데이트 롤백 계속**(Continue update rollback)을 한다(막힌 리소스를 건너뛰는 선택은 원인을 본 뒤에만). 롤백이 끝난 뒤 다시 `revoke` 한다.
    - 그 밖의 상태면 `delete-role-policy`를 실행한다. 정책이 이미 없으면 그렇다고 알리고 정상 종료한다. 이 정책은 `DenyPivotAndQueueData`에 걸리지 않는다(역할을 맡는 동작이 아니다).
 7. `apply`가 끝나면 워크플로의 **"Check trust principals"** 단계가 `AlarmOpsCentral-RemediatorCaller`, `AlarmOpsCentral-VercelConsole`, `AlarmOpsCentral-Engine`의 신뢰 정책을 자동으로 읽는다. Principal이 같은 계정 ARN, 템플릿이 쓰는 Service(`lambda.amazonaws.com`), `VERCEL_OIDC_PROVIDER_ARN`과 정확히 같은 Federated가 아니면 단계가 실패하고 결과 표가 요약에 남는다(`.github/scripts/check_trust_principals.py`). 실패하면 즉시 신뢰 정책을 되돌리고 보안 담당에게 알린다. 이 세 역할 밖의 역할을 바꿨다면 그 역할의 신뢰 관계는 IAM 콘솔에서 사람이 한 번 읽는다.

@@ -389,6 +389,7 @@ jobs:
           done
           echo "Verified: change set code = build output (manifest $EXPECTED)" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Execute the approved change set
+        id: execute
         env:
           CHANGESET: ${{ needs.plan.outputs.changeset }}
           MODE: ${{ needs.plan.outputs.mode }}
@@ -403,6 +404,7 @@ jobs:
       # trusted only by this account, the templates' service principals and the Vercel OIDC provider. Reads need iam:GetRole
       # (deploy role, central-bootstrap.yaml IamReadRoles on role/AlarmOpsCentral-*). Logic: .github/scripts/check_trust_principals.py.
       - name: Check trust principals
+        if: always() && steps.execute.conclusion != 'skipped'
         env:
           PROVIDER: ${{ vars.VERCEL_OIDC_PROVIDER_ARN }}
         run: |
@@ -415,7 +417,7 @@ jobs:
             items+=("$role=$d/$role.json")
           done
           rc=0
-          python3 -I .github/scripts/check_trust_principals.py "$account" "$PROVIDER" lambda.amazonaws.com "${items[@]}" > "$d/result.txt" || rc=$?
+          python3 -I .github/scripts/check_trust_principals.py "$account" "$PROVIDER" "${items[@]}" > "$d/result.txt" || rc=$?
           grep -v '^::error::' "$d/result.txt" >> "$GITHUB_STEP_SUMMARY" || true
           grep '^::error::' "$d/result.txt" || true
           exit "$rc"

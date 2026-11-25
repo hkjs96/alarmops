@@ -24,7 +24,7 @@ class Base(unittest.TestCase):
         self.logdir = self.sb.dir / "tc-logs"
 
     def run_tc(self, args, stdin=ACCT + "\n", extra_env=None):
-        env = self.sb.env({"TRUST_CHANGE_LOG_DIR": str(self.logdir), **(extra_env or {})})
+        env = self.sb.env({"TRUST_CHANGE_LOG_DIR": str(self.logdir), "TRUST_CHANGE_TEST_NO_TTY": "1", **(extra_env or {})})
         return subprocess.run(["bash", str(SCRIPT), *args], env=env, input=stdin, capture_output=True, text=True,
                               timeout=60, cwd=str(self.sb.dir))
 
@@ -66,12 +66,23 @@ class RoleNames(Base):
 class Guards(Base):
     def test_agent_and_ambient_credentials_refused_before_any_aws_call(self):
         for var in ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
-                    "AWS_SESSION_TOKEN", "AWS_PROFILE", "AWS_DEFAULT_PROFILE"):
+                    "AWS_SESSION_TOKEN", "AWS_PROFILE", "AWS_DEFAULT_PROFILE", "AWS_CONFIG_FILE",
+                    "AWS_SHARED_CREDENTIALS_FILE", "AWS_ENDPOINT_URL", "AWS_ENDPOINT_URL_STS", "AWS_ROLE_ARN",
+                    "AWS_WEB_IDENTITY_TOKEN_FILE", "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+                    "AWS_CONTAINER_AUTHORIZATION_TOKEN"):
             with self.subTest(var=var):
                 cp = self.grant(extra_env={var: "1"})
                 self.assertEqual(cp.returncode, 2)
                 self.assertIn(var, cp.stderr)
         self.assertEqual(self.sb.calls(), [])
+
+    def test_stdin_that_is_not_a_tty_is_refused_without_the_test_switch(self):
+        for fn in (self.grant, self.revoke):
+            cp = fn(extra_env={"TRUST_CHANGE_TEST_NO_TTY": ""})
+            self.assertEqual(cp.returncode, 2)
+            self.assertIn("터미널", cp.stderr)
+        self.assertEqual(self.sb.calls(), [])
+        self.assertEqual(self.grant(extra_env={"TRUST_CHANGE_TEST_NO_TTY": "0"}).returncode, 2)
 
     def test_profile_only_by_argument(self):
         for args in (["grant", "--role", ROLE], ["grant", "--profile"],

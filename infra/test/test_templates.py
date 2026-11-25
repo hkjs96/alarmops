@@ -760,8 +760,11 @@ class DeployWorkflow(unittest.TestCase):
         self.assertIn("iam get-role", run)
         self.assertNotIn("update-assume-role-policy", run)
         self.assertEqual(steps[i_chk]["env"], {"PROVIDER": "${{ vars.VERCEL_OIDC_PROVIDER_ARN }}"})
-        self.assertNotIn("if", steps[i_chk])          # no `if: always()` / continue-on-error that could hide a failure
+        # runs after a failed apply too (rollback may have touched trust policies), but never when execute was skipped
+        self.assertEqual(steps[i_exec].get("id"), "execute")
+        self.assertEqual(steps[i_chk]["if"], "always() && steps.execute.conclusion != 'skipped'")
         self.assertNotIn("continue-on-error", steps[i_chk])
+        self.assertNotIn("lambda.amazonaws.com", run)   # expectations live in the script, per role
         self.assertIn("exit \"$rc\"", run)
         self.assertNotIn("check_trust_principals", self.runs("plan"))
         # permissions stay exactly the same: the read is covered by the deploy role's IamReadRoles statement

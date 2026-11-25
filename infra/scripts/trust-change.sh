@@ -35,7 +35,8 @@ aws_t() { aws --profile "$TC_PROFILE" --region "$TC_REGION" "$@" </dev/null; }
 
 # 1) 에이전트·상시 자격증명 거부 (aws 를 부르기 전)
 for v in CLAUDECODE CLAUDE_CODE_ENTRYPOINT AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN \
-         AWS_DEFAULT_PROFILE AWS_PROFILE; do
+         AWS_DEFAULT_PROFILE AWS_PROFILE AWS_CONFIG_FILE AWS_SHARED_CREDENTIALS_FILE AWS_ROLE_ARN \
+         AWS_WEB_IDENTITY_TOKEN_FILE $(compgen -v | grep -E '^(AWS_ENDPOINT_URL|AWS_CONTAINER_)' || true); do
   if [ -n "${!v+set}" ]; then
     die "환경변수 $v 가 설정되어 있다. 에이전트 세션이나 상시 자격증명에서는 실행하지 않는다. 사람이 별도 터미널에서 --profile 로만 실행한다." 2
   fi
@@ -57,6 +58,14 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$TC_PROFILE" ] || die "--profile 이 필요하다" 2
 [ -n "$TC_ROLE" ] || die "--role 이 필요하다" 2
+
+# 사람이 터미널에서 직접 실행하는 스크립트다. 표준 입력이 TTY 가 아니면(파이프·리다이렉트·자동 실행) 거부한다.
+# TRUST_CHANGE_TEST_NO_TTY=1 은 infra/test 의 단위 테스트가 가짜 aws 와 파이프 입력을 쓰려는 용도다. 실제 aws 를
+# 쓰는 운영 실행에서는 이 변수를 설정하지 않는다. 이 변수는 TTY 검사만 건너뛰며, 계정 12자리 재입력·역할 이름 검사·
+# 환경변수 거부는 그대로 적용된다(실제 자격 증명 경로는 AWS_* 거부와 --profile 로 막혀 있다).
+if [ ! -t 0 ] && [ "${TRUST_CHANGE_TEST_NO_TTY:-}" != 1 ]; then
+  die "표준 입력이 터미널이 아니다. 사람이 터미널에서 직접 실행한다." 2
+fi
 
 # 프로필: dev 또는 중앙 계정용 central, central-<이름>. 리허설·고객 프로필은 받지 않는다.
 [[ "$TC_PROFILE" =~ ^(dev|central(-[a-z0-9]+)*)$ ]] || die "--profile 은 dev 또는 central[-이름] 형식이어야 한다" 2
