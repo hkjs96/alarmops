@@ -38,7 +38,7 @@ const DEFS: Def[] = [
   ["res_hanbit_api", "tracking-public-api", "Lambda", "ap-northeast-2", ["hanbit", "tracking", "public-api"], "MONITORED", null, 0, 2, true],
   ["res_hanbit_batch", "batch-worker", "EC2", "ap-northeast-1", ["hanbit", "ops", "batch"], "NOT_MONITORED", null, 0, 0, true],
   ["res_ara_game", "game-api-fleet", "EC2", "ap-northeast-2", ["ara", "live-ops", "game-api"], "MONITORED", null, 0, 4, true],
-  ["res_ara_503", "matchmaking-cache", "ElastiCache", "ap-northeast-2", ["ara", "live-ops", "matchmaking"], "NEEDS_REVIEW", "tag_removed", 30, 2, true],
+  ["res_ara_cache", "matchmaking-cache", "ElastiCache", "ap-northeast-2", ["ara", "live-ops", "matchmaking"], "NEEDS_REVIEW", "tag_removed", 30, 2, true],
 ];
 const METRICS: Record<string, [string, number, string][]> = {
   EC2: [["CPUUtilization", 80, "%"], ["StatusCheckFailed", 1, ""], ["mem_used_percent", 85, "%"], ["disk_used_percent", 90, "%"]],

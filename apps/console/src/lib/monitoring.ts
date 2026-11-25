@@ -62,6 +62,8 @@ export function monitoringError(f: Failure, action: MonitoringAction, name: stri
       const role = f.details?.role === "alarmWriter" ? "AlarmWriter" : f.details?.role === "tagWriter" ? "TagWriter" : action === "tag_on" ? "TagWriter" : action === "stop" ? "AlarmWriter" : "required";
       return `${what}. The ${role} role is not enabled for this AWS account. Enable it under Customers › Onboarding, then try again.`;
     }
+    case "ACCOUNT_DISABLED":
+      return `${what}. This customer or AWS account is no longer active, so nothing can be changed for it. Check the customer’s status under Customers.`;
     case "NOT_SUPPORTED": return `${what}. Keeping a resource under review is not available yet.`;
     case "ROLE_REQUIRED": case "FORBIDDEN": case "READ_ONLY":
       return `${what}. Changing monitoring needs the Operator role.`;

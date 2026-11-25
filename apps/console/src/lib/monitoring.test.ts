@@ -14,6 +14,9 @@ describe("monitoring error sentences", () => {
     expect(monitoringError(f("CAPABILITY_DISABLED", { details: { role: "alarmWriter" } }), "stop", "ledger-db")).toContain("AlarmWriter role is not enabled");
     expect(monitoringError(f("CAPABILITY_DISABLED", { details: { role: "tagWriter" } }), "tag_on", "x")).toContain("TagWriter role is not enabled");
   });
+  it("409 ACCOUNT_DISABLED says the customer or account is no longer active", () => {
+    expect(monitoringError(f("ACCOUNT_DISABLED"), "stop", "x")).toContain("This customer or AWS account is no longer active");
+  });
   it("502 and NOT_SUPPORTED are sentences", () => {
     expect(monitoringError(f("COMMAND_PUBLISH_FAILED"), "stop", "x")).toContain("could not be queued");
     expect(monitoringError(f("NOT_SUPPORTED"), "keep", "x")).toContain("not available yet");

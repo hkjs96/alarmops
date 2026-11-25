@@ -734,4 +734,8 @@ div.co-refused { margin-top: 6px; }
   .t.mon .mon-key { max-width: 100%; }
   .tw:has(.t.mon) { overflow-x: visible; }
   .mon-skel-tiles { grid-template-columns: minmax(0, 1fr); }
+  /* the tile text wraps instead of being cut off at the tile edge */
+  .shell-main .tiles.mon-tiles { flex-wrap: wrap; overflow-x: visible; }
+  .shell-main .tiles.mon-tiles .tile:nth-child(n) { flex: 1 1 100%; flex-wrap: wrap; white-space: normal; min-height: 44px; padding: 8px 10px; }
+  .shell-main .tiles.mon-tiles .tile .d { display: block; height: auto; margin: 0; flex: 1 1 100%; }
 }

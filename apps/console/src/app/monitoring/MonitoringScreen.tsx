@@ -73,7 +73,7 @@ export async function MonitoringScreen({ tab, sp }: { tab: MonitoringTab; sp: SP
         </Card>
       ) : (
         <>
-          <div className="tiles" role="group" aria-label="Monitoring counts for the current filter" data-testid="mon-tiles">
+          <div className="tiles mon-tiles" role="group" aria-label="Monitoring counts for the current filter" data-testid="mon-tiles">
             <div className="tile" data-testid="tile-monitored">
               <div className="row"><span className="st res"><Mark shape="chk" /></span><span className="ov">Monitored</span></div>
               <div className="v">{plus(stats.monitored, more)}</div>
