@@ -777,7 +777,8 @@ http://localhost:3107/auth/dev-login?as=admin
 | `Not authorized to perform sts:AssumeRoleWithWebIdentity` | CloudTrail의 `AssumeRoleWithWebIdentity` 이벤트에서 `userIdentity.userName`의 실제 sub를 확인하고, 스택 `alarmops-central-bootstrap`의 파라미터 `GitHubRepo`를 그 값(`owner@ID/repo@ID`)으로 업데이트한다 |
 | `plan`: `Check the central bus stack exists`에서 실패 | 버스 스택이 없거나 이름이 `alarmops-central-bus`가 아니다. 4-1의 1~2번 |
 | `plan`: 파라미터 `VercelOidcProviderArn` 형식 오류 | ARN이 `…:oidc-provider/oidc.vercel.com` 또는 `…:oidc-provider/oidc.vercel.com/<팀 슬러그>`로 끝나야 한다. 4-1의 4번 |
-| 콘솔 "The check could not be queued", CloudTrail `AssumeRoleWithWebIdentity` AccessDenied, `identityProvider`가 `…/oidc.vercel.com/<팀>` | 예전 템플릿이 조건 키를 Global(`oidc.vercel.com:aud`)로 고정해 Team 공급자와 맞지 않았다. 이 수정 이후 배포로 해결된다. `VercelOidcProviderArn`이 실제 공급자 ARN과 같은지 확인 |
+| 콘솔 "The check could not be queued", CloudTrail `AssumeRoleWithWebIdentity` AccessDenied, `identityProvider`가 `…/oidc.vercel.com/<팀>` | 신뢰 정책이 다른 공급자를 가리킨다. `aws iam get-role --role-name AlarmOpsCentral-VercelConsole`의 `Federated`와 조건 키를 본다. GitHub `central` 환경 변수 `VERCEL_OIDC_PROVIDER_ARN`을 실제 공급자 ARN(Team이면 `…/oidc.vercel.com/<팀>`)으로 바꾸고 deploy-central을 Run workflow로 다시 돌린다. 신뢰 정책이 바뀌므로 먼저 `infra/aws/deploy-role-policy.md` 4장의 임시 권한(`AlarmOpsDeployCentral-TrustChange`)을 붙인다 |
+| deploy-central `apply`가 `UPDATE_ROLLBACK_FAILED`, 알림 메일 `iam-denied` `UpdateAssumeRolePolicy` AccessDenied | 신뢰 정책 변경에 임시 권한이 없었다. 임시 권한을 붙이고 `aws cloudformation continue-update-rollback --stack-name alarmops-central`(리소스 건너뛰지 않음) → `UPDATE_ROLLBACK_COMPLETE` 확인 → Run workflow로 다시 배포 → 임시 권한 삭제 |
 | `plan`: `SesFromAddress is required when SesIdentityArn is set` | `SES_FROM_ADDRESS`도 같이 넣는다 |
 | `apply`: 예약 동시성 관련 실패 | Lambda 동시 실행 한도가 140 미만이다. 4-1의 5번 |
 | `apply`: 코드 검증 단계에서 권한 거부 | 배포 역할에 `cloudformation:GetTemplate`이나 SAM 버킷 `s3:GetObject`가 없다. 4-1의 3번 |
