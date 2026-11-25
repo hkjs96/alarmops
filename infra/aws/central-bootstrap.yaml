@@ -506,7 +506,10 @@ Resources:
               - "events:TagResource"
               - "events:UntagResource"
               - "events:ListTagsForResource"
-            Resource: !Sub "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/${BusName}/${ResourcePrefix}-*"
+            Resource:
+              - !Sub "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/${BusName}/${ResourcePrefix}-*"
+              # #123: schedule rules (ScheduleExpression) only exist on the default bus; only the periodic-sync rules.
+              - !Sub "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/${ResourcePrefix}-sync-*"
           - Sid: "EventsCentralBusRead"
             Effect: "Allow"
             Action: "events:DescribeEventBus"

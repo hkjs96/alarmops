@@ -10,8 +10,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Protocol
 
 from alarm_engine import events, offboard, remediation
 from alarm_engine.aws import CapabilityDisabled
@@ -23,12 +24,25 @@ logger = logging.getLogger(__name__)
 COMMAND_TYPES = frozenset({
     "SYNC_ACCOUNT", "SYNC_RESOURCE", "APPLY_THRESHOLD", "APPLY_CUSTOMER_DEFAULT", "SET_SEVERITY",
     "SET_MONITORING_TAG", "STOP_MONITORING", "CHECK_ALARM_LIVENESS", "EXECUTE_REMEDIATION", "CHECK_CONNECTION",
-    "OFFBOARD_ACCOUNT",
+    "OFFBOARD_ACCOUNT", "SYNC_ALL_ACCOUNTS",
 })
+SYSTEM_CUSTOMER = "system"      # customerId of system commands (SYNC_ALL_ACCOUNTS only, API-CONTRACT 6)
+SCHEDULED_MODES = ("DAILY", "TAG_RECONCILE")
+
+
+class CommandSender(Protocol):
+    """SQS SendMessageBatch port. `send_batch(entries)` returns the Ids of the entries that failed."""
+    def send_batch(self, entries: list[dict]) -> list[str]: ...
 
 
 class InvalidCommand(ValueError):
     pass
+
+
+class SyncConfigRejected(InvalidCommand):
+    """Periodic-sync command refused because of the engine's own configuration (bad budget, no queue URL), not because
+    the command is malformed. handle_batch reports it as a record failure so SQS retries and it lands in CommandsDlq
+    (alarmed) instead of silently dropping that hour's sync."""
 
 
 # Per-type required payload keys and their types (API-CONTRACT §6). Missing/mistyped → poison (not retried).
@@ -36,6 +50,7 @@ _STR, _BOOL = (str,), (bool,)
 _NUM = (int, float)
 REQUIRED: dict[str, dict[str, tuple[type, ...]]] = {
     "SYNC_ACCOUNT": {},
+    "SYNC_ALL_ACCOUNTS": {"mode": _STR},
     "SYNC_RESOURCE": {"resourceId": _STR},
     "APPLY_THRESHOLD": {"thresholdChangeId": _STR, "managedAlarmId": _STR},
     "APPLY_CUSTOMER_DEFAULT": {"resourceType": _STR, "metricKey": _STR},
@@ -49,7 +64,7 @@ REQUIRED: dict[str, dict[str, tuple[type, ...]]] = {
 }
 NEEDS_ACCOUNT = frozenset({"SYNC_ACCOUNT", "CHECK_ALARM_LIVENESS", "CHECK_CONNECTION", "OFFBOARD_ACCOUNT"})
 OPTIONAL: dict[str, dict[str, tuple[type, ...]]] = {
-    "SYNC_ACCOUNT": {"mode": _STR},
+    "SYNC_ACCOUNT": {"mode": _STR, "deferrals": (int,)},
     "SYNC_RESOURCE": {"restoreDrift": _BOOL},
     "APPLY_THRESHOLD": {"threshold": _NUM, "off": _BOOL, "evalM": (int,), "evalN": (int,), "periodSec": (int,),
                         "statistic": _STR},
@@ -66,6 +81,12 @@ def _check_type(name: str, v: Any, types: tuple[type, ...]) -> None:
         raise InvalidCommand(f"{name} is empty")
 
 
+def _check_system_customer(t: str, customer_id: str) -> None:
+    """`customerId: "system"` is for SYNC_ALL_ACCOUNTS only, and SYNC_ALL_ACCOUNTS takes nothing else."""
+    if (customer_id == SYSTEM_CUSTOMER) != (t == "SYNC_ALL_ACCOUNTS"):
+        raise InvalidCommand(f"{t}: customerId not allowed for this type")
+
+
 def parse(body: str) -> dict[str, Any]:
     try:
         cmd = json.loads(body)
@@ -78,6 +99,7 @@ def parse(body: str) -> dict[str, Any]:
             raise InvalidCommand(f"missing {k}")
     if cmd["type"] not in COMMAND_TYPES:
         raise InvalidCommand(f"unknown type {cmd['type']}")
+    _check_system_customer(cmd["type"], cmd["customerId"])
     p = cmd.get("payload", {})
     if p is None:
         p = cmd["payload"] = {}
@@ -94,6 +116,8 @@ def parse(body: str) -> dict[str, Any]:
     if t in NEEDS_ACCOUNT:
         if not isinstance(cmd.get("cloudAccountId"), str) or not cmd["cloudAccountId"]:
             raise InvalidCommand(f"{t}: cloudAccountId required")
+    if t == "SYNC_ACCOUNT" and p.get("deferrals") is not None and p["deferrals"] < 0:
+        raise InvalidCommand("payload.deferrals must be >= 0")
     if t == "CHECK_ALARM_LIVENESS":
         names = p["alarmNames"]
         if len(names) > MAX_LIVENESS_ALARMS or not all(isinstance(n, str) and n for n in names):
@@ -114,14 +138,102 @@ def _account_of(engine: Engine, cmd: dict) -> str:
     return str(acc)
 
 
-def dispatch(engine: Engine, cmd: dict, liveness_sink: Callable[[str, str, dict], None] | None = None) -> dict:
-    t, cus, p = cmd["type"], cmd["customerId"], cmd.get("payload") or {}
+def _sender_or_default(sender: CommandSender | None) -> CommandSender:
+    if sender is not None:
+        return sender
+    from alarm_engine import wiring
     try:
+        return wiring.get_command_sender()
+    except RuntimeError as e:        # COMMANDS_QUEUE_URL missing: periodic-sync path only (message has no secret)
+        raise SyncConfigRejected(f"periodic sync unavailable: {e}") from e
+
+
+def _sync_settings():
+    """Periodic-sync settings. A bad value rejects only the commands that need them (fan-out, deferral); every other
+    command keeps working. The reason names variables and numbers only (no secret) and is logged by the caller."""
+    from alarm_engine import wiring
+    try:
+        return wiring.sync_settings_from_env()
+    except ValueError as e:
+        raise SyncConfigRejected(f"periodic sync refused, invalid settings: {e}") from e
+
+
+def _send_all(sender: CommandSender, entries: list[dict]) -> None:
+    """SendMessageBatch in groups of 10; failed entries are sent once more, then the caller gets an exception."""
+    for i in range(0, len(entries), 10):
+        group = entries[i:i + 10]
+        failed = set(sender.send_batch(group))
+        if failed:
+            failed = set(sender.send_batch([e for e in group if e["Id"] in failed]))
+        if failed:
+            raise RuntimeError(f"{len(failed)} command(s) could not be queued")
+
+
+def _entry(i: int, cmd: dict, delay: int) -> dict:
+    return {"Id": f"c{i}", "MessageBody": json.dumps(cmd, separators=(",", ":")), "DelaySeconds": delay}
+
+
+def _fan_out(engine: Engine, cmd: dict, mode: str, sender: CommandSender | None) -> dict:
+    settings = _sync_settings()
+    accounts = engine.repo.list_active_accounts()
+    n = len(accounts)
+    step = min(settings.fanout_spread_seconds, 900 / n) if n else 0
+    entries = [_entry(i, {"schemaVersion": 1, "commandId": f"{cmd['commandId']}-{a.id}", "type": "SYNC_ACCOUNT",
+                          "customerId": a.customer_id, "cloudAccountId": a.id, "payload": {"mode": mode}},
+                      int(i * step)) for i, a in enumerate(accounts)]
+    if entries:
+        _send_all(_sender_or_default(sender), entries)
+    return {"status": "OK", "children": n}
+
+
+def _defer_or_skip(cmd: dict, p: dict, mode: str, sender: CommandSender | None) -> dict:
+    settings = _sync_settings()
+    deferrals = p.get("deferrals") or 0
+    if deferrals >= settings.max_deferrals:
+        logger.warning("SYNC_ACCOUNT %s SKIPPED_BUSY: account still busy after %d deferrals", cmd["commandId"], deferrals)
+        return {"status": "SKIPPED_BUSY"}
+    base = cmd["commandId"]
+    if deferrals and base.endswith(f"-d{deferrals}"):
+        base = base[:-len(f"-d{deferrals}")]
+    copy = {"schemaVersion": 1, "commandId": f"{base}-d{deferrals + 1}", "type": "SYNC_ACCOUNT",
+            "customerId": cmd["customerId"], "cloudAccountId": cmd["cloudAccountId"],
+            "payload": {"mode": mode, "deferrals": deferrals + 1}}
+    _send_all(_sender_or_default(sender), [_entry(0, copy, settings.defer_seconds)])
+    return {"status": "DEFERRED", "deferrals": deferrals + 1}
+
+
+def dispatch(engine: Engine, cmd: dict, liveness_sink: Callable[[str, str, dict], None] | None = None,
+             sender: CommandSender | None = None) -> dict:
+    t, cus, p = cmd["type"], cmd["customerId"], cmd.get("payload") or {}
+    _check_system_customer(t, cus)
+    try:
+        if t == "SYNC_ALL_ACCOUNTS":
+            if p.get("mode") not in SCHEDULED_MODES:
+                raise InvalidCommand(f"bad mode {p.get('mode')}")
+            return _fan_out(engine, cmd, p["mode"], sender)
         if t == "SYNC_ACCOUNT":
             mode = p.get("mode", "ON_DEMAND")
             if mode not in ("DAILY", "TAG_RECONCILE", "ON_DEMAND"):
                 raise InvalidCommand(f"bad mode {mode}")
-            return {"status": "OK", "counts": engine.sync_account(_account_of(engine, cmd), mode)}
+            started = time.monotonic()
+            deferrals = p.get("deferrals") or 0
+            base_id = cmd["commandId"]
+            if deferrals and base_id.endswith(f"-d{deferrals}"):
+                base_id = base_id[:-len(f"-d{deferrals}")]      # a deferred copy dedupes under the original id
+            counts = engine.sync_account(_account_of(engine, cmd), mode, base_id)
+            logger.info("SYNC_ACCOUNT %s mode=%s took %.1fs", cmd["commandId"], mode, time.monotonic() - started)
+            if counts.get("skipped") == "INACTIVE":     # D-43: suspended/terminated/disabled since it was queued
+                logger.warning("SYNC_ACCOUNT %s SKIPPED_INACTIVE (customer/account no longer active)", cmd["commandId"])
+                return {"status": "SKIPPED_INACTIVE", "counts": counts}
+            if counts.get("skipped") == "DUPLICATE":
+                logger.info("SYNC_ACCOUNT %s SKIPPED_DUPLICATE (command already finished)", cmd["commandId"])
+                return {"status": "SKIPPED_DUPLICATE", "counts": counts}
+            if counts.get("skipped") == "BUSY":
+                if mode in SCHEDULED_MODES:
+                    return _defer_or_skip(cmd, p, mode, sender)
+                logger.warning("SYNC_ACCOUNT %s SKIPPED_BUSY (%s)", cmd["commandId"], mode)
+                return {"status": "SKIPPED_BUSY", "counts": counts}
+            return {"status": "OK", "counts": counts}
         if t == "SYNC_RESOURCE":
             r = engine.sync_one(cus, p["resourceId"], restore_external=bool(p.get("restoreDrift")))
             return {"status": "OK" if r else "SKIPPED_NOT_MONITORED", "counts": r.plan.counts() if r else {}}
@@ -190,7 +302,7 @@ def _margin_ms() -> int:
 
 
 def handle_batch(engine: Engine, event: dict, remaining_ms: Callable[[], int] | None = None,
-                 margin_ms: int = DEFAULT_TIME_MARGIN_MS) -> dict:
+                 margin_ms: int = DEFAULT_TIME_MARGIN_MS, sender: CommandSender | None = None) -> dict:
     """Process the SQS records in order. With `remaining_ms` (Lambda context), a record is only started while at least
     `margin_ms` is left; the rest are returned in `batchItemFailures` (SQS redelivers them; commands are idempotent)."""
     failures: list[dict[str, str]] = []
@@ -230,9 +342,13 @@ def handle_batch(engine: Engine, event: dict, remaining_ms: Callable[[], int] | 
             logger.error("dropping invalid command %s: %s", rec.get("messageId"), e)   # poison: do not retry
             continue
         try:
-            out = dispatch(engine, cmd)
+            out = dispatch(engine, cmd, sender=sender)
             logger.info("command %s %s customer=%s → %s", cmd["commandId"], cmd["type"], cmd["customerId"],
                         out.get("status"))
+        except SyncConfigRejected as e:    # engine misconfiguration: retry -> CommandsDlq -> alarm (not a silent drop)
+            logger.error("periodic sync command %s %s rejected by engine configuration, will retry then DLQ: %s",
+                         cmd["commandId"], cmd["type"], e)
+            failures.append({"itemIdentifier": rec["messageId"]})
         except InvalidCommand as e:
             logger.error("invalid command %s customer=%s: %s", cmd["commandId"], cmd["customerId"], e)
         except Exception as e:  # noqa: BLE001

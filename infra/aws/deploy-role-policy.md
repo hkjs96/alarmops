@@ -529,7 +529,10 @@
         "events:UntagResource",
         "events:ListTagsForResource"
       ],
-      "Resource": "arn:<PARTITION>:events:<REGION>:<ACCOUNT_ID>:rule/alarmops-central/alarmops-*"
+      "Resource": [
+        "arn:<PARTITION>:events:<REGION>:<ACCOUNT_ID>:rule/alarmops-central/alarmops-*",
+        "arn:<PARTITION>:events:<REGION>:<ACCOUNT_ID>:rule/alarmops-sync-*"
+      ]
     },
     {
       "Sid": "EventsCentralBusRead",
@@ -613,6 +616,8 @@
   ]
 }
 ```
+
+- `EventsRulesOnCentralBus`의 두 번째 Resource `rule/alarmops-sync-*`는 #123 주기 동기화 스케줄 규칙(기본 버스)용이다. 스케줄 규칙은 기본 버스에만 만들 수 있어 중앙 버스 경로로는 부족하고, 범위는 `alarmops-sync-` 접두 규칙뿐이다.
 
 ### 문장별 요약
 

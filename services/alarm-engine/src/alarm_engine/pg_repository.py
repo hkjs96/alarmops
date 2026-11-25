@@ -85,6 +85,10 @@ class PgRepository:
         r = self._one('SELECT * FROM "CloudAccount" WHERE id = %s', cloud_account_id)
         if r is None:
             raise LookupError(cloud_account_id)
+        return self._account(r)
+
+    @staticmethod
+    def _account(r: dict) -> CloudAccount:
         return CloudAccount(
             id=r["id"], customer_id=r["customerId"], aws_account_id=r["awsAccountId"], external_id=r["externalId"],
             reader_role_arn=r["readerRoleArn"], regions=tuple(r["regions"] or ["ap-northeast-2"]),
@@ -99,9 +103,28 @@ class PgRepository:
                            AND NOT a.disabled AND a."connectionPurgedAt" IS NULL ''', aws_account_id)
         return self.get_account(r["id"]) if r else None
 
+    def list_active_accounts(self) -> list[CloudAccount]:
+        """Fan-out targets of the periodic sync: same rule as find_active_account_by_aws_id (D-43)."""
+        return [self._account(r) for r in self._all('''SELECT a.* FROM "CloudAccount" a
+                         JOIN "Customer" c ON c.id = a."customerId"
+                         WHERE c.status = 'ACTIVE' AND NOT a.disabled AND a."connectionPurgedAt" IS NULL
+                         ORDER BY a.id''')]
+
+    def is_account_active(self, cloud_account_id: str) -> bool:
+        """Customer ACTIVE, account not disabled, connection not purged (D-43); re-checked when a delayed child runs."""
+        return self._one('''SELECT 1 AS x FROM "CloudAccount" a JOIN "Customer" c ON c.id = a."customerId"
+                            WHERE a.id = %s AND c.status = 'ACTIVE' AND NOT a.disabled
+                              AND a."connectionPurgedAt" IS NULL''', cloud_account_id) is not None
+
     def sync_run_started_since(self, cloud_account_id: str, within: timedelta) -> bool:
         return self._one('''SELECT 1 AS x FROM "AlarmSyncRun" WHERE "cloudAccountId" = %s
                             AND "startedAt" > now() - %s LIMIT 1''', cloud_account_id, within) is not None
+
+    def sync_command_done(self, customer_id: str, cloud_account_id: str, command_id: str) -> bool:
+        """A run of this command (counts.commandId, no schema change) already ended SUCCEEDED/PARTIAL."""
+        return self._one('''SELECT 1 AS x FROM "AlarmSyncRun" WHERE "cloudAccountId" = %s AND "customerId" = %s
+                            AND status IN ('SUCCEEDED','PARTIAL') AND counts->>'commandId' = %s LIMIT 1''',
+                         cloud_account_id, customer_id, command_id) is not None
 
     def update_account_status(self, cloud_account_id: str, statuses: dict[str, str]) -> None:
         cols = {"reader": "readerStatus", "alarmWriter": "alarmWriterStatus", "tagWriter": "tagWriterStatus",
@@ -254,11 +277,26 @@ class PgRepository:
                    status, error, change_id, customer_id)
 
     # sync runs
-    def start_sync_run(self, customer_id: str, cloud_account_id: str, mode: str) -> str:
+    def start_sync_run(self, customer_id: str, cloud_account_id: str, mode: str, command_id: str | None = None) -> str:
         rid = f"run_{uuid.uuid4().hex}"
-        self._exec('''INSERT INTO "AlarmSyncRun" (id, "customerId", "cloudAccountId", mode, "startedAt", "heartbeatAt")
-                      VALUES (%s,%s,%s,%s::"SyncMode",now(),now())''', rid, customer_id, cloud_account_id, mode)
+        self._exec('''INSERT INTO "AlarmSyncRun" (id, "customerId", "cloudAccountId", mode, "startedAt", "heartbeatAt", counts)
+                      VALUES (%s,%s,%s,%s::"SyncMode",now(),now(),%s)''', rid, customer_id, cloud_account_id, mode,
+                   Jsonb({"commandId": command_id} if command_id else {}))
         return rid
+
+    def claim_sync_run(self, customer_id: str, cloud_account_id: str, mode: str, stale_after: timedelta,
+                       command_id: str | None = None) -> str | None:
+        """One live run per account: a transaction-scoped advisory lock serialises claimers, then a fresh RUNNING row
+        (heartbeat newer than `stale_after`) means busy (None). Old duplicate RUNNING rows only read as busy until stale."""
+        with self.conn.transaction():
+            self._exec("SELECT pg_advisory_xact_lock(hashtextextended('AlarmSyncRun:' || %s::text, 0))", cloud_account_id)
+            busy = self._one('''SELECT 1 AS x FROM "AlarmSyncRun"
+                                WHERE "cloudAccountId" = %s AND "customerId" = %s AND status = 'RUNNING'
+                                  AND COALESCE("heartbeatAt", "startedAt") > now() - %s LIMIT 1''',
+                             cloud_account_id, customer_id, stale_after)
+            if busy is not None:
+                return None
+            return self.start_sync_run(customer_id, cloud_account_id, mode, command_id)
 
     def heartbeat_sync_run(self, customer_id: str, run_id: str) -> None:
         self._exec('UPDATE "AlarmSyncRun" SET "heartbeatAt" = now() WHERE id = %s AND "customerId" = %s',
