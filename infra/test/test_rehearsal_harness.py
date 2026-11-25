@@ -563,6 +563,18 @@ class VerifyInteractive(Base):
                                                            "FailedInvocations": {"start": 3, "step": 1}})
         self.assertTrue(any("PASS" in r for r in self.row(rep, "(가)")), rep)
 
+    def test_already_allowed_skips_a_and_runs_b(self):
+        """11/25 rehearsal-b rerun: answering N to (가) must still offer (나) when the account is already allowed."""
+        res, rep = self.run_verify("n\ny\n" + "y\n" * 4)
+        self.assertTrue(any("SKIP" in r for r in self.row(rep, "(가)")), rep)
+        self.assertFalse(any("허용 목록 추가 확인 없음" in r for r in self.row(rep, "(나)")), rep)
+        ops = [(c["service"], c["op"]) for c in self.sb.calls()]
+        self.assertIn(("sqs", "tag-queue"), ops)
+
+    def test_already_allowed_no_still_skips_b(self):
+        res, rep = self.run_verify("n\nn\n")
+        self.assertTrue(any("허용 목록 추가 확인 없음" in r for r in self.row(rep, "(나)")), rep)
+
     def test_no_datapoints_is_zero_not_a_shell_error(self):
         """11/25 rehearsal-b: a rule with no datapoints gave an empty value and `[: : integer expression expected`."""
         res, rep = self.run_verify("y\ny\n")
