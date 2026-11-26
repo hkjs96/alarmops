@@ -277,7 +277,8 @@ export function ScopeTree(props: ScopeTreeProps) {
   }
 
   const tokens = tokensOf(query);
-  const real = rows.filter((r) => r.kind !== "root" && r.kind !== "group").length;
+  // "empty" comes from the data: a collapsed group hides its customers but is still a row, so it is not empty
+  const empty = !rows.some((r) => r.kind === "group" || r.kind === "customer") && (searching || problems || customers.length === 0);
   let hint: React.ReactNode = null;
   if (refused) hint = <><b>{view.hits} matches</b> · nothing selected. Use <span className="kbd">↑</span><span className="kbd">↓</span> to choose one, then Enter.</>;
   else if (searching && view.hits === 1) hint = <><b>1 match</b> · Enter selects it</>;
@@ -357,7 +358,7 @@ export function ScopeTree(props: ScopeTreeProps) {
         <div className="stree-r" role="presentation">{rows.filter((r) => r.kind === "root").map(renderRow)}</div>
         <div className="stree-s" role="presentation">
           {rows.filter((r) => r.kind !== "root").map(renderRow)}
-          {real === 0 ? (
+          {empty ? (
             <div className="stree-none">
               {searching ? `No customer, project or service starts with “${query.trim()}”` : problems ? "No customer has an open incident or a call-order problem." : "No customers."}
             </div>
