@@ -831,12 +831,73 @@ class DeployConsoleWorkflow(unittest.TestCase):
         self.assertNotRegex(self.text, r"echo[^\n]*\$\{?VERCEL_TOKEN")
 
     def test_token_only_on_pull_and_deploy_steps(self):
-        for st in self.wf["jobs"]["deploy"]["steps"]:
-            has = "VERCEL_TOKEN" in (st.get("env") or {})
-            run = st.get("run", "")
-            if "pull" in run or "deploy --prebuilt" in run or "settings are present" in st.get("name", ""):
-                continue
-            self.assertFalse(has, st.get("name", st.get("uses")))
+        # Exactly the steps that talk to Vercel get the token; nothing that runs repository or third-party code does.
+        with_token = [st.get("name") for st in self.wf["jobs"]["deploy"]["steps"] if "VERCEL_TOKEN" in (st.get("env") or {})]
+        self.assertEqual(
+            with_token,
+            [
+                "Check the Vercel settings are present",
+                "Pull the production environment from Vercel",
+                "Record the current production deployment",
+                "Deploy the prebuilt output",
+                "Look at production after a failed deploy",
+                "Put the previous deployment back (smoke check or deploy failed)",
+            ],
+        )
+        by_name = {st.get("name"): st for st in self.wf["jobs"]["deploy"]["steps"]}
+        for name in with_token[2:]:
+            run = by_name[name]["run"]
+            self.assertNotRegex(run, r"\bnode\b|\bnpm\b|\bnpx\b")  # only the pinned CLI runs with the token
+
+    def test_rollback_after_failed_smoke(self):
+        steps = self.wf["jobs"]["deploy"]["steps"]
+        names = [st.get("name") for st in steps]
+        smoke = next(st for st in steps if "smoke-console.mjs" in st.get("run", "") and st.get("id") == "smoke")
+        i_smoke = steps.index(smoke)
+        rb = next(st for st in steps if st.get("id") == "rollback")
+        self.assertGreater(steps.index(rb), i_smoke)
+        # runs only when the smoke step failed (not on build errors, not on success)
+        self.assertIn("failure()", rb["if"])
+        self.assertIn("steps.smoke.outcome == 'failure'", rb["if"])
+        # previous deployment is recorded BEFORE the deploy step
+        deploy = next(st for st in steps if st.get("id") == "deploy")
+        rec = next(i for i, n in enumerate(names) if n == "Record the current production deployment")
+        self.assertLess(rec, steps.index(deploy))
+        self.assertLess(names.index("Pick the previous deployment"), steps.index(deploy))
+        # also after a failed deploy step (output unreadable but production may have changed), only with a recorded previous one
+        self.assertIn("steps.deploy.outcome == 'failure'", rb["if"])
+        self.assertIn("steps.previous.outputs.prev_id != ''", rb["if"])
+        look = next(st for st in steps if st.get("name") == "Look at production after a failed deploy")
+        self.assertIn("steps.previous.outputs.prev_id != ''", look["if"])
+        self.assertLess(steps.index(deploy), steps.index(look))
+        self.assertLess(steps.index(look), steps.index(rb))
+        self.assertIn("unchanged", rb["run"])  # deploy failed but production still serves the previous one: no promote
+        # the deploy step leaves a person note when its output cannot be read
+        self.assertIn("GITHUB_STEP_SUMMARY", deploy["run"])
+        self.assertIn("Promote", deploy["run"])
+        # promote first (keeps auto-assignment), rollback only as fallback, both by deployment id (dpl_...), never by URL
+        self.assertLess(rb["run"].index("promote"), rb["run"].index("rollback \"$PREV_ID\""))
+        self.assertIn('promote "$PREV_ID"', rb["run"])
+        self.assertNotIn('"$PREV_URL" --timeout', rb["run"])
+        self.assertIn("dpl_", rb["run"])
+        self.assertIn("::error::", rb["run"])
+        self.assertIn("no previous production deployment", rb["run"])
+        self.assertIn("automatic rollback failed", rb["run"])
+        # token is never on the command line
+        self.assertNotIn("--token", rb["run"])
+        # same smoke check again on the restored deployment, then the run ends red
+        again = next(st for st in steps if st.get("id") == "smoke-after")
+        self.assertIn("smoke-console.mjs", again["run"])
+        self.assertIn("steps.rollback.outcome == 'success'", again["if"])
+        self.assertNotIn("VERCEL_TOKEN", again.get("env") or {})
+        fail = next(st for st in steps if st.get("name") == "Fail the run after a rollback")
+        self.assertIn("steps.rollback.outcome == 'success'", fail["if"])
+        self.assertIn("exit 1", fail["run"])
+        # the summary tells a person what to do
+        self.assertIn("GITHUB_STEP_SUMMARY", rb["run"])
+        self.assertIn("Promote", rb["run"])
+        # cleanup stays last
+        self.assertEqual(steps[-1].get("if"), "always()")
 
     def test_step_order_and_cleanup(self):
         steps = self.wf["jobs"]["deploy"]["steps"]

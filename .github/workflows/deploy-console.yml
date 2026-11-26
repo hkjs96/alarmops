@@ -18,7 +18,7 @@ run-name: deploy-console ${{ github.event.workflow_run.head_sha || github.sha }}
 #
 # Secrets: VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID are `production` ENVIRONMENT secrets (Settings ->
 # Environments -> production -> Secrets), not repository secrets: only a job that passed the environment's rules can read
-# them. The token is given ONLY to the two steps that talk to Vercel (pull, deploy), as the VERCEL_TOKEN environment
+# them. The token is given ONLY to the steps that talk to Vercel (pull, inspect, deploy, promote/rollback), as the VERCEL_TOKEN environment
 # variable (never as a command-line argument). Everything that runs third-party or repository code (npm ci, the CLI
 # install, vercel build) runs without it, and `vercel build` also runs without any secret from the project's environment:
 # right after the env check, strip-deploy-env.mjs cuts the pulled file down to CONSOLE_ORIGIN, TRUSTED_PROXY and
@@ -78,7 +78,7 @@ jobs:
           EVENT: ${{ github.event_name }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           GH_TOKEN: ${{ github.token }}
-        run: python3 -I .github/scripts/deploy_gate.py deploy-console.yml deploy '^(apps/|packages/|tools/vercel-cli/|package[^/]*\.json$|\.github/workflows/deploy-console\.yml$|\.github/scripts/(check-console-deploy-env|strip-deploy-env|smoke-console)\.mjs$)'
+        run: python3 -I .github/scripts/deploy_gate.py deploy-console.yml deploy '^(apps/|packages/|tools/vercel-cli/|package[^/]*\.json$|\.github/workflows/deploy-console\.yml$|\.github/scripts/(check-console-deploy-env|strip-deploy-env|smoke-console|rollback-console)\.mjs$)'
 
   deploy:
     runs-on: ubuntu-24.04
@@ -129,6 +129,22 @@ jobs:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
         run: $VERCEL_BIN build --prod
+      # Automatic rollback (D-59/D-60), part 1: remember which deployment production serves NOW, before the new one goes live.
+      - name: Read the production address
+        id: origin
+        run: node .github/scripts/rollback-console.mjs origin .vercel/.env.production.local >> "$GITHUB_OUTPUT"
+      - name: Record the current production deployment
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          ORIGIN: ${{ steps.origin.outputs.origin }}
+        # A failing inspect (first deploy, nothing behind the address) is not an error here: it means "no previous deployment".
+        run: |
+          $VERCEL_BIN inspect "$ORIGIN" > "$RUNNER_TEMP/inspect-before.txt" 2>&1 || echo "vercel inspect failed, treating it as no previous deployment"
+      - name: Pick the previous deployment
+        id: previous
+        run: node .github/scripts/rollback-console.mjs previous "$RUNNER_TEMP/inspect-before.txt" >> "$GITHUB_OUTPUT"
       - name: Deploy the prebuilt output
         id: deploy
         env:
@@ -139,15 +155,88 @@ jobs:
           # stdout of `vercel deploy` is the deployment URL (not a secret); progress goes to stderr.
           url=$($VERCEL_BIN deploy --prebuilt --prod)
           if ! [[ "$url" =~ ^https://[A-Za-z0-9.-]+\.vercel\.app$ ]]; then
-            echo "::error::unexpected output from vercel deploy (not a *.vercel.app deployment URL)"; exit 1
+            echo "::error::unexpected output from vercel deploy (not a *.vercel.app deployment URL)"
+            echo "Deploy output could not be read: the new deployment may already be live. The next steps put the previous one back when one was recorded; otherwise Person: Vercel dashboard -> Deployments -> last good production deployment -> Promote (docs/GO-LIVE.md, 3-6)." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
           fi
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "Deployment: $url" >> "$GITHUB_STEP_SUMMARY"
       # Smoke check runs against CONSOLE_ORIGIN (the production address from the checked environment): the per-deployment
       # URL may sit behind Vercel deployment protection, which would answer 401 to everything and hide real problems.
-      # If it fails, the new deployment is already live: roll back (docs/GO-LIVE.md, step 3, "Rollback").
+      # If it fails, the new deployment is already live, so the steps below put the previous one back (part 2) and the run
+      # still ends RED: a person must know, even when the rollback worked.
       - name: Smoke check
+        id: smoke
         run: node .github/scripts/smoke-console.mjs --env-file .vercel/.env.production.local
+      # Part 2. `vercel promote` of the previous production deployment, not `vercel rollback`: rollback turns off
+      # auto-assignment of production domains, so the NEXT deploy would not go live and its smoke check would pass against
+      # the old one. Promote keeps auto-assignment. Hobby can promote; rollback there only reaches the previous production
+      # deployment, which is the same target, so rollback is the fallback if promote is refused. The token is given to
+      # this step only because it talks to Vercel; the argument is a deployment id (dpl_...) that came out of a target=production,
+      # status=Ready check of `vercel inspect`, validated again here. The URL is only printed.
+      # The deploy step can fail AFTER the new deployment went live (for example its output could not be read). Then the
+      # smoke check never runs, so production is looked at again here, only when a previous deployment was recorded.
+      - name: Look at production after a failed deploy
+        if: failure() && steps.deploy.outcome == 'failure' && steps.previous.outputs.prev_id != ''
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          ORIGIN: ${{ steps.origin.outputs.origin }}
+        run: |
+          $VERCEL_BIN inspect "$ORIGIN" > "$RUNNER_TEMP/inspect-after.txt" 2>&1 || echo "vercel inspect failed, production state unknown"
+      - name: Put the previous deployment back (smoke check or deploy failed)
+        id: rollback
+        if: failure() && (steps.smoke.outcome == 'failure' || (steps.deploy.outcome == 'failure' && steps.previous.outputs.prev_id != ''))
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          PREV_ID: ${{ steps.previous.outputs.prev_id }}
+          PREV_URL: ${{ steps.previous.outputs.prev_url }}
+          NEW_URL: ${{ steps.deploy.outputs.url }}
+          DEPLOY_OUTCOME: ${{ steps.deploy.outcome }}
+        run: |
+          {
+            echo "### Failure after the deploy step started (deploy: $DEPLOY_OUTCOME)"
+            echo "New deployment: ${NEW_URL:-unknown}"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$DEPLOY_OUTCOME" = failure ] && [ -f "$RUNNER_TEMP/inspect-after.txt" ] && grep -qE "^[[:space:]]*id[[:space:]]+$PREV_ID[[:space:]]*$" "$RUNNER_TEMP/inspect-after.txt"; then
+            echo "::error::vercel deploy failed and production still serves the previous deployment; nothing to roll back"
+            echo "Production is unchanged (still $PREV_URL)." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          if ! [[ "$PREV_ID" =~ ^dpl_[A-Za-z0-9]{8,64}$ ]]; then
+            echo "::error::deploy or smoke check failed and there is no previous production deployment to go back to (first deploy?)"
+            echo "Not rolled back: no previous deployment was recorded. Person: Vercel dashboard -> Deployments -> a good deployment -> Promote, or fix forward (docs/GO-LIVE.md, 3-6)." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          if $VERCEL_BIN promote "$PREV_ID" --timeout 3m; then how=promote
+          elif $VERCEL_BIN rollback "$PREV_ID" --timeout 3m; then how=rollback
+          else
+            echo "::error::automatic rollback failed (promote and rollback both refused); production still serves the new deployment"
+            echo "Rollback FAILED. Person: Vercel dashboard -> Deployments -> $PREV_URL -> Promote (docs/GO-LIVE.md, 3-6)." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "how=$how" >> "$GITHUB_OUTPUT"
+          echo "Production was put back to $PREV_URL with vercel $how. Checking it with the same smoke check next." >> "$GITHUB_STEP_SUMMARY"
+          if [ "$how" = rollback ]; then echo "After a rollback Vercel stops auto-assigning new deployments: Promote a deployment in the dashboard before the next deploy (docs/GO-LIVE.md, 3-6)." >> "$GITHUB_STEP_SUMMARY"; fi
+      - name: Smoke check again on the restored deployment
+        id: smoke-after
+        if: failure() && steps.rollback.outcome == 'success'
+        run: node .github/scripts/smoke-console.mjs --env-file .vercel/.env.production.local
+      # The run ends red after a rollback on purpose.
+      - name: Fail the run after a rollback
+        if: failure() && steps.rollback.outcome == 'success'
+        run: |
+          if [ "${{ steps.smoke-after.outcome }}" = success ]; then
+            echo "Previous deployment is live again and passes the smoke check. This run stays red: the new code needs a fix." >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::deploy or smoke check failed; rolled back to the previous deployment (restored one passes the smoke check)"
+          else
+            echo "The restored deployment ALSO fails the smoke check. Person: check Vercel settings and variables (docs/GO-LIVE.md, 3-6)." >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::smoke check failed after deploy and also after rollback; production is not healthy"
+          fi
+          exit 1
       # Always: the pulled file holds production environment values (secrets are already stripped; this is the second layer).
       - name: Delete the pulled environment
         if: always()

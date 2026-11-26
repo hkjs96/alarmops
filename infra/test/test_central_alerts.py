@@ -30,7 +30,7 @@ GUARD_PREFIX = "AlarmOpsGuard"
 TOPIC_NAME = f"{GUARD_PREFIX}-alerts"
 ACCOUNT, PARTITION = "123456789012", "aws"
 GOLIVE_CHECKBOX_COUNT = 40  # checklist items of docs/GO-LIVE.md before #115: the existing item is edited, none is added
-GOLIVE_D57_LINE_NO = 594
+GOLIVE_D57_LINE_NO = 596
 GOLIVE_D57_LINE = (
     "   - **신뢰 정책 변경의 우회 위험은 수용했다(D-57).** 보완책(CloudTrail 알림, plan 승인 전 본문 확인, `TrustChange` 정책 1시간 "
     "자동 만료)은 `deploy-role-policy.md` 3-2·4·4-1·4-2절에 있다. **CloudTrail 알림 규칙은 실고객 연결 전 필수다**(구현은 파일럿 전 이슈)."

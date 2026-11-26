@@ -445,7 +445,7 @@ http://localhost:3107/auth/dev-login?as=admin
 
 어디서: Vercel 대시보드 또는 본인 터미널
 
-- [ ] **스모크 검사가 실패했을 때(되돌리기, N4)**
+- [ ] **스모크 검사가 실패했을 때(되돌리기, N4)**: 자동 되돌리기가 먼저 한다(구현됨, D-59; 직전 production 배포를 `vercel promote`로 되살리고 스모크를 다시 돌린 뒤 실행은 빨간색으로 끝난다). 요약에 `Rollback FAILED` 또는 `no previous production deployment`가 있을 때만 사람이 한다: Vercel 대시보드 → Deployments → 마지막 정상 production 배포 → `⋮` → Promote
 - [ ] **되돌린 뒤 새 배포로 되돌리기 해제**
 
 > **참고** 화면별 클릭 순서는 `docs/SETUP-VERCEL.md` 11단계
@@ -478,6 +478,8 @@ http://localhost:3107/auth/dev-login?as=admin
 | 스모크: 401인데 콘솔의 응답이 아님 | Deployment Protection이 막고 있다. `docs/SETUP-VERCEL.md` 10단계 |
 | 스모크: `/login`에 mock 표식 | `MOCK_API`가 들어갔다. 지우고 다시 배포한다 |
 | 모든 주소가 503 | `CONSOLE_ORIGIN`이 없거나 `https://…` 모양이 아니다 |
+| 실행 요약에 `Rollback FAILED` 또는 `no previous production deployment` (자동 되돌리기 실패) | production은 아직 새(고장난) 배포다. Vercel 대시보드 → 프로젝트 → Deployments → 마지막 정상 production 배포 → `⋮` → Promote. 그 뒤 `curl -s -o /dev/null -w "%{http_code}" https://<콘솔>/login`이 `200`인지 본다. 원인을 고쳐 다시 배포한다 |
+| 실행 요약에 "restored deployment ALSO fails" | 이전 배포도 고장이다(환경변수·`TICK_SECRET` 등 Vercel 설정). 설정을 고치고 `deploy-console`을 Run workflow로 다시 실행한다 |
 | `TickHeartbeat`가 안 바뀜 | Vault의 `tick_secret`과 Vercel의 `TICK_SECRET`이 다르거나(401), SQL의 `<console-host>`를 안 바꿨다. 두 값을 맞추고 3-5를 다시 본다 |
 | `lastStatus`가 `ERROR` | 허브에 그 행의 `name`과 시각을 알린다. 값(비밀)은 보내지 않는다 |
 
