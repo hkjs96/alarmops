@@ -767,6 +767,14 @@ http://localhost:3107/auth/dev-login?as=admin
        | (f) 태그 없는 기존 알람 덮어쓰기(PutMetricAlarm+ManagedBy 요청 태그) → 거부 | PASS | AccessDenied |
 
      - (c)(d)(f)의 태그 없는 알람 `AlarmOpsRehearsal-replica-unmanaged`는 본인 자격증명으로 만든다. 시험 알람은 `AlarmOpsRehearsal-replica-test`다. (f)는 같은 이름에 `ManagedBy=AlarmOps` 요청 태그를 달아 덮어쓰기를 시도한다. 성공하면 FAIL이고, 비고에 "기존 고객 알람 덮어쓰기 가능: template.yaml CreateAlarmWithManagedByTag 보완 필요"와 임계값·태그가 실제로 바뀌었는지가 적힌다.
+     - **보완안 실측(선택, (f)가 FAIL일 때)**: `replica-check.sh --profile rehearsal-b --confirm-account 12자리 --probe-resource-tag-deny`. (a)~(f) 표 대신 아래 표만 낸다. 원본 정책 복사본에 명시적 Deny `DenyOverwriteUnmanaged`(PutMetricAlarm, `aws:ResourceTag/ManagedBy` 가 없을 때)를 두 변형(`null` = `Null` 조건, `stringnotequals` = `StringNotEquals` 조건)으로 별도 인라인 정책 `probe-deny` 에 붙이고, 다시 assume 한 뒤(정책 전파 대기 기본 20초, `REHEARSAL_PROBE_WAIT`) p1~p4 를 잰다. 측정이므로 판정이 "사용 불가"여도 종료 코드 0이다(준비 실패·오류 중단은 1, 안전 관문 거부는 2 이상). 시험 알람은 `AlarmOpsRehearsal-probe-<변형>-new`·`-unmanaged`이고 정리 때 함께 지운다. 이 표만 허브에 보낸다.
+
+       | 변형 | p1 새 알람 생성 | p2 태그없는 알람 덮어쓰기 | p3 관리 알람 수정 | p4 관리 알람 삭제 | 판정 |
+       |---|---|---|---|---|---|
+       | null | ALLOWED | DENIED | ALLOWED | ALLOWED | 사용 가능 |
+       | stringnotequals | ALLOWED | DENIED | ALLOWED | ALLOWED | 사용 가능 |
+
+       판정은 p1 ALLOWED, p2 DENIED(본인 자격증명으로 임계값이 그대로인 것도 확인), p3 ALLOWED, p4 ALLOWED 일 때만 "사용 가능"이다. p1 이 DENIED 면 CloudWatch 가 새 알람의 `aws:ResourceTag` 를 비어 있다고 보는 것이고 그 변형은 쓸 수 없다. 그때 p3·p4 는 본인 자격증명이 태그를 달아 대신 만든 알람으로 재며 값 뒤에 `*` 가 붙는다.
      - 끝나면(실패·Ctrl+C·터미널 닫기 포함) 시험 알람 두 개, 인라인 정책, 임시 역할을 스스로 지운다. 정리 실패 경고가 나오면 같은 명령에 `--cleanup-only`를 붙여 다시 돌린다.
      - 임시 자격증명은 출력·로그에 나오지 않는다. 로그는 `rehearsal-logs/<profile>/replica-check.md`(올리지 않는다).
      - **표가 나오기 전에 멈추는 경우**: 종료 코드 1~5와 `오류:` 줄이 나온다. 2는 인자·환경변수·확인 계정 거부, 3은 중앙·개발·거부 목록 계정, 4는 프로필이 SSO 역할이 아님, 5는 임시 역할이 이미 있음, 1은 그 밖의 오류(원본 역할·정책 없음, 호출 실패 등)다. 이 코드는 `verify.sh`의 종료 코드 2(SKIP 있음)와 뜻이 다르다. 이때는 `오류:` 줄과 종료 코드만 허브에 보낸다.
@@ -810,7 +818,7 @@ http://localhost:3107/auth/dev-login?as=admin
 | 실측 `replica-check.sh`: 표에 `(준비) 복제 역할 assume` 또는 `(준비) 정책 전파(DescribeAlarms)` FAIL | IAM 전파가 느리다. 환경변수 `REHEARSAL_ASSUME_RETRIES`(기본 12, 5초 간격)를 늘려(예: 36) 다시 실행한다. 그래도 같은 오류 코드면 그 코드만 허브에 보낸다 |
 | 실측: `오류: 역할 AlarmOpsRehearsal-WriterReplica 가 이미 있다`(종료 코드 5) | 이전 실행의 잔여물이다. 같은 명령에 `--cleanup-only`를 붙여 정리하고 다시 실행한다 |
 | 실측: `AlarmOpsRehearsal=true 태그가 없어 지우지 않는다` | 같은 이름의 다른 사람이 만든 역할이다. 지우지 않는다. 콘솔에서 누가 만들었는지 확인하고 허브에 알린다 |
-| 실측 (f) FAIL "기존 고객 알람 덮어쓰기 가능" | 정책 결함이다(남의 알람을 `ManagedBy` 요청 태그로 덮어쓸 수 있음). 고객 스택에 AlarmWriter를 켜기 전에 허브에 표를 보내 `template.yaml`의 `CreateAlarmWithManagedByTag` 보완을 이슈로 만든다 |
+| 실측 (f) FAIL "기존 고객 알람 덮어쓰기 가능" | 정책 결함이다(남의 알람을 `ManagedBy` 요청 태그로 덮어쓸 수 있음). 고객 스택에 AlarmWriter를 켜기 전에 허브에 표를 보내 `template.yaml`의 `CreateAlarmWithManagedByTag` 보완을 이슈로 만든다. 보완안(명시적 Deny) 후보를 재려면 `--probe-resource-tag-deny`로 다시 실행해(복제 역할 정리 후) 나온 변형 표를 허브에 보낸다 |
 | 실측 `replica-check.sh`: `환경변수 AWS_CA_BUNDLE 가 설정되어 있다`(또는 `AWS_ENDPOINT_URL*`, `AWS_CONFIG_FILE`, `AWS_SHARED_CREDENTIALS_FILE`)로 거부, 종료 코드 2 | 임시 자격증명이 엉뚱한 곳으로 가지 않게 막은 것이다. 그 터미널에서만 `unset AWS_CA_BUNDLE`(해당 변수)을 하고 다시 실행한다. 회사 TLS 검사 때문에 unset 하면 AWS 호출이 실패하면 허브에 문의한다 |
 
 ### 배경 (읽지 않아도 된다)

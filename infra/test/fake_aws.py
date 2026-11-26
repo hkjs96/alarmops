@@ -36,6 +36,10 @@ Scenario keys (all optional):
   cw_overwrite_unmanaged_denied  true: a replica PutMetricAlarm on an existing alarm WITHOUT ManagedBy=AlarmOps is denied
                      (models CloudWatch applying the resource tag on update); false/absent: the policy decides, so a
                      request tag ManagedBy=AlarmOps overwrites it (the suspected hole checked by replica-check (f))
+  cw_create_resource_tags  "request": on a NEW alarm aws:ResourceTag/* is evaluated from the request tags; "absent"/unset: it
+                     is absent on create (replica-check --probe-resource-tag-deny measures which one CloudWatch does).
+                     Condition operators StringEquals, StringNotEquals (missing key -> true) and Null are modelled.
+  cw_ignore_deny_sid a Sid whose statement is skipped (models a Deny that CloudWatch does not enforce)
   fail_nth           {"service op": N}: the N-th call (1-based) of that operation exits 254 with InternalFailure
   sleep_ops          {"service op": seconds}: that call touches $FAKE_AWS_LOG.sleeping then sleeps (signal tests)
   iam_roles entries may carry "path": "/aws-reserved/sso.amazonaws.com/ap-northeast-2/" (iam get-role Arn includes it)
@@ -207,12 +211,16 @@ def _ctx_values(key, ctx):
 def _cond_ok(cond, ctx):
     for op, block in (cond or {}).items():
         mode, _, base = op.rpartition(":")
-        if base != "StringEquals":
+        if base not in ("StringEquals", "StringNotEquals", "Null"):
             raise ValueError("fake aws: unsupported condition operator " + op)
         for key, want in block.items():
             want = want if isinstance(want, list) else [want]
             have = _ctx_values(key, ctx)
-            if mode == "ForAnyValue":
+            if base == "Null":   # "true": the key is absent; "false": the key is present
+                ok = (not have) == (str(want[0]).lower() == "true")
+            elif base == "StringNotEquals":   # a missing key makes a negated operator true
+                ok = not any(h in want for h in have)
+            elif mode == "ForAnyValue":
                 ok = any(h in want for h in have)
             elif mode == "ForAllValues":
                 ok = all(h in want for h in have)
@@ -223,7 +231,7 @@ def _cond_ok(cond, ctx):
     return True
 
 
-def evaluate(policy, action, ctx):
+def evaluate(policy, action, ctx, ignore_sid=None):
     """True = allowed. Explicit Deny wins; no matching Allow = implicit deny."""
     import fnmatch
 
@@ -231,6 +239,8 @@ def evaluate(policy, action, ctx):
     stmts = [stmts] if isinstance(stmts, dict) else stmts
     allowed = False
     for st in stmts:
+        if ignore_sid and st.get("Sid") == ignore_sid:
+            continue
         acts = st.get("Action", [])
         acts = [acts] if isinstance(acts, str) else acts
         if not any(fnmatch.fnmatch(action.lower(), a.lower()) for a in acts):
@@ -363,7 +373,10 @@ def replica_model(scen, service, op, opts, rec, account, first):
                                  for s in (p["Statement"] if isinstance(p["Statement"], list) else [p["Statement"]])]}
             for n in names or [None]:
                 ctx = {"request_tags": req, "resource_tags": (st["alarms"].get(n) or {}) if n else {}}
-                if not evaluate(pol, "cloudwatch:" + camel(op), ctx):
+                if (op == "put-metric-alarm" and n not in st["alarms"]
+                        and scen.get("cw_create_resource_tags") == "request"):
+                    ctx["resource_tags"] = dict(req)   # hypothesis: CloudWatch evaluates aws:ResourceTag from the request tags on create
+                if not evaluate(pol, "cloudwatch:" + camel(op), ctx, scen.get("cw_ignore_deny_sid")):
                     error("AccessDenied", camel(op), "User is not authorized to perform: cloudwatch:" + camel(op))
                 if (op == "put-metric-alarm" and scen.get("cw_overwrite_unmanaged_denied") and n in st["alarms"]
                         and st["alarms"][n].get("ManagedBy") != "AlarmOps"):

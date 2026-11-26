@@ -31,6 +31,7 @@ bash infra/scripts/rehearsal/cleanup.sh  --profile rehearsal-b --confirm-account
 aws sso login --profile rehearsal-b
 bash infra/scripts/rehearsal/replica-check.sh --profile rehearsal-b --confirm-account <12자리> [--cleanup-only]
 ```
+  - 선택 인자 `--probe-resource-tag-deny`: (a)~(f) 대신 원본 정책 복사본에 명시적 Deny(`DenyOverwriteUnmanaged`)를 `Null`·`StringNotEquals` 두 변형으로 붙이고(별도 인라인 정책 `probe-deny`, 끝나면 지움) `| 변형 | p1 새 알람 생성 | p2 태그없는 알람 덮어쓰기 | p3 관리 알람 수정 | p4 관리 알람 삭제 | 판정 |` 표를 낸다. 측정이라 종료 코드는 판정과 무관하게 0(중단 1, 거부 2 이상). `REHEARSAL_PROBE_WAIT`(기본 20초)로 정책 전파 대기를 조절한다. 자세한 것은 `docs/GO-LIVE.md` 4단계.
   - SSO 프로필이 아니면(종료 코드 4) 중단한다. 신뢰 정책은 `iam get-role`로 얻은 본인 SSO 역할의 정확한 ARN 하나(`StringEquals aws:PrincipalArn`)다. `AWS_ENDPOINT_URL*`·`AWS_CONFIG_FILE`·`AWS_SHARED_CREDENTIALS_FILE`·`AWS_CA_BUNDLE`가 있으면 거부한다(이 스크립트만). 표가 나오기 전 종료 코드 1~5는 `verify.sh`의 2(SKIP 있음)와 뜻이 다르다(GO-LIVE 4단계). `cleanup.sh`는 임시 역할이 남았으면 경고만 하고 `--cleanup-only`를 안내한다. 임시 역할이 이미 있으면 덮어쓰지 않고 멈춘다(`--cleanup-only` 안내). 임시 자격증명은 호출마다 서브셸에서만 쓰고 출력·로그에 남기지 않는다. 로그는 `rehearsal-logs/<profile>/replica-check.md`. 환경변수 `REHEARSAL_ASSUME_RETRIES`(기본 12), `REHEARSAL_ASSUME_INTERVAL`(기본 5초)로 IAM 전파 대기를 조절한다.
 - 계정 12자리는 매번 직접 입력한다. 계정 표, 실제 `sts get-caller-identity` 결과와 모두 같아야 한다.
 - preflight는 읽기만 한다. 끝에 사람 관문(7-1 콘솔 등록, 7-4 연결 확인)을 묻는다.
