@@ -979,7 +979,7 @@ npm ci --ignore-scripts && npm run build:lambda -w @alarmops/ingest && npm run b
 2. **Check connection**을 누른다.
 3. 역할 행이 잠깐 `Checking…`으로 바뀐다. 기다린다.
 4. 확인: 켠 역할이 모두 OK로 보인다. EventForwarder는 이 버튼으로 시험되지 않고, 첫 이벤트가 오면 `OK · EVENTS RECEIVED`가 된다.
-5. EventForwarder가 `WAITING FOR THE FIRST EVENT`면 고객 계정의 시험 리소스(예: SQS 큐)에 `Monitoring=off` 태그를 붙인다. 고객 스택은 `Monitoring`·`Threshold_*` 키가 든 태그 변경과 알람 상태 변경만 중앙으로 보내므로, 다른 키(`Team=…`)로는 이벤트가 오지 않는다. `off`는 알람을 만들지 않는다. 2~5분 뒤 화면을 새로고침하면 First event에 시각이 찍힌다.
+5. EventForwarder가 `WAITING FOR THE FIRST EVENT`면 고객 계정에서 `Monitoring` 태그가 없는(감시 중이 아닌) 시험 리소스(예: 새 SQS 큐)에 `Monitoring=off` 태그를 붙인다. 이미 `Monitoring=on`인 리소스에 붙이면 알람은 남지만 확인 필요(Needs review)로 바뀌므로 쓰지 않는다. 고객 스택은 `Monitoring`·`Threshold_*` 키가 든 태그 변경과 알람 상태 변경만 중앙으로 보내므로, 다른 키(`Team=…`)로는 이벤트가 오지 않는다. `off`는 알람을 만들지 않는다. 2~5분 뒤 화면을 새로고침하면 First event에 시각이 찍힌다.
 
 ### 7-5. 호출 순서·담당자 등록 (15분)
 
