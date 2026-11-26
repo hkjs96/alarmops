@@ -25,6 +25,12 @@ bash infra/scripts/rehearsal/verify.sh   --profile rehearsal-b --confirm-account
 bash infra/scripts/rehearsal/cleanup.sh  --profile rehearsal-b --confirm-account <12자리> --run-id <이름> [--stack]
 ```
 
+- `replica-check.sh`(#159)는 순서 밖에서 B 계정 리허설 때 한 번 돌린다. 원본 `AlarmOps-AlarmWriter`의 정책·경계를 복사한 임시 역할 `AlarmOpsRehearsal-WriterReplica`를 본인 SSO 역할로 assume 해서, 태그 조건이 실제로 먹는지 5개를 본다. 끝나면 스스로 지운다. 자세한 것은 `docs/GO-LIVE.md` 4단계.
+
+```
+bash infra/scripts/rehearsal/replica-check.sh --profile rehearsal-b --confirm-account <12자리> [--cleanup-only]
+```
+  - SSO 프로필이 아니면 중단한다. 임시 역할이 이미 있으면 덮어쓰지 않고 멈춘다(`--cleanup-only` 안내). 임시 자격증명은 호출마다 서브셸에서만 쓰고 출력·로그에 남기지 않는다. 로그는 `rehearsal-logs/<profile>/replica-check.md`. 환경변수 `REHEARSAL_ASSUME_RETRIES`(기본 12), `REHEARSAL_ASSUME_INTERVAL`(기본 5초)로 IAM 전파 대기를 조절한다.
 - 계정 12자리는 매번 직접 입력한다. 계정 표, 실제 `sts get-caller-identity` 결과와 모두 같아야 한다.
 - preflight는 읽기만 한다. 끝에 사람 관문(7-1 콘솔 등록, 7-4 연결 확인)을 묻는다.
 - verify는 허용 목록 추가 **전**에 시작한다. (가) 후 스크립트가 멈추면 중앙에서 `bus-allowlist` `action=add` 를 실행하고 y 로 계속한다. 입력이 없으면 해당 항목은 SKIP 이고, SKIP 이 하나라도 있으면 종료 코드 2 로 끝난다(결과표에 "SKIP 있음").

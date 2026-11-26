@@ -749,12 +749,25 @@ http://localhost:3107/auth/dev-login?as=admin
    - 태그를 떼면 알람은 남고 콘솔이 확인 필요(NEEDS_REVIEW)로 표시한다. 사람이 콘솔에서 Stop monitoring을 누르면 그 알람만 사라진다.
    - 순서 (다): 스크립트가 `REHEARSAL_WAIT_SECONDS`(기본 900초, 15분) 동안 알람 유지를 지켜본다. 이 동안 Stop monitoring을 누르지 않는다(Needs review 표시는 봐도 된다). 스크립트가 "(다) 대기 끝"이라고 물으면 콘솔 Monitoring > Needs review에서 그 큐를 확인하고 Stop monitoring을 누른 뒤 y로 답한다.
    - `ManagedBy` 없는 알람 거부는 정책 시뮬레이션(실측 아님)으로 본다.
-   - **1회 수동 실측(B 계정 리허설 때 한 번, 선택 아님)**: 시뮬레이션이 못 보는 CloudWatch의 실제 태그 조건 처리와 조직 SCP를 확인한다. 사람이 CLI로 한다(하네스에 넣지 않는다).
-     1. `AlarmOps-AlarmWriter`의 권한 정책과 권한 경계를 콘솔(IAM → 역할)에서 그대로 확인한다.
-     2. 같은 권한 정책과 같은 권한 경계를 붙인 임시 역할 `AlarmOpsRehearsal-WriterReplica`를 만든다. 신뢰 대상만 본인 SSO 역할로 둔다. 태그 `AlarmOpsRehearsal=true`.
-     3. 그 역할로 `cloudwatch put-metric-alarm`을 두 번 부른다: `--tags Key=ManagedBy,Value=AlarmOps`를 붙이면 성공, 빼면 `AccessDenied`여야 한다. 알람 이름은 `AlarmOpsRehearsal-replica-test`.
-     4. 만든 알람을 지우고 임시 역할을 지운다. 결과(성공/AccessDenied)만 허브에 알린다.
-     5. 원본 정책과 다르게 만들면 의미가 없다. 확신이 없으면 하지 말고 허브에 묻는다.
+   - **1회 수동 실측(B 계정 리허설 때 한 번, 선택 아님)**: 시뮬레이션이 못 보는 CloudWatch의 실제 태그 조건 처리와 조직 SCP를 확인한다. 사람이 SSO로 로그인한 별도 터미널에서 스크립트 하나를 돌린다.
+     ```
+     bash infra/scripts/rehearsal/replica-check.sh --profile rehearsal-b --confirm-account 12자리
+     ```
+     - 하는 일: 원본 `AlarmOps-AlarmWriter`의 권한 정책(`manage-alarmops-alarms`)과 권한 경계를 읽어 그대로 복사한 임시 역할 `AlarmOpsRehearsal-WriterReplica`(태그 `AlarmOpsRehearsal=true`)를 만든다. 신뢰 대상은 본인 SSO 역할뿐이다(프로필이 SSO 역할이 아니면 멈춘다). 그 역할을 assume 해서 아래 5개를 본다. 원본 역할·정책이 없으면 아무것도 만들지 않고 거부하고, 임시 역할이 이미 있으면 덮어쓰지 않고 멈춘다.
+     - 기대하는 표(전부 PASS여야 종료 코드 0):
+
+       | 항목 | 결과 | 비고 |
+       |---|---|---|
+       | (a) 태그 없는 PutMetricAlarm → 거부 | PASS | AccessDenied |
+       | (b) ManagedBy=AlarmOps 태그로 PutMetricAlarm → 성공 | PASS | 성공, list-tags 에서 ManagedBy=AlarmOps 확인 |
+       | (c) 태그 없는 알람에 TagResource(ManagedBy) → 거부 | PASS | AccessDenied |
+       | (d) 태그 없는 알람 DeleteAlarms → 거부 (#87 미확인 항목) | PASS | AccessDenied |
+       | (e) ManagedBy=AlarmOps 알람 DeleteAlarms → 성공 | PASS | 성공 |
+
+     - (c)(d)의 태그 없는 알람 `AlarmOpsRehearsal-replica-unmanaged`는 본인 자격증명으로 만든다. 시험 알람은 `AlarmOpsRehearsal-replica-test`다.
+     - 끝나면(실패·Ctrl+C 포함) 시험 알람 두 개, 인라인 정책, 임시 역할을 스스로 지운다. 정리 실패 경고가 나오면 같은 명령에 `--cleanup-only`를 붙여 다시 돌린다.
+     - 임시 자격증명은 출력·로그에 나오지 않는다. 로그는 `rehearsal-logs/<profile>/replica-check.md`(올리지 않는다).
+     - 실패하면(FAIL 행이 있으면) 허브에는 **표만** 보낸다. 오류 코드 말고 다른 출력·로그·자격증명은 보내지 않는다.
 5. `bash infra/scripts/rehearsal/cleanup.sh --profile rehearsal-b --confirm-account 12자리 --run-id 이름 [--stack]`. B 계정을 계속 쓰면 여기서 멈춘다. 연결을 끊을 때만 사람이 `bus-allowlist remove`를 하고, 시험 고객사를 더 쓰지 않으면 콘솔 고객사 화면에서 **Terminate…**로 해지 체크리스트를 닫는다(`infra/customer-stack/OFFBOARDING.md`). 계정 하나만 비활성화하는 버튼은 없다(고객사 단위 Suspend/Terminate뿐).
 6. 결과를 허브에 알린다. 항목별로 "됐다/안 됐다/TIMEOUT/SKIP"과 오류 코드만 보낸다. 로그(`rehearsal-logs/`)는 올리지 않는다.
 

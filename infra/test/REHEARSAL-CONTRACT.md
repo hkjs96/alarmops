@@ -15,6 +15,7 @@
 | `preflight.sh` | `--profile NAME` (필수). 쓰기 호출 없음 |
 | `install.sh` | `--profile`, `--confirm-account 12자리` |
 | `verify.sh` | `--profile`, `--confirm-account`, `--run-id ID` (생략 시 시각 기반 기본값) |
+| `replica-check.sh` | `--profile`, `--confirm-account`, `--cleanup-only` (#159). 테스트: `test_replica_check.py`. 가짜 aws 의 `iam_roles` 시나리오가 IAM·STS·CloudWatch 상태 모델을 켠다. 환경변수 `REHEARSAL_ASSUME_RETRIES`·`REHEARSAL_ASSUME_INTERVAL`(테스트는 3·0) |
 | `cleanup.sh` | `--profile`, `--confirm-account`, `--run-id ID` (필수), `--stack` (선택), `--stack-name N` (선택, 기본 `alarmops-customer`) |
 
 - 스크립트는 `bash 스크립트경로 플래그...`로 실행한다(실행 권한에 의존하지 않는다).
