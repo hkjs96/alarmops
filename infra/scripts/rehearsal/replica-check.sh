@@ -344,7 +344,7 @@ sys.exit(0 if any(x.get("Key") == "ManagedBy" for x in t) else 1)
     rp_prep_alarm "$CAN" ""
     rp_overwrite "$CAN" 2
     if [ "$(rp_cell)" != ALLOWED ]; then
-      rp_note "오류: 카나리 실패($v): Deny 가 없는 상태인데 태그 없는 알람 덮어쓰기가 $(rp_cell). 옛 정책이 남았거나 원본 정책에 구멍이 없다. REHEARSAL_PROBE_WAIT 를 늘려 다시 실행한다"
+      rp_note "오류: 카나리 실패($v): Deny 가 없는 상태인데 태그 없는 알람 덮어쓰기가 $(rp_cell). 옛 정책이 남았거나 원본 정책에 구멍이 없다. 첫 변형(null)이면 구멍이 없는 것이니 일반 모드 (f) 결과를 보고, 오류 줄과 종료 코드만 허브에 보낸다. 두 번째 변형이면 REHEARSAL_PROBE_WAIT=60 으로 다시 실행한다"
       exit 1
     fi
     rp_exec person cloudwatch delete-alarms --alarm-names "$CAN"
@@ -423,7 +423,7 @@ print("%g" % a[0]["Threshold"] if a else "")
   if [ -n "$NOTES" ]; then rh_say ""; rh_say "$NOTES"; fi
   rh_say ""
   if [ "$STAR" = 1 ]; then rh_say "* p1 이 거부돼서 본인 자격증명이 ManagedBy=AlarmOps 태그를 달아 대신 만든 알람으로 p3·p4 를 쟀다."; fi
-  rh_say "측정 완료(판정과 무관하게 종료 코드 0). 이 표만 허브에 보낸다(자격증명·로그는 보내지 않는다)"
+  rh_say "측정 완료(판정과 무관하게 종료 코드 0). 이 표와 그 아래 사유 줄만 허브에 보낸다(자격증명·로그는 보내지 않는다)"
   exit 0
 fi
 
