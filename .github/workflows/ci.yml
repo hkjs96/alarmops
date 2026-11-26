@@ -81,8 +81,9 @@ jobs:
           cat "$RUNNER_TEMP/ci-changes.out"
           cat "$RUNNER_TEMP/ci-changes.out" >> "$GITHUB_OUTPUT"
 
-  # Information only (D-62): classifies the PR as `low` or `human` with .github/scripts/pr_risk.py. Never fails, sets no label,
-  # has no write permission; the hub reads the result (job output / summary). Pull requests only.
+  # Information only (D-62): classifies the PR as `low` or `human`. Never fails, sets no label, has no write permission. This job
+  # runs the classifier of the PR's base commit via the PR's copy of pr_risk_check.sh, so it is NOT the official verdict: the hub
+  # re-runs `.github/scripts/pr_risk_check.sh <head-sha>` from main. Pull requests only.
   risk:
     if: ${{ github.event_name == 'pull_request' }}
     runs-on: ubuntu-24.04
@@ -91,6 +92,7 @@ jobs:
       contents: read
     outputs:
       risk: ${{ steps.classify.outputs.risk }}
+      sha: ${{ github.event.pull_request.head.sha }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -105,11 +107,11 @@ jobs:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
           # Errors are not fatal here: any failure below leaves the answer `human` and the job green.
-          if git diff --name-status --no-renames "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/files.txt"; then
-            python3 -I .github/scripts/pr_risk.py < "$RUNNER_TEMP/files.txt" || echo "risk=human" >> "$GITHUB_OUTPUT"
-          else
-            echo "::warning::git diff failed; risk=human"
+          export BASE_REF="$BASE_SHA"
+          if ! bash .github/scripts/pr_risk_check.sh "$HEAD_SHA"; then
+            echo "::warning::classifier could not run; risk=human"
             echo "risk=human" >> "$GITHUB_OUTPUT"
+            echo "sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
           fi
           exit 0
 
