@@ -160,6 +160,22 @@ class ReviewFindings(unittest.TestCase):
                 self.assertEqual(res[0], "human", p)
                 self.assertEqual(rule_of(res), "always-human", p)
 
+    # case: Windows PCs do not tell `docs/Decisions` from `docs/decisions`
+    def test_case_variants_of_human_paths_are_human(self):
+        for p in ("docs/Decisions/DECISIONS.md", "docs/decisions/decisions.md", "docs/Specs/x.md", "docs/Process/x.md",
+                  "docs/QA/x.md", "docs/UI/x.md", "docs/Qa/results.md", "docs/Go-Live.md", "docs/api-contract.md",
+                  ".GitHub/workflows/x.yml", "Infra/aws/x.yaml", "INFRA/CUSTOMER-STACK/template.yaml", "Db/prisma/x.sql",
+                  ".Claude/settings.json", "claude.md", "Infra/Scripts/Rehearsal/x.sh", "Package.JSON", "docs/Process/x.agent.md"):
+            for st in ("A", "M"):
+                self.assertEqual(run([(st, p)])[0], "human", (st, p))
+
+    def test_low_whitelists_are_exact_case(self):
+        self.assertEqual(run([("A", "Docs/research/a.md")])[0], "human")
+        self.assertEqual(run([("A", "DOCS/research/a.md")])[0], "human")
+        self.assertEqual(run([("A", "Infra/test/test_x.py")])[0], "human")
+        self.assertEqual(run([("A", "services/x/Tests/test_a.py")])[0], "human")
+        self.assertEqual(run([("A", "docs/research/a.md")])[0], "low")
+
     # test/ directory does not make a test
     def test_files_in_test_dirs_that_are_not_tests(self):
         for p in ("services/x/tests/conftest.py", "services/x/tests/__init__.py", "services/x/test/setup.ts",

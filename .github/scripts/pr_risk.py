@@ -141,15 +141,16 @@ def classify(files, raw=None):
         H = lambda rule, detail: (rule, detail, "human")
         L = lambda rule, detail: (rule, detail, "low")
         r = None
+        lp = path.lower()  # human lists are compared case-insensitively (Windows PCs); the low whitelists stay exact-case
         for pat, why in ALWAYS_HUMAN:
-            if _match(path, pat):
+            if _match(lp, pat.lower()):
                 r = H("always-human", f"{pat}: {why}")
                 break
         if r is None and DEP_FILE_RE.fullmatch(path.split("/")[-1]):
             r = H("dependency-file", "dependency / build file (always a person, also for Dependabot)")
         if r is None:
             for pat in DOCS_HUMAN:
-                if _match(path, pat):
+                if _match(lp, pat.lower()):
                     r = H("docs-human", f"{pat}: decision, test input, gate evidence or agent-read document")
                     break
         modes = (raw or {}).get(path)
