@@ -92,3 +92,21 @@ test('Google SSO: client id and allowed domains are required; bad entries fail; 
   assert.ok(bad.some((p) => p.startsWith('SSO_ALLOWED_EMAILS')));
   assert.ok(!bad.join(' ').includes('example.com'), 'no value is echoed');
 });
+
+test('SSO_ALLOWED_EMAILS: the Vercel CLI "[SENSITIVE]" placeholder (any case, quoted in a pulled file) and an empty value are skipped', () => {
+  for (const v of ['[SENSITIVE]', '[sensitive]', ' [Sensitive] ', '']) assert.deepEqual(checkConsoleDeployEnv({ ...GOOD, SSO_ALLOWED_EMAILS: v }), [], v);
+  const parsed = parseEnvFile('SSO_ALLOWED_EMAILS="[SENSITIVE]"\n');
+  assert.deepEqual(checkConsoleDeployEnv({ ...GOOD, ...parsed }), []);
+});
+
+test('SSO_ALLOWED_DOMAINS placeholder counts as not set (domains must be Plain)', () => {
+  assert.ok(checkConsoleDeployEnv({ ...GOOD, SSO_ALLOWED_DOMAINS: '[SENSITIVE]' }).some((p) => p.startsWith('SSO_ALLOWED_DOMAINS is not set')));
+});
+
+test('bad SSO_ALLOWED_EMAILS entry reports shape only, never the value', () => {
+  const secret = 'ab cd"@@x';
+  const out = checkConsoleDeployEnv({ ...GOOD, SSO_ALLOWED_EMAILS: secret }).join('\n');
+  assert.match(out, /entry #1 is not an exact e-mail address \(length 9, 2 "@", disallowed: quote\/whitespace\)/);
+  assert.ok(!out.includes('ab cd') && !out.includes('x'.repeat(1) + '"'));
+  assert.deepEqual(checkConsoleDeployEnv({ ...GOOD, SSO_ALLOWED_EMAILS: 'someone@example.com' }), []);
+});
