@@ -3,7 +3,7 @@
 # 사용: bash replica-check.sh --profile rehearsal-b --confirm-account 12자리 [--cleanup-only]
 # 사전 준비: 별도 터미널에서 SSO 로그인(프로필 rehearsal-<이름>). 종료 코드 1~5 는 표가 나오기 전 중단일 수 있다(GO-LIVE 4단계).
 # 원본 AlarmOps-AlarmWriter 의 권한 정책·권한 경계를 그대로 복사한 임시 역할 AlarmOpsRehearsal-WriterReplica 를 만들고,
-# 본인 SSO 역할로 assume 해서 5개를 확인한다. 끝나면(실패·중단 포함) 만든 것을 모두 지운다.
+# 본인 SSO 역할로 assume 해서 6개((a)~(f))를 확인한다. 끝나면(실패·중단 포함) 만든 것을 모두 지운다.
 # 임시 자격증명은 출력·로그·부모 셸 환경변수에 두지 않는다(호출마다 서브셸 안에서만 export).
 # 종료 코드: 전부 PASS 0, 그 밖 1, 인자·안전 관문 거부 2 이상.
 set -euo pipefail
@@ -236,9 +236,10 @@ rh_say "복제 역할 생성: $REPLICA (경계: ${BOUNDARY:-없음}, 신뢰: $CA
 rh_say ""
 rh_say "| 항목 | 결과 | 비고 |"
 rh_say "|---|---|---|"
-rp_row() {  # $1=항목 $2=PASS|FAIL $3=비고
+HOLD=0; HELD=""
+rp_row() {  # $1=항목 $2=PASS|FAIL $3=비고. HOLD=1 이면 표시를 미뤘다가(HELD) 나중에 순서대로 출력한다
   if [ "$2" = FAIL ]; then FAILS=$((FAILS + 1)); fi
-  rh_say "| $1 | $2 | $3 |"
+  if [ "$HOLD" = 1 ]; then HELD="| $1 | $2 | $3 |"; else rh_say "| $1 | $2 | $3 |"; fi
 }
 
 # ---- 5) assume (IAM 전파 대기 재시도)
@@ -315,30 +316,31 @@ sys.exit(0 if any(x.get("Key") == "ManagedBy" and x.get("Value") == "AlarmOps" f
   fi
 fi
 
-# (c)(d) 본인 자격증명으로 ManagedBy 없는 알람을 만들고 복제 역할로 건드려 본다
-rp_exec person cloudwatch put-metric-alarm --alarm-name "$ALARM_U" "${BASE[@]}"
-u_prepared=0; [ "$RP_RC" -eq 0 ] && u_prepared=1
-if [ "$RP_RC" -ne 0 ]; then
-  prep="준비 실패: 본인 자격증명으로 알람 생성 오류 코드 $(rp_code)"
-  rp_row "(c) 태그 없는 알람에 TagResource(ManagedBy) → 거부" FAIL "$prep"
-  rp_row "(d) 태그 없는 알람 DeleteAlarms → 거부" FAIL "$prep"
-else
-  rp_exec replica cloudwatch tag-resource --resource-arn "$ARN_U" --tags Key=ManagedBy,Value=AlarmOps
-  expect_denied "(c) 태그 없는 알람에 TagResource(ManagedBy) → 거부"
-  rp_exec replica cloudwatch delete-alarms --alarm-names "$ALARM_U"
-  expect_denied "(d) 태그 없는 알람 DeleteAlarms → 거부 (#87 미확인 항목)"
-fi
+# ALARM_U: 본인 자격증명으로 ManagedBy 없는 알람을 만든다. 만든 알람에 ManagedBy 가 붙어 있지 않은지도 본다.
+U_REASON=""
+rp_make_u() {
+  rp_exec person cloudwatch put-metric-alarm --alarm-name "$ALARM_U" "${BASE[@]}"
+  if [ "$RP_RC" -ne 0 ]; then U_REASON="본인 자격증명으로 알람 생성 오류 코드 $(rp_code)"; return 1; fi
+  rp_exec person cloudwatch list-tags-for-resource --resource-arn "$ARN_U" --output json
+  if [ "$RP_RC" -ne 0 ]; then U_REASON="만든 알람의 태그를 확인하지 못함(코드 $(rp_code))"; return 1; fi
+  if printf '%s' "$RP_OUT" | "$RH_PY" -c '
+import json, sys
+t = json.load(sys.stdin).get("Tags", [])
+sys.exit(0 if any(x.get("Key") == "ManagedBy" for x in t) else 1)
+'; then U_REASON="만든 알람에 ManagedBy 태그가 이미 붙어 있음"; return 1; fi
+  return 0
+}
+u_prepared=0
+if rp_make_u; then u_prepared=1; fi
 
-# (e) 관리 알람 삭제
-rp_exec replica cloudwatch delete-alarms --alarm-names "$ALARM_T"
-if [ "$RP_RC" -eq 0 ]; then rp_row "(e) ManagedBy=AlarmOps 알람 DeleteAlarms → 성공" PASS "성공"
-else rp_row "(e) ManagedBy=AlarmOps 알람 DeleteAlarms → 성공" FAIL "오류 코드 $(rp_code)"; fi
-
-# (f) 복제 역할이 태그 없는 기존 알람(ALARM_U)을 ManagedBy 요청 태그로 덮어쓸 수 있는가.
+# (f) 복제 역할이 태그 없는 기존 알람(ALARM_U)을 ManagedBy 요청 태그로 덮어쓸 수 있는가. (c)(d)보다 먼저 본다:
+#     (c)(d)가 알람 상태(태그·존재)를 바꾸기 전의 깨끗한 알람에서 판정해야 한다. 표에는 (e) 다음에 순서대로 낸다.
 #     CreateAlarmWithManagedByTag 는 요청 태그 조건만 있다. 기존 알람에도 적용되는지는 실측으로만 안다. 설정이 바뀌는지 보려고 임계값을 다르게 보낸다.
 F_LABEL="(f) 태그 없는 기존 알람 덮어쓰기(PutMetricAlarm+ManagedBy 요청 태그) → 거부"
+f_overwrote=0
+HOLD=1
 if [ "$u_prepared" != 1 ]; then
-  rp_row "$F_LABEL" FAIL "준비 실패: 본인 자격증명으로 알람을 만들지 못했다"
+  rp_row "$F_LABEL" FAIL "준비 실패: $U_REASON"
 else
   rp_exec replica cloudwatch put-metric-alarm --alarm-name "$ALARM_U" --namespace AlarmOpsRehearsal \
     --metric-name ReplicaCheck --statistic Average --period 60 --evaluation-periods 1 --threshold 2 \
@@ -346,6 +348,7 @@ else
   if [ "$RP_RC" -ne 0 ]; then
     expect_denied "$F_LABEL"
   else
+    f_overwrote=1
     thr=""; tagnote="조회 실패"
     rp_exec person cloudwatch describe-alarms --alarm-names "$ALARM_U" --output json
     if [ "$RP_RC" -eq 0 ]; then
@@ -376,6 +379,37 @@ sys.exit(0 if any(x.get("Key") == "ManagedBy" and x.get("Value") == "AlarmOps" f
     rp_row "$F_LABEL" FAIL "기존 고객 알람 덮어쓰기 가능: template.yaml CreateAlarmWithManagedByTag 보완 필요 ($thr, $tagnote)"
   fi
 fi
+HOLD=0
+
+# (f)가 덮어썼다면 알람이 오염됐다(설정·ManagedBy 태그). (c)(d)를 위해 지우고 태그 없이 다시 만든다. 못 하면 (c)(d)는 준비 실패.
+if [ "$f_overwrote" = 1 ]; then
+  rp_exec person cloudwatch delete-alarms --alarm-names "$ALARM_U"
+  if [ "$RP_RC" -ne 0 ]; then
+    u_prepared=0; U_REASON="(f)로 덮어써진 알람을 지우지 못함(코드 $(rp_code))"
+  elif rp_make_u; then
+    u_prepared=1
+  else
+    u_prepared=0; U_REASON="(f) 뒤 알람 재생성 실패: $U_REASON"
+  fi
+fi
+
+# (c)(d)
+if [ "$u_prepared" != 1 ]; then
+  prep="준비 실패: $U_REASON"
+  rp_row "(c) 태그 없는 알람에 TagResource(ManagedBy) → 거부" FAIL "$prep"
+  rp_row "(d) 태그 없는 알람 DeleteAlarms → 거부" FAIL "$prep"
+else
+  rp_exec replica cloudwatch tag-resource --resource-arn "$ARN_U" --tags Key=ManagedBy,Value=AlarmOps
+  expect_denied "(c) 태그 없는 알람에 TagResource(ManagedBy) → 거부"
+  rp_exec replica cloudwatch delete-alarms --alarm-names "$ALARM_U"
+  expect_denied "(d) 태그 없는 알람 DeleteAlarms → 거부 (#87 미확인 항목)"
+fi
+
+# (e) 관리 알람 삭제
+rp_exec replica cloudwatch delete-alarms --alarm-names "$ALARM_T"
+if [ "$RP_RC" -eq 0 ]; then rp_row "(e) ManagedBy=AlarmOps 알람 DeleteAlarms → 성공" PASS "성공"
+else rp_row "(e) ManagedBy=AlarmOps 알람 DeleteAlarms → 성공" FAIL "오류 코드 $(rp_code)"; fi
+rh_say "$HELD"
 
 rh_say ""
 if [ "$FAILS" -gt 0 ]; then

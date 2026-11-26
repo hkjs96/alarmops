@@ -80,7 +80,7 @@ B·C 계정 태그 흐름, untag 후 NEEDS_REVIEW와 STOP_MONITORING, 허용 목
 - 환경변수 거부 목록은 공통(`rh_env_check`)에 `replica-check.sh`만 `AWS_ENDPOINT_URL*`, `AWS_CONFIG_FILE`, `AWS_SHARED_CREDENTIALS_FILE`, `AWS_CA_BUNDLE`를 더한다(기존 verify·install 사용자에게 영향 없음).
 - 정리 규칙: 시험 알람 두 개(`AlarmOpsRehearsal-replica-test`, `AlarmOpsRehearsal-replica-unmanaged`)는 고정 이름으로 지운다. 임시 역할 `AlarmOpsRehearsal-WriterReplica`는 태그 `AlarmOpsRehearsal=true`를 확인한 뒤에만(인라인 정책 → 역할 순) 지운다. 태그가 없으면 지우지 않고 실패로 알린다. `cleanup.sh`는 이 역할이 남았으면 경고와 `--cleanup-only` 안내만 하고 직접 지우지 않는다.
 - 종료 코드: 전부 PASS 0, FAIL 행 또는 준비·정리 실패 1, 거부 2·3(공통), SSO 프로필 아님 4, 임시 역할이 이미 있음 5.
-- 결과표는 (a)~(f) 한 줄씩(`| 항목 | 결과 | 비고 |`). 비고에는 오류 코드만 쓴다.
+- 결과표는 (a)~(f) 한 줄씩(`| 항목 | 결과 | 비고 |`). 비고는 PASS 행에서는 대개 오류 코드(`AccessDenied`)나 "성공"이다. 하지만 (b) PASS("성공, list-tags 에서 ManagedBy=AlarmOps 확인")와 (f) FAIL("기존 고객 알람 덮어쓰기 가능: ... (임계값, 태그)")은 문장이고, 준비 단계 실패 때는 `(준비) 복제 역할 assume`, `(준비) 정책 전파(DescribeAlarms)` 행이 나올 수 있으며 (c)(d)에 "준비 실패: ..." 문장이 들어갈 수 있다. 판정 순서는 (a) (b) (f) (c) (d) (e)이고 표는 (a)~(f) 순으로 낸다. 비고에는 오류 코드와 알람 설정 사실만 쓰고 자격증명·메시지 본문은 쓰지 않는다.
 - 임시 자격증명은 서브셸 안에서만 쓰고 출력·로그에 쓰지 않는다. 모든 출력은 `common.sh`의 `rh_mask`(ExternalId + 자격증명 모양)를 거친다.
 - 가짜 aws: 시나리오 키 `iam_roles`(역할별 `path`·`boundary`·`policies`·`tags`), `caller_arn`, `assume_crlf`, `assume_fail_first`, `cw_overwrite_unmanaged_denied`, `sleep_ops`. 상태는 `$FAKE_AWS_LOG.state`에 둔다.
 - 테스트: `infra/test/test_replica_check.py`.

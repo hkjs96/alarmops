@@ -771,7 +771,7 @@ http://localhost:3107/auth/dev-login?as=admin
      - 임시 자격증명은 출력·로그에 나오지 않는다. 로그는 `rehearsal-logs/<profile>/replica-check.md`(올리지 않는다).
      - **표가 나오기 전에 멈추는 경우**: 종료 코드 1~5와 `오류:` 줄이 나온다. 2는 인자·환경변수·확인 계정 거부, 3은 중앙·개발·거부 목록 계정, 4는 프로필이 SSO 역할이 아님, 5는 임시 역할이 이미 있음, 1은 그 밖의 오류(원본 역할·정책 없음, 호출 실패 등)다. 이 코드는 `verify.sh`의 종료 코드 2(SKIP 있음)와 뜻이 다르다. 이때는 `오류:` 줄과 종료 코드만 허브에 보낸다.
      - 표에 FAIL이 있으면 허브에는 **표만** 보낸다. 표의 오류 코드 말고 다른 출력·로그·자격증명은 보내지 않는다.
-     - 끝난 뒤 잔존 확인: `bash infra/scripts/rehearsal/cleanup.sh`가 임시 역할이 남아 있으면 경고하고 `--cleanup-only` 명령을 안내한다. 또는 콘솔 IAM → 역할에서 `AlarmOpsRehearsal-WriterReplica`가 없는지 눈으로 확인한다.
+     - 끝난 뒤 잔존 확인: 위 5번의 cleanup.sh 명령(`--run-id` 포함)이 임시 역할이 남아 있으면 경고하고 `--cleanup-only` 명령을 안내한다. 또는 콘솔 IAM → 역할에서 `AlarmOpsRehearsal-WriterReplica`가 없는지 눈으로 확인한다.
 5. `bash infra/scripts/rehearsal/cleanup.sh --profile rehearsal-b --confirm-account 12자리 --run-id 이름 [--stack]`. B 계정을 계속 쓰면 여기서 멈춘다. 연결을 끊을 때만 사람이 `bus-allowlist remove`를 하고, 시험 고객사를 더 쓰지 않으면 콘솔 고객사 화면에서 **Terminate…**로 해지 체크리스트를 닫는다(`infra/customer-stack/OFFBOARDING.md`). 계정 하나만 비활성화하는 버튼은 없다(고객사 단위 Suspend/Terminate뿐).
 6. 결과를 허브에 알린다. 항목별로 "됐다/안 됐다/TIMEOUT/SKIP"과 오류 코드만 보낸다. 로그(`rehearsal-logs/`)는 올리지 않는다.
 
@@ -807,10 +807,11 @@ http://localhost:3107/auth/dev-login?as=admin
 | Lambda가 시작을 거부 | 비밀의 연결 문자열에 `sslmode=require`가 없다. 4-4의 3번 |
 | 콘솔에서 고객 해지 시 503 `COMMANDS_UNAVAILABLE` | Vercel에 `ALARM_COMMANDS_QUEUE_URL`이 없다. 4-5 |
 | 리허설 `verify.sh` (다)가 "알람이 N개에서 0개로 바뀜(D-16 위반)" FAIL | 스크립트가 알람 유지를 지켜보는 대기 중(기본 15분)에 콘솔에서 Stop monitoring을 눌렀다. 엔진 문제가 아니다. `AuditLog`에 그 시각의 `resource.stop_monitoring`이 있으면 이 경우다. `cleanup.sh … --run-id <방금 쓴 이름>`으로 정리하고 새 `--run-id`로 `verify.sh`를 다시 돌린다. Stop은 스크립트가 "(다) 대기 끝"이라고 물을 때 누른다 |
-| 실측 `replica-check.sh`: 표에 `(준비) 복제 역할 assume` 또는 `(준비) 정책 전파` FAIL | IAM 전파가 느리다. 환경변수 `REHEARSAL_ASSUME_RETRIES`(기본 12, 5초 간격)를 늘려(예: 36) 다시 실행한다. 그래도 같은 오류 코드면 그 코드만 허브에 보낸다 |
+| 실측 `replica-check.sh`: 표에 `(준비) 복제 역할 assume` 또는 `(준비) 정책 전파(DescribeAlarms)` FAIL | IAM 전파가 느리다. 환경변수 `REHEARSAL_ASSUME_RETRIES`(기본 12, 5초 간격)를 늘려(예: 36) 다시 실행한다. 그래도 같은 오류 코드면 그 코드만 허브에 보낸다 |
 | 실측: `오류: 역할 AlarmOpsRehearsal-WriterReplica 가 이미 있다`(종료 코드 5) | 이전 실행의 잔여물이다. 같은 명령에 `--cleanup-only`를 붙여 정리하고 다시 실행한다 |
 | 실측: `AlarmOpsRehearsal=true 태그가 없어 지우지 않는다` | 같은 이름의 다른 사람이 만든 역할이다. 지우지 않는다. 콘솔에서 누가 만들었는지 확인하고 허브에 알린다 |
 | 실측 (f) FAIL "기존 고객 알람 덮어쓰기 가능" | 정책 결함이다(남의 알람을 `ManagedBy` 요청 태그로 덮어쓸 수 있음). 고객 스택에 AlarmWriter를 켜기 전에 허브에 표를 보내 `template.yaml`의 `CreateAlarmWithManagedByTag` 보완을 이슈로 만든다 |
+| 실측 `replica-check.sh`: `환경변수 AWS_CA_BUNDLE 가 설정되어 있다`(또는 `AWS_ENDPOINT_URL*`, `AWS_CONFIG_FILE`, `AWS_SHARED_CREDENTIALS_FILE`)로 거부, 종료 코드 2 | 임시 자격증명이 엉뚱한 곳으로 가지 않게 막은 것이다. 그 터미널에서만 `unset AWS_CA_BUNDLE`(해당 변수)을 하고 다시 실행한다. 회사 TLS 검사 때문에 unset 하면 AWS 호출이 실패하면 허브에 문의한다 |
 
 ### 배경 (읽지 않아도 된다)
 

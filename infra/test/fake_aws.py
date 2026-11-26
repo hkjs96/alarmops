@@ -36,6 +36,7 @@ Scenario keys (all optional):
   cw_overwrite_unmanaged_denied  true: a replica PutMetricAlarm on an existing alarm WITHOUT ManagedBy=AlarmOps is denied
                      (models CloudWatch applying the resource tag on update); false/absent: the policy decides, so a
                      request tag ManagedBy=AlarmOps overwrites it (the suspected hole checked by replica-check (f))
+  fail_nth           {"service op": N}: the N-th call (1-based) of that operation exits 254 with InternalFailure
   sleep_ops          {"service op": seconds}: that call touches $FAKE_AWS_LOG.sleeping then sleeps (signal tests)
   iam_roles entries may carry "path": "/aws-reserved/sso.amazonaws.com/ap-northeast-2/" (iam get-role Arn includes it)
   assume_crlf        true: sts assume-role output ends every line with CRLF (Windows aws.exe)
@@ -455,6 +456,14 @@ def main() -> None:
 
     if fail_read:
         error("AccessDenied", op, f"not allowed ({scen['fail_reads']})", 255)
+    nth = (scen.get("fail_nth") or {}).get(f"{service} {op}")
+    if nth:   # the n-th call (1-based) of this operation fails
+        cf = os.environ["FAKE_AWS_LOG"] + ".count-" + f"{service}-{op}"
+        n = int(open(cf, encoding="utf-8").read() or 0) + 1 if os.path.exists(cf) else 1
+        with open(cf, "w", encoding="utf-8") as f:
+            f.write(str(n))
+        if n == nth:
+            error("InternalFailure", op, "simulated failure (nth)")
     if f"{service} {op}" in (scen.get("fail_ops") or []):
         error("InternalFailure", op, "simulated failure")
 

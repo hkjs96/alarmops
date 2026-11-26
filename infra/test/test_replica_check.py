@@ -18,12 +18,14 @@ from rehearsal_support import ACCT, EID, PROFILE, REPO, Sandbox, mode
 from test_rehearsal_harness import Base
 
 SCRIPT = "replica-check.sh"
+LONG_ALARM = "AlarmOps-SQS-ApproximateAgeOfOldestMessage-alarmopsRehearsalQueueB8Xyz123"
+LONG_RUN = "AlarmOpsRehearsalRunB8Xyz123abcDEF456ghiJKL789"
 ORIG = "AlarmOps-AlarmWriter"
 POLICY_NAME = "manage-alarmops-alarms"
 REPLICA = fake_aws.REPLICA_NAME
 TEST_ALARM = "AlarmOpsRehearsal-replica-test"
 UNMANAGED = "AlarmOpsRehearsal-replica-unmanaged"
-SSO_ROLE = "AWSReservedSSO_AdminAccess_0123456789abcdef"
+SSO_ROLE = "AWSReservedSSO_AdministratorAccess_0123456789abcdef"
 SSO_ARN = f"arn:aws:sts::{ACCT}:assumed-role/{SSO_ROLE}/someone"
 BOUNDARY = f"arn:aws:iam::{ACCT}:policy/org-boundary"
 CRED_VALUES = (fake_aws.REPLICA_KEY, fake_aws.REPLICA_SECRET, fake_aws.REPLICA_TOKEN)
@@ -79,7 +81,7 @@ class ReplicaBase(Base):
         return [f'{c["service"]} {c["op"]}' for c in (self.sb.calls() if calls is None else calls)]
 
     def row(self, res, tag):
-        rows = [l for l in res.out.splitlines() if l.startswith("|") and f"({tag})" in l]
+        rows = [l for l in res.out.splitlines() if l.startswith(f"| ({tag})")]
         self.assertEqual(len(rows), 1, f"row ({tag}) in:\n{res.out}")
         return rows[0]
 
@@ -467,7 +469,7 @@ class MaskUnit(unittest.TestCase):
 
     def test_secret_shapes_are_masked(self):
         tok_pct = "FwoGZXIvYXdzE%2BabcDEFg%2Fhij0123klmNOPqrstUVWXyz4567%2B89ABCDEFghij"
-        tok_dash = "IQoJb3JpZ2luX2VjE-abcDEFghij_klmnoPQRSTuvwxYZ0123456789-abc_defGHIjkl"
+        tok_dash = "IQoJb3JpZ2luX2VjE-abcDEFghij_klmnoPQRSTuvwxYZ0123456789-abc_defGHIjkl-QRSTuvwxYZ0123456789_abcDEFghij"
         cases = {
             "pct": (f"token {tok_pct} end", tok_pct),
             "dash_underscore": (f"x {tok_dash}", tok_dash),
@@ -477,6 +479,12 @@ class MaskUnit(unittest.TestCase):
             "secret_snake": ("secret_access_key: abc/def", "abc/def"),
             "akia": ("key AKIAIOSFODNN7EXAMPLE used", "AKIAIOSFODNN7EXAMPLE"),
             "asia": ("key ASIAFAKEREPLICAKEY0001", "ASIAFAKEREPLICAKEY0001"),
+            "access_token": ('{"accessToken":"abcDEF123xyz"}', "abcDEF123xyz"),
+            "bearer": ("Authorization: Bearer abcDEF123xyz.tok", "abcDEF123xyz.tok"),
+            "sso_bearer": ("x-amz-sso_bearer_token: abcDEF123xyz", "abcDEF123xyz"),
+            "password": ("password=hunter2hunter2", "hunter2hunter2"),
+            "secret_key": ('"SecretKey": "abcDEF123xyz"', "abcDEF123xyz"),
+            "slash_token": ("tok " + "aB3/" * 12, "aB3/aB3/aB3/"),
         }
         for name, (text, secret) in cases.items():
             with self.subTest(name):
@@ -489,7 +497,11 @@ class MaskUnit(unittest.TestCase):
         for benign in ("https://sqs.ap-northeast-2.amazonaws.com/111111111111/alarmops-rehearsal-run-0001",
                        "arn:aws:iam::111111111111:role/AlarmOps-AlarmWriter",
                        '{"MetricAlarms": [{"AlarmName": "alarm-own-q1", "Threshold": 1.0}]}',
-                       "alarmops-rehearsal-averyveryverylongrunidwithoutuppercaseletters-and-more-0123456789"):
+                       "alarmops-rehearsal-averyverylongrunidwithoutuppercase-and-more-0123456789",
+                       LONG_ALARM, SSO_ROLE, "alarmops-rehearsal-" + LONG_RUN,
+                       f"arn:aws:iam::111111111111:role/{LONG_ALARM}",
+                       f"arn:aws:iam::111111111111:role/aws-reserved/sso.amazonaws.com/ap-northeast-2/{SSO_ROLE}",
+                       f"https://sqs.ap-northeast-2.amazonaws.com/111111111111/alarmops-rehearsal-{LONG_RUN}"):
             with self.subTest(benign):
                 self.assertEqual(self.mask(benign).strip(), benign)
 
@@ -497,7 +509,7 @@ class MaskUnit(unittest.TestCase):
         import subprocess
         sb = Sandbox()
         self.addCleanup(sb.close)
-        secret = "ZZtopSECRETvalue0123456789abcdefghijklmnopqrstuvwxyzQWERT"
+        secret = "ZZtopSECRET+value0123456789abcdefghijklmnopqrstuvwxyzQWERT"
         sb.set_scenario(leak=secret)
         env = sb.env()
         for script in ('RH_PROFILE=rehearsal-a; aws_r cloudwatch describe-alarms >/dev/null',
@@ -505,6 +517,167 @@ class MaskUnit(unittest.TestCase):
             cp = subprocess.run(["bash", "-c", 'source "$1"; ' + script, "_", self.COMMON],
                                 capture_output=True, text=True, env=env, timeout=30)
             self.assertNotIn(secret, cp.stdout + cp.stderr, script)
+
+
+
+class MaskTwoTiers(unittest.TestCase):
+    """Data path (aws_r stdout) masks only ExternalId, key ids and keyword values; the length heuristic is for output
+    people see (rh_say/rh_log/rh_die, aws_r stderr, rp_mask)."""
+    COMMON = MaskUnit.COMMON
+
+    def run_bash(self, script, *args, env=None):
+        import os
+        import subprocess
+        e = {"PATH": os.environ["PATH"], "HOME": "/tmp", **(env or {})}
+        cp = subprocess.run(["bash", "-c", 'source "$1"; ' + script, "_", self.COMMON, *args],
+                            capture_output=True, text=True, env=e, timeout=30)
+        self.assertEqual(cp.returncode, 0, cp.stderr)
+        return cp.stdout
+
+    def test_data_mask_keeps_long_names(self):
+        for text in (LONG_ALARM, SSO_ROLE, "x" * 100, "aB3/" * 12,
+                     f"arn:aws:iam::111111111111:role/{LONG_ALARM}",
+                     f'{{"AlarmName": "{LONG_ALARM}", "Dimensions": [{{"Name": "QueueName", "Value": "alarmops-rehearsal-{LONG_RUN}"}}]}}'):
+            with self.subTest(text[:30]):
+                self.assertEqual(self.run_bash('rh_mask_data "$2"', text).strip(), text)
+
+    def test_data_mask_still_hides_keys_keywords_and_external_id(self):
+        out = self.run_bash('rh_mask_data "$2"', f"a ASIAFAKEREPLICAKEY0001 b X-Amz-Security-Token=abc%2Bdef id={EID}",
+                            env={"REHEARSAL_EXTERNAL_ID": EID})
+        for secret in ("ASIAFAKEREPLICAKEY0001", "abc%2Bdef", EID):
+            self.assertNotIn(secret, out)
+
+    def test_data_mask_json_value_stops_at_the_quote(self):
+        out = self.run_bash('rh_mask_data "$2"', '{"Password": "x1", "AlarmName": "keep-me"}')
+        self.assertIn("keep-me", out)
+        self.assertNotIn("x1", out)
+
+    def test_human_mask_is_narrow(self):
+        long_plain = "a" * 100          # a single 80+ char token is still hidden
+        self.assertNotIn(long_plain, self.run_bash('rh_mask "$2"', long_plain))
+        self.assertEqual(self.run_bash('rh_mask "$2"', LONG_ALARM).strip(), LONG_ALARM)
+
+
+class DataPaths(ReplicaBase):
+    """Long mixed-case names must survive every script that parses aws_r output (#160 review)."""
+
+    def write_run_log(self, run_id, queue):
+        d = self.sb.log_dir / PROFILE
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{run_id}.md").write_text(f"QUEUE: {queue}\n", encoding="utf-8")
+
+    def test_cleanup_finds_and_deletes_long_named_alarm_and_queue(self):
+        from test_rehearsal_harness import alarm
+        q = "alarmops-rehearsal-" + LONG_RUN
+        self.write_run_log("run-one", q)
+        self.sb.set_scenario(
+            queues={q: {"tags": {"AlarmOpsRehearsal": "true", "AlarmOpsRehearsalRun": "run-one"}}},
+            alarms=[alarm(LONG_ALARM, q, {"ManagedBy": "AlarmOps"})])
+        res = self.sb.run("cleanup.sh", self.sb.good_args("cleanup.sh", run_id="run-one"))
+        self.assertEqual(res.code, 0, res.text)
+        from rehearsal_support import alarm_names, option_values
+        deleted = {n for c in self.sb.calls() if c["op"] == "delete-alarms" for n in alarm_names(c)}
+        self.assertEqual(deleted, {LONG_ALARM})
+        urls = [u for c in self.sb.calls() if c["op"] == "delete-queue" for u in option_values(c["argv"], "--queue-url")]
+        self.assertEqual([u.rsplit("/", 1)[-1] for u in urls], [q])
+
+    def test_verify_keeps_the_long_queue_url(self):
+        res = self.sb.run("verify.sh", self.sb.good_args("verify.sh", run_id=LONG_RUN), stdin_text="y\n" * 12)
+        queue = "alarmops-rehearsal-" + LONG_RUN
+        expect = f"https://sqs.ap-northeast-2.amazonaws.com/{ACCT}/{queue}"
+        urls = [a for c in self.sb.calls() if c["service"] == "sqs" and c["op"] in ("tag-queue", "untag-queue")
+                for i, a in enumerate(c["argv"]) if i and c["argv"][i - 1] == "--queue-url"]
+        self.assertTrue(urls, res.text)
+        self.assertEqual(set(urls), {expect})
+
+    def test_verify_alarm_detection_with_long_names(self):
+        from test_rehearsal_harness import alarm
+        queue = "alarmops-rehearsal-" + LONG_RUN
+        self.sb.set_scenario(alarms=[alarm(LONG_ALARM, queue, {"ManagedBy": "AlarmOps"})])
+        res = self.sb.run("verify.sh", self.sb.good_args("verify.sh", run_id=LONG_RUN), stdin_text="y\n" * 12)
+        self.assertIn(LONG_ALARM, self.sb.report(LONG_RUN) + res.out + res.err, "(나) must see the long-named alarm")
+
+    def test_preflight_shows_long_stack_name(self):
+        name = "alarmops-SQS-ApproximateAgeOfOldestMessage-alarmopsRehearsal-B8Xyz123"
+        self.sb.set_scenario(stacks=[{"StackName": name, "StackStatus": "CREATE_COMPLETE", "Tags": []}])
+        res = self.sb.run("preflight.sh", ["--profile", PROFILE])
+        self.assertIn(name, res.text)
+
+    def test_install_updates_existing_stack_with_long_tag_values(self):
+        self.sb.set_scenario(stacks=[{"StackName": "alarmops-customer", "StackStatus": "CREATE_COMPLETE",
+                                      "Tags": [{"Key": "Note", "Value": LONG_ALARM},
+                                               {"Key": "AlarmOpsRehearsal", "Value": "true"}]}])
+        res = self.sb.run("install.sh", self.sb.good_args("install.sh"))
+        self.assertIn("update-stack", [c["op"] for c in self.sb.calls()], res.text)
+
+    def test_replica_check_prints_the_sso_role_name(self):
+        self.scenario()
+        res = self.go()
+        self.assertIn(f"신뢰: {SSO_ROLE}", res.out)
+        self.assertIn(f"신뢰: {SSO_ROLE}", self.sb.log_text())
+
+
+class FirstThenCD(ReplicaBase):
+    """(f) is judged first, on a clean ALARM_U; (c)/(d) must not pollute it and (f) must not pollute (c)/(d)."""
+    LOOSE = copy.deepcopy(POLICY)
+    LOOSE["Statement"][3].pop("Condition")     # ChangeOwnAlarms without the tag condition: (c)/(d) wrongly allowed
+    LOOSE["Statement"].pop()                   # no Deny on ManagedBy tag edits
+
+    def replica_ops_on_u(self):
+        return [c["op"] for c in self.sb.calls()
+                if c["as_replica"] and UNMANAGED in " ".join(c["argv"])]
+
+    def test_f_runs_before_c_and_d(self):
+        self.scenario()
+        self.go()
+        self.assertEqual(self.replica_ops_on_u(), ["put-metric-alarm", "tag-resource", "delete-alarms"])
+
+    def test_table_rows_stay_in_order(self):
+        self.scenario()
+        res = self.go()
+        order = [m.group(1) for m in re.finditer(r"^\| \(([a-f])\)", res.out, re.M)]
+        self.assertEqual(order, list("abcdef"))
+
+    def test_overwrite_resets_the_alarm_for_c_and_d(self):
+        self.scenario(cw_overwrite_unmanaged_denied=False)
+        res = self.go()
+        v = self.verdicts(res)
+        self.assertEqual((v["c"], v["d"], v["f"]), ("PASS", "PASS", "FAIL"), res.out)   # not polluted by (f)'s tag
+        ops = [(c["op"], c["as_replica"]) for c in self.sb.calls() if UNMANAGED in " ".join(c["argv"])
+               or (c["op"] == "delete-alarms" and UNMANAGED in " ".join(c["argv"]))]
+        i_f = ops.index(("put-metric-alarm", True))
+        self.assertEqual(ops[i_f + 1], ("describe-alarms", False))
+        self.assertIn(("delete-alarms", False), ops[i_f:])
+        self.assertIn(("put-metric-alarm", False), ops[i_f:])     # re-created by the person
+
+    def test_c_and_d_allowed_does_not_change_f_denied(self):
+        self.scenario(policy=self.LOOSE, cw_overwrite_unmanaged_denied=True)
+        res = self.go()
+        v = self.verdicts(res)
+        self.assertEqual(v["f"], "PASS", res.out)
+        self.assertEqual((v["c"], v["d"]), ("FAIL", "FAIL"), res.out)
+        self.assertNotEqual(res.code, 0)
+
+    def test_c_and_d_allowed_does_not_change_f_allowed(self):
+        self.scenario(policy=self.LOOSE, cw_overwrite_unmanaged_denied=False)
+        res = self.go()
+        v = self.verdicts(res)
+        self.assertEqual(v["f"], "FAIL", res.out)
+        self.assertIn("임계값 1→2", self.row(res, "f"))
+        self.assertEqual((v["c"], v["d"]), ("FAIL", "FAIL"), res.out)
+        self.assertCleanedUp()
+
+    def test_recreate_failure_marks_c_and_d_as_prepare_failures(self):
+        # put-metric-alarm calls: (a)=1 (b)=2 ALARM_U=3 (f)=4 re-create=5
+        self.scenario(cw_overwrite_unmanaged_denied=False, fail_nth={"cloudwatch put-metric-alarm": 5})
+        res = self.go()
+        v = self.verdicts(res)
+        self.assertEqual(v["f"], "FAIL")
+        for k in "cd":
+            self.assertIn("준비 실패", self.row(res, k))
+            self.assertEqual(v[k], "FAIL")
+        self.assertEqual([o for o in self.replica_ops_on_u()], ["put-metric-alarm"])
+        self.assertCleanedUp()
 
 
 class Docs(unittest.TestCase):
@@ -517,12 +690,18 @@ class Docs(unittest.TestCase):
     def test_review_docs(self):
         gl = (REPO / "docs" / "GO-LIVE.md").read_text(encoding="utf-8")
         for needle in ("aws sso login --profile rehearsal-b", "REHEARSAL_ASSUME_RETRIES", "--cleanup-only",
-                       "(f)", "오류:", "종료 코드", "AlarmOpsRehearsal-WriterReplica"):
+                       "(f)", "오류:", "종료 코드", "AlarmOpsRehearsal-WriterReplica", "(준비) 정책 전파(DescribeAlarms)",
+                       "AWS_CA_BUNDLE", "unset"):
             self.assertIn(needle, gl, needle)
+        self.assertNotIn("`bash infra/scripts/rehearsal/cleanup.sh`가 임시 역할이", gl)
+        self.assertIn("5번의 cleanup.sh 명령", gl)
+        head = (REPO / "infra" / "scripts" / "rehearsal" / "replica-check.sh").read_text(encoding="utf-8").split("set -e", 1)[0]
+        self.assertIn("6개", head)
+        self.assertNotIn("5개", head)
         rd = (REPO / "infra" / "scripts" / "rehearsal" / "README.md").read_text(encoding="utf-8")
         self.assertIn("aws sso login --profile rehearsal-b", rd)
         ct = (REPO / "infra" / "test" / "REHEARSAL-CONTRACT.md").read_text(encoding="utf-8")
-        for needle in ("replica-check.md", "5개", "태그"):
+        for needle in ("replica-check.md", "5개", "태그", "(준비)"):
             self.assertIn(needle, ct, needle)
 
     def test_go_live_and_readme_mention_script(self):

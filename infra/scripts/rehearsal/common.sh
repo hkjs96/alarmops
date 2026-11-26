@@ -19,24 +19,45 @@ RH_ALLOWED=" --profile "
 
 rh_die() { printf '오류: %s\n' "$(rh_mask "$1")" >&2; exit "${2:-1}"; }
 
-# 출력에 나가는 모든 문자열의 단일 마스킹 지점(aws_r, rh_say, rh_log, rh_die). ExternalId 원문과 자격증명 모양을 가린다:
-#  - ASIA/AKIA 키 ID
-#  - 키워드(security-token, session_token, secret_access_key; 대소문자 무시) 뒤의 값: X-Amz-Security-Token=..., "SecretAccessKey": "..."
-#  - 40자 이상 base64/URL 인코딩 모양(영문 대·소문자와 숫자를 모두 포함할 때만). 긴 큐 이름·ARN 같은 소문자 이름은 건드리지 않는다.
-# awk 는 구간 표현식 {n,} 를 쓰지 않는다(mawk 호환).
-rh_mask() {
+# 마스킹은 두 단계다.
+#  rh_mask_data: 데이터 경로(aws_r 의 stdout 반환. 호출자가 알람·큐 이름, URL 을 파싱한다). 확실한 것만 가린다:
+#    ExternalId 원문, ASIA/AKIA 키 ID, 키워드 뒤의 값(security-token, session_token, secret_access_key, secret_key,
+#    access_token, x-amz-sso_bearer_token, bearer, authorization, password; 값은 공백·따옴표·쉼표·&·; 에서 끝난다).
+#    sed 의 I(대소문자 무시) 플래그는 GNU sed 전용이다(Git Bash 포함, BSD/macOS sed 는 다를 수 있다).
+#  rh_mask: 사람에게 보이는 경로(rh_say, rh_log, rh_die, aws_r 의 stderr, rp_mask). rh_mask_data 에 더해 긴 토큰 휴리스틱:
+#    40자 이상이면서 + / = % 중 하나를 포함하거나, 80자 이상 단일 토큰. 긴 이름·ARN·URL 이 걸리지 않게
+#    "arn:aws" 또는 "://" 를 포함한 단어는 건드리지 않는다. awk 는 구간 표현식 {n,} 를 쓰지 않는다(mawk 호환).
+rh_mask_data() {
   local t="$1"
   if [ -n "$RH_EID" ]; then t="${t//"$RH_EID"/****}"; fi
   t="$(printf '%s\n' "$t" | sed -E \
     -e 's/(ASIA|AKIA)[A-Z0-9]{12,}/****/g' \
-    -e "s/(security-token|session_?token|secret_?access_?key)[\"'=: ]+[^[:space:]]+/\\1=****/Ig" |
-    awk '{
+    -e 's/(bearer|basic)[ ]+[A-Za-z0-9._~+\/=-]{8,}/\1 ****/Ig' \
+    -e "s/(security-token|session_?token|secret_?access_?key|secret_?key|access_?token|x-amz-sso_bearer_token|bearer|authorization|password)[\"'=: ]+[^[:space:],\"'&;)}]+/\\1=****/Ig")"
+  printf '%s' "$t"
+}
+
+rh_mask() {
+  local t
+  t="$(rh_mask_data "$1")"
+  t="$(printf '%s\n' "$t" | awk '
+    function maskword(w,   out, tok, rest) {
+      if (index(w, "arn:aws") || index(w, "://")) return w
+      out = ""; rest = w
+      while (match(rest, /[A-Za-z0-9+\/=%_-]+/)) {
+        tok = substr(rest, RSTART, RLENGTH)
+        if ((length(tok) >= 40 && tok ~ /[+\/=%]/) || length(tok) >= 80) tok = "****"
+        out = out substr(rest, 1, RSTART - 1) tok
+        rest = substr(rest, RSTART + RLENGTH)
+      }
+      return out rest
+    }
+    {
       out = ""; s = $0
-      while (match(s, /[A-Za-z0-9+\/=%_-]+/)) {
-        tok = substr(s, RSTART, RLENGTH)
-        if (length(tok) >= 40 && tok ~ /[A-Z]/ && tok ~ /[a-z]/ && tok ~ /[0-9]/) tok = "****"
-        out = out substr(s, 1, RSTART - 1) tok
-        s = substr(s, RSTART + RLENGTH)
+      while (match(s, /[^ \t"\047,]+/)) {
+        rs = RSTART; rl = RLENGTH   # maskword 안의 match 가 RSTART/RLENGTH 를 덮어쓴다
+        out = out substr(s, 1, rs - 1) maskword(substr(s, rs, rl))
+        s = substr(s, rs + rl)
       }
       print out s
     }')"
@@ -99,12 +120,12 @@ rh_parse_args() {
   done
 }
 
-# 모든 aws 호출은 이 래퍼로만. 출력은 ExternalId 마스킹을 거친다.
+# 모든 aws 호출은 이 래퍼로만. stdout 은 rh_mask_data(데이터 경로), stderr 은 rh_mask(사람에게 보임)를 거친다.
 aws_r() {
   local out rc=0 errf err
   rh_tmpfile; errf="$RH_TMPF"
   out="$(aws --profile "$RH_PROFILE" --region "$RH_REGION" "$@" 2>"$errf" </dev/null)" || rc=$?   # stdin 을 넘기지 않는다(사람 응답을 aws 가 먹지 않게)
-  if [ -n "$out" ]; then printf '%s\n' "$(rh_mask "$out")"; fi
+  if [ -n "$out" ]; then printf '%s\n' "$(rh_mask_data "$out")"; fi   # 데이터 경로: 긴 토큰 휴리스틱을 쓰지 않는다
   if [ -s "$errf" ]; then
     err="$(cat "$errf")"
     printf '%s\n' "$(rh_mask "$err")" >&2
