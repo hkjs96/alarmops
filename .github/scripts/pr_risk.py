@@ -13,11 +13,11 @@ $GITHUB_STEP_SUMMARY (else stderr); `risk=` and `sha=` go to $GITHUB_OUTPUT when
 Anything that cannot be established from the input makes the answer human.
 
 low  = every file is one of:
-  - a document under docs/, added or modified, regular file (mode 100644), not a script (.sh .py .mjs .js ...), and not one
+  - a document under docs/ (.md, .png, .jpg only), added or modified, regular file (mode 100644), and not one
     of the documents that tests read, that are gate evidence (docs/qa/**) or that agents read as instructions
     (docs/ui/**, specs, DATA-MODEL, API-CONTRACT, PERSONAS, DECISIONS, ...). See DOCS_HUMAN.
-  - a NEW test file (status A, mode 100644), recognised by file name only: *.test.ts(x), *.test.mjs, *.spec.ts, test_*.py,
-    *_test.py; apps/console/e2e only *.spec.ts. Any change to an existing test file is human (a test can be weakened
+  - a NEW test file (status A, mode 100644) by file name (*.test.ts(x), *.test.mjs, *.spec.ts, test_*.py, *_test.py) AND location
+    (infra/test/, services/*/tests/, packages/*/test/, apps/console/e2e/*.spec.ts, apps/console/src/**/*.test.ts(x)). Any change to an existing test file is human (a test can be weakened
     by editing it), and so is a deleted one.
 human = everything else, in particular .github/**, .claude/**, CLAUDE.md, infra/aws/**, infra/customer-stack/**,
   infra/scripts/rehearsal/**, db/**, every dependency file (package.json, lock files, requirements*, pyproject.toml, ...,
@@ -30,6 +30,7 @@ import sys
 
 ALWAYS_HUMAN = [
     (".github/**", "workflow / CI / script change"),
+    ("docs/process/**", "agent definition drafts that a person copies into .claude/"),
     (".claude/**", "agent configuration change"),
     ("CLAUDE.md", "project instructions change"),
     ("infra/aws/**", "central AWS stack change"),
@@ -59,7 +60,8 @@ DEP_FILE_RE = re.compile(
     r"|setup\.py|setup\.cfg|uv\.lock|Gemfile(?:\.lock)?|go\.(?:mod|sum)|Cargo\.(?:toml|lock)|Dockerfile[^/]*)",
     re.I,
 )
-SCRIPT_EXT = (".sh", ".bash", ".py", ".mjs", ".cjs", ".js", ".ts", ".ps1", ".cmd", ".bat", ".command")
+# Documents: only these extensions can be low (.html mockups, .json, .yml, .svg, scripts, ... are human).
+DOCS_LOW_EXT = (".md", ".png", ".jpg")
 TEST_NAME_RE = re.compile(r"(?:.+\.(?:test\.tsx?|test\.mjs|spec\.ts)|test_[^/]+\.py|[^/]+_test\.py)")
 
 
@@ -83,17 +85,24 @@ def _match(path, pattern):
     return re.fullmatch(rx, path) is not None
 
 
+# Where a NEW test file may be low (and only by file name). Anything else, e.g. a *.test.ts inside services/x/src, is human.
+TEST_DIRS = [
+    "infra/test/**",
+    "services/*/tests/**",
+    "packages/*/test/**",
+    "apps/console/e2e/*.spec.ts",
+]
+
+
 def is_test_file(path):
-    """By file name only; a `test/` directory does not make a file a test."""
-    parts = path.split("/")
-    base = parts[-1]
-    if _match(path, "apps/console/e2e/**") and not _match(path, "apps/console/e2e/*.spec.ts"):
-        return False
+    """By file name AND location; a `test/` directory alone does not make a file a test."""
+    base = path.split("/")[-1]
     if not TEST_NAME_RE.fullmatch(base):
         return False
-    if base.endswith(".py") and "src" in parts[:-1]:
-        return False  # a test_*.py inside a product package is product code until shown otherwise
-    return True
+    if _match(path, "apps/console/src/**"):
+        # console tests live next to the code: only *.test.ts(x) there, nothing else under src
+        return bool(re.fullmatch(r".+\.test\.tsx?", base))
+    return any(_match(path, p) for p in TEST_DIRS)
 
 
 def parse_files(text):
@@ -150,8 +159,8 @@ def classify(files, raw=None):
                 r = H("docs-deleted", "a deleted document")
             elif status not in ("A", "M"):
                 r = H("docs-status", f"status {status}")
-            elif path.lower().endswith(SCRIPT_EXT):
-                r = H("docs-script", "an executable-type file under docs/")
+            elif not path.lower().endswith(DOCS_LOW_EXT):
+                r = H("docs-extension", "only .md, .png and .jpg files are low (.html, .json, .yml, .svg, scripts: a person)")
             elif modes is None:
                 r = H("docs-mode-unknown", "file mode unknown (no --raw input)")
             elif not regular:

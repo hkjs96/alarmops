@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Official PR risk verdict (D-62). Usage: bash .github/scripts/pr_risk_check.sh <pr-head-sha>
 #
-# Run by the hub (and, as information only, by the `risk` job of ci.yml). The classifier is taken from origin/main, never from
+# Run by the hub. The classifier is taken from origin/main, never from
 # the PR, so a PR cannot change the rules that judge it. The base is FIXED to origin/main: there is no environment variable
-# or option to change it. The script first runs `git fetch origin main` (a failure stops it, so a stale main cannot be used);
-# only inside GitHub Actions, where actions/checkout has just fetched all branches and has no credentials, the fetch is skipped.
+# or option to change it. The script always runs `git fetch origin main` first (a failure stops it, so a stale main cannot
+# be used). The `risk` job of ci.yml does not use this script.
 # The printed JSON line carries the head SHA; the hub merges a `low` PR only if that SHA is still the PR's head at merge time.
 #
 # The head must already be in the local repository (`git fetch origin pull/<n>/head` or the PR branch).
@@ -20,9 +20,8 @@ if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
 fi
 base_ref="origin/main"
 
-if [ "${GITHUB_ACTIONS:-}" != "true" ]; then
-  git fetch --quiet origin main
-fi
+# Always fetched, no exception (an environment variable must not be able to skip it); a failure stops the script.
+git fetch --quiet origin main
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT

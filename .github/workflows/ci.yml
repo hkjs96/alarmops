@@ -101,15 +101,22 @@ jobs:
       - id: classify
         continue-on-error: true
         env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           # Errors are not fatal here: any failure below leaves the answer `human` and the job green.
-          # The script judges against origin/main (fixed); actions/checkout with fetch-depth 0 has just fetched it.
-          if ! bash .github/scripts/pr_risk_check.sh "$HEAD_SHA"; then
+          # For information only: the classifier of the fixed base commit judges base...head. The official verdict is the
+          # hub's (pr_risk_check.sh, which always fetches origin/main itself).
+          fail() {
             echo "::warning::classifier could not run; risk=human"
             echo "risk=human" >> "$GITHUB_OUTPUT"
             echo "sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
-          fi
+            exit 0
+          }
+          git show "$BASE_SHA:.github/scripts/pr_risk.py" > "$RUNNER_TEMP/pr_risk.py" || fail
+          git diff --name-status --no-renames "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/name-status.txt" || fail
+          git diff --raw --no-renames "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/raw.txt" || fail
+          python3 -I "$RUNNER_TEMP/pr_risk.py" --head "$HEAD_SHA" --raw "$RUNNER_TEMP/raw.txt" < "$RUNNER_TEMP/name-status.txt" || fail
           exit 0
 
   test:
