@@ -63,6 +63,26 @@ def test_sqs_untag_event_keeps_alarms_and_marks_needs_review(env, monkeypatch):
     assert "delete_alarms" not in fake.cw(R).writes()
 
 
+def test_sqs_missing_from_list_but_get_queue_url_ok_keeps_alarms(env):
+    """ListQueues alone must never delete alarms: the queue is still there per GetQueueUrl."""
+    repo, fake, sess, eng, acct = env
+    sess.add(rgt(R, ["sqs"], []))
+    sess.add(("sqs", R, "list_queues", {}))                                   # list omits the queue
+    sess.add(("sqs", R, "get_queue_url", {"QueueUrl": SQS_URL}, {"QueueName": "jobs"}))
+    _tags_without_monitoring(sess)
+    counts = eng.sync_account(acct.id, "TAG_RECONCILE")
+    assert counts["deleted"] == 0 and len(fake.cw(R).alarms) == 3
+
+
+def test_sqs_really_gone_deletes_alarms(env):
+    repo, fake, sess, eng, acct = env
+    sess.add(rgt(R, ["sqs"], []))
+    sess.add(("sqs", R, "list_queues", {}))
+    sess.add(("sqs", R, "get_queue_url", "QueueDoesNotExist", {"QueueName": "jobs"}))
+    counts = eng.sync_account(acct.id, "TAG_RECONCILE")
+    assert counts["deleted"] == 3 and not fake.cw(R).alarms
+
+
 def test_sqs_untag_then_account_sync_keeps_alarms_and_marks_needs_review(env):
     repo, fake, sess, eng, acct = env
     sess.add(rgt(R, ["sqs"], []))                                     # Monitoring tag gone: not listed any more

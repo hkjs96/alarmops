@@ -13,9 +13,8 @@ from moto import mock_aws
 
 from alarm_engine import events
 from alarm_engine.collectors import AwsDiscovery
-from alarm_engine.collectors.groups import GROUP_OF
 from alarm_engine.engine import Engine
-from test_d16_moto_e2e import MOTO_ACCOUNT, R, MotoSessions, _event, _managed
+from test_d16_moto_e2e import MOTO_ACCOUNT, MotoSessions, R, _event, _managed
 
 URL = os.environ.get("ALARM_ENGINE_TEST_PG_URL")
 pytestmark = [pytest.mark.pg, pytest.mark.skipif(not URL, reason="ALARM_ENGINE_TEST_PG_URL not set")]

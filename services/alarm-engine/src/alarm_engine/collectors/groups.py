@@ -284,7 +284,15 @@ def _dynamodb_exists(ctx: Ctx, keys: list[str]) -> dict[str, bool | None]:
 
 
 def _sqs_exists(ctx: Ctx, keys: list[str]) -> dict[str, bool | None]:
-    return _in_set(keys, lambda: {u.rsplit("/", 1)[-1] for u in pages(ctx.client("sqs").list_queues, "QueueUrls")})
+    """ListQueues is only a hint: a queue missing from the list is "gone" only if GetQueueUrl also says it does not
+    exist (D-16 fail-safe: one list result must never delete alarms). Any other answer is unknown (None)."""
+    listed = _in_set(keys, lambda: {u.rsplit("/", 1)[-1] for u in pages(ctx.client("sqs").list_queues, "QueueUrls")})
+    missing = [k for k, v in listed.items() if v is False]
+    if not missing:
+        return listed
+    confirmed = _probe(missing, lambda k: bool(call(ctx.client("sqs").get_queue_url, QueueName=k).get("QueueUrl")),
+                       ("QueueDoesNotExist", "AWS.SimpleQueueService.NonExistentQueue"))
+    return {k: (confirmed[k] if k in confirmed else v) for k, v in listed.items()}
 
 
 def _sns_exists(ctx: Ctx, keys: list[str]) -> dict[str, bool | None]:

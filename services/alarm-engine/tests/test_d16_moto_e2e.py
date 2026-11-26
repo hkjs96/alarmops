@@ -8,7 +8,6 @@ from moto import mock_aws
 
 from alarm_engine import events
 from alarm_engine.collectors import AwsDiscovery
-from alarm_engine.collectors.groups import GROUP_OF
 from alarm_engine.engine import Engine
 from alarm_engine.repository import InMemoryRepository
 from conftest import make_account

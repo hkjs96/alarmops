@@ -315,7 +315,8 @@ def test_read_tags_keeps_internal_tags_and_reports_removal():
     ("EC2", [("ec2", R, "describe_instances", "UnauthorizedOperation", {"InstanceIds": ["i-1"]})], ["i-1"], None),
     ("RDS", [("rds", R, "describe_db_instances", "DBInstanceNotFound", {"DBInstanceIdentifier": "db1"})], ["db1"], False),
     ("DynamoDB", [("dynamodb", R, "describe_table", "ResourceNotFoundException", {"TableName": "t"})], ["t"], False),
-    ("SQS", [("sqs", R, "list_queues", {"QueueUrls": [f"https://sqs.{R}.amazonaws.com/{A}/q1"]}, None)], ["q1", "q2"], None),
+    ("SQS", [("sqs", R, "list_queues", {"QueueUrls": [f"https://sqs.{R}.amazonaws.com/{A}/q1"]}, None),
+            ("sqs", R, "get_queue_url", "QueueDoesNotExist", {"QueueName": "q2"})], ["q1", "q2"], None),
     ("Lambda", [], ["fn"], None),                              # no Lambda list API in the Reader role → unknown
 ])
 def test_alive_probes(rtype, steps, keys, want):

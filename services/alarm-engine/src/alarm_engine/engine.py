@@ -327,6 +327,8 @@ class Engine:
             for row in rows:
                 state = alive.get(row.resource_key)
                 if state is False:
+                    logger.info("alarm delete: resource %s/%s confirmed gone (state=%s)", row.resource_type,
+                                row.resource_key, row.monitoring_state)
                     try:
                         self._delete_all(account, row, counts)
                     except AwsStateUnknown as e:
@@ -371,6 +373,7 @@ class Engine:
             region = alarms[0].raw.get("AlarmArn", "::::").split(":")[3] or account.regions[0]
             state = self.discovery.alive(account, region, md.resource_type, [rid]).get(rid)
             if state is False:
+                logger.info("orphan alarm delete: resource %s/%s confirmed gone, no row", md.resource_type, rid)
                 w = self._writer(account, region)
                 for a in alarms:
                     if w is not None:
@@ -460,6 +463,7 @@ class Engine:
         """A person resolves NEEDS_REVIEW by stopping monitoring: only now are alarms deleted (D-16)."""
         row = self._row(customer_id, resource_id)
         account = self.repo.get_account(row.cloud_account_id)
+        logger.info("alarm delete: STOP_MONITORING by a person for %s/%s", row.resource_type, row.resource_key)
         n = self._delete_all(account, row)
         row.monitoring_state, row.needs_review_since, row.needs_review_reason = "NOT_MONITORED", None, None
         self.repo.upsert_resource(row)
