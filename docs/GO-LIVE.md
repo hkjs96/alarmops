@@ -746,7 +746,8 @@ http://localhost:3107/auth/dev-login?as=admin
    - 허용 목록 추가 **전**에 먼저 돈다. 허용 목록에 없는 계정의 이벤트가 막히는지(`FailedInvocations`)를 본다. 중앙에서 처리되지 않았음은 사람이 콘솔에서 확인한다.
    - 그다음 사람이 `bus-allowlist`(`action=add`)로 시험 계정을 넣고 스크립트를 계속한다.
    - 태그를 붙이면 알람이 생긴다(`ManagedBy=AlarmOps`, 큐 차원). 반영까지 최대 15분(디바운스 10분 포함) 기다린다.
-   - 태그를 떼면 알람은 남고 콘솔이 확인 필요(NEEDS_REVIEW)로 표시한다. 사람이 콘솔에서 STOP_MONITORING을 실행하면 그 알람만 사라진다.
+   - 태그를 떼면 알람은 남고 콘솔이 확인 필요(NEEDS_REVIEW)로 표시한다. 사람이 콘솔에서 Stop monitoring을 누르면 그 알람만 사라진다.
+   - 순서 (다): 스크립트가 `REHEARSAL_WAIT_SECONDS`(기본 900초, 15분) 동안 알람 유지를 지켜본다. 이 동안 Stop monitoring을 누르지 않는다(Needs review 표시는 봐도 된다). 스크립트가 "(다) 대기 끝"이라고 물으면 콘솔 Monitoring > Needs review에서 그 큐를 확인하고 Stop monitoring을 누른 뒤 y로 답한다.
    - `ManagedBy` 없는 알람 거부는 정책 시뮬레이션(실측 아님)으로 본다.
    - **1회 수동 실측(B 계정 리허설 때 한 번, 선택 아님)**: 시뮬레이션이 못 보는 CloudWatch의 실제 태그 조건 처리와 조직 SCP를 확인한다. 사람이 CLI로 한다(하네스에 넣지 않는다).
      1. `AlarmOps-AlarmWriter`의 권한 정책과 권한 경계를 콘솔(IAM → 역할)에서 그대로 확인한다.
@@ -788,7 +789,7 @@ http://localhost:3107/auth/dev-login?as=admin
 | `apply`가 건너뛰어짐, 요약에 `no changes` | 바뀐 것이 없다. 정상이다 |
 | Lambda가 시작을 거부 | 비밀의 연결 문자열에 `sslmode=require`가 없다. 4-4의 3번 |
 | 콘솔에서 고객 해지 시 503 `COMMANDS_UNAVAILABLE` | Vercel에 `ALARM_COMMANDS_QUEUE_URL`이 없다. 4-5 |
-| 리허설 `verify.sh` (다)가 "알람이 3개에서 0개로 바뀜(D-16 위반)" FAIL | 스크립트가 알람 유지를 지켜보는 대기 중(기본 15분)에 콘솔에서 Stop monitoring을 눌렀다. 엔진 문제가 아니다. `AuditLog`에 그 시각의 `resource.stop_monitoring`이 있으면 이 경우다. `cleanup.sh`로 정리하고 새 `--run-id`로 다시 한다. Stop은 스크립트가 "(다) 대기 끝"이라고 물을 때 누른다 |
+| 리허설 `verify.sh` (다)가 "알람이 N개에서 0개로 바뀜(D-16 위반)" FAIL | 스크립트가 알람 유지를 지켜보는 대기 중(기본 15분)에 콘솔에서 Stop monitoring을 눌렀다. 엔진 문제가 아니다. `AuditLog`에 그 시각의 `resource.stop_monitoring`이 있으면 이 경우다. `cleanup.sh … --run-id <방금 쓴 이름>`으로 정리하고 새 `--run-id`로 `verify.sh`를 다시 돌린다. Stop은 스크립트가 "(다) 대기 끝"이라고 물을 때 누른다 |
 
 ### 배경 (읽지 않아도 된다)
 
