@@ -9,7 +9,9 @@
 - **덤프 이전**: ExternalId와 이력을 그대로 두려면 아래 "덤프 이전"을 따른다.
 
 ## 1. 새 프로젝트 (SETUP-PROD-DB 1~3단계)
-- 리전은 **Northeast Asia (Seoul)**이다. 만든 뒤 프로젝트 설정에서 리전이 서울인지 다시 본다.
+- 리전은 **Northeast Asia (Seoul)**이다. 생성 화면의 Region 기본값은 **Auto**라서 그대로 두면 서울이 아닐 수 있다. 목록에서 직접 고른다(11/26 실제). 만든 뒤 프로젝트 설정에서 리전이 서울인지 다시 본다.
+- 생성 화면의 **Data access**에서 "Enable Data API"와 "Grant API access to new tables automatically"를 끄고 만든다. "Enable RLS on new tables automatically"도 끈 채로 둔다(옛 프로젝트와 같은 조건, 권한은 마이그레이션과 `roles.sql`이 정한다).
+- PoC 동안은 개발 단계라 이름은 `alarmops-dev-icn`이다. 무료 플랜의 활성 프로젝트 수 제한에 걸리면 옛 프로젝트를 먼저 **Pause**(Settings → General → Project availability)한다. Pause는 1년 안에 되살릴 수 있다.
 - 이름은 `alarmops-prod`와 겹치지 않게 짓는다(예: `alarmops-prod-icn`). 옛 프로젝트는 아직 지우지 않는다.
 - Data API를 끈다(2단계, 필수).
 - 연결 주소는 Connect 화면에서 **그대로** 복사한다. 호스트는 `aws-0`/`aws-1`, 리전 이름을 포함해 화면에 보이는 값을 쓴다. 문서 예시 값을 쓰지 않는다(11/25 OperationalError의 원인).
