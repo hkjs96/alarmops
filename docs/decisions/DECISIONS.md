@@ -1046,13 +1046,12 @@ D-60에서 쓰는 방식:
 
 - **결정**
   - PR 위험도는 기계가 정한다. `.github/scripts/pr_risk.py`가 변경 파일로 `low` 또는 `human`을 낸다.
-  - **공식 판정은 허브가 main의 분류기로 낸다.** PR이 분류기를 고쳐 스스로 low가 되는 것을 막기 위해서다. 허브는 `bash .github/scripts/pr_risk_check.sh <PR head SHA>`를 실행한다(PR_AUTHOR·PR_TITLE을 환경변수로 준다). 이 스크립트는 `git show origin/main:.github/scripts/pr_risk.py`로 분류기를 꺼내 `git diff --name-status --no-renames origin/main...<sha>`, numstat, `--raw`(파일 모드), `git log --format=%ae`를 넘기고, 결과 JSON에 head SHA를 찍는다. 허브는 병합 시점에도 PR head가 그 SHA인지 확인한다. 판정을 못 내면(JSON 없음) human이다.
+  - **공식 판정은 허브가 main의 분류기로 낸다.** PR이 분류기를 고쳐 스스로 low가 되는 것을 막기 위해서다. 허브는 `bash .github/scripts/pr_risk_check.sh <PR head SHA>`를 실행한다(PR_AUTHOR·PR_TITLE을 환경변수로 준다). 이 스크립트는 `git show origin/main:.github/scripts/pr_risk.py`로 분류기를 꺼내 `git diff --name-status --no-renames origin/main...<sha>`와 `--raw`(파일 모드)를 넘기고, 결과 JSON에 head SHA를 찍는다. 허브는 병합 시점에도 PR head가 그 SHA인지 확인한다. 판정을 못 내면(JSON 없음) human이다. 기준은 `origin/main`으로 고정이다(환경변수·옵션으로 바꿀 수 없고, 먼저 `git fetch origin main`을 강제로 실행한다. 인자는 40자리 16진수만 받는다).
   - CI `risk` job은 참고 정보다(head SHA와 요약만 남기고, 실패하지 않으며, 라벨·쓰기 권한이 없다). 이 job의 결과로 병합하지 않는다.
-  - **low**: 바뀐 파일이 모두 아래에 속할 때만이다.
-    - 문서(`docs/**`, `docs/qa/**` 포함). 추가·수정만이고, 일반 파일(모드 100644)이어야 한다. 단 다음은 제외한다: DECISIONS.md, 테스트가 읽는 문서(`docs/specs/**`, `docs/GO-LIVE.md`, `docs/SETUP-PROD-DB.md`, `docs/SETUP-SUPABASE.md`, `docs/API-CONTRACT.md`), docs 아래의 실행 파일(.sh·.py·.mjs·.js 등)과 심볼릭 링크, 문서 삭제
-    - 테스트 파일 추가, 또는 기존 테스트에 줄만 추가(삭제·변경된 줄 0). 테스트 파일은 파일 이름으로만 인정한다(`*.test.ts(x)`, `*.test.mjs`, `*.spec.ts`, `test_*.py`, `*_test.py`, e2e는 `apps/console/e2e/*.spec.ts`). `test/` 디렉터리 안이라는 이유만으로는 테스트가 아니다(`conftest.py`, `__init__.py`, 설정·fixtures, 셸 파일은 human). 테스트 삭제는 human이다
-    - Dependabot patch·minor. 0.x 패키지는 제외한다. PR의 모든 커밋이 dependabot 작성이어야 하고, package.json은 이미 있는 의존성의 버전 값만 바뀌어야 한다(scripts·새 의존성·version 변경은 human)
-    - 리허설 스크립트(`infra/scripts/rehearsal/**`)는 low가 아니다. 실계정에서 실행되므로 human이다
+  - **low**: 바뀐 파일이 모두 아래 둘 중 하나일 때만이다.
+    - 문서(`docs/**`): 추가·수정만이고 일반 파일(모드 100644)이어야 한다. 다음은 제외한다: DECISIONS.md, 테스트가 읽는 문서(`docs/specs/**`, `docs/GO-LIVE.md`, `docs/SETUP-PROD-DB.md`, `docs/SETUP-SUPABASE.md`, `docs/API-CONTRACT.md`), 관문 증거(`docs/qa/**`), 에이전트가 지시로 읽는 문서(`docs/ui/**`, `docs/DATA-MODEL.md`, `docs/PERSONAS.md`; 프롬프트 주입 경로가 될 수 있다), docs 아래의 실행 파일(.sh·.py·.mjs·.js 등)과 심볼릭 링크, 문서 삭제
+    - 새 테스트 파일 추가(상태 A, 모드 100644). 테스트 파일은 파일 이름으로만 인정한다(`*.test.ts(x)`, `*.test.mjs`, `*.spec.ts`, `test_*.py`, `*_test.py`, e2e는 `apps/console/e2e/*.spec.ts`). **기존 테스트 파일의 수정은 줄만 추가해도 human이다**(skip 추가 등으로 약화할 수 있다). 삭제도 human이다. `test/` 디렉터리 안이라는 이유만으로는 테스트가 아니다
+  - **human**(기본값): 위 둘 밖의 모든 변경이다. 의존성 파일(`package.json`, 락 파일, `requirements*`, `pyproject.toml` 등)은 Dependabot PR이어도 human이다(예외 없음: 락 파일 내용·alias·URL 버전·위조된 작성자를 기계가 다 막을 수 없어 사람이 승인한다). 리허설 스크립트(`infra/scripts/rehearsal/**`)도 실계정에서 실행되므로 human이다.
   - **human**(기본값): 그 밖의 모든 변경이다. 특히 `.github/**`(워크플로·배포), `.claude/**`, `CLAUDE.md`, `infra/aws/**`, `infra/customer-stack/**`(IAM·신뢰 정책), `db/**`(마이그레이션), 의존성, DECISIONS.md, 제품 코드(services·packages·apps)가 그렇다.
   - low이고 다음을 모두 만족하면 허브가 사람 승인 없이 squash 병합한다.
     - 현재 head에서 CI가 모두 통과했다.
@@ -1062,7 +1061,7 @@ D-60에서 쓰는 방식:
   - human PR은 지금처럼 사람이 승인한다.
 - **바뀌는 것**: D-59의 "사람의 상시 관문은 PR 병합 승인 하나"를 "위험이 human인 PR의 병합 승인"으로 좁힌다. main 보호, CI, CODEOWNERS는 그대로다.
 - **이유**: 11/25 하루에 승인한 PR이 15개였다. 그중 문서·테스트·스크립트 수정이 절반쯤이었다. 사람의 판단이 필요한 PR에 승인을 집중하기 위해서다.
-- **다시 볼 때**: 실고객 연결 뒤 low PR이 사고를 낸 일이 있으면 범위를 줄인다. 운영 단계(D-59 "다시 볼 때")에서 다시 정한다.
+- **다시 볼 때**: 실고객 연결 뒤 low PR이 사고를 낸 일이 있으면 범위를 줄인다. 새 테스트 파일은 CI와 개발 PC에서 임의 코드로 실행된다. low로 병합된 뒤 사고가 나면 범위를 다시 줄인다. 운영 단계(D-59 "다시 볼 때")에서 다시 정한다.
 - **확정일**: 11/26 (사용자 결정, A안)
 
 ## 이전을 쉽게 만드는 개발 원칙 (D-09에 딸림)

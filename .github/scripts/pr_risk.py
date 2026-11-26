@@ -5,34 +5,28 @@ The official verdict is made by the hub with the classifier from `main` (.github
 the `risk` job of ci.yml runs the PR's own copy and is information only (a PR could change the classifier).
 
 Input
-  env PR_AUTHOR, PR_TITLE   PR author login and title (env, so a title is never on a command line)
-  stdin                     `git diff --name-status --no-renames base...head` (`M<TAB>path`); bare paths count as M
-  --numstat FILE            `git diff --numstat --no-renames base...head` (needed to call a modified test file low)
-  --raw FILE                `git diff --raw --no-renames base...head` (modes; needed to call a docs file low)
-  --emails FILE             `git log --format=%ae base..head`, one per line (every commit must be Dependabot's)
-  --base SHA --head SHA     merge base and PR head; package.json files are read with `git show` to see which keys changed
+  stdin        `git diff --name-status --no-renames base...head` (`A<TAB>path`); bare paths count as M
+  --raw FILE   `git diff --raw --no-renames base...head` (file modes; without it nothing can be low)
+  --head SHA   the PR head, echoed in the output
 Output: stdout is ONE JSON line {"risk", "head", "reasons": [{"path","rule","detail","verdict"}...]}; a markdown table goes to
 $GITHUB_STEP_SUMMARY (else stderr); `risk=` and `sha=` go to $GITHUB_OUTPUT when set. Always exits 0.
-Anything that cannot be established from the input (no numstat, no modes, no emails, ...) makes the answer human.
+Anything that cannot be established from the input makes the answer human.
 
 low  = every file is one of:
-  - docs/** (docs/qa/** included) that is added or modified, not a script (.sh .py .mjs .js ...), not executable, not a
-    symlink (mode 120000), and not on the list of documents that tests or scripts read (DOCS_READ_BY_TESTS)
-  - a test file, by FILE NAME only (*.test.ts(x), *.test.mjs, *.spec.ts, test_*.py, *_test.py): added, or modified with
-    no deleted line (numstat deletions == 0). apps/console/e2e: only *.spec.ts. Not conftest.py, fixtures, config, shell files.
-  - package.json / package-lock.json of a Dependabot patch/minor PR (not 0.x; every commit by dependabot; package.json only
-    changes versions of dependencies it already has)
+  - a document under docs/, added or modified, regular file (mode 100644), not a script (.sh .py .mjs .js ...), and not one
+    of the documents that tests read, that are gate evidence (docs/qa/**) or that agents read as instructions
+    (docs/ui/**, specs, DATA-MODEL, API-CONTRACT, PERSONAS, DECISIONS, ...). See DOCS_HUMAN.
+  - a NEW test file (status A, mode 100644), recognised by file name only: *.test.ts(x), *.test.mjs, *.spec.ts, test_*.py,
+    *_test.py; apps/console/e2e only *.spec.ts. Any change to an existing test file is human (a test can be weakened
+    by editing it), and so is a deleted one.
 human = everything else, in particular .github/**, .claude/**, CLAUDE.md, infra/aws/**, infra/customer-stack/**,
-  infra/scripts/rehearsal/** (real-account scripts), db/**, DECISIONS.md, deleted files of docs or tests. No files: human.
+  infra/scripts/rehearsal/**, db/**, every dependency file (package.json, lock files, requirements*, pyproject.toml, ...,
+  also for Dependabot: there is no Dependabot exception). No files: human.
 """
 import json
 import os
 import re
-import subprocess
 import sys
-
-DEPENDABOT = "dependabot[bot]"
-DEPENDABOT_EMAIL = re.compile(r"^(?:\d+\+)?dependabot\[bot\]@users\.noreply\.github\.com$")
 
 ALWAYS_HUMAN = [
     (".github/**", "workflow / CI / script change"),
@@ -42,21 +36,30 @@ ALWAYS_HUMAN = [
     ("infra/customer-stack/**", "customer-facing IAM stack change"),
     ("infra/scripts/rehearsal/**", "rehearsal scripts run against a real account"),
     ("db/**", "database change"),
-    ("docs/decisions/DECISIONS.md", "decision change (decisions are for a person)"),
 ]
-# Documents that tests or scripts read (grep of the tests: alarm-rules golden test, GO-LIVE / SETUP-PROD-DB checks in
-# infra/test, API-CONTRACT in the engine tests, SETUP-SUPABASE in mask-db-urls). Editing them can change a test's result.
-DOCS_READ_BY_TESTS = [
+# Documents that are not low: DECISIONS (decisions are for a person); documents that tests or scripts read (alarm-rules golden
+# test, GO-LIVE / SETUP-PROD-DB checks in infra/test, API-CONTRACT in the engine tests, SETUP-SUPABASE in mask-db-urls);
+# gate evidence (docs/qa); documents that agents read as instructions (ui, DATA-MODEL, PERSONAS), a prompt-injection path.
+DOCS_HUMAN = [
+    "docs/decisions/DECISIONS.md",
     "docs/specs/**",
     "docs/GO-LIVE.md",
     "docs/SETUP-PROD-DB.md",
     "docs/SETUP-SUPABASE.md",
     "docs/API-CONTRACT.md",
+    "docs/DATA-MODEL.md",
+    "docs/PERSONAS.md",
+    "docs/qa/**",
+    "docs/ui/**",
 ]
-DEP_FILES = ("package.json", "package-lock.json")
-DEP_SECTIONS = ("dependencies", "devDependencies", "optionalDependencies", "peerDependencies")
+# Dependency files, by base name, anywhere in the tree.
+DEP_FILE_RE = re.compile(
+    r"(?:package(?:-lock)?\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|\.npmrc|\.nvmrc"
+    r"|requirements[^/]*\.(?:txt|in)|constraints[^/]*\.txt|pyproject\.toml|poetry\.lock|Pipfile(?:\.lock)?"
+    r"|setup\.py|setup\.cfg|uv\.lock|Gemfile(?:\.lock)?|go\.(?:mod|sum)|Cargo\.(?:toml|lock)|Dockerfile[^/]*)",
+    re.I,
+)
 SCRIPT_EXT = (".sh", ".bash", ".py", ".mjs", ".cjs", ".js", ".ts", ".ps1", ".cmd", ".bat", ".command")
-TITLE_RE = re.compile(r"\bfrom\s+v?(\d+)(?:\.(\d+))?\S*\s+to\s+v?(\d+)(?:\.(\d+))?", re.I)
 TEST_NAME_RE = re.compile(r"(?:.+\.(?:test\.tsx?|test\.mjs|spec\.ts)|test_[^/]+\.py|[^/]+_test\.py)")
 
 
@@ -93,38 +96,6 @@ def is_test_file(path):
     return True
 
 
-def dependabot_bump(author, title):
-    """'minor' (patch/minor, not 0.x), 'major', '0x' (0.x or 0.0.x, treated as breaking) or None (not readable)."""
-    if author != DEPENDABOT:
-        return None
-    m = TITLE_RE.search(title or "")
-    if not m:
-        return None
-    a1, a2, b1, b2 = m.groups()
-    if a1 != b1:
-        return "major"
-    if a1 == "0":
-        return "0x"
-    return "minor"
-
-
-def package_json_only_versions(old_text, new_text):
-    """True when the only change is the version string of dependencies that already existed."""
-    try:
-        old, new = json.loads(old_text), json.loads(new_text)
-    except Exception:
-        return False
-    if not isinstance(old, dict) or not isinstance(new, dict) or set(old) != set(new):
-        return False
-    for key in old:
-        if key in DEP_SECTIONS and isinstance(old[key], dict) and isinstance(new[key], dict):
-            if set(old[key]) != set(new[key]):
-                return False
-        elif old[key] != new[key]:
-            return False
-    return True
-
-
 def parse_files(text):
     out = []
     for line in text.splitlines():
@@ -136,18 +107,6 @@ def parse_files(text):
             out.append((status.strip()[:1] or "M", path.strip()))
         else:
             out.append(("M", line.strip()))
-    return out
-
-
-def parse_numstat(text):
-    """path -> (added, deleted); binary files (`-`) become None."""
-    out = {}
-    for line in (text or "").splitlines():
-        parts = line.rstrip("\r").split("\t", 2)
-        if len(parts) != 3:
-            continue
-        a, d, path = parts
-        out[path] = (int(a), int(d)) if a.isdigit() and d.isdigit() else None
     return out
 
 
@@ -164,12 +123,10 @@ def parse_raw(text):
     return out
 
 
-def classify(files, author, title, numstat=None, raw=None, emails=None, pkg_ok=None):
-    """files: [(status, path)]; numstat/raw: dicts or None (unknown); emails: list or None; pkg_ok: f(path)->bool or None.
-    Returns (risk, reasons)."""
+def classify(files, raw=None):
+    """files: [(status, path)]; raw: {path: (old_mode, new_mode)} or None (unknown). Returns (risk, reasons)."""
     if not files:
         return "human", [{"path": "-", "rule": "empty", "detail": "no changed files (fail-safe)", "verdict": "human"}]
-    bump = dependabot_bump(author, title)
     reasons = []
     for status, path in files:
         H = lambda rule, detail: (rule, detail, "human")
@@ -179,26 +136,16 @@ def classify(files, author, title, numstat=None, raw=None, emails=None, pkg_ok=N
             if _match(path, pat):
                 r = H("always-human", f"{pat}: {why}")
                 break
-        if r is None and any(_match(path, p) for p in DOCS_READ_BY_TESTS):
-            r = H("docs-read-by-tests", "document that tests or scripts read")
-        if r is None and path.split("/")[-1] in DEP_FILES:
-            if author == DEPENDABOT and bump == "major":
-                r = H("dependabot-major", "Dependabot major update")
-            elif author == DEPENDABOT and bump == "0x":
-                r = H("dependabot-0x", "Dependabot update of a 0.x package (minor is breaking)")
-            elif bump != "minor":
-                r = H("always-human", "package.json / package-lock.json change (not a Dependabot patch/minor update)")
-            elif not emails or not all(DEPENDABOT_EMAIL.match(e.strip()) for e in emails):
-                r = H("dependabot-commits", "a commit of the PR is not by dependabot (or authors unknown)")
-            elif status != "M":
-                r = H("dependabot-status", f"status {status}, only a modification is allowed")
-            elif path.endswith("package.json") and not (pkg_ok and pkg_ok(path)):
-                r = H("dependabot-pkg-keys", "package.json changes more than versions of existing dependencies (or cannot be checked)")
-            else:
-                r = L("dependabot-minor", "Dependabot patch/minor update")
+        if r is None and DEP_FILE_RE.fullmatch(path.split("/")[-1]):
+            r = H("dependency-file", "dependency / build file (always a person, also for Dependabot)")
+        if r is None:
+            for pat in DOCS_HUMAN:
+                if _match(path, pat):
+                    r = H("docs-human", f"{pat}: decision, test input, gate evidence or agent-read document")
+                    break
+        modes = (raw or {}).get(path)
+        regular = modes is not None and modes[1] == "100644" and modes[0] in ("000000", "100644")
         if r is None and _match(path, "docs/**"):
-            modes = (raw or {}).get(path)
-            base = path.split("/")[-1]
             if status == "D":
                 r = H("docs-deleted", "a deleted document")
             elif status not in ("A", "M"):
@@ -207,25 +154,19 @@ def classify(files, author, title, numstat=None, raw=None, emails=None, pkg_ok=N
                 r = H("docs-script", "an executable-type file under docs/")
             elif modes is None:
                 r = H("docs-mode-unknown", "file mode unknown (no --raw input)")
-            elif "120000" in modes:
-                r = H("docs-symlink", "symbolic link (mode 120000)")
-            elif modes[1] != "100644":
-                r = H("docs-mode", f"mode {modes[1]} (not a regular non-executable file)")
+            elif not regular:
+                r = H("docs-mode", f"mode {modes[0]} -> {modes[1]} (symlink, executable or type change)")
             else:
-                r = L("docs-qa" if _match(path, "docs/qa/**") else "docs", "docs/qa/**" if _match(path, "docs/qa/**") else "docs/**")
+                r = L("docs", "docs/**")
         if r is None and is_test_file(path):
-            if status == "A":
-                r = L("test-added", "added test file")
-            elif status == "M":
-                ns = (numstat or {}).get(path)
-                if ns is None:
-                    r = H("test-modified", "modified test file: deleted-line count unknown")
-                elif ns[1] == 0:
-                    r = L("test-lines-added", "existing test file, lines added only")
-                else:
-                    r = H("test-modified", f"existing test file with {ns[1]} deleted/changed line(s)")
+            if status != "A":
+                r = H("test-existing", f"existing test file with status {status} (only a new test file is low)")
+            elif modes is None:
+                r = H("test-mode-unknown", "file mode unknown (no --raw input)")
+            elif not regular:
+                r = H("test-mode", f"mode {modes[0]} -> {modes[1]} (symlink or executable bit)")
             else:
-                r = H("test-deleted", f"test file with status {status}")
+                r = L("test-added", "new test file")
         if r is None:
             r = H("not-listed", "outside the low list (default human)")
         reasons.append({"path": path, "rule": r[0], "detail": r[1], "verdict": r[2]})
@@ -261,13 +202,6 @@ def _read(path):
         return None
 
 
-def _git_show(rev, path):
-    try:
-        return subprocess.run(["git", "show", f"{rev}:{path}"], capture_output=True, text=True, check=True).stdout
-    except Exception:
-        return None
-
-
 def _args(argv):
     opts = {}
     i = 0
@@ -285,19 +219,8 @@ def main(argv=None):
     head = opts.get("head", "")
     try:
         files = parse_files(sys.stdin.read())
-        numstat = parse_numstat(_read(opts["numstat"])) if "numstat" in opts and _read(opts["numstat"]) is not None else None
-        raw = parse_raw(_read(opts["raw"])) if "raw" in opts and _read(opts["raw"]) is not None else None
-        et = _read(opts["emails"]) if "emails" in opts else None
-        emails = [e for e in et.splitlines() if e.strip()] if et is not None else None
-        pkg_ok = None
-        if opts.get("base") and head:
-            def pkg_ok(path, b=opts["base"], h=head):
-                if not path.endswith("package.json"):
-                    return True
-                o, n = _git_show(b, path), _git_show(h, path)
-                return o is not None and n is not None and package_json_only_versions(o, n)
-        risk, reasons = classify(files, os.environ.get("PR_AUTHOR", ""), os.environ.get("PR_TITLE", ""),
-                                 numstat, raw, emails, pkg_ok)
+        raw_text = _read(opts["raw"]) if "raw" in opts else None
+        risk, reasons = classify(files, parse_raw(raw_text) if raw_text is not None else None)
     except Exception as e:  # information only; the safe answer is human
         risk, reasons = "human", [{"path": "-", "rule": "error", "detail": f"classifier error: {e}", "verdict": "human"}]
     print(json.dumps({"risk": risk, "head": head, "reasons": reasons}, ensure_ascii=False, separators=(",", ":")))

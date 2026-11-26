@@ -32,7 +32,7 @@
 2. security 검토에 [차단] 없음 (권한·IAM·비밀·격리·워크플로를 바꾸는 PR)
 3. 화면 변경이면 qa-ux의 `/persona-check` 결과가 `docs/qa/results.md`에 기록됨
 4. 템플릿 파라미터·워크플로 입력·환경변수·IAM 신뢰 정책·사람 작업을 바꾸는 PR은 docs-auditor가 `DOCS OK` (신뢰 정책 변경은 `gate:needs-human-step`)
-5. 사용자 승인. 단 D-62: 허브가 main의 분류기(`.github/scripts/pr_risk_check.sh <head-sha>`)로 낸 판정이 `low`(문서, 테스트 파일 추가 또는 기존 테스트에 줄만 추가, Dependabot patch/minor(0.x 제외)만)이고 1~3을 만족하면 허브가 병합하고 하루 마감 보고에 남긴다. `human`은 사용자 승인
+5. 사용자 승인. 단 D-62: 허브가 main의 분류기(`.github/scripts/pr_risk_check.sh <head-sha>`)로 낸 판정이 `low`(문서(테스트 입력·관문 증거·에이전트 참조 문서·DECISIONS 제외)와 새 테스트 파일 추가만. 기존 테스트 수정·의존성·Dependabot은 human)이고 1~3을 만족하면 허브가 병합하고 하루 마감 보고에 남긴다. `human`은 사용자 승인
 
 ## 보고 형식
 - 이슈 완료: 바뀐 것 2~3줄, PR 링크, 남은 위험

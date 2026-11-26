@@ -82,7 +82,7 @@ jobs:
           cat "$RUNNER_TEMP/ci-changes.out" >> "$GITHUB_OUTPUT"
 
   # Information only (D-62): classifies the PR as `low` or `human`. Never fails, sets no label, has no write permission. This job
-  # runs the classifier of the PR's base commit via the PR's copy of pr_risk_check.sh, so it is NOT the official verdict: the hub
+  # runs the classifier of origin/main via the PR's copy of pr_risk_check.sh, so it is NOT the official verdict: the hub
   # re-runs `.github/scripts/pr_risk_check.sh <head-sha>` from main. Pull requests only.
   risk:
     if: ${{ github.event_name == 'pull_request' }}
@@ -101,13 +101,10 @@ jobs:
       - id: classify
         continue-on-error: true
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
           # Errors are not fatal here: any failure below leaves the answer `human` and the job green.
-          export BASE_REF="$BASE_SHA"
+          # The script judges against origin/main (fixed); actions/checkout with fetch-depth 0 has just fetched it.
           if ! bash .github/scripts/pr_risk_check.sh "$HEAD_SHA"; then
             echo "::warning::classifier could not run; risk=human"
             echo "risk=human" >> "$GITHUB_OUTPUT"
