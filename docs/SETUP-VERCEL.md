@@ -383,6 +383,8 @@ DB가 서울이라 함수도 서울에 둔다. 기본값(`iad1`, 미국 동부)�
 | 화면에 나온 글 | 할 일 |
 |---|---|
 | 작업 `deploy`가 Skipped | `main`이 아닌 브랜치로 실행했다. 9단계 2번 |
+| Vercel 화면에서 Redeploy를 누르면 "Prebuilt deployments cannot be redeployed" | 우리 배포는 GitHub Actions에서 미리 빌드해 올린다. 그래서 Vercel Redeploy로는 바뀐 환경변수가 반영되지 않는다. GitHub Actions → deploy-console → Run workflow(main)로 새로 배포한다. 수동 실행은 바뀐 파일과 상관없이 항상 배포한다(11/26 실제) |
+| `SSO_ALLOWED_EMAILS entry #1 is not an exact e-mail address` (Secret으로 넣었는데) | `vercel pull`은 Secret 값 대신 `[SENSITIVE]`를 쓴다. #151 이후 점검은 이 값을 건너뛴다. #151 이전 커밋이면 main을 최신으로 배포한다. Config로 넣었다면 삭제하고 Secret으로 다시 만든다(11/26 실제) |
 | `Secret VERCEL_TOKEN is not set in the production environment` (ORG_ID, PROJECT_ID도 같은 모양) | 저장소 시크릿에 넣었거나 이름이 다르다. 7단계 5번 |
 | `Pull the production environment` 단계 실패 | 토큰 만료·범위 오류, 또는 ID가 다른 팀·프로젝트 것. 5·6단계 |
 | `CONSOLE_ORIGIN is not set (...)` | 없거나 Secret으로 넣었다. Config로 다시 만든다. 8-2 |

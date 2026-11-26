@@ -151,3 +151,4 @@ VALUES ('usr_' || substr(md5(random()::text), 1, 12), 'you@mz.co.kr', 'Your Name
 | "Sign-in didn't complete. Try again." | 로그인 중간에 10분이 지났거나 쿠키가 막혔다 | 처음부터 다시 한다. 다른 사이트에서 열었다면 콘솔 주소로 직접 들어간다 |
 | 배포 점검 실패: `SSO_ALLOWED_DOMAINS …` | 값이 비었거나 `*`, 공백, `@` 항목이 있다 | 2단계 주의를 본다 |
 | 로그인 직후 `/login?ended=1` | 세션은 만들어졌지만 사용자가 비활성이 되었다 | 사용자 행 `status`를 확인한다 |
+| "This Google account can't sign in"인데 사용자 행과 허용 도메인이 있다 | 회사 별칭 도메인이다. 예: 메일은 `@megazone.com`이지만 Google 계정 주소는 `@mz.co.kr`이다. 콘솔은 Google이 돌려주는 주소로 찾는다 | Google 계정 화면에 보이는 주소로 `User.email`을 고친다: `UPDATE "User" SET "email"='<그 주소>' WHERE "email"='<넣었던 주소>';` (11/26 실제) |
