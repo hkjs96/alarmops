@@ -8,7 +8,7 @@ Severity enum mapping: engine "SEV-3" ↔ DB `SEV_3`.
 from __future__ import annotations
 
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 import psycopg
@@ -132,6 +132,16 @@ class PgRepository:
         sets = ", ".join(f'"{cols[k]}" = %s::"RoleStatus"' for k in statuses)
         self._exec(f'UPDATE "CloudAccount" SET {sets}, "lastCheckedAt" = now(), "updatedAt" = now() WHERE id = %s',
                    *statuses.values(), cloud_account_id)
+
+    def record_account_event(self, customer_id: str, cloud_account_id: str, event_time: datetime | None) -> None:
+        """Same statement and 60-second rule as the ingest path (packages/store-sql ingestRepo.ts). The time is capped
+        at now() (never future); None means now(). Matches id AND customerId."""
+        self._exec('''UPDATE "CloudAccount" SET "firstEventAt" = COALESCE("firstEventAt", t.at),
+                        "lastEventAt" = GREATEST(COALESCE("lastEventAt", t.at), t.at)
+                      FROM (SELECT LEAST(COALESCE(%s::timestamptz, now()), now()) AS at) t
+                      WHERE "id" = %s AND "customerId" = %s
+                        AND ("firstEventAt" IS NULL OR "lastEventAt" IS NULL OR "lastEventAt" < t.at - interval '60 seconds')''',
+                   event_time, cloud_account_id, customer_id)
 
     # resources
     @staticmethod

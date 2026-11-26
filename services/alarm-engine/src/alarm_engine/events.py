@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 import os
 import re
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from alarm_engine.engine import Engine
@@ -133,6 +133,27 @@ def _rows_for(engine: Engine, account_id: str, refs: set[str]) -> list[ResourceR
             if r.resource_arn in refs or r.resource_key in tails or r.resource_key in refs]
 
 
+def _event_time(raw: Any) -> datetime | None:
+    """EventBridge top-level `time` if it is ISO-8601, else None (the repository then uses now(); it caps at now())."""
+    if not isinstance(raw, str):
+        return None
+    try:
+        t = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    return t if t.tzinfo else t.replace(tzinfo=UTC)
+
+
+def _record_event_time(engine: Engine, account: Any, raw_time: Any) -> None:
+    """Best effort (#154): a failure here must never change how the tag event is handled. The log carries only a tag
+    and the exception class / SQLSTATE, no account id and no message text."""
+    try:
+        engine.repo.record_account_event(account.customer_id, account.id, _event_time(raw_time))
+    except Exception as e:  # noqa: BLE001
+        logger.warning("tag_event.account_event_time_failed class=%s sqlstate=%s", type(e).__name__,
+                       getattr(e, "sqlstate", None) or "unknown")
+
+
 def handle_tag_event(engine: Engine, event: dict) -> dict:
     if not is_cloudtrail_event(event):
         return {"status": "IGNORED", "reason": "not a CloudTrail API event"}
@@ -152,6 +173,10 @@ def handle_tag_event(engine: Engine, event: dict) -> dict:
     if account is None:
         logger.warning("tag event for unknown/inactive account %s", aws_account)
         return {"status": "IGNORED", "reason": "unknown account"}
+    # Recorded before the "no supported resource" check: the event did arrive from this forwarding account, which is
+    # all "first event received" (onboarding status) means. Whether it names a resource we handle is a different
+    # question. Events rejected above (malformed, failed call, not a tag event, unknown account) never get here.
+    _record_event_time(engine, account, event.get("time"))
     refs, keys, monitoring = extract(name, detail.get("requestParameters"))
     refs = {r for r in refs if _supported(r, name)}
     if not refs:

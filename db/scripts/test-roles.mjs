@@ -41,7 +41,7 @@ const EXPECTED = {
 const ALL = 'all';
 const SPEC = {
   [ENGINE]: {
-    Customer: { select: ALL }, CloudAccount: { select: ALL, update: ['readerStatus', 'alarmWriterStatus', 'tagWriterStatus', 'remediatorStatus', 'lastCheckedAt', 'updatedAt'] },
+    Customer: { select: ALL }, CloudAccount: { select: ALL, update: ['readerStatus', 'alarmWriterStatus', 'tagWriterStatus', 'remediatorStatus', 'lastCheckedAt', 'updatedAt', 'firstEventAt', 'lastEventAt'] },
     Resource: { select: ALL, insert: ALL, update: ['resourceArn', 'name', 'tags', 'monitoringTag', 'monitoringState', 'needsReviewSince', 'needsReviewReason', 'monitoringTagSetBy', 'lastSeenAt', 'discoveryRunId', 'updatedAt'] },
     ManagedAlarm: { select: ALL, insert: ALL, update: ['alarmName', 'alarmArn', 'region', 'severity', 'severityManual', 'threshold', 'thresholdSource', 'consoleThreshold', 'evalM', 'evalN', 'evalSource', 'comparison', 'statistic', 'period', 'treatMissingData', 'driftStatus', 'driftDetail', 'lastSyncedAt', 'version'] },
     ThresholdDefault: { select: ALL }, ThresholdChange: { select: ALL, update: ['applyStatus', 'error'] },
@@ -230,6 +230,12 @@ test('(a) engine: every statement of pg_repository.py runs', async () => {
   // update_account_status
   await q(`UPDATE "CloudAccount" SET "readerStatus" = 'OK'::"RoleStatus", "tagWriterStatus" = 'DENIED'::"RoleStatus", "lastCheckedAt" = now(), "updatedAt" = now() WHERE id = $1`, [ID]);
   assert.equal((await rows('SELECT "readerStatus" FROM "CloudAccount" WHERE id = $1', [ID]))[0].readerStatus, 'OK');
+
+  // record_account_event (#154)
+  await q(`UPDATE "CloudAccount" SET "firstEventAt" = COALESCE("firstEventAt", t.at), "lastEventAt" = GREATEST(COALESCE("lastEventAt", t.at), t.at)
+             FROM (SELECT LEAST(COALESCE($1::timestamptz, now()), now()) AS at) t
+            WHERE "id" = $2 AND "customerId" = $3 AND ("firstEventAt" IS NULL OR "lastEventAt" IS NULL OR "lastEventAt" < t.at - interval '60 seconds')`, [null, ID, ID]);
+  assert.ok((await rows('SELECT "firstEventAt" FROM "CloudAccount" WHERE id = $1', [ID]))[0].firstEventAt);
 
   // upsert_resource: insert, then the ON CONFLICT DO UPDATE path
   const resource = `INSERT INTO "Resource" (id, "customerId", "cloudAccountId", region, "resourceType", "resourceArn", "resourceKey", name, tags, "monitoringTag", "monitoringState",
