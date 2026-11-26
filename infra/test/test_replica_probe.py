@@ -26,6 +26,11 @@ def probe_names(variant):
     return f"AlarmOpsRehearsal-probe-{variant}-new", f"AlarmOpsRehearsal-probe-{variant}-unmanaged"
 
 
+def all_probe_names(variant):
+    return probe_names(variant) + (f"AlarmOpsRehearsal-probe-{variant}-canary",
+                                   f"AlarmOpsRehearsal-probe-{variant}-other")
+
+
 def deny_stmt(cond):
     return {"Sid": "DenyOverwriteUnmanaged", "Effect": "Deny", "Action": "cloudwatch:PutMetricAlarm",
             "Resource": f"arn:aws:cloudwatch:*:{ACCT}:alarm:*", "Condition": cond}
@@ -53,11 +58,12 @@ class FakeConditionModel(unittest.TestCase):
         self.assertTrue(self.ev(SNE_COND, {"ManagedBy": "AlarmOps"}))
 
 
-class Probe(ReplicaBase):
+class ProbeBase(ReplicaBase):
     ENV = {**ReplicaBase.ENV, "REHEARSAL_PROBE_WAIT": "0"}
 
     def probe(self, hypothesis="request", policy=POLICY, **extra):
-        self.scenario(policy=policy, cw_overwrite_unmanaged_denied=False, cw_create_resource_tags=hypothesis, **extra)
+        self.scenario(policy=policy, cw_overwrite_unmanaged_denied=False, cw_create_resource_tags=hypothesis,
+                      cw_update_ignores_tags=True, **extra)
         return self.go(extra_args=[PROBE_FLAG])
 
     def table(self, res):
@@ -73,9 +79,11 @@ class Probe(ReplicaBase):
         st = self.state()
         self.assertNotIn(PROBE_POLICY, json.dumps(st["roles"]))
         for v in VARIANTS:
-            for n in probe_names(v):
+            for n in all_probe_names(v):
                 self.assertNotIn(n, st["alarms"])
 
+
+class Probe(ProbeBase):
     def test_request_tag_hypothesis_is_usable(self):
         res = self.probe("request")
         self.assertEqual(res.code, 0, res.text)
@@ -101,10 +109,13 @@ class Probe(ReplicaBase):
         res = self.probe("request", cw_ignore_deny_sid="DenyOverwriteUnmanaged")
         self.assertEqual(res.code, 0, res.text)
         t = self.table(res)
-        for v in VARIANTS:
-            self.assertTrue(t[v][2].startswith("ALLOWED"), res.out)
-            self.assertRegex(t[v][2], r"1\D+2")        # threshold change seen with the person's credentials
-            self.assertEqual(t[v][5], "사용 불가", res.out)
+        # null: the canary (an alarm tagged ManagedBy=Other) is allowed as expected, the missing Deny shows in p2
+        self.assertTrue(t["null"][2].startswith("ALLOWED"), res.out)
+        self.assertRegex(t["null"][2], r"1\D+2")        # threshold change seen with the person's credentials
+        self.assertEqual(t["null"][5], "사용 불가", res.out)
+        # stringnotequals: the canary expects DENIED but got ALLOWED -> the Deny is not in effect -> remeasure
+        self.assertEqual(t["stringnotequals"][2], "불안정", res.out)
+        self.assertEqual(t["stringnotequals"][5], "재측정", res.out)
         self.assertCleanedUpProbe()
 
     def test_probe_does_not_run_the_normal_table(self):
@@ -149,7 +160,7 @@ class Probe(ReplicaBase):
             self.assertEqual(option(p1[0]["argv"], "--threshold"), "1")
             self.assertEqual(option(p1[1]["argv"], "--threshold"), "2")
             p2 = [c for c in rep if c["op"] == "put-metric-alarm" and un in c["argv"]]
-            self.assertEqual(len(p2), 1)
+            self.assertEqual(len(p2), 2, "p2 is measured twice")
             self.assertIn("Key=ManagedBy,Value=AlarmOps", p2[0]["argv"])
             self.assertEqual(option(p2[0]["argv"], "--threshold"), "2")
             dels = [alarm_names_of(c) for c in rep if c["op"] == "delete-alarms" and new in alarm_names_of(c)]
@@ -162,8 +173,8 @@ class Probe(ReplicaBase):
 
     def test_names_are_distinct_and_cleaned(self):
         self.probe("request")
-        names = {n for v in VARIANTS for n in probe_names(v)}
-        self.assertEqual(len(names), 4)
+        names = {n for v in VARIANTS for n in all_probe_names(v)}
+        self.assertEqual(len(names), 8)
         dels = {n for c in self.sb.calls() if c["op"] == "delete-alarms" and not c["as_replica"] for n in alarm_names_of(c)}
         self.assertTrue(names <= dels)
 
@@ -223,7 +234,7 @@ class Probe(ReplicaBase):
         self.assertEqual(res.code, 0, res.text)
         names = {n for c in self.sb.calls() if c["op"] == "delete-alarms" for n in alarm_names_of(c)}
         for v in VARIANTS:
-            for n in probe_names(v):
+            for n in all_probe_names(v):
                 self.assertIn(n, names)
 
     def test_normal_mode_does_not_touch_probe_names(self):
@@ -257,7 +268,108 @@ class Probe(ReplicaBase):
         self.assertCleanedUpProbe()
 
 
+class Reliability(ProbeBase):
+    """Review items: stale Deny between variants, canaries, p2 measured twice, polluted targets."""
+
+    def policy_ops(self):
+        out = []
+        for c in self.sb.calls():
+            if c["op"] in ("put-role-policy", "delete-role-policy") and option(c["argv"], "--policy-name") == PROBE_POLICY:
+                out.append(c["op"])
+        return out
+
+    def test_old_deny_is_removed_before_the_next_variant(self):
+        self.probe("request")
+        ops = self.policy_ops()
+        self.assertEqual(ops[:4], ["delete-role-policy", "put-role-policy", "delete-role-policy", "put-role-policy"], ops)
+
+    def test_start_deletes_all_probe_alarms_before_creating_any(self):
+        self.probe("request")
+        calls = [c for c in self.sb.calls() if not c["as_replica"]]
+        first_del = next(i for i, c in enumerate(calls) if c["op"] == "delete-alarms")
+        first_put = next(i for i, c in enumerate(calls) if c["op"] == "put-metric-alarm")
+        self.assertLess(first_del, first_put)
+        self.assertEqual(set(alarm_names_of(calls[first_del])), {n for v in VARIANTS for n in all_probe_names(v)})
+
+    def test_tag_on_prepared_alarm_is_a_prep_failure(self):
+        res = self.probe("request", cw_person_put_tags={"ManagedBy": "AlarmOps"})
+        self.assertEqual(res.code, 1, res.text)
+        self.assertIn("준비 실패", res.text)
+        self.assertEqual([c for c in self.sb.calls() if c["as_replica"] and c["op"] == "put-metric-alarm"], [])
+        self.assertCleanedUpProbe()
+
+    def test_prepared_alarms_are_tag_checked_with_own_credentials(self):
+        self.probe("request")
+        un = probe_names("null")[1]
+        tags = [c for c in self.sb.calls() if c["op"] == "list-tags-for-resource" and not c["as_replica"]
+                and un in " ".join(c["argv"])]
+        self.assertTrue(tags)
+
+    def test_canary_without_deny_runs_before_each_attach(self):
+        self.probe("request")
+        calls = self.sb.calls()
+        attach = [i for i, c in enumerate(calls) if c["op"] == "put-role-policy"
+                  and option(c["argv"], "--policy-name") == PROBE_POLICY]
+        self.assertEqual(len(attach), 2)
+        for v, a in zip(VARIANTS, attach):
+            canary = f"AlarmOpsRehearsal-probe-{v}-canary"
+            idx = [i for i, c in enumerate(calls) if c["as_replica"] and c["op"] == "put-metric-alarm" and canary in c["argv"]]
+            self.assertEqual(len(idx), 1, v)
+            self.assertIn("Key=ManagedBy,Value=AlarmOps", calls[idx[0]]["argv"])
+            self.assertLess(idx[0], a, "the no-Deny canary runs before this variant's Deny is attached")
+
+    def test_stale_deny_makes_the_canary_fail_and_stops(self):
+        res = self.probe("request", iam_stale_probe_deny=True)
+        self.assertEqual(res.code, 1, res.text)
+        self.assertIn("오류:", res.text)
+        self.assertIn("카나리", res.text)
+        self.assertEqual([l for l in res.out.splitlines() if l.startswith("| stringnotequals |")], [])
+        self.assertCleanedUpProbe()
+
+    def test_deny_canary_is_a_person_made_other_tagged_alarm(self):
+        self.probe("request")
+        calls = self.sb.calls()
+        for v in VARIANTS:
+            other = f"AlarmOpsRehearsal-probe-{v}-other"
+            made = [c for c in calls if not c["as_replica"] and c["op"] == "put-metric-alarm" and other in c["argv"]]
+            self.assertEqual(len(made), 1)
+            self.assertIn("Key=ManagedBy,Value=Other", made[0]["argv"])
+            tried = [c for c in calls if c["as_replica"] and c["op"] == "put-metric-alarm" and other in c["argv"]]
+            self.assertEqual(len(tried), 1)
+
+    def test_p2_that_changes_between_two_measurements_is_unstable(self):
+        # the Deny is ignored for the first 3 puts made while it is attached (canary, p1, p2 first try)
+        res = self.probe("request", cw_ignore_deny_first_n_puts=3)
+        self.assertEqual(res.code, 0, res.text)
+        t = self.table(res)
+        self.assertEqual(t["null"][2], "불안정", res.out)
+        self.assertEqual(t["null"][5], "재측정", res.out)
+
+    def test_stable_results_are_judged(self):
+        res = self.probe("request")
+        for v in VARIANTS:
+            self.assertNotIn("불안정", " ".join(self.table(res)[v]))
+
+
 class Docs(unittest.TestCase):
+    def test_cell_values_and_flow_are_documented(self):
+        gl = (REPO / "docs" / "GO-LIVE.md").read_text(encoding="utf-8")
+        ct = (REPO / "infra" / "test" / "REHEARSAL-CONTRACT.md").read_text(encoding="utf-8")
+        for text in (gl, ct):
+            for needle in ("ALLOWED (임계값", "DENIED (확인 필요", "ERROR(준비 실패)", "불안정", "재측정", "카나리"):
+                self.assertIn(needle, text, needle)
+        for needle in ("REHEARSAL_PROBE_WAIT=60", "사용 가능일 때의 모양(예시)", "오류:", "probe-deny", "AlarmOpsRehearsal-probe-"):
+            self.assertIn(needle, gl, needle)
+        self.assertIn("[--probe-resource-tag-deny]", (REPO / "infra/scripts/rehearsal/README.md").read_text(encoding="utf-8"))
+
+    def test_go_live_command_is_one_block_with_sso_login(self):
+        lines = [l.strip() for l in (REPO / "docs" / "GO-LIVE.md").read_text(encoding="utf-8").splitlines()]
+        want = "bash infra/scripts/rehearsal/replica-check.sh --profile rehearsal-b --confirm-account 12자리 --probe-resource-tag-deny"
+        i = lines.index(want)
+        self.assertEqual(lines[i - 1], "aws sso login --profile rehearsal-b")
+        self.assertEqual(lines[i - 2], "```")
+        self.assertEqual(lines[i + 1], "```")
+
     def test_docs_mention_probe(self):
         for rel in ("docs/GO-LIVE.md", "infra/scripts/rehearsal/README.md", "infra/test/REHEARSAL-CONTRACT.md"):
             self.assertIn(PROBE_FLAG, (REPO / rel).read_text(encoding="utf-8"), rel)
