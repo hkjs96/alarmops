@@ -8,6 +8,7 @@ import type {
   NewUserInput, UserItem, UserListQuery, UserPatchInput,
   CustomerRecord, ProjectRecord, ServiceRecord, AccountRecord, AccountStatus, NewAccountInput, AccountCapabilities, ContactRecord, NewContactInput,
   VerifyContactInput, VerifyContactResult, VerifyBulkResult, VerifyPeek, VerifyDone,
+  ResourceListQuery, ResourceListResponse, ManagedAlarmListResponse, MonitoringAction, MonitoringCommandResult,
 } from "./types";
 
 export class ApiError extends Error {
@@ -141,6 +142,14 @@ export interface ConsoleApi {
   peekVerify(token: string): Promise<VerifyPeek>;
   /** Public. POST /verify/{token} consumes the token once. */
   confirmVerify(token: string): Promise<VerifyDone>;
+
+  /* ---- Monitoring (API-CONTRACT 8.5) ---- */
+  /** GET /resources with the scope filter. One call; `outside` is there when a filter is on. */
+  listResources(q?: ResourceListQuery): Promise<ResourceListResponse>;
+  /** GET /managed-alarms with the same scope filter */
+  listManagedAlarms(q?: Pick<ResourceListQuery, "customer" | "project" | "service" | "mine" | "type" | "limit" | "cursor">): Promise<ManagedAlarmListResponse>;
+  /** POST /resources/{id}/monitoring → 202. 409, 403 CAPABILITY_DISABLED, 503 COMMANDS_UNAVAILABLE. */
+  setMonitoring(resourceId: string, action: MonitoringAction): Promise<MonitoringCommandResult>;
 }
 
 /** Empty params are dropped (known-bugs 9-6). */
@@ -245,5 +254,8 @@ export function createHttpApi(opts: { baseUrl: string; fetch?: typeof fetch; hea
     verifyBulk: (contactIds) => call("POST", "/contacts/verify-bulk", { contactIds }),
     peekVerify: (token) => call("GET", `/verify/${enc(token)}`),
     confirmVerify: (token) => call("POST", `/verify/${enc(token)}`, {}),
+    listResources: (q = {}) => call("GET", "/resources" + toQuery({ ...q, mine: q.mine ? 1 : undefined })),
+    listManagedAlarms: (q = {}) => call("GET", "/managed-alarms" + toQuery({ ...q, mine: q.mine ? 1 : undefined })),
+    setMonitoring: (id, action) => call("POST", `/resources/${enc(id)}/monitoring`, { action }),
   };
 }

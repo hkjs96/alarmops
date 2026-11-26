@@ -11,3 +11,8 @@ docs/qa/shots/
 
 # agent worktrees (local only; also exempt from CI path filter, so never commit them)
 .claude/worktrees/
+
+# rehearsal harness (#122): local account table and run logs
+infra/scripts/rehearsal/accounts.local.json
+rehearsal-logs/
+trust-change-logs/

@@ -1,5 +1,6 @@
-import { StubPage } from "@/components/StubPage";
+import { redirect } from "next/navigation";
 
+/** The resource panel is not built yet: the address leads to the Resources tab. */
 export default function Page() {
-  return <StubPage title="Resource" spec="docs/ui/screens/resource-detail.md" />;
+  redirect("/monitoring/resources");
 }

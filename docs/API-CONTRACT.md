@@ -63,7 +63,7 @@ Slack ──▶ POST /api/slack/interactive        문자·음성 업체 ──�
 | 404 | `NOT_FOUND` | 없음 또는 범위 밖 |
 | 403 | `NOT_A_RESPONDER` | 연락처 열람: 그 고객의 Responder가 아니고 ADMIN도 아님(D-35) |
 | 422 | `EMERGENCY_REASON_REQUIRED` | 연락처 비상 열람: Responder가 아닌 ADMIN이 `reason` 없이(또는 공백만) 호출(D-35) |
-| 409 | `VERSION_CONFLICT`, `ALREADY_EXISTS`, `INVALID_TRANSITION`, `TAG_WINS` | 경합, 중복 생성(4b5b079), 상태 전이 불가, 리소스 태그가 값 결정(D-08) |
+| 409 | `VERSION_CONFLICT`, `ALREADY_EXISTS`, `INVALID_TRANSITION`, `TAG_WINS`, `NOT_SUPPORTED` | 경합, 중복 생성(4b5b079), 상태 전이 불가, 리소스 태그가 값 결정(D-08) |
 | 409 | `WOULD_BE_UNREACHABLE`, `IN_USE`, `FROM_TEMPLATE` | Responders 쓰기: 고객이 UNREACHABLE이 됨(`?confirmUnreachable=true`로 확인 후 실행) / 단계가 그 사람을 지정함 / 템플릿에서 온 직원(§8.3 Responders) |
 | 413 | `PAYLOAD_TOO_LARGE` | 수집 본문 1MB 초과 |
 | 422 | `ROLE_UPDATE_REQUIRED` | 고객 스택이 옛 버전 |
@@ -248,7 +248,8 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 
 | type | payload | 엔진 동작 | 필요한 역할 | 근거 |
 |---|---|---|---|---|
-| `SYNC_ACCOUNT` | `{ mode: "DAILY"|"TAG_RECONCILE"|"ON_DEMAND" }` | 발견 → 고아 정리 → 동기화, AlarmSyncRun 기록 | Reader (+AlarmWriter 있으면 쓰기) | alarm-sync §6 |
+| `SYNC_ACCOUNT` | `{ mode: "DAILY"|"TAG_RECONCILE"|"ON_DEMAND", deferrals?: int }` | 발견 → 고아 정리 → 동기화, AlarmSyncRun 기록 | Reader (+AlarmWriter 있으면 쓰기) | alarm-sync §6 |
+| `SYNC_ALL_ACCOUNTS` | `{ mode: "DAILY"|"TAG_RECONCILE" }` | **주기 동기화 팬아웃(#123).** 시스템 명령이라 `customerId`는 `"system"`이고 `cloudAccountId`는 없다. 엔진은 대상 계정마다 `SYNC_ACCOUNT` 하나를 이 큐에 다시 넣을 뿐 직접 동기화하지 않는다. 결과 `status: OK` | — (DB 읽기, SQS 송신) | D-43 |
 | `SYNC_RESOURCE` | `{ resourceId }` | 리소스 하나 동기화 | Reader, AlarmWriter | §5 |
 | `APPLY_THRESHOLD` | `{ managedAlarmId, threshold?, evalM?, evalN?, off?, thresholdChangeId }` | 같은 이름 알람 제자리 `PutMetricAlarm`, 콘솔 값을 알람에 저장 | AlarmWriter | D-08 |
 | `APPLY_CUSTOMER_DEFAULT` | `{ resourceType, metricKey }` | 영향 리소스 재해석·제자리 수정 | AlarmWriter | D-19 |
@@ -269,6 +270,12 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 - 엔진 테스트는 AWS 호출을 모두 목으로(backend 지침).
 - **`SYNC_ACCOUNT` 결과(수집기 29종, #48).** 타입별 수집 실패는 계정 전체를 멈추지 않는다: AlarmSyncRun `counts.typeErrors = { "<region>/<type>": "<오류>" }`, `counts.errors`에 합산, 상태 `PARTIAL`. 실패한 (리전, 타입)의 기존 행·알람은 **건드리지 않는다**("못 나열함" ≠ 태그 제거·삭제). 모든 수집기가 실패하면(예: AssumeRole 거부) 런이 `FAILED`이고 행은 그대로(4-9). `mode`(DAILY/TAG_RECONCILE/ON_DEMAND)는 AlarmSyncRun에 기록되며 엔진 동작은 같다(메트릭 점검·알림·히스토리는 엔진 밖).
 - **CloudTrail 태그 이벤트(#48).** 고객 스택 `TagChangeRule`이 중앙 버스로 보낸 EventBridge 봉투(`detail-type: "AWS API Call via CloudTrail"`)가 `alarm-commands` 큐로 들어오면 엔진이 명령과 같은 큐에서 처리한다(별도 큐 없음). 고객은 **봉투 최상위 `account`로만** 정한다(`detail.*`·요청 안 ARN 불신). 이벤트는 "어느 리소스·어느 태그 키"만 알려 주고 상태는 Reader로 태그를 다시 읽어 정한다: `Monitoring` 제거 → `NEEDS_REVIEW`(알람 불변, D-16), `Monitoring=on` → `MONITORED`+동기화, `Threshold_*` 변경 → 동기화. 행이 없는 리소스에 `Monitoring=on`이 붙으면 `TAG_RECONCILE` 계정 동기화 한 번. 정지·해지 고객은 무시(D-43). **인프라 의존:** 중앙 버스 규칙이 이 이벤트를 `alarm-commands` 큐로 전달해야 한다(infra 이슈).
+- **주기 동기화 생산자(#123).** 규칙 두 개(기본 버스, `rate(1 hour)`=`TAG_RECONCILE`, 매일 KST 03:00=`DAILY`)가 `SYNC_ALL_ACCOUNTS`를 이 큐에 넣는다. `commandId = sched-<mode>-<fire time>`(규칙 InputTransformer의 `$.time`). `customerId: "system"`은 이 type에서만 받고, 다른 type이 `"system"`을 쓰거나 이 type이 실제 고객 ID를 쓰면 InvalidCommand(재시도 없이 버림). 대상 계정은 `Customer.status='ACTIVE'`, `disabled` 아님, `connectionPurgedAt IS NULL`(D-43, CloudTrail 이벤트의 활성 계정 판정과 같다). 자식 `SYNC_ACCOUNT`의 `commandId = <팬아웃 commandId>-<cloudAccountId>`이고 1KiB 미만이며, 팬아웃 명령에는 계정 목록을 싣지 않는다. 송신은 `SendMessageBatch` 10개씩, 실패 항목은 한 번 더 보내고 그래도 남으면 팬아웃 레코드를 재전달시킨다. 재전달하면 이미 보낸 자식이 큐에 두 벌 생기지만, 엔진이 자식 `commandId`를 런의 `counts.commandId`에 기록하고(스키마 변경 없음) 같은 `commandId`(미룸 사본은 `-d<n>`을 뗀 원래 id)의 런이 `SUCCEEDED`·`PARTIAL`로 끝나 있으면 두 번째 복사본은 `SKIPPED_DUPLICATE`로 끝난다. `FAILED` 런은 재시도를 막지 않는다. 두 복사본이 동시에 오면 뒤의 것은 아래 바쁨 처리로 미뤄졌다가 같은 방식으로 건너뛴다.
+- **팬아웃 분산.** 자식 i(0부터)의 `DelaySeconds = floor(i × min(SYNC_FANOUT_SPREAD_SECONDS, 900/N))`. `SYNC_FANOUT_SPREAD_SECONDS` 기본 10, 0~900만 받고 벗어나면 기본값과 경고 로그.
+- **계정당 실행 하나, 바쁨 처리.** 계정마다 heartbeat가 살아 있는 RUNNING 런이 있으면 새 런을 만들지 않는다. 살아 있음 = heartbeat가 엔진 제한 시간(`ENGINE_TIMEOUT_SECONDS`, 기본 120초) + 30초 안이다. 동기화는 한 Lambda 호출(제한 시간) 안에서만 도니 그보다 오래 멈춘 런은 프로세스가 사라진 것이라 다음 시도가 `FAILED`(stale)로 닫고 새 런을 만든다(그래서 크래시·시간 초과 뒤 SQS 재전달은 `SKIPPED_BUSY`로 버려지지 않는다). 이벤트 인라인 `TAG_RECONCILE`의 10분 디바운스는 그대로라 재전달된 이벤트는 무시되고 다음 정시 런이 처리한다. `STALE_RUN_AFTER`(20분)는 바깥 안전 한도로 남는다(DB advisory lock으로 판정, 스키마 변경 없음). 이 경로는 `ON_DEMAND`·이벤트 인라인 `TAG_RECONCILE`·스케줄 자식이 모두 같다. 자식이 실행될 때 `Customer.status='ACTIVE'`·`disabled` 아님·`connectionPurgedAt IS NULL`을 다시 확인하고(D-43; 팬아웃 뒤 정지·해지될 수 있음) 아니면 `SKIPPED_INACTIVE`로 끝낸다(모든 mode, 사유 경고 로그, 미룸 안 함). 바쁘면 `SYNC_ACCOUNT` 결과 상태는 `SKIPPED_BUSY`이고 counts는 `{ skipped: "BUSY" }`다. 스케줄 자식(`DAILY`·`TAG_RECONCILE`)만 `deferrals < SYNC_BUSY_MAX_DEFERRALS`(기본 5)이면 같은 명령을 `deferrals+1`, `commandId` 끝 `-d<n>`, `DelaySeconds = SYNC_BUSY_DEFER_SECONDS`(기본 300, 최대 900)로 다시 보내고 결과 상태를 `DEFERRED`로 한다. 횟수를 다 쓰면 `SKIPPED_BUSY` 경고 로그만 남긴다(예외 없음, 수신 횟수 소모 없음). 미룸 총량 5×300초 = 1500초(25분)는 `STALE_RUN_AFTER`(1200초) + 엔진 제한 시간(120초)보다 커야 하고, 이 부등식은 템플릿 Rules(`SyncBusyBudget`, 두 파라미터는 허용값 목록)가 배포 전에 강제하고, 엔진도 실행 시 검사해 어기면 주기 동기화 명령(팬아웃·미룸)만 사유(변수명·숫자)를 로그에 남기고 레코드 실패(`batchItemFailures`)로 돌려 SQS가 재시도하고 `CommandsDlq`로 보낸다(`CommandsDlqNotEmptyAlarm`이 울린다. 조용히 버리지 않는다). 같은 배치의 다른 명령은 정상 처리하고, 엔진 기동은 막지 않는다. `COMMANDS_QUEUE_URL`이 없을 때도 같다. 그래서 heartbeat가 멈춘 런은 미룸 한도 안에 stale로 정리되고 새 런이 생긴다.
+- **`deferrals`는 선택 payload.** 정수(0 이상)만 받는다. 옛 엔진은 모르는 키라 무시하고 그대로 처리한다(되돌리기 안전).
+- **최대 반영 지연.** `Monitoring=on`이 붙었는데 리소스 행이 없고 이벤트가 디바운스로 무시된 경우, 다음 정시 `TAG_RECONCILE`까지 60분 + 팬아웃 분산 최대 15분(900초) + 바쁨 미룸 최대 25분(5×300초) + 큐 대기·실행 시간 = 기본값으로 약 100분 + 실행 시간. 최근 실행 스킵은 없다: 앞선 런의 mode·끝난 상태(SUCCEEDED·PARTIAL·FAILED)는 보지 않고 RUNNING(stale 아님)만 본다.
+- **환경변수.** `COMMANDS_QUEUE_URL`(송신 큐, 템플릿 `!Ref`, 코드에 하드코딩하지 않음), `SYNC_FANOUT_SPREAD_SECONDS`, `SYNC_BUSY_MAX_DEFERRALS`, `SYNC_BUSY_DEFER_SECONDS`. **인프라 의존:** 기본 버스 규칙 2개·전용 DLQ·큐 정책·엔진 송신 권한·`EngineBatchSize`(infra 이슈), 배포 역할의 기본 버스 `rule/<prefix>-sync-*` 권한(bootstrap, 사람이 스택 업데이트). 배포 순서는 엔진 → bootstrap → 규칙.
 
 ## 7. 알람 엔진 ↔ DB 계약 (B10)
 
@@ -516,9 +523,10 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 ### 8.5 리소스·임계치 (D-08, D-16, D-19)
 | 메서드 경로 | 설명 | 권한 |
 |---|---|---|
-| GET `/resources?customerId=&customer=&project=&service=&type=&monitoringState=&coverage=missing` | 커버리지 빈틈(P4-2). `NEEDS_REVIEW` 필터(D-16) | V |
-| GET `/resources/{id}` | 태그 사본, 알람, 값과 출처, 드리프트, 변경 이력 | V |
-| POST `/resources/{id}/monitoring` | `{ action: "tag_on" | "stop" | "keep" }` — tag_on은 TagWriter 필요(403 `CAPABILITY_DISABLED`), stop은 확인 필요 해제 | O |
+| GET `/resources?customerId=&customer=&project=&service=&mine=1&type=&monitoringState=&limit=&cursor=` | **구현됨(1차).** 항목 `{ id, name(Name 태그, 없으면 resourceKey), resourceKey, resourceType, region, account: { id, alias, awsAccountId, alarmWriterEnabled, tagWriterEnabled }, org: { customer, project, service }(OrgRef), monitoringState, needsReviewSince, needsReviewReason, alarmCount, lastSeenAt }`. 응답 `{ items, nextCursor, outside }` — `outside`는 범위 필터가 없으면 null, 있으면 `{ needsReview: 필터 밖 확인 필요 리소스 수, inAlarm: 필터 밖 ALARM 상태 ManagedAlarm 수 }`(`/managed-alarms`도 같은 값). `account.awsAccountId`는 INTERNAL만(포털은 null, R-2). 정렬 name, id(바이트 순). 잘못된 `monitoringState`·`type` 400. **미구현: `coverage=missing`** |
+| GET `/resources/{id}` | **구현됨(1차).** 목록 항목 + `tags`(사본) + `alarms[]`(아래 `/managed-alarms` 항목). 범위 밖·없는 ID는 같은 404(D-33). **미구현: 값 출처 층, 드리프트 상세, 변경 이력** | V |
+| POST `/resources/{id}/monitoring` | **구현됨(1차).** `{ action: "stop" \| "tag_on" \| "keep" }` → 202 `{ commandId, status: "queued" }`. 순서: 404 → 403 `ROLE_REQUIRED` → 400 → keep이면 409 `NOT_SUPPORTED` → 상태(409 `INVALID_TRANSITION`: stop은 `NEEDS_REVIEW`만, tag_on은 `NEEDS_REVIEW`·`NOT_MONITORED`만) → 계정·고객 활성(고객 `ACTIVE`·계정 비활성 아님·연결 미삭제가 아니면 409 `ACCOUNT_DISABLED`, 발행 없음) → 계정 기능(403 `CAPABILITY_DISABLED`, `details.role`: stop=alarmWriter, tag_on=tagWriter) → 큐 없음 503 `COMMANDS_UNAVAILABLE` → 발행 실패 502 `COMMAND_PUBLISH_FAILED`. stop은 `STOP_MONITORING { resourceId, deleteAlarms: true }`, tag_on은 `SET_MONITORING_TAG { resourceId, value: "on" }`를 발행(감사 `resource.stop_monitoring` 등). API는 행을 바꾸지 않는다(엔진이 바꾼다). **keep은 엔진에 대응 명령이 없어 409 `NOT_SUPPORTED`** | O |
+| GET `/managed-alarms?customer=&project=&service=&mine=1&resourceId=&state=&severity=&limit=&cursor=` | **구현됨(1차, 읽기 전용).** 항목 `{ id, resourceId, resourceName, resourceType, region, metricKey, alarmName(리소스 + 지표, 임계치 없음 D-08), org, severity, threshold(number), thresholdSource, evalM, evalN, comparison, statistic, period, state(OK\|ALARM\|INSUFFICIENT_DATA\|null), driftStatus, lastSyncedAt }`, 응답 `{ items, nextCursor, outside }`. 정렬 alarmName, id | V |
 | GET `/resources/{id}/thresholds` | 지표별 `{ value, source: CODE|MSP|CUSTOMER|CONSOLE|TAG, layers: [...] , editable, lockedReason }` | V |
 | POST `/thresholds/preview` | `{ targets[], change }` → 영향 리소스·출처별 결과, 태그가 이기는 대상 표시 | O |
 | POST `/thresholds/apply` | preview와 같은 본문 + `previewId` → ThresholdChange 행 + `APPLY_THRESHOLD` 명령, `202 { changeIds[] }` | O |

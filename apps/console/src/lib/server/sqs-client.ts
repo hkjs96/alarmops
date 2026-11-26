@@ -8,8 +8,8 @@ import type { SqsSender } from "@alarmops/api";
  * The AWS SDK and the OIDC helper are imported on the first `send`, so mock mode, tests and a console without a queue
  * never load them. `createApi` is built synchronously, hence the thin lazy wrapper.
  *
- * `awsCredentialsProvider` is from `@vercel/functions/oidc` (3.11.3). That subpath is marked deprecated in favour of
- * `@vercel/oidc-aws-credentials-provider`; same call shape, switch when that package is approved.
+ * `awsCredentialsProvider` is from `@vercel/oidc-aws-credentials-provider` (pinned; it replaces the deprecated
+ * `@vercel/functions/oidc` with the same call shape).
  * Without AWS_ROLE_ARN there is no client (undefined): the caller then leaves the publisher undefined, so a
  * termination stays 503 COMMANDS_UNAVAILABLE.
  */
@@ -18,7 +18,7 @@ export function sqsClientFromEnv(env: Record<string, string | undefined> = proce
   if (!roleArn) return undefined;
   let client: Promise<SqsSender> | undefined;
   const load = (): Promise<SqsSender> => (client ??= (async () => {
-    const [{ SQSClient }, { awsCredentialsProvider }] = await Promise.all([import("@aws-sdk/client-sqs"), import("@vercel/functions/oidc")]);
+    const [{ SQSClient }, { awsCredentialsProvider }] = await Promise.all([import("@aws-sdk/client-sqs"), import("@vercel/oidc-aws-credentials-provider")]);
     return new SQSClient({ region: "ap-northeast-2", credentials: awsCredentialsProvider({ roleArn }) }) as unknown as SqsSender;
   })().catch((e) => { client = undefined; throw e; }));
   return { send: async (command) => (await load()).send(command) };

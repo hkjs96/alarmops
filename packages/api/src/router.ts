@@ -17,6 +17,7 @@ import { listContactReveals, revealContact } from './revealApi.js';
 import { createCustomer, listAccounts, createAccount, patchAccount, deleteAccount, checkAccount, getAccountStatus } from './onboardingApi.js';
 import { listContacts, createContact, patchContact, deleteContact, verifyContact, verifyBulk, useVerifyLink, peekVerifyLink, type VerificationSender } from './contactsApi.js';
 import { createProject, createService, getCustomer, listCustomers, listProjects, listServices, patchCustomer, patchProject, patchService } from './orgApi.js';
+import { getResource, listManagedAlarms, listResources, postMonitoring } from './monitoringApi.js';
 import { createUser, getUser, listUsers, patchUser } from './usersApi.js';
 import { deleteResponder, getMe, getOncallNow, getPagingHealth, getResponders, listRotations, listStaff, patchResponder, postResponder } from './peopleApi.js';
 
@@ -122,6 +123,11 @@ export const ROUTES: Route[] = [
   route('PATCH', '/contacts/:id', (r, d, p) => patchContact(r, d, p[0]!), () => false),
   route('DELETE', '/contacts/:id', (r, d, p) => deleteContact(r, d, p[0]!)),
   route('POST', '/contacts/:id/verify', (r, d, p) => verifyContact(r, d, p[0]!)),
+  // ── monitoring (D-16): resources, managed alarms ──
+  route('GET', '/resources', (r, d) => listResources(r, d)),
+  route('GET', '/resources/:id', (r, d, p) => getResource(r, d, p[0]!)),
+  route('POST', '/resources/:id/monitoring', (r, d, p) => postMonitoring(r, d, p[0]!)),
+  route('GET', '/managed-alarms', (r, d) => listManagedAlarms(r, d)),
   // ── users (#69, D-55): responses carry a masked e-mail only, so replay is fine ──
   route('GET', '/users', (r, d) => listUsers(r, d)),
   route('POST', '/users', (r, d) => createUser(r, d)),

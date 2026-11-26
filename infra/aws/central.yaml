@@ -34,8 +34,10 @@ Parameters:
     Description: Name of the bus created by central-bus.yaml (stack output BusName). Must exist before this stack.
   VercelOidcProviderArn:
     Type: String
-    AllowedPattern: '^arn:aws[a-z-]*:iam::[0-9]{12}:oidc-provider/oidc\.vercel\.com$'
-    Description: IAM OIDC provider registered by a person for issuer https://oidc.vercel.com (Vercel "Global" issuer mode).
+    AllowedPattern: '^arn:aws[a-z-]*:iam::[0-9]{12}:oidc-provider/oidc\.vercel\.com(/[a-z0-9][a-z0-9-]{0,62})?$'
+    Description: >-
+      IAM OIDC provider registered by a person. Global issuer mode: ...:oidc-provider/oidc.vercel.com.
+      Team issuer mode: ...:oidc-provider/oidc.vercel.com/<team slug>. The trust condition keys are derived from this ARN.
   VercelTeamSlug:
     Type: String
     AllowedPattern: '^[A-Za-z0-9_-]{1,64}$'
@@ -78,6 +80,41 @@ Parameters:
     Type: Number
     Default: 10
     MinValue: 1
+  EngineBatchSize:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    MaxValue: 10
+    Description: SQS event source BatchSize for the engine. 1 keeps the receive count from rising when a batch runs out of time (#123).
+  SyncSchedulesState:
+    Type: String
+    Default: ENABLED
+    AllowedValues: [ENABLED, DISABLED]
+    Description: State of the periodic-sync schedule rules. DISABLED stops the producer (rollback switch, #123).
+  SyncDailySchedule:
+    Type: String
+    Default: cron(0 18 * * ? *)
+    Description: EventBridge schedule of the DAILY sync (UTC). The default is 03:00 KST.
+  SyncFanoutSpreadSeconds:
+    Type: Number
+    Default: 10
+    MinValue: 0
+    MaxValue: 900
+    Description: Seconds between the delayed starts of the per-account sync children (capped so the spread is at most 900 s).
+  SyncBusyMaxDeferrals:
+    Type: Number
+    Default: 5
+    AllowedValues: [2, 3, 4, 5, 6, 8, 10, 12, 15, 20]
+    Description: >-
+      Times a busy scheduled sync child is sent back. This x SyncBusyDeferSeconds must be > 1320 s (stale-run window
+      1200 s + engine timeout 120 s); the Rule SyncBusyBudget enforces it (CloudFormation Rules cannot multiply, so both
+      parameters take a fixed value list and the Rule lists the allowed pairs). The engine also rejects a violating
+      setting at run time (the periodic sync only; every other command keeps working).
+  SyncBusyDeferSeconds:
+    Type: Number
+    Default: 300
+    AllowedValues: [120, 180, 300, 450, 600, 900]
+    Description: Delay of each busy-deferral copy (SQS DelaySeconds, at most 900). See SyncBusyMaxDeferrals.
   EngineMaxConcurrency:
     Type: Number
     Default: 5
@@ -123,6 +160,29 @@ Parameters:
     Description: ALARMOPS_REMEDIATION_EXECUTION for the engine (D-15). Stays false until the Slack approval path is live.
 
 Rules:
+  # SyncBusyMaxDeferrals x SyncBusyDeferSeconds > 1320 (= 1200 s stale window + 120 s engine timeout, the maximum the
+  # EngineTimeoutSeconds parameter allows). Allowed pairs per delay: 120 -> >=12, 180 -> >=8, 300 -> >=5, 450 -> >=3,
+  # 600 -> >=3, 900 -> >=2.
+  SyncBusyBudget:
+    Assertions:
+      - Assert:
+          Fn::Or:
+            - Fn::And:
+                - !Equals [!Ref SyncBusyDeferSeconds, "120"]
+                - !Contains [["12", "15", "20"], !Ref SyncBusyMaxDeferrals]
+            - Fn::And:
+                - !Equals [!Ref SyncBusyDeferSeconds, "180"]
+                - !Contains [["8", "10", "12", "15", "20"], !Ref SyncBusyMaxDeferrals]
+            - Fn::And:
+                - !Equals [!Ref SyncBusyDeferSeconds, "300"]
+                - !Contains [["5", "6", "8", "10", "12", "15", "20"], !Ref SyncBusyMaxDeferrals]
+            - Fn::And:
+                - !Contains [["450", "600"], !Ref SyncBusyDeferSeconds]
+                - !Contains [["3", "4", "5", "6", "8", "10", "12", "15", "20"], !Ref SyncBusyMaxDeferrals]
+            - Fn::And:
+                - !Equals [!Ref SyncBusyDeferSeconds, "900"]
+                - !Contains [["2", "3", "4", "5", "6", "8", "10", "12", "15", "20"], !Ref SyncBusyMaxDeferrals]
+        AssertDescription: SyncBusyMaxDeferrals x SyncBusyDeferSeconds must be greater than 1320 seconds.
   SesNeedsFromAddress:
     RuleCondition: !Not [!Equals [!Ref SesIdentityArn, ""]]
     Assertions:
@@ -269,6 +329,14 @@ Resources:
       SqsManagedSseEnabled: true
       MessageRetentionPeriod: 1209600
 
+  # Delivery of the periodic-sync schedule rules (#123). Own DLQ and policy: scoped to the two schedule rules only.
+  SyncScheduleRuleDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${ResourcePrefix}-sync-schedule-rule-dlq"
+      SqsManagedSseEnabled: true
+      MessageRetentionPeriod: 1209600
+
   AlertEventsDlq:
     Type: AWS::SQS::Queue
     Properties:
@@ -288,11 +356,12 @@ Resources:
         deadLetterTargetArn: !GetAtt AlertEventsDlq.Arn
         maxReceiveCount: 5
 
-  # Security review (hkjs96/alarmops#47, engine-collectors #10):
-  #  - the only Allow for events.amazonaws.com is bound to ONE rule ARN (ArnEquals aws:SourceArn). No Principal "*" in
-  #    any Allow, no aws:SourceAccount-only condition.
-  #  - DenySendFromOthers: both ArnNotEquals must hold (AND) for the Deny to apply, so the console role and that one
-  #    rule are the only senders.
+  # Security review (hkjs96/alarmops#47, engine-collectors #10; #123):
+  #  - the only Allow for events.amazonaws.com is bound to exactly 3 rule ARNs (ArnEquals aws:SourceArn): the tag-event
+  #    rule on the central bus and the two periodic-sync schedule rules on the default bus. No Principal "*" in any
+  #    Allow, no aws:SourceAccount-only condition.
+  #  - DenySendFromOthers: both ArnNotEquals must hold (AND) for the Deny to apply, so the console role, CentralRole
+  #    (the engine sends fan-out children and deferred copies back) and those three rules are the only senders.
   CommandsQueuePolicy:
     Type: AWS::SQS::QueuePolicy
     Properties:
@@ -300,9 +369,9 @@ Resources:
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          - Sid: ConsoleSendOnly
+          - Sid: ConsoleAndEngineSend
             Effect: Allow
-            Principal: { AWS: !GetAtt VercelConsoleRole.Arn }
+            Principal: { AWS: [!GetAtt VercelConsoleRole.Arn, !GetAtt CentralRole.Arn] }
             Action: sqs:SendMessage
             Resource: !GetAtt CommandsQueue.Arn
           - Sid: TagEventRuleSend
@@ -311,7 +380,8 @@ Resources:
             Action: sqs:SendMessage
             Resource: !GetAtt CommandsQueue.Arn
             Condition:
-              ArnEquals: { "aws:SourceArn": !GetAtt TagEventRule.Arn }
+              ArnEquals:
+                "aws:SourceArn": [!GetAtt TagEventRule.Arn, !GetAtt SyncHourlyRule.Arn, !GetAtt SyncDailyRule.Arn]
           - Sid: EngineReceiveDelete
             Effect: Allow
             Principal: { AWS: !GetAtt CentralRole.Arn }
@@ -324,8 +394,8 @@ Resources:
             Resource: !GetAtt CommandsQueue.Arn
             Condition:
               ArnNotEquals:
-                "aws:PrincipalArn": !GetAtt VercelConsoleRole.Arn
-                "aws:SourceArn": !GetAtt TagEventRule.Arn
+                "aws:PrincipalArn": [!GetAtt VercelConsoleRole.Arn, !GetAtt CentralRole.Arn]
+                "aws:SourceArn": [!GetAtt TagEventRule.Arn, !GetAtt SyncHourlyRule.Arn, !GetAtt SyncDailyRule.Arn]
           - Sid: DenyReceiveFromOthers
             Effect: Deny
             Principal: "*"
@@ -338,6 +408,29 @@ Resources:
             Principal: "*"
             Action: sqs:*
             Resource: !GetAtt CommandsQueue.Arn
+            Condition:
+              Bool: { "aws:SecureTransport": "false" }
+
+  SyncScheduleRuleDlqPolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues: [!Ref SyncScheduleRuleDlq]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: SyncScheduleRulesDeadLetter
+            Effect: Allow
+            Principal: { Service: events.amazonaws.com }
+            Action: sqs:SendMessage
+            Resource: !GetAtt SyncScheduleRuleDlq.Arn
+            Condition:
+              ArnEquals:
+                "aws:SourceArn": [!GetAtt SyncHourlyRule.Arn, !GetAtt SyncDailyRule.Arn]
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: sqs:*
+            Resource: !GetAtt SyncScheduleRuleDlq.Arn
             Condition:
               Bool: { "aws:SecureTransport": "false" }
 
@@ -454,6 +547,49 @@ Resources:
             MaximumRetryAttempts: 10
             MaximumEventAgeInSeconds: 3600
 
+  # ================================================================ periodic sync schedule rules -> alarm-commands (#123)
+  # Schedule rules only exist on the default bus (not CentralBusName). Each sends one SYNC_ALL_ACCOUNTS command; the
+  # engine fans it out per account. commandId carries the fire time so a redelivery is the same command.
+  SyncHourlyRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${ResourcePrefix}-sync-hourly"
+      Description: Hourly TAG_RECONCILE of every active account (catches tag events the debounce dropped).
+      ScheduleExpression: rate(1 hour)
+      State: !Ref SyncSchedulesState
+      Targets:
+        - Id: alarm-commands
+          Arn: !GetAtt CommandsQueue.Arn
+          InputTransformer:
+            InputPathsMap:
+              t: $.time
+            InputTemplate: '{"schemaVersion":1,"commandId":"sched-TAG_RECONCILE-<t>","type":"SYNC_ALL_ACCOUNTS","customerId":"system","payload":{"mode":"TAG_RECONCILE"}}'
+          DeadLetterConfig:
+            Arn: !GetAtt SyncScheduleRuleDlq.Arn
+          RetryPolicy:
+            MaximumRetryAttempts: 10
+            MaximumEventAgeInSeconds: 3600
+
+  SyncDailyRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${ResourcePrefix}-sync-daily"
+      Description: Daily full sync (DAILY) of every active account.
+      ScheduleExpression: !Ref SyncDailySchedule
+      State: !Ref SyncSchedulesState
+      Targets:
+        - Id: alarm-commands
+          Arn: !GetAtt CommandsQueue.Arn
+          InputTransformer:
+            InputPathsMap:
+              t: $.time
+            InputTemplate: '{"schemaVersion":1,"commandId":"sched-DAILY-<t>","type":"SYNC_ALL_ACCOUNTS","customerId":"system","payload":{"mode":"DAILY"}}'
+          DeadLetterConfig:
+            Arn: !GetAtt SyncScheduleRuleDlq.Arn
+          RetryPolicy:
+            MaximumRetryAttempts: 10
+            MaximumEventAgeInSeconds: 3600
+
   # ================================================================ roles
   # CentralRole: the ONE role customer stacks trust (their CentralRoleArn parameter). It is also the alarm-engine
   # Lambda's execution role, so the identity that assumes customer roles is the code that holds the DB secret and
@@ -504,6 +640,11 @@ Resources:
                 Effect: Allow
                 Action: [sqs:ReceiveMessage, sqs:DeleteMessage, sqs:GetQueueAttributes, sqs:ChangeMessageVisibility]
                 Resource: !GetAtt CommandsQueue.Arn
+              # #123: fan-out children and deferred copies go back to the same queue (the only send right added).
+              - Sid: SendSyncCommands
+                Effect: Allow
+                Action: sqs:SendMessage
+                Resource: !GetAtt CommandsQueue.Arn
               - Sid: ReadEngineDbSecret
                 Effect: Allow
                 Action: secretsmanager:GetSecretValue
@@ -548,16 +689,19 @@ Resources:
       RoleName: AlarmOpsCentral-VercelConsole
       Description: Vercel console (production) sends alarm commands. Nothing else.
       MaxSessionDuration: 3600
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal: { Federated: !If [VercelProviderInThisAccount, !Ref VercelOidcProviderArn, !Ref "AWS::NoValue"] }
-            Action: sts:AssumeRoleWithWebIdentity
-            Condition:
-              StringEquals:
-                "oidc.vercel.com:aud": !Sub "https://vercel.com/${VercelTeamSlug}"
-                "oidc.vercel.com:sub": !Sub "owner:${VercelTeamSlug}:project:${VercelProjectName}:environment:production"
+      # Condition keys are "<provider path>:aud|sub": oidc.vercel.com (Global) or oidc.vercel.com/<team> (Team issuer).
+      # CloudFormation cannot compute map keys, so the document is a JSON string (Sub) with the prefix taken from the provider ARN.
+      # Without a provider in this account the Principal is empty, which IAM rejects: nobody can assume the role.
+      AssumeRolePolicyDocument: !If
+        - VercelProviderInThisAccount
+        - !Sub
+          - |
+            {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"${VercelOidcProviderArn}"},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"${OidcKeyPrefix}:aud":"https://vercel.com/${VercelTeamSlug}","${OidcKeyPrefix}:sub":"owner:${VercelTeamSlug}:project:${VercelProjectName}:environment:production"}}}]}
+          - OidcKeyPrefix: !Select [1, !Split ["oidc-provider/", !Ref VercelOidcProviderArn]]
+        - !Sub
+          - |
+            {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"${OidcKeyPrefix}:aud":"https://vercel.com/${VercelTeamSlug}","${OidcKeyPrefix}:sub":"owner:${VercelTeamSlug}:project:${VercelProjectName}:environment:production"}}}]}
+          - OidcKeyPrefix: !Select [1, !Split ["oidc-provider/", !Ref VercelOidcProviderArn]]
       Policies:
         - PolicyName: console
           PolicyDocument:
@@ -623,12 +767,20 @@ Resources:
           DATABASE_URL_SECRET_ARN: !Ref EngineDbSecret
           ALARMOPS_REMEDIATION_EXECUTION: !Ref RemediationExecution
           REMEDIATOR_CALLER_ROLE_ARN: !If [RemediationEnabled, !GetAtt RemediatorCallerRole.Arn, !Ref "AWS::NoValue"]
+          # #123: the engine sends the fan-out children and deferred copies back to its own queue.
+          COMMANDS_QUEUE_URL: !Ref CommandsQueue
+          ENGINE_TIMEOUT_SECONDS: !Ref EngineTimeoutSeconds   # the engine derives its dead-run window from this
+          SYNC_FANOUT_SPREAD_SECONDS: !Ref SyncFanoutSpreadSeconds
+          SYNC_BUSY_MAX_DEFERRALS: !Ref SyncBusyMaxDeferrals
+          SYNC_BUSY_DEFER_SECONDS: !Ref SyncBusyDeferSeconds
       Events:
         Commands:
           Type: SQS
           Properties:
             Queue: !GetAtt CommandsQueue.Arn
-            BatchSize: 5
+            # 1: a record of a batch that has no time left is returned unread, so the receive count only rises on a
+            # real failure (#123 simulation). Raise only together with the fan-out spread.
+            BatchSize: !Ref EngineBatchSize
             FunctionResponseTypes: [ReportBatchItemFailures]
             ScalingConfig:
               MaximumConcurrency: !Ref EngineMaxConcurrency
@@ -825,6 +977,24 @@ Resources:
       Dimensions:
         - Name: QueueName
           Value: !GetAtt TagEventsRuleDlq.QueueName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmTopicArn], !Ref "AWS::NoValue"]
+
+  SyncScheduleRuleDlqNotEmptyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ResourcePrefix}-sync-schedule-rule-dlq-not-empty"
+      AlarmDescription: Periodic sync commands the schedule rules could not deliver to alarm-commands.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt SyncScheduleRuleDlq.QueueName
       Statistic: Maximum
       Period: 300
       EvaluationPeriods: 1

@@ -11,6 +11,7 @@ import { createRevealApi, createRevealStore, type RevealStore } from "./reveal-m
 import { createRetentionApi, createRetentionStore, type RetentionStore } from "./retention-mock";
 import { createUsersApi, createUsersStore, type UsersStore } from "./users-mock";
 import { createOnboardingApi, createOnboardingStore, type OnboardingStore } from "./onboarding-mock";
+import { createMonitoringApi, createMonitoringStore, type MonitoringStore } from "./monitoring-mock";
 
 interface Store {
   customers: FxCustomer[];
@@ -23,6 +24,7 @@ interface Store {
   retention: RetentionStore;
   users: UsersStore;
   onboarding: OnboardingStore;
+  monitoring: MonitoringStore;
 }
 
 export interface MockUser { id: string; contactId: string; name: string; email: string; role: Role; kind?: "INTERNAL" | "CUSTOMER" }
@@ -48,6 +50,7 @@ export function createStore(opts: { customers?: 14 | 34 } = {}): Store {
   return {
     customers, paging: createPaging(customers), customerStatus: createStatusStore(), reveals: createRevealStore(customers), retention: createRetentionStore(), users: createUsersStore(),
     onboarding: createOnboardingStore(),
+    monitoring: createMonitoringStore(customers),
     incidents: structuredClone([...fx.openIncidents, ...fx.resolvedIncidents, ...fx.suppressedIncidents]),
     timelines: structuredClone(fx.timelines),
     undo: new Map(),
@@ -170,6 +173,11 @@ export function createMockApi(store: Store = createStore(), clock: () => number 
     err: (status, code, message, details) => new ApiError(status, code, message, `req_mock_${++reqSeq}`, details),
   });
 
+  const monitoringApi = createMonitoringApi({
+    store: store.monitoring, customers: store.customers, me: ME, need, mineIds: () => new Set(store.customers.filter((c) => c.mine).map((c) => c.id)),
+    err: (status, code, message, details) => new ApiError(status, code, message, `req_mock_${++reqSeq}`, details),
+  });
+
   return {
     ...pagingApi,
     ...revealApi,
@@ -177,6 +185,7 @@ export function createMockApi(store: Store = createStore(), clock: () => number 
     ...retentionApi,
     ...usersApi,
     ...onboardingApi,
+    ...monitoringApi,
     async me() { return { id: ME.id, name: ME.name, email: ME.email, role: ME.role, ...(ME.kind ? { kind: ME.kind } : {}) }; },
     async listIncidents(q = {}) {
       const scope = scopeOf(q);

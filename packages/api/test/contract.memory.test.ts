@@ -8,6 +8,7 @@ import { retentionContract } from './contract/retentionContract.js';
 import { revealContract } from './contract/revealContract.js';
 import { onboardingContract } from './contract/onboardingContract.js';
 import { orgContract } from './contract/orgContract.js';
+import { monitoringContract } from './contract/monitoringContract.js';
 import { usersContract } from './contract/usersContract.js';
 
 describe('api store contract: memory', () => {
@@ -18,4 +19,5 @@ describe('api store contract: memory', () => {
   onboardingContract(async (seed) => memoryFixture(seed as MemoryApiStore));
   usersContract(async (seed) => memoryFixture(seed as MemoryApiStore));
   orgContract(async (seed) => memoryFixture(seed as MemoryApiStore));
+  monitoringContract(async (seed) => memoryFixture(seed as MemoryApiStore));
 });

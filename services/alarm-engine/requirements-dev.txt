@@ -7,3 +7,5 @@ hypothesis==6.170.15
 moto[cloudwatch,sts]==5.2.5
 ruff==0.17.4
 mypy==2.4.1
+# CloudFormation lint, run by tests/test_periodic_sync_repo_checks.py (same pin as .github/workflows/ci.yml).
+cfn-lint==1.60.1

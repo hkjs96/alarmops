@@ -14,7 +14,7 @@ name: ci
 #   infra/**                                       infra
 #   .github/scripts/**                             infra, db (both run the script tests)
 #   docs/**, root *.md, .env.example, .gitignore,  nothing (docs_only). Exceptions that tests read:
-#     .claude/worktrees/**                         docs/specs/alarm-rules.md -> engine, docs/SETUP-PROD-DB.md -> infra,
+#     .claude/worktrees/**                         docs/specs/alarm-rules.md -> engine, docs/SETUP-PROD-DB.md -> infra, docs/GO-LIVE.md -> infra,
 #                                                  tools/vercel-cli/** -> infra, the offboard-account.command.json
 #                                                  fixtures (packages/api, alarm-engine) -> test + engine.
 #   *.md inside an area                            follows that area's rule (e.g. infra/aws/*.md -> infra)
@@ -168,12 +168,12 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install "cfn-lint==1.60.1"
-      - name: cfn-lint (customer stack, central bus, central SAM bundle)
-        run: cfn-lint infra/customer-stack/template.yaml infra/aws/central-bus.yaml infra/aws/central.yaml infra/aws/central-bootstrap.yaml
+      - name: cfn-lint (customer stack, central bus, central SAM bundle, bootstrap, alerts)
+        run: cfn-lint infra/customer-stack/template.yaml infra/aws/central-bus.yaml infra/aws/central.yaml infra/aws/central-bootstrap.yaml infra/aws/central-alerts.yaml
       - name: Template structure tests (roles, trust, Deny rules)
         run: python -m unittest discover -s infra/test -v
       - name: Workflow script tests (console deploy environment check, bus allow list)
-        run: node --test .github/scripts/check-console-deploy-env.test.mjs .github/scripts/smoke-console.test.mjs .github/scripts/strip-deploy-env.test.mjs .github/scripts/bus-allowlist.test.mjs .github/scripts/ci-changes.test.mjs
+        run: node --test .github/scripts/check-console-deploy-env.test.mjs .github/scripts/smoke-console.test.mjs .github/scripts/rollback-console.test.mjs .github/scripts/strip-deploy-env.test.mjs .github/scripts/bus-allowlist.test.mjs .github/scripts/ci-changes.test.mjs
 
   e2e:
     needs: changes
@@ -307,7 +307,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Workflow script tests (drift check, connection string check)
-        run: node --test .github/scripts/check-migration-drift.test.mjs .github/scripts/mask-db-urls.test.mjs .github/scripts/check-console-deploy-env.test.mjs .github/scripts/smoke-console.test.mjs .github/scripts/strip-deploy-env.test.mjs .github/scripts/bus-allowlist.test.mjs
+        run: node --test .github/scripts/check-migration-drift.test.mjs .github/scripts/mask-db-urls.test.mjs .github/scripts/check-console-deploy-env.test.mjs .github/scripts/smoke-console.test.mjs .github/scripts/rollback-console.test.mjs .github/scripts/strip-deploy-env.test.mjs .github/scripts/bus-allowlist.test.mjs
       - name: Prisma generate
         run: npx prisma generate
         working-directory: db

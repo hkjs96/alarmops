@@ -150,3 +150,187 @@ def test_sync_run_started_since_is_account_scoped_and_windowed(pg):
     pg.start_sync_run("cus_1", "acc_1", "TAG_RECONCILE")
     assert pg.sync_run_started_since("acc_1", timedelta(minutes=10))
     assert not pg.sync_run_started_since("acc_1", timedelta(seconds=-1))
+
+
+# ── #123 periodic sync: claim_sync_run (advisory lock) and the fan-out target list ────────────────────────────────
+
+def _acct(pg, aid: str, cus: str, aws: str, **cols) -> None:
+    pg._exec('''INSERT INTO "CloudAccount" (id, "customerId", "awsAccountId", "externalId", "readerRoleArn",
+                "eventForwarderRoleArn", "alarmWriterRoleArn", "alarmWriterEnabled", "updatedAt")
+                VALUES (%s,%s,%s,%s,'arn:r','arn:fw','arn:w',true,now())''', aid, cus, aws, f"ext-{aid}")
+    for col, val in cols.items():
+        pg._exec(f'UPDATE "CloudAccount" SET "{col}" = %s WHERE id = %s', val, aid)
+
+
+def _running(pg, acct: str) -> int:
+    return pg._one('SELECT count(*) AS n FROM "AlarmSyncRun" WHERE "cloudAccountId" = %s AND status = \'RUNNING\'',
+                   acct)["n"]
+
+
+def test_list_active_accounts_matches_the_fan_out_rule(pg):
+    for cid, status in (("cus_p_act", "ACTIVE"), ("cus_p_sus", "SUSPENDED")):
+        pg._exec('''INSERT INTO "Customer" (id, name, slug, status, "updatedAt") VALUES (%s,%s,%s,%s::"CustomerStatus",now())''',
+                 cid, cid, cid.replace("_", "-"), status)
+    _acct(pg, "acc_p_ok1", "cus_p_act", "300000000001")
+    _acct(pg, "acc_p_ok2", "cus_p_act", "300000000002")
+    _acct(pg, "acc_p_sus", "cus_p_sus", "300000000003")
+    _acct(pg, "acc_p_dis", "cus_p_act", "300000000004", disabled=True)
+    pg._exec('''INSERT INTO "CloudAccount" (id, "customerId", "awsAccountId", "externalId", "readerRoleArn",
+                "eventForwarderRoleArn", "alarmWriterRoleArn", "connectionPurgedAt", "updatedAt")
+                VALUES ('acc_p_pur','cus_p_act','300000000005','ext-acc_p_pur','arn:r','arn:fw','arn:w',now(),now())''')
+    got = {(a.id, a.customer_id) for a in pg.list_active_accounts() if a.id.startswith("acc_p_")}
+    assert got == {("acc_p_ok1", "cus_p_act"), ("acc_p_ok2", "cus_p_act")}
+
+
+def test_claim_sync_run_lets_exactly_one_of_two_concurrent_callers_win(pg):
+    import threading
+
+    from alarm_engine.pg_repository import PgRepository
+    pg._exec('''INSERT INTO "Customer" (id, name, slug, "updatedAt") VALUES ('cus_p_c','C','pc',now())
+                ON CONFLICT DO NOTHING''')
+    url = URL.rsplit("/", 1)[0] + "/" + pg.conn.info.dbname      # info.dsn omits the password
+    for rnd in range(15):
+        acct = f"acc_p_claim{rnd}"
+        _acct(pg, acct, "cus_p_c", f"4000000000{rnd:02d}")
+        repos = [PgRepository(url), PgRepository(url)]
+        barrier = threading.Barrier(2)
+        results: list = [None, None]
+        errors: list = []
+
+        def go(i, repos=repos, barrier=barrier, results=results, errors=errors, acct=acct):
+            try:
+                barrier.wait()
+                results[i] = repos[i].claim_sync_run("cus_p_c", acct, "DAILY", timedelta(minutes=20))
+            except Exception as e:  # noqa: BLE001
+                errors.append(e)
+
+        ts = [threading.Thread(target=go, args=(i,)) for i in range(2)]
+        for t in ts:
+            t.start()
+        for t in ts:
+            t.join()
+        for r in repos:
+            r.conn.close()
+        assert errors == []
+        assert sorted(x is None for x in results) == [False, True]
+        assert _running(pg, acct) == 1
+
+
+def test_claim_sync_run_respects_staleness_and_tenant_account_scope(pg):
+    pg._exec('''INSERT INTO "Customer" (id, name, slug, "updatedAt") VALUES ('cus_p_c','C','pc',now())
+                ON CONFLICT DO NOTHING''')
+    _acct(pg, "acc_p_st", "cus_p_c", "500000000001")
+    _acct(pg, "acc_p_st2", "cus_p_c", "500000000002")
+    stale = timedelta(minutes=20)
+    first = pg.claim_sync_run("cus_p_c", "acc_p_st", "TAG_RECONCILE", stale)
+    assert first is not None
+    assert pg.claim_sync_run("cus_p_c", "acc_p_st", "DAILY", stale) is None
+    assert pg.claim_sync_run("cus_p_c", "acc_p_st2", "DAILY", stale) is not None      # other account is independent
+    pg._exec('''UPDATE "AlarmSyncRun" SET "heartbeatAt" = now() - interval '21 minutes' WHERE id = %s''', first)
+    assert pg.claim_sync_run("cus_p_c", "acc_p_st", "DAILY", stale) is not None       # stale row no longer blocks
+    pg.finish_sync_run("cus_p_c", first, "FAILED", {})
+
+
+def test_existing_duplicate_running_rows_mean_busy_then_stale_cleanup_replaces_them(pg):
+    from alarm_engine.engine import Engine
+    from conftest import FakeDiscovery, FakeSessions
+    pg._exec('''INSERT INTO "Customer" (id, name, slug, "updatedAt") VALUES ('cus_p_c','C','pc',now())
+                ON CONFLICT DO NOTHING''')
+    _acct(pg, "acc_p_dup", "cus_p_c", "600000000001")
+    for rid in ("run_dup1", "run_dup2"):
+        pg._exec('''INSERT INTO "AlarmSyncRun" (id, "customerId", "cloudAccountId", mode, "startedAt", "heartbeatAt")
+                    VALUES (%s,'cus_p_c','acc_p_dup','DAILY'::"SyncMode",now(),now())''', rid)
+    eng = Engine(pg, FakeSessions(), FakeDiscovery())
+    assert eng.sync_account("acc_p_dup", "DAILY") == {"skipped": "BUSY"}
+    assert pg._one('SELECT count(*) AS n FROM "AlarmSyncRun" WHERE "cloudAccountId" = %s', "acc_p_dup")["n"] == 2
+    pg._exec('''UPDATE "AlarmSyncRun" SET "heartbeatAt" = now() - interval '21 minutes' WHERE "cloudAccountId" = 'acc_p_dup' ''')
+    assert pg.fail_stale_sync_runs(timedelta(minutes=20)) >= 2
+    states = {r["id"]: r["status"] for r in pg._all('SELECT id, status FROM "AlarmSyncRun" WHERE "cloudAccountId" = %s',
+                                                    "acc_p_dup")}
+    assert states["run_dup1"] == "FAILED" and states["run_dup2"] == "FAILED"
+    assert pg.claim_sync_run("cus_p_c", "acc_p_dup", "DAILY", timedelta(minutes=20)) is not None
+    assert _running(pg, "acc_p_dup") == 1
+
+
+def test_is_account_active_follows_the_d43_rule(pg):
+    for cid, status in (("cus_p_a2", "ACTIVE"), ("cus_p_t2", "TERMINATED")):
+        pg._exec('''INSERT INTO "Customer" (id, name, slug, status, "updatedAt") VALUES (%s,%s,%s,%s::"CustomerStatus",now())
+                    ON CONFLICT DO NOTHING''', cid, cid, cid.replace("_", "-"), status)
+    _acct(pg, "acc_p_ia1", "cus_p_a2", "700000000001")
+    _acct(pg, "acc_p_ia2", "cus_p_t2", "700000000002")
+    _acct(pg, "acc_p_ia3", "cus_p_a2", "700000000003", disabled=True)
+    assert pg.is_account_active("acc_p_ia1")
+    assert not pg.is_account_active("acc_p_ia2") and not pg.is_account_active("acc_p_ia3")
+    _acct(pg, "acc_p_ia4", "cus_p_a2", "700000000004")
+    assert pg.is_account_active("acc_p_ia4")
+    pg._exec('''UPDATE "CloudAccount" SET "connectionPurgedAt" = now() WHERE id = 'acc_p_ia4' ''')
+    assert not pg.is_account_active("acc_p_ia4")                     # purged connection (drop the IS NULL clause -> True)
+    assert not pg.is_account_active("acc_p_missing")
+
+
+def test_sync_command_done_uses_counts_command_id_and_only_finished_runs(pg):
+    pg._exec('''INSERT INTO "Customer" (id, name, slug, "updatedAt") VALUES ('cus_p_c','C','pc',now())
+                ON CONFLICT DO NOTHING''')
+    _acct(pg, "acc_p_cd", "cus_p_c", "800000000001")
+    rid = pg.claim_sync_run("cus_p_c", "acc_p_cd", "DAILY", timedelta(minutes=20), "sched-DAILY-t-acc_p_cd")
+    assert rid is not None
+    assert not pg.sync_command_done("cus_p_c", "acc_p_cd", "sched-DAILY-t-acc_p_cd")     # RUNNING is not done
+    pg.finish_sync_run("cus_p_c", rid, "SUCCEEDED", {"commandId": "sched-DAILY-t-acc_p_cd"})
+    assert pg.sync_command_done("cus_p_c", "acc_p_cd", "sched-DAILY-t-acc_p_cd")
+    assert not pg.sync_command_done("cus_other", "acc_p_cd", "sched-DAILY-t-acc_p_cd")
+    # a run that finished under a DIFFERENT commandId on the same account does not answer for this one
+    assert not pg.sync_command_done("cus_p_c", "acc_p_cd", "sched-DAILY-other-id")
+    rid2 = pg.claim_sync_run("cus_p_c", "acc_p_cd", "DAILY", timedelta(minutes=20), "cmd-B")
+    assert rid2 is not None
+    assert pg._one('SELECT counts->>'+"'commandId'"+' AS c FROM "AlarmSyncRun" WHERE id = %s', rid2)["c"] == "cmd-B"
+    pg.finish_sync_run("cus_p_c", rid2, "SUCCEEDED", {"commandId": "cmd-B"})
+    assert pg.sync_command_done("cus_p_c", "acc_p_cd", "cmd-B")
+    assert not pg.sync_command_done("cus_p_c", "acc_p_cd", "cmd-C")   # only cmd-B ended; cmd-C was never run
+    # FAILED is not done, PARTIAL is
+    rid3 = pg.claim_sync_run("cus_p_c", "acc_p_cd", "DAILY", timedelta(minutes=20), "cmd-F")
+    assert rid3 is not None
+    pg.finish_sync_run("cus_p_c", rid3, "FAILED", {"commandId": "cmd-F"})
+    assert not pg.sync_command_done("cus_p_c", "acc_p_cd", "cmd-F")
+    rid4 = pg.claim_sync_run("cus_p_c", "acc_p_cd", "DAILY", timedelta(minutes=20), "cmd-P")
+    assert rid4 is not None
+    pg.finish_sync_run("cus_p_c", rid4, "PARTIAL", {"commandId": "cmd-P"})
+    assert pg.sync_command_done("cus_p_c", "acc_p_cd", "cmd-P")
+
+
+# --- regression: ID generation must not depend on the process (Lambda cold starts restarted a counter at 1) ---
+
+_CHILD = r'''
+import sys
+sys.path.insert(0, sys.argv[2])
+from alarm_engine.engine import Engine
+from alarm_engine.pg_repository import PgRepository
+from conftest import FakeDiscovery, FakeSessions, ec2
+repo = PgRepository(sys.argv[1])
+Engine(repo, FakeSessions(), FakeDiscovery(resources=[ec2(sys.argv[3])])).sync_account("acc_p_uid", "DAILY")
+'''
+
+
+def _run_fresh_process(pg, instance_id: str) -> None:
+    import subprocess
+    import sys
+    url = URL.rsplit("/", 1)[0] + "/" + pg.conn.info.dbname
+    src = Path(__file__).resolve().parents[1] / "src"
+    env = {**os.environ, "PYTHONPATH": str(src)}
+    out = subprocess.run([sys.executable, "-c", _CHILD, url, str(Path(__file__).parent), instance_id],
+                         capture_output=True, text=True, env=env)
+    assert out.returncode == 0, out.stderr[-2000:]
+
+
+def test_new_process_does_not_collide_with_existing_resource_ids(pg):
+    _acct(pg, "acc_p_uid", "cus_1", "900000000001")
+    # a row left by the old counter scheme (res_000001), as in production
+    pg._exec('''INSERT INTO "Resource" (id, "customerId", "cloudAccountId", region, "resourceType", "resourceArn",
+                "resourceKey", "lastSeenAt", "updatedAt") VALUES ('res_000001','cus_1','acc_p_uid','ap-northeast-2','EC2',
+                'arn:aws:ec2:ap-northeast-2:123456789012:instance/i-legacy','i-legacy',now(),now())''')
+    _run_fresh_process(pg, "i-first")      # fresh process 1
+    _run_fresh_process(pg, "i-second")     # fresh process 2: a counter would reuse the first id
+    _run_fresh_process(pg, "i-legacy")     # legacy row is found by its natural key, not duplicated
+    rows = pg.list_resources("acc_p_uid")
+    assert sorted(r.resource_key for r in rows) == ["i-first", "i-legacy", "i-second"]
+    assert len({r.id for r in rows}) == 3
+    assert next(r for r in rows if r.resource_key == "i-legacy").id == "res_000001"

@@ -120,6 +120,16 @@ describe('contract fixture shared with services/alarm-engine/tests', () => {
   });
 });
 
+describe('Monitoring commands (D-16) through the SQS adapter', () => {
+  it.each(['stop-monitoring', 'set-monitoring-tag'])('%s: the body on the queue is the fixture the engine test parses, key for key', async (name) => {
+    const cmd = JSON.parse(read(`./fixtures/${name}.command.json`)) as AlarmCommand;
+    expect(JSON.parse(read(`../../../services/alarm-engine/tests/fixtures/${name}.command.json`))).toEqual(cmd);
+    const { client, sent } = fake();
+    await new SqsCommandPublisher(client, { queueUrl: STD, expectedAccount: ACCT }).publish(cmd);
+    expect(JSON.parse(sent[0]!.MessageBody!)).toEqual(cmd);
+  });
+});
+
 describe('PATCH /customers/{id}/status with SqsCommandPublisher', () => {
   it('AWS error name and queue url never reach the response body', async () => {
     const w = await cworld(async (seed) => memoryFixture(seed as MemoryApiStore));

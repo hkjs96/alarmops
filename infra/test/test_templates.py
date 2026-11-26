@@ -7,6 +7,7 @@ Needs only PyYAML (installed with cfn-lint).
 from __future__ import annotations
 
 import json
+import re
 import unittest
 from pathlib import Path
 
@@ -228,6 +229,7 @@ class ReaderCollectorAdditions(unittest.TestCase):
 
 C = _load(ROOT / "aws" / "central.yaml")
 CR = C["Resources"]
+BOOT = _load(ROOT / "aws" / "central-bootstrap.yaml")
 
 
 def c_statements(role: str) -> list[dict]:
@@ -297,7 +299,18 @@ class CentralTemplate(unittest.TestCase):
         self.assertEqual(sts["ReadEngineDbSecret"]["Resource"], {"Ref": "EngineDbSecret"})
         self.assertEqual(sorted(sts["ConsumeAlarmCommands"]["Action"]),
                          ["sqs:ChangeMessageVisibility", "sqs:DeleteMessage", "sqs:GetQueueAttributes", "sqs:ReceiveMessage"])
-        self.assertNotIn("sqs:SendMessage", str(c_statements("CentralRole")))
+        # Every statement (Fn::If branches too) whose Action or NotAction pattern could match sqs:SendMessage.
+        from fnmatch import fnmatchcase
+        def could_send(x: dict) -> bool:
+            pats = [a for a in as_list(x.get("Action")) + as_list(x.get("NotAction")) if isinstance(a, str)]
+            return any(fnmatchcase("sqs:sendmessage", a.lower()) for a in pats) or "NotAction" in x
+        senders = [x for x in c_all_statements("CentralRole") if could_send(x)]
+        self.assertEqual(len(senders), 1, senders)
+        self.assertEqual(senders[0]["Sid"], "SendSyncCommands")
+        self.assertEqual(senders[0]["Effect"], "Allow")
+        self.assertEqual(senders[0]["Action"], "sqs:SendMessage")
+        self.assertEqual(senders[0]["Resource"], {"Fn::GetAtt": "CommandsQueue.Arn"})
+        self.assertNotIn("Condition", senders[0])
 
     def test_remediator_caller_reachable_only_from_central_role(self):
         (st,) = CR["RemediatorCallerRole"]["Properties"]["AssumeRolePolicyDocument"]["Statement"]
@@ -306,22 +319,79 @@ class CentralTemplate(unittest.TestCase):
         self.assertEqual(as_list(p["Action"]), ["sts:AssumeRole"])
         self.assertEqual(p["Resource"], {"Fn::Sub": "arn:${AWS::Partition}:iam::*:role/AlarmOps-Remediator"})
 
-    # ---- Vercel OIDC role (D-49)
+    # ---- Vercel OIDC role (D-49): Global and Team issuer modes; condition-key prefix computed from the provider ARN
+    @staticmethod
+    def _render_vercel_trust(provider_arn, in_account=True, slug="acme-team", project="alarmops"):
+        """Evaluate the Fn::If / Fn::Sub / Select / Split subset used by the trust document and parse the JSON."""
+        env = {"VercelOidcProviderArn": provider_arn, "VercelTeamSlug": slug, "VercelProjectName": project}
+
+        def ev(x, local):
+            if isinstance(x, str):
+                return x
+            (k, v), = x.items()
+            if k == "Ref":
+                return env[v]
+            if k == "Fn::If":
+                assert v[0] == "VercelProviderInThisAccount"
+                return ev(v[1] if in_account else v[2], local)
+            if k == "Fn::Split":
+                return ev(v[1], local).split(v[0])
+            if k == "Fn::Select":
+                return ev(v[1], local)[int(v[0])]
+            if k == "Fn::Sub":
+                tmpl, extra = (v, {}) if isinstance(v, str) else (v[0], {n: ev(e, local) for n, e in v[1].items()})
+                scope = {**env, **extra}
+                return re.sub(r"\$\{([A-Za-z0-9]+)\}", lambda m: scope[m.group(1)], tmpl)
+            raise AssertionError(f"unsupported intrinsic {k}")
+
+        doc = CR["VercelConsoleRole"]["Properties"]["AssumeRolePolicyDocument"]
+        return json.loads(ev(doc, {}))
+
+    def test_vercel_provider_arn_pattern_accepts_global_and_team_only(self):
+        for pat in (C["Parameters"]["VercelOidcProviderArn"]["AllowedPattern"],
+                    BOOT["Parameters"]["VercelOidcProviderArn"]["AllowedPattern"]):
+            for ok in ("arn:aws:iam::123456789012:oidc-provider/oidc.vercel.com",
+                       "arn:aws:iam::123456789012:oidc-provider/oidc.vercel.com/acme-team",
+                       "arn:aws:iam::123456789012:oidc-provider/oidc.vercel.com/a1"):
+                self.assertRegex(ok, pat)
+            for bad in ("arn:aws:iam::123456789012:oidc-provider/oidc.vercel.com/",
+                        "arn:aws:iam::123456789012:oidc-provider/oidc.vercel.com/Acme",
+                        "arn:aws:iam::123456789012:oidc-provider/oidc.vercel.com/-a",
+                        "arn:aws:iam::123456789012:oidc-provider/oidc.vercel.com/a/b",
+                        "arn:aws:iam::123456789012:oidc-provider/oidc.vercel.com/a*",
+                        "arn:aws:iam::123456789012:oidc-provider/oidc.vercelxcom",
+                        "arn:aws:iam::123456789012:oidc-provider/evil.example.com/acme",
+                        "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com",
+                        "arn:aws:iam::123456789012:oidc-provider/oidc.vercel.com/a" + "b" * 63):
+                self.assertNotRegex(bad, pat)
+        self.assertRegex("", BOOT["Parameters"]["VercelOidcProviderArn"]["AllowedPattern"])
+        self.assertNotRegex("", C["Parameters"]["VercelOidcProviderArn"]["AllowedPattern"])
+
     def test_vercel_trust_is_pinned_to_project_production_and_team_audience(self):
         P = C["Parameters"]
-        self.assertEqual(P["VercelOidcProviderArn"]["AllowedPattern"],
-                         r"^arn:aws[a-z-]*:iam::[0-9]{12}:oidc-provider/oidc\.vercel\.com$")
         for n in ("VercelTeamSlug", "VercelProjectName", "VercelOidcProviderArn"):
             self.assertNotIn("Default", P[n])
-        (st,) = CR["VercelConsoleRole"]["Properties"]["AssumeRolePolicyDocument"]["Statement"]
-        self.assertEqual(st["Principal"], {"Federated": {"Fn::If": [
-            "VercelProviderInThisAccount", {"Ref": "VercelOidcProviderArn"}, {"Ref": "AWS::NoValue"}]}})
+        for arn, prefix in (
+                ("arn:aws:iam::123456789012:oidc-provider/oidc.vercel.com/acme-team", "oidc.vercel.com/acme-team"),
+                ("arn:aws:iam::123456789012:oidc-provider/oidc.vercel.com", "oidc.vercel.com")):
+            with self.subTest(provider=arn):
+                doc = self._render_vercel_trust(arn)
+                (st,) = doc["Statement"]
+                self.assertEqual(doc["Version"], "2012-10-17")
+                self.assertEqual(st["Effect"], "Allow")
+                self.assertEqual(st["Principal"], {"Federated": arn})
+                self.assertEqual(st["Action"], "sts:AssumeRoleWithWebIdentity")
+                self.assertEqual(st["Condition"], {"StringEquals": {
+                    f"{prefix}:aud": "https://vercel.com/acme-team",
+                    f"{prefix}:sub": "owner:acme-team:project:alarmops:environment:production"}})
+                self.assertNotIn("*", json.dumps(st))
+                self.assertNotIn("StringLike", json.dumps(st))
+
+    def test_vercel_trust_has_no_principal_when_provider_is_in_another_account(self):
+        doc = self._render_vercel_trust("arn:aws:iam::123456789012:oidc-provider/oidc.vercel.com/acme-team", in_account=False)
+        (st,) = doc["Statement"]
+        self.assertEqual(st["Principal"], {})
         self.assertEqual(st["Action"], "sts:AssumeRoleWithWebIdentity")
-        self.assertEqual(st["Condition"], {"StringEquals": {
-            "oidc.vercel.com:aud": {"Fn::Sub": "https://vercel.com/${VercelTeamSlug}"},
-            "oidc.vercel.com:sub": {"Fn::Sub": "owner:${VercelTeamSlug}:project:${VercelProjectName}:environment:production"}}})
-        self.assertNotIn("*", str(st))
-        self.assertNotIn("StringLike", str(st))
 
     def test_vercel_role_has_one_permission_plus_optional_scoped_ses(self):
         sts = c_all_statements("VercelConsoleRole")
@@ -346,17 +416,24 @@ class CentralTemplate(unittest.TestCase):
     def test_commands_queue_policy_shape(self):
         sts = queue_statements("CommandsQueuePolicy")
         vercel = {"Fn::GetAtt": "VercelConsoleRole.Arn"}
-        rule = {"Fn::GetAtt": "TagEventRule.Arn"}
+        rules = [{"Fn::GetAtt": f"{n}.Arn"} for n in ("TagEventRule", "SyncHourlyRule", "SyncDailyRule")]
+        by_repr = lambda xs: sorted(xs, key=repr)
         allow_events = sts["TagEventRuleSend"]
         self.assertEqual(allow_events["Effect"], "Allow")
         self.assertEqual(allow_events["Principal"], {"Service": "events.amazonaws.com"})
         self.assertEqual(allow_events["Action"], "sqs:SendMessage")
-        self.assertEqual(allow_events["Condition"], {"ArnEquals": {"aws:SourceArn": rule}})
+        self.assertEqual(list(allow_events["Condition"]), ["ArnEquals"])
+        self.assertEqual(list(allow_events["Condition"]["ArnEquals"]), ["aws:SourceArn"])
+        self.assertEqual(by_repr(allow_events["Condition"]["ArnEquals"]["aws:SourceArn"]), by_repr(rules))
         deny = sts["DenySendFromOthers"]
         self.assertEqual(deny["Effect"], "Deny")
         self.assertEqual(deny["Action"], "sqs:SendMessage")
-        self.assertEqual(deny["Condition"], {"ArnNotEquals": {"aws:PrincipalArn": vercel, "aws:SourceArn": rule}})
-        self.assertEqual(sts["ConsoleSendOnly"]["Principal"], {"AWS": vercel})
+        self.assertEqual(list(deny["Condition"]), ["ArnNotEquals"])
+        neq = deny["Condition"]["ArnNotEquals"]
+        self.assertEqual(sorted(neq), ["aws:PrincipalArn", "aws:SourceArn"])
+        self.assertEqual(by_repr(neq["aws:PrincipalArn"]), by_repr([vercel, {"Fn::GetAtt": "CentralRole.Arn"}]))
+        self.assertEqual(by_repr(neq["aws:SourceArn"]), by_repr(rules))
+        self.assertEqual(by_repr(sts["ConsoleAndEngineSend"]["Principal"]["AWS"]), by_repr([vercel, {"Fn::GetAtt": "CentralRole.Arn"}]))
         self.assertEqual(sts["DenyInsecureTransport"]["Condition"], {"Bool": {"aws:SecureTransport": "false"}})
         # nothing may allow everyone, and no SourceAccount-only trust
         for s in sts.values():
@@ -541,6 +618,51 @@ class PinnedActions(unittest.TestCase):
                     self.assertRegex(st["uses"], SHA_USES, f"{fn}:{job}")
 
 
+def assert_auto_conditions(tc, cond):
+    """workflow_run may deploy only after ci succeeded for a push to main of this repository."""
+    cond = " ".join(cond.split())
+    for needle in (
+        "github.event_name == 'workflow_dispatch'",
+        "github.event.workflow_run.conclusion == 'success'",
+        "github.event.workflow_run.event == 'push'",
+        "github.event.workflow_run.head_branch == 'main'",
+        "github.event.workflow_run.head_repository.full_name == github.repository",
+    ):
+        tc.assertIn(needle, cond)
+
+
+def assert_head_sha_checkouts(tc, wf):
+    n = 0
+    for name, st in all_steps(wf):
+        if str(st.get("uses", "")).startswith("actions/checkout"):
+            n += 1
+            tc.assertEqual(st["with"]["ref"], "${{ github.event.workflow_run.head_sha || github.sha }}", name)
+    tc.assertGreater(n, 0)
+
+
+def assert_gate_since_last_deploy(tc, wf, workflow_file, deploy_job):
+    """The gate judges the range since the last successful deploy (deploy_gate.py), not only the merged commit."""
+    gate = wf["jobs"]["gate"]
+    tc.assertEqual(gate["permissions"], {"contents": "read", "actions": "read"})
+    tc.assertEqual(wf["permissions"], {"contents": "read"})
+    checkout = gate["steps"][0]
+    tc.assertEqual(checkout["with"]["fetch-depth"], 0)  # the base commit can be many commits back
+    tc.assertIs(checkout["with"]["persist-credentials"], False)
+    r = " ".join(st.get("run", "") for st in gate["steps"])
+    tc.assertIn(f"python3 -I .github/scripts/deploy_gate.py {workflow_file} {deploy_job} ", r)
+    # central: plan success + apply skipped (empty change set) also counts as deployed; console has no such case
+    tc.assertEqual(r.rstrip().endswith("' plan"), workflow_file == "deploy-central.yml")
+    tc.assertNotIn("$HEAD_SHA^", r)
+    env = [st["env"] for st in gate["steps"] if "env" in st][0]
+    tc.assertEqual(env["EVENT"], "${{ github.event_name }}")
+    tc.assertEqual(env["HEAD_SHA"], "${{ github.event.workflow_run.head_sha }}")
+    tc.assertEqual(env["GH_TOKEN"], "${{ github.token }}")
+    # run-name must carry the deployed commit: the next gate reads it back
+    tc.assertEqual(wf["run-name"], f"{workflow_file[:-4]} ${{{{ github.event.workflow_run.head_sha || github.sha }}}}")
+    # the base is a run whose real deploy job succeeded: that job must exist under exactly this name
+    tc.assertIn(deploy_job, wf["jobs"])
+
+
 class DeployWorkflow(unittest.TestCase):
     def setUp(self):
         self.text = (WORKFLOWS / "deploy-central.yml").read_text(encoding="utf-8")
@@ -553,16 +675,33 @@ class DeployWorkflow(unittest.TestCase):
     def test_triggers_and_workflow_permissions(self):
         wf = self.wf
         on = wf.get("on", wf.get(True))
-        self.assertEqual(list(on), ["workflow_dispatch"])
+        self.assertEqual(sorted(on), ["workflow_dispatch", "workflow_run"])
+        self.assertEqual(on["workflow_run"], {"workflows": ["ci"], "types": ["completed"], "branches": ["main"]})
         self.assertEqual(wf["permissions"], {"contents": "read"})
         self.assertIn("vars.CENTRAL_DEPLOY_ROLE_ARN", self.text)
         self.assertNotIn("secrets.", self.text)
         self.assertNotIn("AWS_ACCESS_KEY_ID", self.text)
         for name, job in self.jobs.items():
             self.assertIn("github.ref == 'refs/heads/main'", job["if"], name)
+        assert_auto_conditions(self, self.jobs["gate"]["if"])
+        for name in ("build", "checks"):
+            self.assertEqual(self.jobs[name]["needs"], "gate", name)
+            self.assertIn("needs.gate.outputs.deploy == 'true'", self.jobs[name]["if"], name)
+
+    def test_gate_paths_and_head_sha_checkout(self):
+        assert_head_sha_checkouts(self, self.wf)
+        r = " ".join(st.get("run", "") for st in self.jobs["gate"]["steps"])
+        for path in ("infra/aws/", "services/", "packages/core/", "deploy-central", "bundle_manifest"):
+            self.assertIn(path, r)
+        assert_gate_since_last_deploy(self, self.wf, "deploy-central.yml", "apply")
+        self.assertNotIn("environment", self.jobs["gate"])
+        self.assertEqual(self.wf["concurrency"], {"group": "deploy-central", "cancel-in-progress": False})
+        self.assertIn("--no-fail-on-empty-changeset", self.text)
+        self.assertIn("environment: central", self.text)
 
     def test_job_split_and_permissions_per_job(self):
-        self.assertEqual(sorted(self.jobs), ["apply", "build", "checks", "plan"])
+        self.assertEqual(sorted(self.jobs), ["apply", "build", "checks", "gate", "plan"])
+        self.assertEqual(self.jobs["gate"]["permissions"], {"contents": "read", "actions": "read"})
         for name in ("build", "checks"):
             self.assertEqual(self.jobs[name]["permissions"], {"contents": "read"}, name)
             self.assertNotIn("environment", self.jobs[name], name)
@@ -622,6 +761,42 @@ class DeployWorkflow(unittest.TestCase):
             if str(st.get("uses", "")).startswith("actions/checkout"):
                 self.assertIs(st["with"]["persist-credentials"], False, name)
 
+    def test_trust_principal_check_runs_right_after_execute_in_apply_only(self):
+        steps = self.jobs["apply"]["steps"]
+        runs = [st.get("run", "") for st in steps]
+        i_exec = next(i for i, r in enumerate(runs) if "execute-change-set" in r)
+        i_chk = next(i for i, st in enumerate(steps) if st.get("name") == "Check trust principals")
+        i_out = next(i for i, st in enumerate(steps) if "outputs to the job summary" in st.get("name", ""))
+        self.assertEqual(i_chk, i_exec + 1)
+        self.assertLess(i_chk, i_out)
+        run = runs[i_chk]
+        self.assertIn("python3 -I .github/scripts/check_trust_principals.py", run)
+        for role in ("AlarmOpsCentral-RemediatorCaller", "AlarmOpsCentral-VercelConsole", "AlarmOpsCentral-Engine"):
+            self.assertIn(role, run)
+        self.assertIn("iam get-role", run)
+        self.assertNotIn("update-assume-role-policy", run)
+        self.assertEqual(steps[i_chk]["env"], {"PROVIDER": "${{ vars.VERCEL_OIDC_PROVIDER_ARN }}"})
+        # runs after a failed apply too (rollback may have touched trust policies), but never when execute was skipped
+        self.assertEqual(steps[i_exec].get("id"), "execute")
+        self.assertEqual(steps[i_chk]["if"], "always() && steps.execute.conclusion != 'skipped'")
+        self.assertNotIn("continue-on-error", steps[i_chk])
+        self.assertNotIn("lambda.amazonaws.com", run)   # expectations live in the script, per role
+        self.assertIn("exit \"$rc\"", run)
+        self.assertNotIn("check_trust_principals", self.runs("plan"))
+        # permissions stay exactly the same: the read is covered by the deploy role's IamReadRoles statement
+        self.assertEqual(self.jobs["apply"]["permissions"], {"contents": "read", "id-token": "write"})
+        self.assertRegex(self.jobs["gate"]["steps"][-1]["run"], r"check_trust_principals")
+
+    def test_trust_check_roles_are_inside_the_deploy_role_iam_read_scope(self):
+        boot = (ROOT / "aws" / "central-bootstrap.yaml").read_text(encoding="utf-8")
+        block = boot[boot.index('Sid: "IamReadRoles"'):]
+        block = block[:block.index("Sid:", 20)]
+        self.assertIn('"iam:GetRole"', block)
+        self.assertIn("role/AlarmOpsCentral-*", block)
+        central = (ROOT / "aws" / "central.yaml").read_text(encoding="utf-8")
+        for role in ("AlarmOpsCentral-RemediatorCaller", "AlarmOpsCentral-VercelConsole", "AlarmOpsCentral-Engine"):
+            self.assertIn(f"RoleName: {role}", central)
+
 
 class DeployConsoleWorkflow(unittest.TestCase):
     def setUp(self):
@@ -631,9 +806,21 @@ class DeployConsoleWorkflow(unittest.TestCase):
     def test_guards(self):
         wf = self.wf
         on = wf.get("on", wf.get(True))
-        self.assertEqual(list(on), ["workflow_dispatch"])
+        self.assertEqual(sorted(on), ["workflow_dispatch", "workflow_run"])
+        self.assertEqual(on["workflow_run"], {"workflows": ["ci"], "types": ["completed"], "branches": ["main"]})
         self.assertEqual(wf["permissions"], {"contents": "read"})
-        self.assertEqual(list(wf["jobs"]), ["deploy"])
+        self.assertEqual(list(wf["jobs"]), ["gate", "deploy"])
+        gate = wf["jobs"]["gate"]
+        assert_auto_conditions(self, gate["if"])
+        self.assertNotIn("environment", gate)
+        self.assertEqual(wf["jobs"]["deploy"]["needs"], "gate")
+        self.assertIn("needs.gate.outputs.deploy == 'true'", wf["jobs"]["deploy"]["if"])
+        assert_head_sha_checkouts(self, wf)
+        r = " ".join(st.get("run", "") for st in gate["steps"])
+        for path in ("apps/", "packages/", "tools/vercel-cli/", "package[^/]*", "deploy-console"):
+            self.assertIn(path, r)
+        assert_gate_since_last_deploy(self, wf, "deploy-console.yml", "deploy")
+        self.assertEqual(wf["concurrency"], {"group": "deploy-console", "cancel-in-progress": False})
         job = wf["jobs"]["deploy"]
         self.assertEqual(job["permissions"], {"contents": "read"})
         self.assertEqual(job["environment"], "production")
@@ -644,12 +831,73 @@ class DeployConsoleWorkflow(unittest.TestCase):
         self.assertNotRegex(self.text, r"echo[^\n]*\$\{?VERCEL_TOKEN")
 
     def test_token_only_on_pull_and_deploy_steps(self):
-        for st in self.wf["jobs"]["deploy"]["steps"]:
-            has = "VERCEL_TOKEN" in (st.get("env") or {})
-            run = st.get("run", "")
-            if "pull" in run or "deploy --prebuilt" in run or "settings are present" in st.get("name", ""):
-                continue
-            self.assertFalse(has, st.get("name", st.get("uses")))
+        # Exactly the steps that talk to Vercel get the token; nothing that runs repository or third-party code does.
+        with_token = [st.get("name") for st in self.wf["jobs"]["deploy"]["steps"] if "VERCEL_TOKEN" in (st.get("env") or {})]
+        self.assertEqual(
+            with_token,
+            [
+                "Check the Vercel settings are present",
+                "Pull the production environment from Vercel",
+                "Record the current production deployment",
+                "Deploy the prebuilt output",
+                "Look at production after a failed deploy",
+                "Put the previous deployment back (smoke check or deploy failed)",
+            ],
+        )
+        by_name = {st.get("name"): st for st in self.wf["jobs"]["deploy"]["steps"]}
+        for name in with_token[2:]:
+            run = by_name[name]["run"]
+            self.assertNotRegex(run, r"\bnode\b|\bnpm\b|\bnpx\b")  # only the pinned CLI runs with the token
+
+    def test_rollback_after_failed_smoke(self):
+        steps = self.wf["jobs"]["deploy"]["steps"]
+        names = [st.get("name") for st in steps]
+        smoke = next(st for st in steps if "smoke-console.mjs" in st.get("run", "") and st.get("id") == "smoke")
+        i_smoke = steps.index(smoke)
+        rb = next(st for st in steps if st.get("id") == "rollback")
+        self.assertGreater(steps.index(rb), i_smoke)
+        # runs only when the smoke step failed (not on build errors, not on success)
+        self.assertIn("failure()", rb["if"])
+        self.assertIn("steps.smoke.outcome == 'failure'", rb["if"])
+        # previous deployment is recorded BEFORE the deploy step
+        deploy = next(st for st in steps if st.get("id") == "deploy")
+        rec = next(i for i, n in enumerate(names) if n == "Record the current production deployment")
+        self.assertLess(rec, steps.index(deploy))
+        self.assertLess(names.index("Pick the previous deployment"), steps.index(deploy))
+        # also after a failed deploy step (output unreadable but production may have changed), only with a recorded previous one
+        self.assertIn("steps.deploy.outcome == 'failure'", rb["if"])
+        self.assertIn("steps.previous.outputs.prev_id != ''", rb["if"])
+        look = next(st for st in steps if st.get("name") == "Look at production after a failed deploy")
+        self.assertIn("steps.previous.outputs.prev_id != ''", look["if"])
+        self.assertLess(steps.index(deploy), steps.index(look))
+        self.assertLess(steps.index(look), steps.index(rb))
+        self.assertIn("unchanged", rb["run"])  # deploy failed but production still serves the previous one: no promote
+        # the deploy step leaves a person note when its output cannot be read
+        self.assertIn("GITHUB_STEP_SUMMARY", deploy["run"])
+        self.assertIn("Promote", deploy["run"])
+        # promote first (keeps auto-assignment), rollback only as fallback, both by deployment id (dpl_...), never by URL
+        self.assertLess(rb["run"].index("promote"), rb["run"].index("rollback \"$PREV_ID\""))
+        self.assertIn('promote "$PREV_ID"', rb["run"])
+        self.assertNotIn('"$PREV_URL" --timeout', rb["run"])
+        self.assertIn("dpl_", rb["run"])
+        self.assertIn("::error::", rb["run"])
+        self.assertIn("no previous production deployment", rb["run"])
+        self.assertIn("automatic rollback failed", rb["run"])
+        # token is never on the command line
+        self.assertNotIn("--token", rb["run"])
+        # same smoke check again on the restored deployment, then the run ends red
+        again = next(st for st in steps if st.get("id") == "smoke-after")
+        self.assertIn("smoke-console.mjs", again["run"])
+        self.assertIn("steps.rollback.outcome == 'success'", again["if"])
+        self.assertNotIn("VERCEL_TOKEN", again.get("env") or {})
+        fail = next(st for st in steps if st.get("name") == "Fail the run after a rollback")
+        self.assertIn("steps.rollback.outcome == 'success'", fail["if"])
+        self.assertIn("exit 1", fail["run"])
+        # the summary tells a person what to do
+        self.assertIn("GITHUB_STEP_SUMMARY", rb["run"])
+        self.assertIn("Promote", rb["run"])
+        # cleanup stays last
+        self.assertEqual(steps[-1].get("if"), "always()")
 
     def test_step_order_and_cleanup(self):
         steps = self.wf["jobs"]["deploy"]["steps"]

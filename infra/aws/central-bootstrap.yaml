@@ -49,10 +49,12 @@ Parameters:
   VercelOidcProviderArn:
     Type: String
     Default: ""
-    AllowedPattern: '^$|^arn:aws[a-z-]*:iam::[0-9]{12}:oidc-provider/oidc\.vercel\.com$'
+    AllowedPattern: '^$|^arn:aws[a-z-]*:iam::[0-9]{12}:oidc-provider/oidc\.vercel\.com(/[a-z0-9][a-z0-9-]{0,62})?$'
     Description: >-
       Empty (default): this stack creates the provider for https://oidc.vercel.com (Vercel Global issuer mode). When the account
       already has it, paste its ARN and nothing is created. central.yaml takes the ARN from the output.
+      If the Vercel project uses Team issuer mode, a person creates the provider https://oidc.vercel.com/<team slug> (audience
+      https://vercel.com/<team slug>) and pastes its ARN here (...:oidc-provider/oidc.vercel.com/<team slug>); this stack never creates it.
   SamArtifactBucketName:
     Type: String
     Default: ""
@@ -97,6 +99,10 @@ Rules:
         AssertDescription: CentralStackName must not be the bootstrap stack name alarmops-central-bootstrap.
       - Assert: !Not [!Equals [!Ref BusStackName, "alarmops-central-bootstrap"]]
         AssertDescription: BusStackName must not be the bootstrap stack name alarmops-central-bootstrap.
+      - Assert: !Not [!Equals [!Ref CentralStackName, "alarmops-central-alerts"]]
+        AssertDescription: CentralStackName must not be the alerts stack name alarmops-central-alerts.
+      - Assert: !Not [!Equals [!Ref BusStackName, "alarmops-central-alerts"]]
+        AssertDescription: BusStackName must not be the alerts stack name alarmops-central-alerts.
   VercelTeamSlugRequiredToCreateProvider:
     RuleCondition: !Equals [!Ref VercelOidcProviderArn, ""]
     Assertions:
@@ -502,7 +508,10 @@ Resources:
               - "events:TagResource"
               - "events:UntagResource"
               - "events:ListTagsForResource"
-            Resource: !Sub "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/${BusName}/${ResourcePrefix}-*"
+            Resource:
+              - !Sub "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/${BusName}/${ResourcePrefix}-*"
+              # #123: schedule rules (ScheduleExpression) only exist on the default bus; only the periodic-sync rules.
+              - !Sub "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/${ResourcePrefix}-sync-*"
           - Sid: "EventsCentralBusRead"
             Effect: "Allow"
             Action: "events:DescribeEventBus"

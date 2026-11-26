@@ -174,7 +174,7 @@ DOC_HASHES = {
     ("## 2.", 0): "c1563d02d4dc8336eb36c6473ff951b995d5746c753a65addc5d5c6d0e604c74",
     ("### 3a.", 0): "f312d3465cfee7a1cacb55df0e268c2ee67aba9e8ff8e341637e35fd126a29be",
     ("### 3b.", 0): "dd0bc86677afefd2568c898b8c11315dfd5b93ad629e025bc281d57354c639ed",
-    ("### 3c.", 0): "ded691a7909312d6e83e9a6f228d6d7de53b1ffedb0391ac7c472a4c190724fe",
+    ("### 3c.", 0): "9677fb8bea7c5767ca3e848503e24665ebf51958930bf8a2f9f4beda07b83a34",
     ("### 3-1.", 0): "71fc111a3162ef97264aa3dd69ecf81dbaf97834ba17431c6045a1b8d14bbab8",
     ("### 3-1.", 1): "dba3cb5ded82c23d33113e68f395bad1cac68ce8ff875cf882b9363d3f79546e",
 }
@@ -356,6 +356,12 @@ class StackNameRules(unittest.TestCase):
         self.assertFalse(self.passes("same-name", "same-name"))
         self.assertFalse(self.passes(self.BOOT, "alarmops-central-bus"))
         self.assertFalse(self.passes("alarmops-central", self.BOOT))
+
+    def test_alerts_stack_name_fails_for_either_parameter(self):
+        alerts = "alarmops-central-alerts"
+        self.assertFalse(self.passes(alerts, "alarmops-central-bus"))
+        self.assertFalse(self.passes("alarmops-central", alerts))
+        self.assertTrue(self.passes("alarmops-central", "alarmops-central-bus"))
 
     def test_minimum_length_is_five(self):
         for name in ("ResourcePrefix", "CentralStackName"):

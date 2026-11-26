@@ -445,7 +445,7 @@ http://localhost:3107/auth/dev-login?as=admin
 
 어디서: Vercel 대시보드 또는 본인 터미널
 
-- [ ] **스모크 검사가 실패했을 때(되돌리기, N4)**
+- [ ] **스모크 검사가 실패했을 때(되돌리기, N4)**: 자동 되돌리기가 먼저 한다(구현됨, D-59; 직전 production 배포를 `vercel promote`로 되살리고 스모크를 다시 돌린 뒤 실행은 빨간색으로 끝난다). 요약에 `Rollback FAILED` 또는 `no previous production deployment`가 있을 때만 사람이 한다: Vercel 대시보드 → Deployments → 마지막 정상 production 배포 → `⋮` → Promote
 - [ ] **되돌린 뒤 새 배포로 되돌리기 해제**
 
 > **참고** 화면별 클릭 순서는 `docs/SETUP-VERCEL.md` 11단계
@@ -478,6 +478,8 @@ http://localhost:3107/auth/dev-login?as=admin
 | 스모크: 401인데 콘솔의 응답이 아님 | Deployment Protection이 막고 있다. `docs/SETUP-VERCEL.md` 10단계 |
 | 스모크: `/login`에 mock 표식 | `MOCK_API`가 들어갔다. 지우고 다시 배포한다 |
 | 모든 주소가 503 | `CONSOLE_ORIGIN`이 없거나 `https://…` 모양이 아니다 |
+| 실행 요약에 `Rollback FAILED` 또는 `no previous production deployment` (자동 되돌리기 실패) | production은 아직 새(고장난) 배포다. Vercel 대시보드 → 프로젝트 → Deployments → 마지막 정상 production 배포 → `⋮` → Promote. 그 뒤 `curl -s -o /dev/null -w "%{http_code}" https://<콘솔>/login`이 `200`인지 본다. 원인을 고쳐 다시 배포한다 |
+| 실행 요약에 "restored deployment ALSO fails" | 이전 배포도 고장이다(환경변수·`TICK_SECRET` 등 Vercel 설정). 설정을 고치고 `deploy-console`을 Run workflow로 다시 실행한다 |
 | `TickHeartbeat`가 안 바뀜 | Vault의 `tick_secret`과 Vercel의 `TICK_SECRET`이 다르거나(401), SQL의 `<console-host>`를 안 바꿨다. 두 값을 맞추고 3-5를 다시 본다 |
 | `lastStatus`가 `ERROR` | 허브에 그 행의 `name`과 시각을 알린다. 값(비밀)은 보내지 않는다 |
 
@@ -489,9 +491,10 @@ http://localhost:3107/auth/dev-login?as=admin
 
 실행 조건:
 
-- `workflow_dispatch`만
+- `main` 병합 후 `ci`가 성공하면 자동 실행(`workflow_run`). 콘솔 경로(`apps/`, `packages/`, `tools/vercel-cli/`, `package*.json`, 이 워크플로 파일)가 바뀐 커밋만 배포하고 나머지는 건너뛴다. 수동 실행(`workflow_dispatch`)도 된다
+- 자동 실행은 `ci`가 이 저장소의 `main` push에서 성공했을 때만, 그 커밋(`head_sha`)을 배포한다
 - `main`에서만
-- 환경 `production`(승인)
+- 환경 `production`(필수 승인자는 사람이 Settings → Environments에서 제거할 수 있다. 환경 이름은 바꾸지 않는다)
 - 권한 `contents: read`
 
 워크플로 순서:
@@ -599,12 +602,11 @@ http://localhost:3107/auth/dev-login?as=admin
 
 4. 순서대로 한다. AWS 쪽 공급자는 위 스택이 만들었다.
    1. 어디서: Vercel 프로젝트 Settings → Security → Secure backend access with OIDC federation
-   2. 발급자 모드를 **Global**로 둔다.
+   2. 발급자 모드는 **Global**이나 **Team** 어느 쪽이든 된다. 템플릿이 공급자 ARN에서 조건 키 접두사를 계산한다. Team이면 사람이 IAM에서 URL `https://oidc.vercel.com/<팀 슬러그>`, 대상 `https://vercel.com/<팀 슬러그>`로 공급자를 만들고 그 ARN을 `VercelOidcProviderArn`으로 쓴다(부트스트랩 스택은 Global만 만든다).
    3. 스택 파라미터 `VercelTeamSlug`가 이 팀 슬러그와 같은지 확인한다(공급자 대상이 `https://vercel.com/<팀 슬러그>`다).
    4. 공급자 ARN은 스택 출력 `VercelOidcProviderArn`이다. 4-2의 스크립트가 변수 `VERCEL_OIDC_PROVIDER_ARN`에 넣는다.
-      - ARN 모양: `arn:aws:iam::<중앙 계정 ID>:oidc-provider/oidc.vercel.com`
-
-   > **주의** 팀 발급자 모드는 이 템플릿의 신뢰 키와 맞지 않는다.
+      - ARN 모양(Global): `arn:aws:iam::<중앙 계정 ID>:oidc-provider/oidc.vercel.com`
+      - ARN 모양(Team): `arn:aws:iam::<중앙 계정 ID>:oidc-provider/oidc.vercel.com/<팀 슬러그>`(슬러그는 소문자·숫자·하이픈)
 
 - [ ] **Service Quotas**
 
@@ -669,8 +671,8 @@ http://localhost:3107/auth/dev-login?as=admin
 
 - [ ] **실행**
 
-1. Actions → `deploy-central` 실행. 브랜치는 `main`을 고른다.
-2. `build`와 `checks`가 끝나면 `plan` 작업 승인을 누른다.
+1. `main`에 병합하고 `ci`가 성공하면 `deploy-central`이 자동으로 시작한다(`infra/aws/`, `services/`, `packages/core/`, `package*.json`, 워크플로 파일, `bundle_manifest.py`가 바뀐 커밋만). 직접 하려면 Actions → `deploy-central` 실행, 브랜치는 `main`을 고른다. 바뀐 것이 없으면 변경 세트가 비어 `apply` 없이 성공으로 끝난다.
+2. `build`와 `checks`가 끝나면 `plan` 작업 승인을 누른다(`central` 환경의 필수 승인자를 제거했으면 승인 없이 진행한다).
 3. `plan`이 끝나면 요약의 **IAM 변경 표**를 읽는다.
    - 표 제목은 `IAM changes (read these first)`다.
    - 볼 것: 역할 이름이 모두 `AlarmOpsCentral-`로 시작하거나 이 스택의 함수 역할이다. 모르는 IAM 리소스가 있으면 승인하지 않고 허브에 묻는다.
@@ -689,6 +691,13 @@ http://localhost:3107/auth/dev-login?as=admin
 엔진용과 수집용은 서로 다른 DB 사용자다(D-56). 먼저 두 사용자를 만들고(`db/sql/roles.sql`), 그 사용자의 주소를 4-3 출력의 `EngineDbSecretArn`, `IngestDbSecretArn` 비밀에 넣는다. 소유자 주소는 넣지 않는다.
 
 > **참고** 화면별 순서는 `docs/SETUP-PROD-DB.md` 6~7단계
+
+> **참고 (11/24 실제로 해 본 순서)** 비밀 값 한 줄은 이렇게 만든다.
+> 1. Supabase 프로젝트 맨 위 **Connect** → **Session pooler** 주소를 메모장에 복사한다.
+> 2. `postgres.` → `alarmops_engine.`(수집은 `alarmops_ingest.`), `[YOUR-PASSWORD]` → 그 사용자 비밀번호(대괄호까지 지움), 끝에 `?sslmode=require`.
+>    - 사용자 이름의 `.<프로젝트ID>`와 호스트(`aws-0`/`aws-1`, 리전)는 **Connect 화면 값 그대로** 둔다. 문서 예시 값을 쓰면 pooler가 거절하고 Postgres 로그에는 아무것도 남지 않는다. 엔진 로그에는 `engine init failed: OperationalError`만 보이고 콘솔 연결 확인은 "queued but no result"가 된다(11/25 실제).
+> 3. 수집용은 포트를 `:5432` → `:6543`으로 바꾼다.
+> 4. Secrets Manager(서울) → 비밀 → **비밀 값 검색** → **편집** → **일반 텍스트**에 임시 값을 지우고 붙인다. 메모장은 저장하지 않고 닫는다.
 
 <!-- include: docs/SETUP-PROD-DB.md 6~7 -->
 
@@ -709,7 +718,7 @@ http://localhost:3107/auth/dev-login?as=admin
    | `CENTRAL_EVENT_BUS_ARN` | `CentralBusArn` |
    | `REMEDIATOR_CALLER_ROLE_ARN` | `RemediatorCallerRoleArn` (Remediator를 켜는 고객이 있을 때만) |
 
-   모두 일반(Plain) 변수로 넣는다. 비밀이 아니다.
+   모두 일반 변수로 넣는다. 비밀이 아니다. Vercel 추가 창의 Type에서 **Config**를 고른다(**Secret** 아님). 다섯 개는 한 창에서 Key·Value 칸을 늘려 한 번에 넣을 수 있다.
 
    > **주의** `AWS_ROLE_ARN`은 배포된 Vercel 런타임에만 넣는다. 회사 PC `.env`, CI, 에이전트 세션에는 넣지 않는다(`apps/console/README.md`).
 2. 콘솔을 다시 배포한다. Actions → `deploy-console` 실행 → 승인(3-4). 새 변수는 새 배포부터 쓰인다.
@@ -728,16 +737,25 @@ http://localhost:3107/auth/dev-login?as=admin
 
 - [ ] **권한 실측**(#38)
 
-1. 시험 계정을 허용 목록에 넣는다. 7단계의 7-2와 같은 방법이다(`bus-allowlist`, `action=add`).
-2. 시험 계정에 고객 스택을 설치한다. 7단계의 7-3과 같은 방법이다. `EnableAlarmWriter`를 `true`로 한다.
-3. 확인:
-   - 알람 생성(Tags 포함)·삭제가 된다.
-   - `ManagedBy` 없는 알람은 거부된다.
-   - 시험 계정에서 태그를 바꾸면 `alarm-commands`로 이벤트가 들어와 엔진이 처리한다.
-   - 허용 목록에 없는 계정이 보낸 이벤트는 닿지 않는다.
-4. 결과를 허브에 알린다. 항목별로 "됐다/안 됐다"와 오류 코드만 보낸다.
+스크립트는 `infra/scripts/rehearsal/`에 있다. 사람이 시험 계정(B·C)에서만 실행한다(중앙 계정은 제외). 에이전트는 실행하지 않는다. 자세한 순서는 그 폴더의 `README.md`를 본다.
 
-> **참고** 각 항목을 어떤 명령·화면으로 확인하는지는 이 문서에 없다. #38을 맡은 허브에 확인 절차를 물어본다.
+1. 시험 계정을 콘솔에 등록한다(7-1, AlarmWriter 켬). 아직 허용 목록에는 넣지 않는다. 그리고 `accounts.local.json`을 만든다(저장소에 올리지 않는다).
+2. `bash infra/scripts/rehearsal/preflight.sh --profile rehearsal-b` (읽기만 한다)
+3. `REHEARSAL_EXTERNAL_ID=... bash infra/scripts/rehearsal/install.sh --profile rehearsal-b --confirm-account 12자리` (스택 `alarmops-customer`, `EnableAlarmWriter=true`). 끝나면 콘솔에서 연결 확인(7-4)이 OK인지 본다.
+4. `bash infra/scripts/rehearsal/verify.sh --profile rehearsal-b --confirm-account 12자리 --run-id 이름`. 스크립트가 멈추면 안내대로 사람이 한다.
+   - 허용 목록 추가 **전**에 먼저 돈다. 허용 목록에 없는 계정의 이벤트가 막히는지(`FailedInvocations`)를 본다. 중앙에서 처리되지 않았음은 사람이 콘솔에서 확인한다.
+   - 그다음 사람이 `bus-allowlist`(`action=add`)로 시험 계정을 넣고 스크립트를 계속한다.
+   - 태그를 붙이면 알람이 생긴다(`ManagedBy=AlarmOps`, 큐 차원). 반영까지 최대 15분(디바운스 10분 포함) 기다린다.
+   - 태그를 떼면 알람은 남고 콘솔이 확인 필요(NEEDS_REVIEW)로 표시한다. 사람이 콘솔에서 STOP_MONITORING을 실행하면 그 알람만 사라진다.
+   - `ManagedBy` 없는 알람 거부는 정책 시뮬레이션(실측 아님)으로 본다.
+   - **1회 수동 실측(B 계정 리허설 때 한 번, 선택 아님)**: 시뮬레이션이 못 보는 CloudWatch의 실제 태그 조건 처리와 조직 SCP를 확인한다. 사람이 CLI로 한다(하네스에 넣지 않는다).
+     1. `AlarmOps-AlarmWriter`의 권한 정책과 권한 경계를 콘솔(IAM → 역할)에서 그대로 확인한다.
+     2. 같은 권한 정책과 같은 권한 경계를 붙인 임시 역할 `AlarmOpsRehearsal-WriterReplica`를 만든다. 신뢰 대상만 본인 SSO 역할로 둔다. 태그 `AlarmOpsRehearsal=true`.
+     3. 그 역할로 `cloudwatch put-metric-alarm`을 두 번 부른다: `--tags Key=ManagedBy,Value=AlarmOps`를 붙이면 성공, 빼면 `AccessDenied`여야 한다. 알람 이름은 `AlarmOpsRehearsal-replica-test`.
+     4. 만든 알람을 지우고 임시 역할을 지운다. 결과(성공/AccessDenied)만 허브에 알린다.
+     5. 원본 정책과 다르게 만들면 의미가 없다. 확신이 없으면 하지 말고 허브에 묻는다.
+5. `bash infra/scripts/rehearsal/cleanup.sh --profile rehearsal-b --confirm-account 12자리 --run-id 이름 [--stack]`. 그 뒤 사람이 콘솔 계정 비활성화와 `bus-allowlist remove`를 한다(OFFBOARDING 순서).
+6. 결과를 허브에 알린다. 항목별로 "됐다/안 됐다/TIMEOUT/SKIP"과 오류 코드만 보낸다. 로그(`rehearsal-logs/`)는 올리지 않는다.
 
 ### 참고: 필요할 때만 하는 것
 
@@ -761,7 +779,9 @@ http://localhost:3107/auth/dev-login?as=admin
 | `plan`: AWS 자격 증명 단계에서 실패 | 배포 역할의 신뢰 조건이 다르다. `sub`가 정확히 `repo:<GITHUB_REPO_SUBJECT>:environment:central`(불변 ID 형식)인지, 공급자의 대상이 `sts.amazonaws.com`인지 본다 |
 | `Not authorized to perform sts:AssumeRoleWithWebIdentity` | CloudTrail의 `AssumeRoleWithWebIdentity` 이벤트에서 `userIdentity.userName`의 실제 sub를 확인하고, 스택 `alarmops-central-bootstrap`의 파라미터 `GitHubRepo`를 그 값(`owner@ID/repo@ID`)으로 업데이트한다 |
 | `plan`: `Check the central bus stack exists`에서 실패 | 버스 스택이 없거나 이름이 `alarmops-central-bus`가 아니다. 4-1의 1~2번 |
-| `plan`: 파라미터 `VercelOidcProviderArn` 형식 오류 | ARN이 `…:oidc-provider/oidc.vercel.com`으로 끝나야 한다. 4-1의 4번 |
+| `plan`: 파라미터 `VercelOidcProviderArn` 형식 오류 | ARN이 `…:oidc-provider/oidc.vercel.com` 또는 `…:oidc-provider/oidc.vercel.com/<팀 슬러그>`로 끝나야 한다. 4-1의 4번 |
+| 콘솔 "The check could not be queued", CloudTrail `AssumeRoleWithWebIdentity` AccessDenied, `identityProvider`가 `…/oidc.vercel.com/<팀>` | 신뢰 정책이 다른 공급자를 가리킨다. `aws iam get-role --role-name AlarmOpsCentral-VercelConsole`의 `Federated`와 조건 키를 본다. GitHub `central` 환경 변수 `VERCEL_OIDC_PROVIDER_ARN`을 실제 공급자 ARN(Team이면 `…/oidc.vercel.com/<팀>`)으로 바꾸고 deploy-central을 Run workflow로 다시 돌린다. 신뢰 정책이 바뀌므로 먼저 `infra/aws/deploy-role-policy.md` 4장의 임시 권한(`AlarmOpsDeployCentral-TrustChange`)을 붙인다 |
+| deploy-central `apply`가 `UPDATE_ROLLBACK_FAILED`, 알림 메일 `iam-denied` `UpdateAssumeRolePolicy` AccessDenied | 신뢰 정책 변경에 임시 권한이 없었다. 임시 권한을 붙이고 `aws cloudformation continue-update-rollback --stack-name alarmops-central`(리소스 건너뛰지 않음) → `UPDATE_ROLLBACK_COMPLETE` 확인 → Run workflow로 다시 배포 → 임시 권한 삭제 |
 | `plan`: `SesFromAddress is required when SesIdentityArn is set` | `SES_FROM_ADDRESS`도 같이 넣는다 |
 | `apply`: 예약 동시성 관련 실패 | Lambda 동시 실행 한도가 140 미만이다. 4-1의 5번 |
 | `apply`: 코드 검증 단계에서 권한 거부 | 배포 역할에 `cloudformation:GetTemplate`이나 SAM 버킷 `s3:GetObject`가 없다. 4-1의 3번 |
@@ -858,7 +878,7 @@ npm ci --ignore-scripts && npm run build:lambda -w @alarmops/ingest && npm run b
 - [x] 알람 엔진 리소스 수집기 29종(#48, #51 완료): `SYNC_ACCOUNT`가 리소스를 찾아 `Monitoring=on` 태그 대상에 알람을 만들고 맞춘다. 이게 있어야 "고객이 태그만 붙이면 알람이 생긴다"가 된다
 - [x] CloudTrail 태그 변경 → 즉시 동기화 연결(#51 완료)
 
-무엇이 되는가: 고객이 자기 AWS 리소스에 `Monitoring=on` 태그를 붙이면 엔진이 그 리소스의 CloudWatch 알람을 만든다. 태그를 떼면 맞춰서 정리한다.
+무엇이 되는가: 고객이 자기 AWS 리소스에 `Monitoring=on` 태그를 붙이면 엔진이 그 리소스의 CloudWatch 알람을 만든다. 태그를 떼면 알람은 남고 콘솔이 확인 필요(NEEDS_REVIEW)로 표시한다(D-16). 알람을 지우려면 사람이 콘솔에서 STOP_MONITORING을 실행한다.
 
 언제 눈으로 볼 수 있나: 코드는 끝났지만 실제 계정에는 아직 배포되지 않았다. 4단계(중앙 계정 배포)와 7단계(고객 연결)가 끝나야 돈다. 동작은 7단계의 태그 시험(7-6의 1~3번)에서 확인한다. 권한이 실제로 맞는지는 4-6(#38)에서 먼저 본다.
 
@@ -891,6 +911,12 @@ npm ci --ignore-scripts && npm run build:lambda -w @alarmops/ingest && npm run b
 > **주의** ExternalId는 고객 담당자에게만 준다. 이슈·PR에 적지 않는다.
 
 - [ ] CloudTrail 알림 규칙 2개 동작 확인(`infra/aws/deploy-role-policy.md` 4-2). 첫 실고객 연결 전에 끝낸다.
+  - 두 리전(us-east-1, 서울)의 스택이 `CREATE_COMPLETE`이고 스택 이름이 정확히 `alarmops-central-alerts`다. 부트스트랩의 `CentralStackName`·`BusStackName` 값과 다른지는 bootstrap Rules가 막는다(#115). Rules는 스택을 만들거나 업데이트할 때 **그때 올린 템플릿**으로 검사된다. 리소스 변경이 없으면 bootstrap 업데이트는 `The submitted information didn't contain changes`로 끝나는데 정상이다(11/24 확인). 대신 현재 파라미터가 기본값(`alarmops-central`, `alarmops-central-bus`)인지 콘솔의 파라미터 탭에서 확인하고, 앞으로 bootstrap을 업데이트할 때는 반드시 main의 최신 템플릿을 올린다.
+  - 두 리전 모두 구독이 `Confirmed`다.
+  - 시험 알림이 도착한다.
+  - CloudTrail 관리 이벤트 추적이 있다(리전마다 관리 이벤트를 기록하는 추적).
+  - 실측: 시험 알림 후 실제 배포 1회를 하고 각 리전에서 규칙 메일 수신 확인(eventName·eventID 포함).
+  - 알림 소음 개선(직접 호출·거부 규칙 분리, 서울 배포 규칙 추가) 후에는 두 리전 스택을 새 템플릿으로 업데이트(사람). 업데이트 뒤 정상 배포 1회에 `AlarmOpsGuard-deploy` 메일 1통만 오는지 확인한다.
 
 ### 7-2. 허용 목록에 계정 추가 (10분)
 

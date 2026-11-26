@@ -119,6 +119,22 @@ def test_capability_disabled_is_a_result_not_a_retry(world):
     assert out == {"status": "CAPABILITY_DISABLED", "role": "tagWriter"}
 
 
+@pytest.mark.parametrize("inactive", ["disabled_accounts", "purged_accounts"])
+@pytest.mark.parametrize("cmd_type,payload", [("STOP_MONITORING", {"resourceId": "r1", "deleteAlarms": True}),
+                                              ("SET_MONITORING_TAG", {"resourceId": "r1", "value": "on"})])
+def test_monitoring_commands_are_skipped_for_an_inactive_account(world, inactive, cmd_type, payload):
+    """D-43: a command that waited in the queue must not delete alarms or write a tag once the account is disabled / purged."""
+    from alarm_engine.handler import dispatch
+    repo, sessions, disc, eng, acc = world
+    row = ResourceRow("r1", "cus_1", acc.id, "ap-northeast-2", "EC2", "arn", "i-1")
+    row.monitoring_state = "NEEDS_REVIEW"
+    repo.resources["r1"] = row
+    getattr(repo, inactive).add(acc.id)
+    out = dispatch(eng, parse(msg(cmd_type, payload)["body"]))
+    assert out == {"status": "SKIPPED_INACTIVE"}
+    assert repo.resources["r1"].monitoring_state == "NEEDS_REVIEW"
+
+
 def test_check_connection_records_role_status(world):
     repo, sessions, disc, eng, acc = world
     handle_batch(eng, {"Records": [msg("CHECK_CONNECTION")]})

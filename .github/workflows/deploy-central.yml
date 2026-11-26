@@ -1,8 +1,18 @@
 name: deploy-central
 
-# Deploys infra/aws/central.yaml (SAM, Seoul) to the central AWS account. Started by a person with workflow_dispatch;
-# an agent never runs it. Four jobs; only `plan` and `apply` can reach AWS, and only they run in the `central`
-# environment (branch main only, required reviewer):
+# run-name carries the commit this run deploys; the next gate reads it back to find the last deployed commit
+# (.github/scripts/deploy_gate.py). Do not change its shape.
+run-name: deploy-central ${{ github.event.workflow_run.head_sha || github.sha }}
+
+# Deploys infra/aws/central.yaml (SAM, Seoul) to the central AWS account. Started two ways: automatically by
+# workflow_run when `ci` succeeded for a push to main in this repository (a merged PR) and the merged commit changed a
+# central path (job `gate`), or by hand with workflow_dispatch (always deploys). The merge approval is the human gate.
+# The required reviewer of the `central` environment is removed by a person in Settings -> Environments -> central, not
+# by this file; until then plan/apply still wait for it. Do not rename the environment (the OIDC `sub` contains it).
+# A workflow_run deploys exactly ci's head_sha (checkout pinned to it). Runs queue in the `deploy-central` concurrency
+# group. An unchanged stack ends green: the change set is empty ("didn't contain changes"), `apply` is skipped.
+# Five jobs; only `plan` and `apply` can reach AWS, and only they run in the `central` environment (branch main only):
+#   gate    no environment, contents: read only. Skips everything when the merged commit touched no central path.
 #   build   no environment, contents: read only, NO id-token. Runs repository and package-registry code (npm, esbuild, pip):
 #           builds the four Lambda bundles and writes the sha256 manifest right after bundling. It cannot mint the
 #           AWS OIDC token, so a compromised dependency cannot become the central deploy role.
@@ -37,6 +47,11 @@ name: deploy-central
 
 on:
   workflow_dispatch:
+  # Automatic: after `ci` succeeded for a push to main (a merged PR) in this repository. Never for pull requests or forks.
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: read
@@ -51,10 +66,38 @@ env:
   BUS_STACK_NAME: alarmops-central-bus
 
 jobs:
+  # Decides whether a workflow_run needs a deploy at all: only when the commits since the last successful deploy touched central paths. A manual
+  # run always deploys. Fail-safe: no earlier successful deploy, a base that is not an ancestor or a failing git diff means deploy. No secrets, no environment.
+  gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    if: >-
+      github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository))
+    # actions: read lets the gate list this workflow's earlier runs and their jobs (the last successful deploy).
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      deploy: ${{ steps.paths.outputs.deploy }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Decide from the files changed since the last successful deploy
+        id: paths
+        env:
+          EVENT: ${{ github.event_name }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -I .github/scripts/deploy_gate.py deploy-central.yml apply '^(infra/aws/|services/|packages/core/|package[^/]*\.json$|\.github/workflows/deploy-central\.yml$|\.github/scripts/(bundle_manifest|check_trust_principals)\.py$)' plan
+
   build:
+    needs: gate
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && needs.gate.outputs.deploy == 'true'
     permissions:
       contents: read
     outputs:
@@ -62,6 +105,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -101,7 +145,7 @@ jobs:
           (cd "$art/manifest" && sha256sum webhook.sha256 eventbridge.sha256 consumer.sha256 engine.sha256 > MANIFEST.sha256)
           sum=$(sha256sum "$art/manifest/MANIFEST.sha256" | cut -d' ' -f1)
           echo "manifest_sha256=$sum" >> "$GITHUB_OUTPUT"
-          { echo "## Built code"; echo; echo "commit \`$GITHUB_SHA\`, manifest sha256 \`$sum\`"; echo; echo '```'; cat "$art/manifest/MANIFEST.sha256"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          { echo "## Built code"; echo; echo "commit \`$(git rev-parse HEAD)\`, manifest sha256 \`$sum\`"; echo; echo '```'; cat "$art/manifest/MANIFEST.sha256"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: central-code
@@ -111,14 +155,16 @@ jobs:
           retention-days: 7
 
   checks:
+    needs: gate
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && needs.gate.outputs.deploy == 'true'
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
@@ -146,6 +192,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           persist-credentials: false
       # Download and verify BEFORE any AWS credential exists in this job. No npm, no pip anywhere in this job.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -282,7 +329,7 @@ jobs:
     if: github.ref == 'refs/heads/main' && needs.plan.outputs.changeset != ''
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    # Second approval: the reviewer has seen the plan summary.
+    # Runs right after plan (D-59: no required reviewer in the PoC). The plan summary stays in the run for later review.
     environment: central
     permissions:
       contents: read
@@ -290,6 +337,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           persist-credentials: false
       # Download and check the manifest BEFORE any AWS credential exists in this job. No npm, no pip in this job.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -337,6 +385,7 @@ jobs:
           done
           echo "Verified: change set code = build output (manifest $EXPECTED)" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Execute the approved change set
+        id: execute
         env:
           CHANGESET: ${{ needs.plan.outputs.changeset }}
           MODE: ${{ needs.plan.outputs.mode }}
@@ -347,6 +396,27 @@ jobs:
           else
             aws cloudformation wait stack-update-complete --stack-name "$STACK_NAME"
           fi
+      # After apply: the roles other parties trust (customer roles trust the engine and RemediatorCaller ARNs) must still be
+      # trusted only by this account, the templates' service principals and the Vercel OIDC provider. Reads need iam:GetRole
+      # (deploy role, central-bootstrap.yaml IamReadRoles on role/AlarmOpsCentral-*). Logic: .github/scripts/check_trust_principals.py.
+      - name: Check trust principals
+        if: always() && steps.execute.conclusion != 'skipped'
+        env:
+          PROVIDER: ${{ vars.VERCEL_OIDC_PROVIDER_ARN }}
+        run: |
+          set -uo pipefail
+          account=$(aws sts get-caller-identity --query Account --output text)
+          d="$RUNNER_TEMP/trust"; mkdir -p "$d"
+          items=()
+          for role in AlarmOpsCentral-RemediatorCaller AlarmOpsCentral-VercelConsole AlarmOpsCentral-Engine; do
+            aws iam get-role --role-name "$role" --query Role.AssumeRolePolicyDocument --output json > "$d/$role.json" || { echo "::error::cannot read the trust policy of $role"; exit 1; }
+            items+=("$role=$d/$role.json")
+          done
+          rc=0
+          python3 -I .github/scripts/check_trust_principals.py "$account" "$PROVIDER" "${items[@]}" > "$d/result.txt" || rc=$?
+          grep -v '^::error::' "$d/result.txt" >> "$GITHUB_STEP_SUMMARY" || true
+          grep '^::error::' "$d/result.txt" || true
+          exit "$rc"
       # Outputs hold ARNs, URLs and the account id: none is a secret. Secret values are never read here.
       - name: Stack outputs to the job summary
         if: success()
