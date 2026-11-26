@@ -194,3 +194,33 @@ describe("<ScopeLine> phone search entry", () => {
     expect(onOpenSearch).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("empty state is decided from the data, not the visible rows (#155)", () => {
+  const one = () => [cus("zio", "Zio Fashion", false, [prj("Main", [svc("Web")])])];
+  const tree = (customers: ScopeCustomerNode[], key: string) =>
+    render(<ScopeTree customers={customers} value={{}} onChange={vi.fn()} rail={false} onRailChange={vi.fn()} width={272} onWidthChange={vi.fn()} storageKey={key} />);
+  beforeEach(() => sessionStorage.clear());
+
+  it("one customer, group collapsed: no \"No customers.\", the group row stays", () => {
+    sessionStorage.setItem("t-empty-1", JSON.stringify({ o: { "~ot": false }, op: {}, prob: false, leg: false }));
+    tree(one(), "t-empty-1");
+    expect(screen.queryByText("No customers.")).toBeNull();
+    expect(screen.getByRole("treeitem", { name: /^Customers\b/ })).toBeInTheDocument();
+    expect(screen.queryByText("Zio Fashion")).toBeNull();
+  });
+  it("no customers: \"No customers.\" is shown", () => {
+    tree([], "t-empty-2");
+    expect(screen.getByText("No customers.")).toBeInTheDocument();
+  });
+  it("search with no hit keeps its message", () => {
+    tree(one(), "t-empty-3");
+    fireEvent.change(screen.getByRole("textbox", { name: /Filter the tree/ }), { target: { value: "qqq" } });
+    expect(screen.getByText(/No customer, project or service starts with “qqq”/)).toBeInTheDocument();
+    expect(screen.queryByText("No customers.")).toBeNull();
+  });
+  it("Only with problems and no problem keeps its message", () => {
+    tree(one(), "t-empty-4");
+    fireEvent.click(screen.getByRole("switch", { name: /Only with problems/ }));
+    expect(screen.getByText("No customer has an open incident or a call-order problem.")).toBeInTheDocument();
+  });
+});
