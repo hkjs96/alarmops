@@ -8,7 +8,8 @@
 //   MOCK_API, E2E_ALLOW_MOCK   must not exist at all (an empty value counts as present)
 //   GOOGLE_CLIENT_ID   set (Plain: it is public in the sign-in URL)
 //   SSO_ALLOWED_DOMAINS   set, at least one valid plain domain, no wildcard/space/"@" entry (D-55; Plain: domains are not secret)
-//   SSO_ALLOWED_EMAILS   optional; when set (Plain), every entry must be an exact address. Keep it Sensitive instead and it is not checked here.
+//   SSO_ALLOWED_EMAILS   optional; when set (Plain), every entry must be an exact address. Keep it Sensitive/Secret instead and it is not checked here:
+//     Vercel CLI (env pull, which `vercel pull` uses) writes the placeholder "[SENSITIVE]" for a value it cannot return; that and an empty value are skipped.
 //   GOOGLE_CLIENT_SECRET, SESSION_SECRET, DATABASE_URL: Sensitive in Vercel, so `vercel pull` does not return them and this check cannot
 //     see them. The console fails closed at run time without them (sign-in unavailable). Not checked here.
 //
@@ -18,6 +19,22 @@
 // Values are never printed, only the variable names and the reason.
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+
+/** Value-free description of a rejected entry: length, "@" count and the kinds of characters that are not allowed. Never the value. */
+function shape(v) {
+  const kinds = new Set();
+  for (const c of v) {
+    if (/[a-z0-9]/.test(c) || ".!#$%&'+/=?^_`{|}~-@".includes(c)) continue;
+    if (c === ' ' || c === '\t') kinds.add('whitespace');
+    else if (c === '"' || c === "'") kinds.add('quote');
+    else if (c === '\\') kinds.add('backslash');
+    else if (c === '[' || c === ']') kinds.add('bracket');
+    else if (c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127) kinds.add('control');
+    else if (c.charCodeAt(0) > 127) kinds.add('non-ascii');
+    else kinds.add('other');
+  }
+  return `length ${v.length}, ${v.split('@').length - 1} "@", disallowed: ${kinds.size ? [...kinds].sort().join('/') : 'none'}`;
+}
 
 /** @param {Record<string, string | undefined>} env @returns {string[]} problems, empty when the environment is fine */
 export function checkConsoleDeployEnv(env) {
@@ -50,15 +67,18 @@ export function checkConsoleDeployEnv(env) {
   const LABEL = '[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?';
   const domainRe = new RegExp(`^${LABEL}(?:\\.${LABEL})+$`);
   const emailRe = new RegExp(`^[a-z0-9.!#$%&'+/=?^_\`{|}~-]{1,64}@${LABEL}(?:\\.${LABEL})+$`);
+  // Vercel CLI writes this in place of a Sensitive/Secret value (the real value is not downloadable). Not a real value: treat as not returned.
+  const isPlaceholder = (v) => v.trim().toLowerCase() === '[sensitive]';
   const list = (k) => (has(k) ? env[k] : '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
   if (!(has('GOOGLE_CLIENT_ID') && env.GOOGLE_CLIENT_ID.trim())) problems.push('GOOGLE_CLIENT_ID is not set (Google sign-in would be unavailable)');
-  const domains = list('SSO_ALLOWED_DOMAINS');
+  const domains = has('SSO_ALLOWED_DOMAINS') && isPlaceholder(env.SSO_ALLOWED_DOMAINS) ? [] : list('SSO_ALLOWED_DOMAINS');
   if (domains.length === 0) problems.push('SSO_ALLOWED_DOMAINS is not set or empty (no one could sign in); set it as a Plain variable');
   domains.forEach((d, i) => {
     if (d.length > 253 || !domainRe.test(d)) problems.push(`SSO_ALLOWED_DOMAINS entry #${i + 1} is not a plain domain (no wildcard, space or "@")`);
   });
-  list('SSO_ALLOWED_EMAILS').forEach((a, i) => {
-    if (a.length > 254 || !emailRe.test(a)) problems.push(`SSO_ALLOWED_EMAILS entry #${i + 1} is not an exact e-mail address`);
+  const emails = has('SSO_ALLOWED_EMAILS') && isPlaceholder(env.SSO_ALLOWED_EMAILS) ? [] : list('SSO_ALLOWED_EMAILS');
+  emails.forEach((a, i) => {
+    if (a.length > 254 || !emailRe.test(a)) problems.push(`SSO_ALLOWED_EMAILS entry #${i + 1} is not an exact e-mail address (${shape(a)})`);
   });
   return problems;
 }
