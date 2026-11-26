@@ -41,7 +41,7 @@ const EXPECTED = {
 const ALL = 'all';
 const SPEC = {
   [ENGINE]: {
-    Customer: { select: ALL }, CloudAccount: { select: ALL, update: ['readerStatus', 'alarmWriterStatus', 'tagWriterStatus', 'remediatorStatus', 'lastCheckedAt', 'updatedAt'] },
+    Customer: { select: ALL }, CloudAccount: { select: ALL, update: ['readerStatus', 'alarmWriterStatus', 'tagWriterStatus', 'remediatorStatus', 'lastCheckedAt', 'updatedAt', 'firstEventAt', 'lastEventAt'] },
     Resource: { select: ALL, insert: ALL, update: ['resourceArn', 'name', 'tags', 'monitoringTag', 'monitoringState', 'needsReviewSince', 'needsReviewReason', 'monitoringTagSetBy', 'lastSeenAt', 'discoveryRunId', 'updatedAt'] },
     ManagedAlarm: { select: ALL, insert: ALL, update: ['alarmName', 'alarmArn', 'region', 'severity', 'severityManual', 'threshold', 'thresholdSource', 'consoleThreshold', 'evalM', 'evalN', 'evalSource', 'comparison', 'statistic', 'period', 'treatMissingData', 'driftStatus', 'driftDetail', 'lastSyncedAt', 'version'] },
     ThresholdDefault: { select: ALL }, ThresholdChange: { select: ALL, update: ['applyStatus', 'error'] },
@@ -51,7 +51,7 @@ const SPEC = {
     CustomerOffboarding: { select: ALL, update: ['steps', 'completedAt'] },
   },
   [INGEST]: {
-    Customer: { select: ['id', 'status'] }, CloudAccount: { select: ['id', 'customerId', 'awsAccountId'] },
+    Customer: { select: ['id', 'status'] }, CloudAccount: { select: ['id', 'customerId', 'awsAccountId', 'firstEventAt', 'lastEventAt'], update: ['firstEventAt', 'lastEventAt'] },
     IntegrationSource: { select: ALL, update: ['lastReceivedAt'] }, SeverityMapping: { select: ALL }, SuppressionPolicy: { select: ALL }, MaintenanceWindow: { select: ALL },
     IngestRejection: { insert: ALL }, OffboardResidual: { select: ALL, insert: ALL, update: ['firstAt', 'lastAt', 'count'] },
     RawEvent: { select: ALL, insert: ALL, update: ['decision', 'decisionReason', 'groupId'] },
@@ -231,6 +231,12 @@ test('(a) engine: every statement of pg_repository.py runs', async () => {
   await q(`UPDATE "CloudAccount" SET "readerStatus" = 'OK'::"RoleStatus", "tagWriterStatus" = 'DENIED'::"RoleStatus", "lastCheckedAt" = now(), "updatedAt" = now() WHERE id = $1`, [ID]);
   assert.equal((await rows('SELECT "readerStatus" FROM "CloudAccount" WHERE id = $1', [ID]))[0].readerStatus, 'OK');
 
+  // record_account_event (#154)
+  await q(`UPDATE "CloudAccount" SET "firstEventAt" = COALESCE("firstEventAt", t.at), "lastEventAt" = GREATEST(COALESCE("lastEventAt", t.at), t.at)
+             FROM (SELECT LEAST(COALESCE($1::timestamptz, now()), now()) AS at) t
+            WHERE "id" = $2 AND "customerId" = $3 AND ("firstEventAt" IS NULL OR "lastEventAt" IS NULL OR "lastEventAt" < t.at - interval '60 seconds')`, [null, ID, ID]);
+  assert.ok((await rows('SELECT "firstEventAt" FROM "CloudAccount" WHERE id = $1', [ID]))[0].firstEventAt);
+
   // upsert_resource: insert, then the ON CONFLICT DO UPDATE path
   const resource = `INSERT INTO "Resource" (id, "customerId", "cloudAccountId", region, "resourceType", "resourceArn", "resourceKey", name, tags, "monitoringTag", "monitoringState",
         "needsReviewSince", "needsReviewReason", "monitoringTagSetBy", "lastSeenAt", "discoveryRunId", "updatedAt")
@@ -300,6 +306,11 @@ test('(a) engine: every statement of pg_repository.py runs', async () => {
 
 test('(a) ingest: every statement of SqlIngestStore runs', async () => {
   const q = (text, params = []) => ingest.query(text, params);
+  // insertRawEvent: account event times (#154). Same statement as ingestRepo.ts; LEAST(..., now()) stands in for sql.now().
+  await q(`UPDATE "CloudAccount" SET "firstEventAt" = COALESCE("firstEventAt", t.at), "lastEventAt" = GREATEST(COALESCE("lastEventAt", t.at), t.at)
+           FROM (SELECT LEAST($3::timestamptz, now()) AS at) t
+          WHERE "awsAccountId" = $1 AND "customerId" = $2 AND ("firstEventAt" IS NULL OR "lastEventAt" IS NULL OR "lastEventAt" < t.at - interval '60 seconds')`,
+    ['123456789012', ID, new Date().toISOString()]);
   const rows = async (text, params) => (await q(text, params)).rows;
   // SourceRepository
   assert.equal((await rows(`SELECT "id", "customerId", "kind", "tokenHash", "enabled", "allowQueryToken" FROM "IntegrationSource" WHERE "tokenHash" = $1`, ['none'])).length, 0);

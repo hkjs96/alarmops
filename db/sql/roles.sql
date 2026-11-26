@@ -56,8 +56,10 @@ END $$;
 -- Reads the whole row (`SELECT *`) of the tables below. Writes only what the contract says it writes.
 GRANT SELECT ON "Customer", "CloudAccount", "Resource", "ManagedAlarm", "ThresholdDefault", "ThresholdChange",
                 "AlarmSyncRun", "RemediationPolicy", "RemediationRequest", "CustomerOffboarding" TO alarmops_engine;
--- CloudAccount: role status and last check only (never roleArn / externalId / enabled flags: the console owns those).
-GRANT UPDATE ("readerStatus", "alarmWriterStatus", "tagWriterStatus", "remediatorStatus", "lastCheckedAt", "updatedAt")
+-- CloudAccount: role status, last check and first/last event time only (never roleArn / externalId / enabled flags: the
+-- console owns those). firstEventAt / lastEventAt: record_account_event (CloudTrail tag events, #154).
+GRANT UPDATE ("readerStatus", "alarmWriterStatus", "tagWriterStatus", "remediatorStatus", "lastCheckedAt", "updatedAt",
+              "firstEventAt", "lastEventAt")
   ON "CloudAccount" TO alarmops_engine;
 -- Resource and ManagedAlarm: upsert (INSERT ... ON CONFLICT DO UPDATE). ManagedAlarm rows are also removed.
 -- Insert is table-wide (a new row is the engine's own). UPDATE is limited to the SET list of the upsert, so id, customerId
@@ -91,6 +93,8 @@ GRANT UPDATE ("steps", "completedAt") ON "CustomerOffboarding" TO alarmops_engin
 -- Customer and CloudAccount: only the columns the lookups read (no externalId, no role ARNs).
 GRANT SELECT ("id", "status") ON "Customer" TO alarmops_ingest;
 GRANT SELECT ("id", "customerId", "awsAccountId") ON "CloudAccount" TO alarmops_ingest;
+-- CloudAccount event times (#154): insertRawEvent stamps firstEventAt/lastEventAt (reads them in SET/WHERE, so SELECT too).
+GRANT SELECT ("firstEventAt", "lastEventAt"), UPDATE ("firstEventAt", "lastEventAt") ON "CloudAccount" TO alarmops_ingest;
 GRANT SELECT ON "IntegrationSource", "SeverityMapping", "SuppressionPolicy", "MaintenanceWindow" TO alarmops_ingest;
 GRANT UPDATE ("lastReceivedAt") ON "IntegrationSource" TO alarmops_ingest;
 GRANT INSERT ON "IngestRejection" TO alarmops_ingest;

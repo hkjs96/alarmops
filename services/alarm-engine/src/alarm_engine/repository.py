@@ -185,6 +185,7 @@ class Repository(Protocol):
     def find_active_account_by_aws_id(self, aws_account_id: str) -> CloudAccount | None: ...
     def sync_run_started_since(self, cloud_account_id: str, within: timedelta) -> bool: ...
     def update_account_status(self, cloud_account_id: str, statuses: dict[str, str]) -> None: ...
+    def record_account_event(self, customer_id: str, cloud_account_id: str, event_time: datetime | None) -> None: ...
     def list_resources(self, cloud_account_id: str) -> list[ResourceRow]: ...
     def get_resource(self, customer_id: str, resource_id: str) -> ResourceRow | None: ...
     def upsert_resource(self, row: ResourceRow) -> ResourceRow: ...
@@ -230,6 +231,7 @@ class InMemoryRepository:
     def __init__(self) -> None:
         self.accounts: dict[str, CloudAccount] = {}
         self.account_status: dict[str, dict[str, str]] = {}
+        self.event_times: dict[str, tuple[datetime, datetime]] = {}   # CloudAccount.firstEventAt / lastEventAt
         self.resources: dict[str, ResourceRow] = {}
         self.defaults: dict[tuple[str, str | None, str, str], LayerValues] = {}   # (level, customer, type, key)
         self.alarms: dict[str, ManagedAlarmRow] = {}
@@ -274,6 +276,17 @@ class InMemoryRepository:
 
     def update_account_status(self, cloud_account_id: str, statuses: dict[str, str]) -> None:
         self.account_status.setdefault(cloud_account_id, {}).update(statuses)
+
+    def record_account_event(self, customer_id: str, cloud_account_id: str, event_time: datetime | None) -> None:
+        """firstEventAt / lastEventAt, same rule as the ingest SQL: time capped at now, last moves only after 60 s."""
+        a = self.accounts.get(cloud_account_id)
+        if a is None or a.customer_id != customer_id:
+            return
+        n = now()
+        at = min(event_time or n, n)
+        first, last = self.event_times.get(cloud_account_id, (None, None))
+        if first is None or last is None or last < at - timedelta(seconds=60):
+            self.event_times[cloud_account_id] = (first or at, max(last or at, at))
 
     # resources
     def list_resources(self, cloud_account_id: str) -> list[ResourceRow]:

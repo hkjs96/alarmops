@@ -334,3 +334,31 @@ def test_new_process_does_not_collide_with_existing_resource_ids(pg):
     assert sorted(r.resource_key for r in rows) == ["i-first", "i-legacy", "i-second"]
     assert len({r.id for r in rows}) == 3
     assert next(r for r in rows if r.resource_key == "i-legacy").id == "res_000001"
+
+
+def test_record_account_event_updates_only_the_matching_row_and_respects_the_60s_rule(pg):
+    from datetime import UTC, datetime
+    _acct(pg, "acc_ev1", "cus_1", "444455556661")
+    _acct(pg, "acc_ev2", "cus_1", "444455556662")
+    _acct(pg, "acc_ev3", "cus_2", "444455556663")
+
+    def times(i):
+        r = pg._one('SELECT "firstEventAt" AS f, "lastEventAt" AS l FROM "CloudAccount" WHERE id = %s', i)
+        return r["f"], r["l"]
+
+    t0 = datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC)
+    pg.record_account_event("cus_1", "acc_ev1", t0)
+    assert times("acc_ev1") == (t0, t0)
+    assert times("acc_ev2") == (None, None) and times("acc_ev3") == (None, None)
+    pg.record_account_event("cus_1", "acc_ev1", t0 + timedelta(seconds=30))     # inside 60 s: no change
+    assert times("acc_ev1") == (t0, t0)
+    t2 = t0 + timedelta(seconds=61)
+    pg.record_account_event("cus_1", "acc_ev1", t2)                            # after 60 s: last advances, first stays
+    assert times("acc_ev1") == (t0, t2)
+    pg.record_account_event("cus_2", "acc_ev2", t0)                            # wrong customer: no row touched
+    assert times("acc_ev2") == (None, None)
+    pg.record_account_event("cus_1", "acc_ev2", datetime.now(UTC) + timedelta(days=3))   # future is capped at now()
+    f, last = times("acc_ev2")
+    assert f <= datetime.now(UTC) and last <= datetime.now(UTC)
+    pg.record_account_event("cus_1", "acc_ev3", None)                          # wrong customer again; None means now()
+    assert times("acc_ev3") == (None, None)
