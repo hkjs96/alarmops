@@ -81,6 +81,38 @@ jobs:
           cat "$RUNNER_TEMP/ci-changes.out"
           cat "$RUNNER_TEMP/ci-changes.out" >> "$GITHUB_OUTPUT"
 
+  # Information only (D-62): classifies the PR as `low` or `human` with .github/scripts/pr_risk.py. Never fails, sets no label,
+  # has no write permission; the hub reads the result (job output / summary). Pull requests only.
+  risk:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      risk: ${{ steps.classify.outputs.risk }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: classify
+        continue-on-error: true
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          # Errors are not fatal here: any failure below leaves the answer `human` and the job green.
+          if git diff --name-status --no-renames "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/files.txt"; then
+            python3 -I .github/scripts/pr_risk.py < "$RUNNER_TEMP/files.txt" || echo "risk=human" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::git diff failed; risk=human"
+            echo "risk=human" >> "$GITHUB_OUTPUT"
+          fi
+          exit 0
+
   test:
     needs: changes
     # Skipped only when changes says 'false'. A failed or empty answer runs the job (fail-safe).
