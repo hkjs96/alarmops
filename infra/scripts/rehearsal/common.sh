@@ -175,6 +175,17 @@ rh_ask() {  # 사람 확인. y 면 0. 입력이 없으면(비대화형) 1
   [[ "$ans" == y || "$ans" == Y ]]
 }
 
+# (다) 유지 대기 안내: 사람에게(stderr) 언제까지 기다리는지와 그동안 Stop 을 누르지 말라고 알린다.
+rh_hold_notice() {
+  local mins=$(( (RH_WAIT_SECONDS + 59) / 60 )) until=""
+  until="$(date -d "@$(( $(date +%s) + RH_WAIT_SECONDS ))" +%H:%M 2>/dev/null || true)"
+  {
+    printf '\n>>> (다) 태그를 뗐습니다. 약 %s분%s 동안 알람이 그대로 남는지 지켜봅니다.\n' "$mins" "${until:+(${until}까지)}"
+    printf '>>> 이 동안 콘솔에서 Stop monitoring 을 누르지 마세요. 누르면 알람이 지워져 D-16 위반(FAIL)으로 잘못 판정됩니다.\n'
+    printf '>>> Needs review 표시는 지금 봐도 됩니다. Stop 은 대기가 끝나고 여기서 물어볼 때 누릅니다.\n\n'
+  } >&2
+}
+
 # 폴링: 명령(함수)이 성공하면 0, 상한(RH_WAIT_SECONDS) 안에 안 되면 1
 rh_poll() {
   local start now

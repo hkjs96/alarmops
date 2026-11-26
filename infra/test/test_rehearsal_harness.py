@@ -622,6 +622,15 @@ class VerifyInteractive(Base):
         self.assertTrue(any("SKIP" in r or "TIMEOUT" in r for r in row), row)   # fake never deletes; no PASS
         self.assertFalse(any("D-16" in r for r in row), row)
 
+    def test_untag_tells_the_person_not_to_press_stop_while_waiting(self):
+        # 11/26 b7: Stop pressed during the keep window deleted the alarms and read as a D-16 violation.
+        q = "alarmops-rehearsal-" + RUN
+        res, _ = self.run_verify(self.YES, metric_sums=self.GROW, alarms=[alarm("a1", q, {"ManagedBy": "AlarmOps"})])
+        self.assertIn("Stop monitoring 을 누르지 마세요", res.err)
+        notice, ask = res.err.find("누르지 마세요"), res.err.find("(다) 대기 끝")
+        self.assertTrue(0 <= notice < ask, res.err)       # the warning comes first, the ask only after the wait
+        self.assertNotIn("누르지 마세요", res.out)          # human guidance stays out of the report table
+
 
 class GoLiveDoc(unittest.TestCase):
     """D-16: a tag that disappears must not delete the alarm; the console shows it as needing review."""

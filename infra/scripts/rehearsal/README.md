@@ -28,6 +28,7 @@ bash infra/scripts/rehearsal/cleanup.sh  --profile rehearsal-b --confirm-account
 - 계정 12자리는 매번 직접 입력한다. 계정 표, 실제 `sts get-caller-identity` 결과와 모두 같아야 한다.
 - preflight는 읽기만 한다. 끝에 사람 관문(7-1 콘솔 등록, 7-4 연결 확인)을 묻는다.
 - verify는 허용 목록 추가 **전**에 시작한다. (가) 후 스크립트가 멈추면 중앙에서 `bus-allowlist` `action=add` 를 실행하고 y 로 계속한다. 입력이 없으면 해당 항목은 SKIP 이고, SKIP 이 하나라도 있으면 종료 코드 2 로 끝난다(결과표에 "SKIP 있음").
+- (다)에서 태그를 뗀 뒤 스크립트는 알람이 그대로 남는지 `REHEARSAL_WAIT_SECONDS`(기본 900초) 동안 지켜본다. 이 동안 콘솔에서 Stop monitoring 을 누르지 않는다. 누르면 알람이 지워져 D-16 위반 FAIL 로 잘못 판정된다. Needs review 표시는 지금 봐도 되고, Stop 은 스크립트가 "(다) 대기 끝"이라고 물을 때 누른다.
 - 결과표 값: PASS(됐다) / FAIL(안 됐다) / FAIL(TIMEOUT, 원인 미상) / SKIP. (라)는 정책 시뮬레이션이라 실측이 아니다.
 - 로그는 `rehearsal-logs/<profile>/<runId>.md`(권한 600). 올리지 않는다.
 - cleanup은 그 runId 로그에 있는 큐와, 그 큐를 차원으로 가진 `ManagedBy=AlarmOps` 알람만 지운다. `--stack` 은 스택 이름이 `alarmops-customer` 이고 스택 태그 `AlarmOpsRehearsal=true` 일 때만 지운다. 끝에 사람 몫(콘솔 계정 비활성화, `bus-allowlist` `action=remove`)을 출력한다.
