@@ -103,6 +103,17 @@ sys.exit(0 if any(t.get("Key") == "AlarmOpsRehearsal" and t.get("Value") == "tru
   fi
 fi
 
+# replica-check.sh(#159)가 남긴 임시 역할 확인. 여기서는 지우지 않고 알리기만 한다(지우는 것은 replica-check.sh --cleanup-only).
+rh_tmpfile; errf="$RH_TMPF"
+rc=0; aws_r iam get-role --role-name AlarmOpsRehearsal-WriterReplica >/dev/null 2>"$errf" || rc=$?
+if [ "$rc" -eq 0 ]; then
+  rh_say ""
+  rh_say "경고: 임시 역할 AlarmOpsRehearsal-WriterReplica 가 남아 있다. 여기서는 지우지 않는다. 다음으로 정리한다:"
+  rh_say "  bash infra/scripts/rehearsal/replica-check.sh --profile $RH_PROFILE --confirm-account <12자리> --cleanup-only"
+elif ! grep -q 'NoSuchEntity' "$errf" 2>/dev/null; then
+  rh_say "참고: 임시 역할 AlarmOpsRehearsal-WriterReplica 가 남았는지 확인하지 못했다(iam:GetRole 권한 또는 조회 오류)"
+fi
+
 rh_say ""
 rh_say "## 사람 몫 (OFFBOARDING 순서)"
 rh_say "1. 콘솔 고객사 화면에서 상태를 바꾼다(계정 단위 버튼은 없음: Suspend 는 되돌릴 수 있고, Terminate 는 해지 체크리스트). 계정을 계속 쓰면 1~3은 하지 않는다"

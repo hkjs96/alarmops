@@ -24,6 +24,23 @@ Scenario keys (all optional):
   fail_ops           ["service op", ...]; those calls exit 254 with a plain error (no secret)
   role_trust         {roleName: trust policy document}   iam get-role
   role_policies      {roleName: [inline policy names]}   iam list-role-policies
+  caller_arn         sts get-caller-identity Arn (default assumed-role/fake/rehearsal)
+  iam_roles          {roleName: {"boundary": arn|null, "policies": {policyName: doc}, "tags": {k: v}}}. Presence switches
+                     iam get-role to strict mode (NoSuchEntity for unknown roles) and enables the replica-check model
+                     (replica-check.sh, #159): iam get-role-policy/create-role/put-role-policy/delete-role-policy/
+                     delete-role and cloudwatch put-metric-alarm/tag-resource/delete-alarms keep state in
+                     $FAKE_AWS_LOG.state. sts assume-role returns the fixed REPLICA_* credentials. Calls carrying
+                     AWS_ACCESS_KEY_ID in env are "replica" calls: the credentials must match, and the allow/deny
+                     decision comes from the role's stored inline policy (StringEquals + ForAnyValue/ForAllValues on
+                     aws:RequestTag/*, aws:ResourceTag/*, aws:TagKeys; explicit Deny wins).
+  cw_overwrite_unmanaged_denied  true: a replica PutMetricAlarm on an existing alarm WITHOUT ManagedBy=AlarmOps is denied
+                     (models CloudWatch applying the resource tag on update); false/absent: the policy decides, so a
+                     request tag ManagedBy=AlarmOps overwrites it (the suspected hole checked by replica-check (f))
+  fail_nth           {"service op": N}: the N-th call (1-based) of that operation exits 254 with InternalFailure
+  sleep_ops          {"service op": seconds}: that call touches $FAKE_AWS_LOG.sleeping then sleeps (signal tests)
+  iam_roles entries may carry "path": "/aws-reserved/sso.amazonaws.com/ap-northeast-2/" (iam get-role Arn includes it)
+  assume_crlf        true: sts assume-role output ends every line with CRLF (Windows aws.exe)
+  assume_fail_first  N: the first N sts assume-role calls fail with AccessDenied (IAM propagation)
   metric_sums        {"Invocations": {"start": N, "step": S, "empty_first": bool}}; the n-th get-metric-statistics call for that
                      metric returns one datapoint with Sum = start + S*n (n counts from 0)
 """
@@ -92,8 +109,10 @@ class UnsupportedQuery(Exception):
 
 
 def query(data, expr: str):
-    """Tiny JMESPath subset: a.b, a[].b, a[*].b, a[0]. Deliberately NOT jmespath, so the verdict never
+    """Tiny JMESPath subset: a.b, a[].b, a[*].b, a[0], [a.b,c.d] (flat multiselect list). Deliberately NOT jmespath, so the verdict never
     depends on what is installed. Anything else (filters, pipes, functions, multiselect) raises."""
+    if expr.startswith("[") and expr.endswith("]") and "." in expr:   # [a.b,c.d] multiselect list
+        return [query(data, e.strip()) for e in expr[1:-1].split(",")]
     cur = data
     for part in expr.split("."):
         m = re.fullmatch(r"([A-Za-z0-9_]*)(\[(\*|\d*)\])?", part)
@@ -154,8 +173,228 @@ def error(code: str, op: str, msg: str, rc: int = 254):
     sys.exit(rc)
 
 
+REPLICA_KEY = "ASIAFAKEREPLICAKEY0001"
+REPLICA_SECRET = "fakeReplicaSecretAccessKey+/0123456789ABCDEFGH"
+REPLICA_TOKEN = "FwoGZXIvYXdzFAKEreplicaSESSIONtoken0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+REPLICA_NAME = "AlarmOpsRehearsal-WriterReplica"
+
+
 def tags_list(d: dict):
     return [{"Key": k, "Value": v} for k, v in (d or {}).items()]
+
+
+def parse_tags(vals):
+    out = {}
+    for v in vals or []:
+        m = re.fullmatch(r"Key=([^,]+),Value=(.*)", v)
+        if m:
+            out[m.group(1)] = m.group(2)
+    return out
+
+
+def _ctx_values(key, ctx):
+    if key.startswith("aws:RequestTag/"):
+        v = ctx["request_tags"].get(key.split("/", 1)[1])
+        return [] if v is None else [v]
+    if key.startswith("aws:ResourceTag/"):
+        v = ctx["resource_tags"].get(key.split("/", 1)[1])
+        return [] if v is None else [v]
+    if key == "aws:TagKeys":
+        return list(ctx["request_tags"])
+    raise ValueError("fake aws: unsupported condition key " + key)
+
+
+def _cond_ok(cond, ctx):
+    for op, block in (cond or {}).items():
+        mode, _, base = op.rpartition(":")
+        if base != "StringEquals":
+            raise ValueError("fake aws: unsupported condition operator " + op)
+        for key, want in block.items():
+            want = want if isinstance(want, list) else [want]
+            have = _ctx_values(key, ctx)
+            if mode == "ForAnyValue":
+                ok = any(h in want for h in have)
+            elif mode == "ForAllValues":
+                ok = all(h in want for h in have)
+            else:
+                ok = bool(have) and all(h in want for h in have)
+            if not ok:
+                return False
+    return True
+
+
+def evaluate(policy, action, ctx):
+    """True = allowed. Explicit Deny wins; no matching Allow = implicit deny."""
+    import fnmatch
+
+    stmts = policy.get("Statement", [])
+    stmts = [stmts] if isinstance(stmts, dict) else stmts
+    allowed = False
+    for st in stmts:
+        acts = st.get("Action", [])
+        acts = [acts] if isinstance(acts, str) else acts
+        if not any(fnmatch.fnmatch(action.lower(), a.lower()) for a in acts):
+            continue
+        if not _cond_ok(st.get("Condition"), ctx):
+            continue
+        if st.get("Effect") == "Deny":
+            return False
+        if st.get("Effect") == "Allow":
+            allowed = True
+    return allowed
+
+
+def camel(op):
+    return "".join(p.capitalize() for p in op.split("-"))
+
+
+def replica_model(scen, service, op, opts, rec, account, first):
+    """Stateful IAM/STS/CloudWatch model for replica-check.sh. Returns True when the call was handled."""
+    sp = os.environ["FAKE_AWS_LOG"] + ".state"
+    if os.path.exists(sp):
+        with open(sp, encoding="utf-8") as f:
+            st = json.load(f)
+    else:
+        st = {"roles": {k: {"boundary": v.get("boundary"), "policies": dict(v.get("policies") or {}),
+                            "tags": dict(v.get("tags") or {}), "path": v.get("path") or "/"}
+                      for k, v in scen["iam_roles"].items()},
+              "alarms": {}, "alarm_cfg": {}, "assume_calls": 0}
+
+    def save():
+        with open(sp, "w", encoding="utf-8") as f:
+            json.dump(st, f)
+
+    key = f"{service} {op}"
+    rname = first("--role-name")
+
+    def need_role():
+        if rname not in st["roles"]:
+            error("NoSuchEntity", camel(op), f"The role with name {rname} cannot be found.")
+        return st["roles"][rname]
+
+    replica_call = "AWS_ACCESS_KEY_ID" in os.environ
+    if replica_call:
+        if (os.environ.get("AWS_ACCESS_KEY_ID"), os.environ.get("AWS_SECRET_ACCESS_KEY"),
+                os.environ.get("AWS_SESSION_TOKEN")) != (REPLICA_KEY, REPLICA_SECRET, REPLICA_TOKEN):
+            error("InvalidClientTokenId", camel(op), "The security token included in the request is invalid.")
+        if REPLICA_NAME not in st["roles"]:
+            error("ExpiredToken", camel(op), "The security token included in the request is expired")
+
+    if key == "iam get-role":
+        r = need_role()
+        out = {"RoleName": rname, "Arn": f"arn:aws:iam::{account}:role/{r.get('path', '/').lstrip('/')}{rname}",
+               "Tags": tags_list(r["tags"])}
+        if r["boundary"]:
+            out["PermissionsBoundary"] = {"PermissionsBoundaryType": "Policy", "PermissionsBoundaryArn": r["boundary"]}
+        emit({"Role": out}, opts)
+        return True
+    if key == "iam get-role-policy":
+        r = need_role()
+        pn = first("--policy-name")
+        if pn not in r["policies"]:
+            error("NoSuchEntity", "GetRolePolicy", f"The role policy with name {pn} cannot be found.")
+        emit({"RoleName": rname, "PolicyName": pn, "PolicyDocument": r["policies"][pn]}, opts)
+        return True
+    if key == "iam create-role":
+        if rname in st["roles"]:
+            error("EntityAlreadyExists", "CreateRole", f"Role with name {rname} already exists.")
+        st["roles"][rname] = {"boundary": first("--permissions-boundary"), "policies": {},
+                              "tags": parse_tags(opts.get("--tags"))}
+        save()
+        emit({"Role": {"RoleName": rname, "Arn": f"arn:aws:iam::{account}:role/{rname}"}}, opts)
+        return True
+    if key == "iam put-role-policy":
+        r = need_role()
+        doc = None
+        for v in opts.get("--policy-document", []):
+            m = re.fullmatch(r"file(?:b)?://(.*)", v)
+            doc = json.loads(rec["files"][m.group(1)] if m else v)
+        r["policies"][first("--policy-name")] = doc
+        save()
+        emit({}, opts)
+        return True
+    if key == "iam delete-role-policy":
+        r = need_role()
+        pn = first("--policy-name")
+        if pn not in r["policies"]:
+            error("NoSuchEntity", "DeleteRolePolicy", f"The role policy with name {pn} cannot be found.")
+        del r["policies"][pn]
+        save()
+        emit({}, opts)
+        return True
+    if key == "iam delete-role":
+        r = need_role()
+        if r["policies"]:
+            error("DeleteConflict", "DeleteRole", "Cannot delete entity, must delete policies first.")
+        del st["roles"][rname]
+        save()
+        emit({}, opts)
+        return True
+
+    if key == "sts assume-role":
+        st["assume_calls"] += 1
+        save()
+        arn_role = (first("--role-arn") or "").rsplit("/", 1)[-1]
+        if st["assume_calls"] <= int(scen.get("assume_fail_first") or 0) or arn_role not in st["roles"]:
+            error("AccessDenied", "AssumeRole", "not authorized to perform: sts:AssumeRole")
+        doc = {"Credentials": {"AccessKeyId": REPLICA_KEY, "SecretAccessKey": REPLICA_SECRET,
+                               "SessionToken": REPLICA_TOKEN, "Expiration": "2030-01-01T00:00:00Z"},
+               "AssumedRoleUser": {"Arn": f"arn:aws:sts::{account}:assumed-role/{arn_role}/x"}}
+        if scen.get("assume_crlf"):   # Windows aws.exe: every output line ends with CRLF
+            import io
+
+            sys.stdout = io.TextIOWrapper(sys.stdout.buffer, newline="\r\n", write_through=True)
+        emit(doc, opts)
+        return True
+
+    if service == "cloudwatch" and op in ("put-metric-alarm", "tag-resource", "delete-alarms", "describe-alarms",
+                                          "list-tags-for-resource"):
+        req = parse_tags(opts.get("--tags"))
+        if op == "put-metric-alarm":
+            names = [first("--alarm-name")]
+        elif op == "delete-alarms":
+            names = opts.get("--alarm-names", [])
+        elif op == "describe-alarms":
+            names = []
+        else:
+            names = [(first("--resource-arn") or "").split(":alarm:")[-1]]
+        if replica_call:
+            pol = {"Statement": [s for p in st["roles"][REPLICA_NAME]["policies"].values()
+                                 for s in (p["Statement"] if isinstance(p["Statement"], list) else [p["Statement"]])]}
+            for n in names or [None]:
+                ctx = {"request_tags": req, "resource_tags": (st["alarms"].get(n) or {}) if n else {}}
+                if not evaluate(pol, "cloudwatch:" + camel(op), ctx):
+                    error("AccessDenied", camel(op), "User is not authorized to perform: cloudwatch:" + camel(op))
+                if (op == "put-metric-alarm" and scen.get("cw_overwrite_unmanaged_denied") and n in st["alarms"]
+                        and st["alarms"][n].get("ManagedBy") != "AlarmOps"):
+                    error("AccessDenied", camel(op), "User is not authorized to perform: cloudwatch:" + camel(op))
+        if op == "put-metric-alarm":
+            st["alarms"].setdefault(names[0], {}).update(req)
+            st["alarm_cfg"][names[0]] = {"Threshold": float(first("--threshold") or 0)}
+        elif op == "tag-resource":
+            if names[0] not in st["alarms"]:
+                error("ResourceNotFound", "TagResource", "alarm not found")
+            st["alarms"][names[0]].update(req)
+        elif op == "delete-alarms":
+            for n in names:
+                st["alarms"].pop(n, None)
+        elif op == "list-tags-for-resource":
+            n = names[0]
+            if n in st["alarms"]:
+                emit({"Tags": tags_list(st["alarms"][n])}, opts)
+                return True
+            return False   # fall through to the scenario's static alarms
+        elif op == "describe-alarms":
+            want = opts.get("--alarm-names")
+            if not want:
+                return False
+            emit({"MetricAlarms": [dict(AlarmName=n, **st["alarm_cfg"].get(n, {})) for n in want if n in st["alarms"]],
+                  "CompositeAlarms": []}, opts)
+            return True
+        save()
+        emit({}, opts)
+        return True
+    return False
 
 
 def main() -> None:
@@ -187,7 +426,8 @@ def main() -> None:
     if fail_read:
         echo.append("error-response")
     secret = scen.get("leak") or scen.get("fail_writes") or scen.get("fail_reads")
-    rec = {"argv": argv, "service": service, "op": op, "files": read_files(argv), "stdin": stdin, "echo": echo}
+    rec = {"argv": argv, "service": service, "op": op, "files": read_files(argv), "stdin": stdin, "echo": echo,
+           "as_replica": "AWS_ACCESS_KEY_ID" in os.environ, "env_profile": "AWS_PROFILE" in os.environ}
     done = []
 
     def record():
@@ -202,6 +442,13 @@ def main() -> None:
     if (service, op) != ("cloudformation", "describe-stacks"):
         record()
 
+    sleep_for = (scen.get("sleep_ops") or {}).get(f"{service} {op}")
+    if sleep_for:
+        import time
+
+        open(os.environ["FAKE_AWS_LOG"] + ".sleeping", "w").close()
+        time.sleep(float(sleep_for))
+
     if scen.get("leak") and service != "sts":
         sys.stderr.write(f"warning: request context ExternalId={scen['leak']}\n")
     if scen.get("fail_writes") and not is_read and service != "sts":
@@ -209,6 +456,14 @@ def main() -> None:
 
     if fail_read:
         error("AccessDenied", op, f"not allowed ({scen['fail_reads']})", 255)
+    nth = (scen.get("fail_nth") or {}).get(f"{service} {op}")
+    if nth:   # the n-th call (1-based) of this operation fails
+        cf = os.environ["FAKE_AWS_LOG"] + ".count-" + f"{service}-{op}"
+        n = int(open(cf, encoding="utf-8").read() or 0) + 1 if os.path.exists(cf) else 1
+        with open(cf, "w", encoding="utf-8") as f:
+            f.write(str(n))
+        if n == nth:
+            error("InternalFailure", op, "simulated failure (nth)")
     if f"{service} {op}" in (scen.get("fail_ops") or []):
         error("InternalFailure", op, "simulated failure")
 
@@ -217,7 +472,11 @@ def main() -> None:
 
     if key == "sts get-caller-identity":
         return emit({"UserId": "AIDAFAKE", "Account": account,
-                     "Arn": f"arn:aws:sts::{account}:assumed-role/fake/rehearsal"}, opts)
+                     "Arn": scen.get("caller_arn") or f"arn:aws:sts::{account}:assumed-role/fake/rehearsal"}, opts)
+
+    if "iam_roles" in scen and service in ("iam", "sts", "cloudwatch"):
+        if replica_model(scen, service, op, opts, rec, account, first):
+            return
 
     if key == "cloudformation describe-stacks":
         name = first("--stack-name")

@@ -749,12 +749,29 @@ http://localhost:3107/auth/dev-login?as=admin
    - 태그를 떼면 알람은 남고 콘솔이 확인 필요(NEEDS_REVIEW)로 표시한다. 사람이 콘솔에서 Stop monitoring을 누르면 그 알람만 사라진다.
    - 순서 (다): 스크립트가 `REHEARSAL_WAIT_SECONDS`(기본 900초, 15분) 동안 알람 유지를 지켜본다. 이 동안 Stop monitoring을 누르지 않는다(Needs review 표시는 봐도 된다). 스크립트가 "(다) 대기 끝"이라고 물으면 콘솔 Monitoring > Needs review에서 그 큐를 확인하고 Stop monitoring을 누른 뒤 y로 답한다.
    - `ManagedBy` 없는 알람 거부는 정책 시뮬레이션(실측 아님)으로 본다.
-   - **1회 수동 실측(B 계정 리허설 때 한 번, 선택 아님)**: 시뮬레이션이 못 보는 CloudWatch의 실제 태그 조건 처리와 조직 SCP를 확인한다. 사람이 CLI로 한다(하네스에 넣지 않는다).
-     1. `AlarmOps-AlarmWriter`의 권한 정책과 권한 경계를 콘솔(IAM → 역할)에서 그대로 확인한다.
-     2. 같은 권한 정책과 같은 권한 경계를 붙인 임시 역할 `AlarmOpsRehearsal-WriterReplica`를 만든다. 신뢰 대상만 본인 SSO 역할로 둔다. 태그 `AlarmOpsRehearsal=true`.
-     3. 그 역할로 `cloudwatch put-metric-alarm`을 두 번 부른다: `--tags Key=ManagedBy,Value=AlarmOps`를 붙이면 성공, 빼면 `AccessDenied`여야 한다. 알람 이름은 `AlarmOpsRehearsal-replica-test`.
-     4. 만든 알람을 지우고 임시 역할을 지운다. 결과(성공/AccessDenied)만 허브에 알린다.
-     5. 원본 정책과 다르게 만들면 의미가 없다. 확신이 없으면 하지 말고 허브에 묻는다.
+   - **1회 수동 실측(B 계정 리허설 때 한 번, 선택 아님)**: 시뮬레이션이 못 보는 CloudWatch의 실제 태그 조건 처리와 조직 SCP를 확인한다. 사람이 별도 터미널에서 SSO로 로그인한 뒤 스크립트 하나를 돌린다.
+     ```
+     aws sso login --profile rehearsal-b
+     bash infra/scripts/rehearsal/replica-check.sh --profile rehearsal-b --confirm-account 12자리
+     ```
+     - 하는 일: 원본 `AlarmOps-AlarmWriter`의 권한 정책(`manage-alarmops-alarms`)과 권한 경계를 읽어 그대로 복사한 임시 역할 `AlarmOpsRehearsal-WriterReplica`(태그 `AlarmOpsRehearsal=true`)를 만든다. 신뢰 대상은 본인 SSO 역할의 정확한 ARN 하나뿐이다(와일드카드 없음. 프로필이 SSO 역할이 아니거나 `iam:GetRole`로 그 ARN을 읽지 못하면 아무것도 만들지 않고 멈춘다). 그 역할을 assume 해서 아래 6개를 본다. 원본 역할·정책이 없으면 거부하고, 임시 역할이 이미 있으면 덮어쓰지 않고 멈춘다. `AWS_ENDPOINT_URL*`, `AWS_CONFIG_FILE`, `AWS_SHARED_CREDENTIALS_FILE`, `AWS_CA_BUNDLE`가 설정된 터미널에서는 거부한다.
+     - 기대하는 표(전부 PASS여야 종료 코드 0):
+
+       | 항목 | 결과 | 비고 |
+       |---|---|---|
+       | (a) 태그 없는 PutMetricAlarm → 거부 | PASS | AccessDenied |
+       | (b) ManagedBy=AlarmOps 태그로 PutMetricAlarm → 성공 | PASS | 성공, list-tags 에서 ManagedBy=AlarmOps 확인 |
+       | (c) 태그 없는 알람에 TagResource(ManagedBy) → 거부 | PASS | AccessDenied |
+       | (d) 태그 없는 알람 DeleteAlarms → 거부 (#87 미확인 항목) | PASS | AccessDenied |
+       | (e) ManagedBy=AlarmOps 알람 DeleteAlarms → 성공 | PASS | 성공 |
+       | (f) 태그 없는 기존 알람 덮어쓰기(PutMetricAlarm+ManagedBy 요청 태그) → 거부 | PASS | AccessDenied |
+
+     - (c)(d)(f)의 태그 없는 알람 `AlarmOpsRehearsal-replica-unmanaged`는 본인 자격증명으로 만든다. 시험 알람은 `AlarmOpsRehearsal-replica-test`다. (f)는 같은 이름에 `ManagedBy=AlarmOps` 요청 태그를 달아 덮어쓰기를 시도한다. 성공하면 FAIL이고, 비고에 "기존 고객 알람 덮어쓰기 가능: template.yaml CreateAlarmWithManagedByTag 보완 필요"와 임계값·태그가 실제로 바뀌었는지가 적힌다.
+     - 끝나면(실패·Ctrl+C·터미널 닫기 포함) 시험 알람 두 개, 인라인 정책, 임시 역할을 스스로 지운다. 정리 실패 경고가 나오면 같은 명령에 `--cleanup-only`를 붙여 다시 돌린다.
+     - 임시 자격증명은 출력·로그에 나오지 않는다. 로그는 `rehearsal-logs/<profile>/replica-check.md`(올리지 않는다).
+     - **표가 나오기 전에 멈추는 경우**: 종료 코드 1~5와 `오류:` 줄이 나온다. 2는 인자·환경변수·확인 계정 거부, 3은 중앙·개발·거부 목록 계정, 4는 프로필이 SSO 역할이 아님, 5는 임시 역할이 이미 있음, 1은 그 밖의 오류(원본 역할·정책 없음, 호출 실패 등)다. 이 코드는 `verify.sh`의 종료 코드 2(SKIP 있음)와 뜻이 다르다. 이때는 `오류:` 줄과 종료 코드만 허브에 보낸다.
+     - 표에 FAIL이 있으면 허브에는 **표만** 보낸다. 표의 오류 코드 말고 다른 출력·로그·자격증명은 보내지 않는다.
+     - 끝난 뒤 잔존 확인: 위 5번의 cleanup.sh 명령(`--run-id` 포함)이 임시 역할이 남아 있으면 경고하고 `--cleanup-only` 명령을 안내한다. 또는 콘솔 IAM → 역할에서 `AlarmOpsRehearsal-WriterReplica`가 없는지 눈으로 확인한다.
 5. `bash infra/scripts/rehearsal/cleanup.sh --profile rehearsal-b --confirm-account 12자리 --run-id 이름 [--stack]`. B 계정을 계속 쓰면 여기서 멈춘다. 연결을 끊을 때만 사람이 `bus-allowlist remove`를 하고, 시험 고객사를 더 쓰지 않으면 콘솔 고객사 화면에서 **Terminate…**로 해지 체크리스트를 닫는다(`infra/customer-stack/OFFBOARDING.md`). 계정 하나만 비활성화하는 버튼은 없다(고객사 단위 Suspend/Terminate뿐).
 6. 결과를 허브에 알린다. 항목별로 "됐다/안 됐다/TIMEOUT/SKIP"과 오류 코드만 보낸다. 로그(`rehearsal-logs/`)는 올리지 않는다.
 
@@ -790,6 +807,11 @@ http://localhost:3107/auth/dev-login?as=admin
 | Lambda가 시작을 거부 | 비밀의 연결 문자열에 `sslmode=require`가 없다. 4-4의 3번 |
 | 콘솔에서 고객 해지 시 503 `COMMANDS_UNAVAILABLE` | Vercel에 `ALARM_COMMANDS_QUEUE_URL`이 없다. 4-5 |
 | 리허설 `verify.sh` (다)가 "알람이 N개에서 0개로 바뀜(D-16 위반)" FAIL | 스크립트가 알람 유지를 지켜보는 대기 중(기본 15분)에 콘솔에서 Stop monitoring을 눌렀다. 엔진 문제가 아니다. `AuditLog`에 그 시각의 `resource.stop_monitoring`이 있으면 이 경우다. `cleanup.sh … --run-id <방금 쓴 이름>`으로 정리하고 새 `--run-id`로 `verify.sh`를 다시 돌린다. Stop은 스크립트가 "(다) 대기 끝"이라고 물을 때 누른다 |
+| 실측 `replica-check.sh`: 표에 `(준비) 복제 역할 assume` 또는 `(준비) 정책 전파(DescribeAlarms)` FAIL | IAM 전파가 느리다. 환경변수 `REHEARSAL_ASSUME_RETRIES`(기본 12, 5초 간격)를 늘려(예: 36) 다시 실행한다. 그래도 같은 오류 코드면 그 코드만 허브에 보낸다 |
+| 실측: `오류: 역할 AlarmOpsRehearsal-WriterReplica 가 이미 있다`(종료 코드 5) | 이전 실행의 잔여물이다. 같은 명령에 `--cleanup-only`를 붙여 정리하고 다시 실행한다 |
+| 실측: `AlarmOpsRehearsal=true 태그가 없어 지우지 않는다` | 같은 이름의 다른 사람이 만든 역할이다. 지우지 않는다. 콘솔에서 누가 만들었는지 확인하고 허브에 알린다 |
+| 실측 (f) FAIL "기존 고객 알람 덮어쓰기 가능" | 정책 결함이다(남의 알람을 `ManagedBy` 요청 태그로 덮어쓸 수 있음). 고객 스택에 AlarmWriter를 켜기 전에 허브에 표를 보내 `template.yaml`의 `CreateAlarmWithManagedByTag` 보완을 이슈로 만든다 |
+| 실측 `replica-check.sh`: `환경변수 AWS_CA_BUNDLE 가 설정되어 있다`(또는 `AWS_ENDPOINT_URL*`, `AWS_CONFIG_FILE`, `AWS_SHARED_CREDENTIALS_FILE`)로 거부, 종료 코드 2 | 임시 자격증명이 엉뚱한 곳으로 가지 않게 막은 것이다. 그 터미널에서만 `unset AWS_CA_BUNDLE`(해당 변수)을 하고 다시 실행한다. 회사 TLS 검사 때문에 unset 하면 AWS 호출이 실패하면 허브에 문의한다 |
 
 ### 배경 (읽지 않아도 된다)
 
