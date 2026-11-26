@@ -93,6 +93,8 @@ GRANT UPDATE ("steps", "completedAt") ON "CustomerOffboarding" TO alarmops_engin
 -- Customer and CloudAccount: only the columns the lookups read (no externalId, no role ARNs).
 GRANT SELECT ("id", "status") ON "Customer" TO alarmops_ingest;
 GRANT SELECT ("id", "customerId", "awsAccountId") ON "CloudAccount" TO alarmops_ingest;
+-- CloudAccount event times (#154): insertRawEvent stamps firstEventAt/lastEventAt (reads them in SET/WHERE, so SELECT too).
+GRANT SELECT ("firstEventAt", "lastEventAt"), UPDATE ("firstEventAt", "lastEventAt") ON "CloudAccount" TO alarmops_ingest;
 GRANT SELECT ON "IntegrationSource", "SeverityMapping", "SuppressionPolicy", "MaintenanceWindow" TO alarmops_ingest;
 GRANT UPDATE ("lastReceivedAt") ON "IntegrationSource" TO alarmops_ingest;
 GRANT INSERT ON "IngestRejection" TO alarmops_ingest;

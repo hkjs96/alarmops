@@ -51,7 +51,7 @@ const SPEC = {
     CustomerOffboarding: { select: ALL, update: ['steps', 'completedAt'] },
   },
   [INGEST]: {
-    Customer: { select: ['id', 'status'] }, CloudAccount: { select: ['id', 'customerId', 'awsAccountId'] },
+    Customer: { select: ['id', 'status'] }, CloudAccount: { select: ['id', 'customerId', 'awsAccountId', 'firstEventAt', 'lastEventAt'], update: ['firstEventAt', 'lastEventAt'] },
     IntegrationSource: { select: ALL, update: ['lastReceivedAt'] }, SeverityMapping: { select: ALL }, SuppressionPolicy: { select: ALL }, MaintenanceWindow: { select: ALL },
     IngestRejection: { insert: ALL }, OffboardResidual: { select: ALL, insert: ALL, update: ['firstAt', 'lastAt', 'count'] },
     RawEvent: { select: ALL, insert: ALL, update: ['decision', 'decisionReason', 'groupId'] },
@@ -306,6 +306,11 @@ test('(a) engine: every statement of pg_repository.py runs', async () => {
 
 test('(a) ingest: every statement of SqlIngestStore runs', async () => {
   const q = (text, params = []) => ingest.query(text, params);
+  // insertRawEvent: account event times (#154). Same statement as ingestRepo.ts; LEAST(..., now()) stands in for sql.now().
+  await q(`UPDATE "CloudAccount" SET "firstEventAt" = COALESCE("firstEventAt", t.at), "lastEventAt" = GREATEST(COALESCE("lastEventAt", t.at), t.at)
+           FROM (SELECT LEAST($3::timestamptz, now()) AS at) t
+          WHERE "awsAccountId" = $1 AND "customerId" = $2 AND ("firstEventAt" IS NULL OR "lastEventAt" IS NULL OR "lastEventAt" < t.at - interval '60 seconds')`,
+    ['123456789012', ID, new Date().toISOString()]);
   const rows = async (text, params) => (await q(text, params)).rows;
   // SourceRepository
   assert.equal((await rows(`SELECT "id", "customerId", "kind", "tokenHash", "enabled", "allowQueryToken" FROM "IntegrationSource" WHERE "tokenHash" = $1`, ['none'])).length, 0);
