@@ -755,7 +755,7 @@ http://localhost:3107/auth/dev-login?as=admin
      3. 그 역할로 `cloudwatch put-metric-alarm`을 두 번 부른다: `--tags Key=ManagedBy,Value=AlarmOps`를 붙이면 성공, 빼면 `AccessDenied`여야 한다. 알람 이름은 `AlarmOpsRehearsal-replica-test`.
      4. 만든 알람을 지우고 임시 역할을 지운다. 결과(성공/AccessDenied)만 허브에 알린다.
      5. 원본 정책과 다르게 만들면 의미가 없다. 확신이 없으면 하지 말고 허브에 묻는다.
-5. `bash infra/scripts/rehearsal/cleanup.sh --profile rehearsal-b --confirm-account 12자리 --run-id 이름 [--stack]`. 그 뒤 사람이 콘솔 계정 비활성화와 `bus-allowlist remove`를 한다(OFFBOARDING 순서).
+5. `bash infra/scripts/rehearsal/cleanup.sh --profile rehearsal-b --confirm-account 12자리 --run-id 이름 [--stack]`. B 계정을 계속 쓰면 여기서 멈춘다. 연결을 끊을 때만 사람이 `bus-allowlist remove`를 하고, 시험 고객사를 더 쓰지 않으면 콘솔 고객사 화면에서 **Terminate…**로 해지 체크리스트를 닫는다(`infra/customer-stack/OFFBOARDING.md`). 계정 하나만 비활성화하는 버튼은 없다(고객사 단위 Suspend/Terminate뿐).
 6. 결과를 허브에 알린다. 항목별로 "됐다/안 됐다/TIMEOUT/SKIP"과 오류 코드만 보낸다. 로그(`rehearsal-logs/`)는 올리지 않는다.
 
 ### 참고: 필요할 때만 하는 것
@@ -880,7 +880,7 @@ npm ci --ignore-scripts && npm run build:lambda -w @alarmops/ingest && npm run b
 - [x] 알람 엔진 리소스 수집기 29종(#48, #51 완료): `SYNC_ACCOUNT`가 리소스를 찾아 `Monitoring=on` 태그 대상에 알람을 만들고 맞춘다. 이게 있어야 "고객이 태그만 붙이면 알람이 생긴다"가 된다
 - [x] CloudTrail 태그 변경 → 즉시 동기화 연결(#51 완료)
 
-무엇이 되는가: 고객이 자기 AWS 리소스에 `Monitoring=on` 태그를 붙이면 엔진이 그 리소스의 CloudWatch 알람을 만든다. 태그를 떼면 알람은 남고 콘솔이 확인 필요(NEEDS_REVIEW)로 표시한다(D-16). 알람을 지우려면 사람이 콘솔에서 STOP_MONITORING을 실행한다.
+무엇이 되는가: 고객이 자기 AWS 리소스에 `Monitoring=on` 태그를 붙이면 엔진이 그 리소스의 CloudWatch 알람을 만든다. 태그를 떼면 알람은 남고 콘솔이 확인 필요(NEEDS_REVIEW)로 표시한다(D-16). 알람을 지우려면 사람이 콘솔 Monitoring > Needs review에서 Stop monitoring을 누른다.
 
 언제 눈으로 볼 수 있나: 코드는 끝났지만 실제 계정에는 아직 배포되지 않았다. 4단계(중앙 계정 배포)와 7단계(고객 연결)가 끝나야 돈다. 동작은 7단계의 태그 시험(7-6의 1~3번)에서 확인한다. 권한이 실제로 맞는지는 4-6(#38)에서 먼저 본다.
 
@@ -978,7 +978,8 @@ npm ci --ignore-scripts && npm run build:lambda -w @alarmops/ingest && npm run b
 1. 콘솔 "연결 확인" → 역할별 OK
 2. **Check connection**을 누른다.
 3. 역할 행이 잠깐 `Checking…`으로 바뀐다. 기다린다.
-4. 확인: 켠 역할이 모두 OK로 보인다.
+4. 확인: 켠 역할이 모두 OK로 보인다. EventForwarder는 이 버튼으로 시험되지 않고, 첫 이벤트가 오면 `OK · EVENTS RECEIVED`가 된다.
+5. EventForwarder가 `WAITING FOR THE FIRST EVENT`면 고객 계정에서 `Monitoring` 태그가 없는(감시 중이 아닌) 시험 리소스(예: 새 SQS 큐)에 `Monitoring=off` 태그를 붙인다. 이미 `Monitoring=on`인 리소스에 붙이면 알람은 남지만 확인 필요(Needs review)로 바뀌므로 쓰지 않는다. 고객 스택은 `Monitoring`·`Threshold_*` 키가 든 태그 변경과 알람 상태 변경만 중앙으로 보내므로, 다른 키(`Team=…`)로는 이벤트가 오지 않는다. `off`는 알람을 만들지 않는다. 2~5분 뒤 화면을 새로고침하면 First event에 시각이 찍힌다.
 
 ### 7-5. 호출 순서·담당자 등록 (15분)
 
@@ -1047,6 +1048,7 @@ npm ci --ignore-scripts && npm run build:lambda -w @alarmops/ingest && npm run b
 | 고객 스택 생성 실패: `ExternalId` | 16자 미만이거나 비어 있다. 7-1에서 발급된 값을 그대로 넣는다 |
 | 고객 스택 생성 실패: `CentralEventBusArn` | 서울 리전 버스 ARN이 아니다. 출력 `CentralBusArn`을 그대로 넣는다 |
 | 연결 확인에서 `Trust policy rejects our role — check ExternalId` | 고객이 넣은 `ExternalId`나 `CentralRoleArn`이 다르다. 고객이 스택 파라미터를 고친다 |
+| 연결 확인에서 EventForwarder가 계속 `WAITING FOR THE FIRST EVENT` | ① 아직 전달 대상 이벤트가 없었다: 7-4의 5번(`Monitoring=off` 태그). `Team=…` 같은 다른 키는 고객 쪽 규칙이 거른다. ② 그래도 안 되면 계정이 버스 허용 목록에 있는지, 스택의 `CentralEventBusArn`이 맞는지 본다 |
 | 알람은 울렸는데 인시던트가 안 열림 | ① 7-2를 스택 설치 뒤에 했다: 허용 전 이벤트는 버려진다. 알람 상태를 한 번 더 바꾼다. ② 틱이 멈췄다: 3-5의 4번으로 확인한다 |
 | 인시던트가 고객 이름 없이(미매핑) 열림 | 콘솔에 그 AWS 계정이 등록되지 않았다. 7-1 |
 | 인시던트는 열렸는데 호출이 안 옴 | 5단계가 안 끝났거나, 그 고객의 호출 순서에 사람이 없다. 7-5 |
