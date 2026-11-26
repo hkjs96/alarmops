@@ -56,3 +56,5 @@ psql "<새 소유자 주소>" -v ON_ERROR_STOP=1 -c "SET session_replication_rol
 |---|---|
 | 콘솔 연결 확인이 "queued but no result", 엔진 로그 `engine init failed: OperationalError` | 엔진 비밀의 사용자 `.<프로젝트ID>`나 호스트가 Connect 화면과 다르다. GO-LIVE 4-4 참고 |
 | 콘솔이 여전히 느리다 | Vercel 함수 리전 확인. Deployments → 최신 → Functions에 `icn1`이 보여야 한다(`apps/console/vercel.json`) |
+| 이전 후 아무도 로그인이 안 된다 | 새 DB에는 사용자가 없다. `docs/SETUP-GOOGLE-SSO.md` 3단계 SQL로 첫 관리자 행을 넣는다. 주소는 Google 계정 주소 그대로 쓴다 |
+| 새 주소를 넣었는데 콘솔이 옛 DB를 본다 | Vercel 환경변수는 새 배포부터 반영된다. Vercel Redeploy는 안 되므로 Actions → deploy-console → Run workflow로 배포한다 |
