@@ -105,7 +105,7 @@ fi
 
 rh_say ""
 rh_say "## 사람 몫 (OFFBOARDING 순서)"
-rh_say "1. 콘솔에서 이 계정 연결을 비활성화한다"
+rh_say "1. 콘솔 고객사 화면에서 상태를 바꾼다(계정 단위 버튼은 없음: Suspend 는 되돌릴 수 있고, Terminate 는 해지 체크리스트). 계정을 계속 쓰면 1~3은 하지 않는다"
 rh_say "2. 중앙에서 bus-allowlist remove 로 이 계정을 허용 목록에서 뺀다"
 rh_say "3. (스택을 남겼다면) 사람이 판단해 고객 스택을 삭제한다. 남은 리소스가 없는지 눈으로 확인한다"
 exit "$status"
