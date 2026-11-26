@@ -143,13 +143,14 @@ fi
 if [ "$B_STATE" = PASS ]; then
   OWN_KEY="$(set_key "${own[@]}")"
   if aws_r sqs untag-queue --queue-url "$url" --tag-keys Monitoring >/dev/null; then
+    rh_hold_notice   # 대기 중에 콘솔에서 Stop 을 누르면 알람이 지워져 D-16 위반으로 잘못 판정된다(11/26 b7)
     if rh_poll alarms_changed; then   # 성공 = 집합이 바뀜 또는 조회 오류
       if [ "$QRC" -ne 0 ]; then
         rh_row "(다) 태그 제거 → 알람 유지" FAIL "알람 조회 오류(종료 코드 $QRC). 유지 여부를 알 수 없음"
       else
-        rh_row "(다) 태그 제거 → 알람 유지" FAIL "태그를 뗀 뒤 그 큐의 알람이 ${#own[@]}개에서 ${#RH_ALARMS[@]}개로 바뀜(D-16 위반)"
+        rh_row "(다) 태그 제거 → 알람 유지" FAIL "태그를 뗀 뒤 그 큐의 알람이 ${#own[@]}개에서 ${#RH_ALARMS[@]}개로 바뀜(D-16 위반). 대기 중에 콘솔에서 Stop monitoring 을 눌렀다면 절차 문제다: AuditLog 의 resource.stop_monitoring 시각으로 확인하고 새 run-id 로 다시 한다"
       fi
-    elif rh_ask "(다) 콘솔에서 NEEDS_REVIEW 표시를 확인하고 STOP_MONITORING 을 실행했습니까?"; then
+    elif rh_ask "(다) 대기 끝. 이제 콘솔 Monitoring > Needs review 에서 이 큐가 보이는지 확인하고 Stop monitoring 을 누른 뒤 답하세요. 눌렀습니까?"; then
       if rh_poll alarms_gone; then
         if [ "$QRC" -ne 0 ]; then
           rh_row "(다) 태그 제거 → 알람 유지" FAIL "STOP_MONITORING 뒤 알람 조회 오류(종료 코드 $QRC)"

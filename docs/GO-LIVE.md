@@ -788,6 +788,7 @@ http://localhost:3107/auth/dev-login?as=admin
 | `apply`가 건너뛰어짐, 요약에 `no changes` | 바뀐 것이 없다. 정상이다 |
 | Lambda가 시작을 거부 | 비밀의 연결 문자열에 `sslmode=require`가 없다. 4-4의 3번 |
 | 콘솔에서 고객 해지 시 503 `COMMANDS_UNAVAILABLE` | Vercel에 `ALARM_COMMANDS_QUEUE_URL`이 없다. 4-5 |
+| 리허설 `verify.sh` (다)가 "알람이 3개에서 0개로 바뀜(D-16 위반)" FAIL | 스크립트가 알람 유지를 지켜보는 대기 중(기본 15분)에 콘솔에서 Stop monitoring을 눌렀다. 엔진 문제가 아니다. `AuditLog`에 그 시각의 `resource.stop_monitoring`이 있으면 이 경우다. `cleanup.sh`로 정리하고 새 `--run-id`로 다시 한다. Stop은 스크립트가 "(다) 대기 끝"이라고 물을 때 누른다 |
 
 ### 배경 (읽지 않아도 된다)
 
