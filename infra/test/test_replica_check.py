@@ -14,7 +14,7 @@ import unittest
 from pathlib import Path
 
 import fake_aws
-from rehearsal_support import ACCT, PROFILE, REPO, Sandbox, mode
+from rehearsal_support import ACCT, EID, PROFILE, REPO, Sandbox, mode
 from test_rehearsal_harness import Base
 
 SCRIPT = "replica-check.sh"
@@ -47,8 +47,14 @@ WRONG_POLICY = copy.deepcopy(POLICY)
 WRONG_POLICY["Statement"][2].pop("Condition")
 
 
-def roles(policy=POLICY, boundary=None, extra=None):
+SSO_PATH = "/aws-reserved/sso.amazonaws.com/ap-northeast-2/"
+SSO_FULL_ARN = f"arn:aws:iam::{ACCT}:role{SSO_PATH}{SSO_ROLE}"
+
+
+def roles(policy=POLICY, boundary=None, extra=None, sso=True):
     r = {ORIG: {"boundary": boundary, "policies": {POLICY_NAME: policy} if policy is not None else {}, "tags": {}}}
+    if sso:   # the caller's own SSO role, whose real ARN carries the aws-reserved path
+        r[SSO_ROLE] = {"path": SSO_PATH, "policies": {}, "tags": {}}
     r.update(extra or {})
     return r
 
@@ -58,6 +64,7 @@ class ReplicaBase(Base):
 
     def scenario(self, policy=POLICY, boundary=None, caller=SSO_ARN, **extra):
         extra.setdefault("iam_roles", roles(policy, boundary))
+        extra.setdefault("cw_overwrite_unmanaged_denied", True)   # CloudWatch denies overwriting a foreign alarm
         self.sb.set_scenario(caller_arn=caller, **extra)
 
     def go(self, confirm=ACCT, extra_args=(), profile=PROFILE):
@@ -78,7 +85,7 @@ class ReplicaBase(Base):
 
     def verdicts(self, res):
         return {t: ("PASS" if "PASS" in self.row(res, t) else "FAIL" if "FAIL" in self.row(res, t) else "?")
-                for t in "abcde"}
+                for t in "abcdef"}
 
     def assertCleanedUp(self):
         st = self.state()
@@ -94,7 +101,7 @@ class AllPass(ReplicaBase):
         res = self.go()
         self.assertEqual(res.code, 0, res.text)
         self.assertIn("| 항목 | 결과 | 비고 |", res.out)
-        self.assertEqual(self.verdicts(res), dict.fromkeys("abcde", "PASS"), res.out)
+        self.assertEqual(self.verdicts(res), dict.fromkeys("abcdef", "PASS"), res.out)
         self.assertCleanedUp()
         self.assertAllScoped([c for c in self.sb.calls() if not c["as_replica"]])
 
@@ -112,8 +119,10 @@ class AllPass(ReplicaBase):
         trust = json.loads(next(iter(create[0]["files"].values())))
         st = trust["Statement"][0]
         self.assertEqual(st["Principal"], {"AWS": f"arn:aws:iam::{ACCT}:root"})
-        self.assertEqual(st["Condition"], {"ArnLike": {
-            "aws:PrincipalArn": f"arn:aws:iam::{ACCT}:role/aws-reserved/sso.amazonaws.com/*{SSO_ROLE}"}})
+        self.assertEqual(st["Condition"], {"StringEquals": {"aws:PrincipalArn": SSO_FULL_ARN}})
+        self.assertNotIn("*", json.dumps(trust), "no wildcard anywhere in the trust policy")
+        gets = [c for c in calls if c["op"] == "get-role" and option(c["argv"], "--role-name") == SSO_ROLE]
+        self.assertEqual(len(gets), 1, "the exact caller role ARN (with path) comes from iam get-role")
         put = [c for c in calls if c["op"] == "put-role-policy"]
         self.assertEqual(len(put), 1)
         self.assertEqual(json.loads(next(iter(put[0]["files"].values()))), POLICY)
@@ -131,7 +140,8 @@ class AllPass(ReplicaBase):
         calls = self.sb.calls()
         tags = [c for c in calls if c["op"] == "list-tags-for-resource" and not c["as_replica"]]
         self.assertTrue(any(TEST_ALARM in " ".join(c["argv"]) for c in tags), self.ops(calls))
-        unmanaged = [c for c in calls if c["op"] == "put-metric-alarm" and UNMANAGED in c["argv"]]
+        unmanaged = [c for c in calls if c["op"] == "put-metric-alarm" and UNMANAGED in c["argv"]
+                     and not c["as_replica"]]
         self.assertEqual(len(unmanaged), 1)
         self.assertFalse(unmanaged[0]["as_replica"], "the unmanaged alarm is created with the person's own credentials")
         self.assertNotIn("--tags", unmanaged[0]["argv"])
@@ -155,13 +165,13 @@ class AllPass(ReplicaBase):
         self.scenario(assume_crlf=True)
         res = self.go()
         self.assertEqual(res.code, 0, res.text)
-        self.assertEqual(self.verdicts(res), dict.fromkeys("abcde", "PASS"), res.out)
+        self.assertEqual(self.verdicts(res), dict.fromkeys("abcdef", "PASS"), res.out)
 
     def test_replica_calls_use_env_credentials_only(self):
         self.scenario()
         self.go()
         replica = [c for c in self.sb.calls() if c["as_replica"]]
-        self.assertGreaterEqual(len(replica), 5)
+        self.assertGreaterEqual(len(replica), 6)
         for c in replica:
             self.assertNotIn("--profile", c["argv"], c["argv"])
             self.assertFalse(c["env_profile"], "AWS_PROFILE must not be set for replica calls")
@@ -324,12 +334,196 @@ class CleanupOnly(ReplicaBase):
         self.assertEqual(self.sb.writes(), [])
 
 
+
+class TrustPin(ReplicaBase):
+    def test_missing_caller_role_refuses_and_creates_nothing(self):
+        self.scenario(iam_roles=roles(sso=False))
+        res = self.go()
+        self.assertNotEqual(res.code, 0, res.text)
+        self.assertEqual(self.sb.writes(), [], self.ops())
+        self.assertNotIn("iam create-role", self.ops())
+
+
+class Assume(ReplicaBase):
+    def test_assume_asks_only_for_the_three_values_as_text(self):
+        self.scenario()
+        self.go()
+        a = [c for c in self.sb.calls() if c["op"] == "assume-role"][0]
+        self.assertEqual(option(a["argv"], "--query"),
+                         "[Credentials.AccessKeyId,Credentials.SecretAccessKey,Credentials.SessionToken]")
+        self.assertEqual(option(a["argv"], "--output"), "text")
+        self.assertLessEqual(int(option(a["argv"], "--duration-seconds")), 3600)
+
+
+class OverwriteCheck(ReplicaBase):
+    def test_f_denied_passes(self):
+        self.scenario()
+        res = self.go()
+        self.assertEqual(self.verdicts(res)["f"], "PASS", res.out)
+        self.assertEqual(res.code, 0, res.text)
+
+    def test_f_allowed_fails_with_findings(self):
+        self.scenario(cw_overwrite_unmanaged_denied=False)
+        res = self.go()
+        self.assertNotEqual(res.code, 0, res.text)
+        self.assertEqual(self.verdicts(res)["f"], "FAIL", res.out)
+        row = self.row(res, "f")
+        self.assertIn("기존 고객 알람 덮어쓰기 가능: template.yaml CreateAlarmWithManagedByTag 보완 필요", row)
+        self.assertRegex(row, r"1\D+2")                  # threshold 1 -> 2 was observed with the person's credentials
+        self.assertIn("ManagedBy=AlarmOps", row)         # the tag was observed
+        for k in "abcde":
+            self.assertEqual(self.verdicts(res)[k], "PASS", res.out)
+        self.assertCleanedUp()
+        look = [c for c in self.sb.calls() if c["op"] in ("describe-alarms", "list-tags-for-resource")
+                and not c["as_replica"] and UNMANAGED in " ".join(c["argv"])]
+        self.assertTrue(look, "the person's own credentials must inspect the alarm after a successful overwrite")
+
+    def test_f_overwrites_the_unmanaged_alarm_with_a_request_tag(self):
+        self.scenario()
+        self.go()
+        puts = [c for c in self.sb.calls() if c["op"] == "put-metric-alarm" and c["as_replica"]
+                and UNMANAGED in c["argv"]]
+        self.assertEqual(len(puts), 1)
+        self.assertIn("Key=ManagedBy,Value=AlarmOps", puts[0]["argv"])
+
+
+class EnvRefusal(ReplicaBase):
+    def test_extra_env_is_refused_by_replica_check_only(self):
+        self.scenario()
+        for var in ("AWS_ENDPOINT_URL", "AWS_ENDPOINT_URL_STS", "AWS_CONFIG_FILE", "AWS_SHARED_CREDENTIALS_FILE",
+                    "AWS_CA_BUNDLE"):
+            with self.subTest(var=var):
+                self.sb.calls_file.unlink(missing_ok=True)
+                res = self.sb.run(SCRIPT, ["--profile", PROFILE, "--confirm-account", ACCT],
+                                  extra_env={**self.ENV, var: "x"})
+                self.assertNotEqual(res.code, 0)
+                self.assertEqual(self.sb.calls(), [])
+                self.assertIn(var, res.text)
+
+    def test_other_scripts_still_accept_those_variables(self):
+        self.scenario()
+        res = self.sb.run("preflight.sh", ["--profile", PROFILE], extra_env={"AWS_CA_BUNDLE": "x"})
+        self.assertNotIn("AWS_CA_BUNDLE", res.text)
+
+
+class Signals(ReplicaBase):
+    def test_sighup_runs_cleanup(self):
+        import os
+        import signal
+        import subprocess
+        import time
+        if os.name != "posix":
+            self.skipTest("POSIX signals")
+        self.scenario(sleep_ops={"cloudwatch put-metric-alarm": 3})
+        from rehearsal_support import SCRIPTS
+        proc = subprocess.Popen(["bash", str(SCRIPTS / SCRIPT), "--profile", PROFILE, "--confirm-account", ACCT],
+                                env=self.sb.env(self.ENV), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True, cwd=str(self.sb.dir))
+        marker = Path(str(self.sb.calls_file) + ".sleeping")
+        deadline = time.time() + 30
+        while not marker.exists() and time.time() < deadline:
+            time.sleep(0.05)
+        self.assertTrue(marker.exists(), "script never reached the first alarm call")
+        proc.send_signal(signal.SIGHUP)
+        proc.communicate(timeout=60)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertCleanedUp()
+
+
+class CleanupShWarns(ReplicaBase):
+    def run_cleanup(self, **scen):
+        self.sb.set_scenario(**scen)
+        return self.sb.run("cleanup.sh", self.sb.good_args("cleanup.sh", run_id="run-0001"))
+
+    def test_warns_and_does_not_delete_the_replica(self):
+        res = self.run_cleanup(iam_roles=roles(extra={REPLICA: {"boundary": None, "policies": {POLICY_NAME: POLICY},
+                                                               "tags": {"AlarmOpsRehearsal": "true"}}}))
+        self.assertIn(REPLICA, res.text)
+        self.assertIn("replica-check.sh", res.text)
+        self.assertIn("--cleanup-only", res.text)
+        self.assertNotIn("iam delete-role", self.ops())
+        st = self.state()   # None: nothing wrote any state, so the role is untouched
+        self.assertTrue(st is None or REPLICA in st["roles"])
+
+    def test_silent_without_replica(self):
+        res = self.run_cleanup(iam_roles=roles())
+        self.assertNotIn("--cleanup-only", res.text)
+
+
+class MaskUnit(unittest.TestCase):
+    """rh_mask (common.sh) is the single masking point: aws_r, rh_say, rh_die and rh_log all go through it."""
+    COMMON = str(REPO / "infra" / "scripts" / "rehearsal" / "common.sh")
+
+    def mask(self, text, eid=None):
+        import os
+        import subprocess
+        env = {"PATH": os.environ["PATH"], "HOME": "/tmp"}
+        if eid:
+            env["REHEARSAL_EXTERNAL_ID"] = eid
+        cp = subprocess.run(["bash", "-c", 'source "$1"; rh_mask "$2"', "_", self.COMMON, text],
+                            capture_output=True, text=True, env=env, timeout=30)
+        self.assertEqual(cp.returncode, 0, cp.stderr)
+        return cp.stdout
+
+    def test_secret_shapes_are_masked(self):
+        tok_pct = "FwoGZXIvYXdzE%2BabcDEFg%2Fhij0123klmNOPqrstUVWXyz4567%2B89ABCDEFghij"
+        tok_dash = "IQoJb3JpZ2luX2VjE-abcDEFghij_klmnoPQRSTuvwxYZ0123456789-abc_defGHIjkl"
+        cases = {
+            "pct": (f"token {tok_pct} end", tok_pct),
+            "dash_underscore": (f"x {tok_dash}", tok_dash),
+            "query_string": ("GET /?X-Amz-Security-Token=ABCdef123%2Bxyz&X-Amz-Date=1", "ABCdef123%2Bxyz"),
+            "json": ('{"SecretAccessKey": "wJalrXUtnFEMI/K7MDENG/bPxRfiCY", "x": 1}', "wJalrXUtnFEMI/K7MDENG/bPxRfiCY"),
+            "env_style": ("AWS_SESSION_TOKEN=shortTok123", "shortTok123"),
+            "secret_snake": ("secret_access_key: abc/def", "abc/def"),
+            "akia": ("key AKIAIOSFODNN7EXAMPLE used", "AKIAIOSFODNN7EXAMPLE"),
+            "asia": ("key ASIAFAKEREPLICAKEY0001", "ASIAFAKEREPLICAKEY0001"),
+        }
+        for name, (text, secret) in cases.items():
+            with self.subTest(name):
+                out = self.mask(text)
+                self.assertNotIn(secret, out)
+                self.assertIn("****", out)
+
+    def test_external_id_still_masked_and_benign_text_untouched(self):
+        self.assertNotIn(EID, self.mask(f"id={EID}", eid=EID))
+        for benign in ("https://sqs.ap-northeast-2.amazonaws.com/111111111111/alarmops-rehearsal-run-0001",
+                       "arn:aws:iam::111111111111:role/AlarmOps-AlarmWriter",
+                       '{"MetricAlarms": [{"AlarmName": "alarm-own-q1", "Threshold": 1.0}]}',
+                       "alarmops-rehearsal-averyveryverylongrunidwithoutuppercaseletters-and-more-0123456789"):
+            with self.subTest(benign):
+                self.assertEqual(self.mask(benign).strip(), benign)
+
+    def test_aws_r_and_rh_die_use_it(self):
+        import subprocess
+        sb = Sandbox()
+        self.addCleanup(sb.close)
+        secret = "ZZtopSECRETvalue0123456789abcdefghijklmnopqrstuvwxyzQWERT"
+        sb.set_scenario(leak=secret)
+        env = sb.env()
+        for script in ('RH_PROFILE=rehearsal-a; aws_r cloudwatch describe-alarms >/dev/null',
+                       f'rh_die "boom SessionToken={secret}"'):
+            cp = subprocess.run(["bash", "-c", 'source "$1"; ' + script, "_", self.COMMON],
+                                capture_output=True, text=True, env=env, timeout=30)
+            self.assertNotIn(secret, cp.stdout + cp.stderr, script)
+
+
 class Docs(unittest.TestCase):
     def test_sids_match_template(self):
         text = (REPO / "infra" / "customer-stack" / "template.yaml").read_text(encoding="utf-8")
         block = text.split("  AlarmWriterRole:", 1)[1].split("# ----", 1)[0]
         sids = re.findall(r"Sid: (\w+)", block)
         self.assertEqual(sids, [s["Sid"] for s in POLICY["Statement"]])
+
+    def test_review_docs(self):
+        gl = (REPO / "docs" / "GO-LIVE.md").read_text(encoding="utf-8")
+        for needle in ("aws sso login --profile rehearsal-b", "REHEARSAL_ASSUME_RETRIES", "--cleanup-only",
+                       "(f)", "오류:", "종료 코드", "AlarmOpsRehearsal-WriterReplica"):
+            self.assertIn(needle, gl, needle)
+        rd = (REPO / "infra" / "scripts" / "rehearsal" / "README.md").read_text(encoding="utf-8")
+        self.assertIn("aws sso login --profile rehearsal-b", rd)
+        ct = (REPO / "infra" / "test" / "REHEARSAL-CONTRACT.md").read_text(encoding="utf-8")
+        for needle in ("replica-check.md", "5개", "태그"):
+            self.assertIn(needle, ct, needle)
 
     def test_go_live_and_readme_mention_script(self):
         for rel in ("docs/GO-LIVE.md", "infra/scripts/rehearsal/README.md", "infra/test/REHEARSAL-CONTRACT.md"):

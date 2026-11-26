@@ -5,7 +5,7 @@
 
 실행: 저장소 루트에서 `python -m unittest discover -s infra/test`. 가짜 `aws`(`infra/test/fake_aws.py`)가 PATH 맨 앞에 놓이고 모든 호출을 기록한다. 실제 AWS에는 접속하지 않는다.
 
-가짜 aws의 `--query`는 JMESPath 축소 구현(`a.b`, `a[].b`, `a[*].b`, `a[0]`)이다. 그 밖의 식(필터·파이프·함수)은 가짜 aws가 종료 코드 97로 끝나고 테스트가 실패한다. 스크립트는 이 부분집합 안에서 `--query`를 쓰거나, 필터는 응답을 받아 셸·python에서 처리한다. 설치된 jmespath 유무로 판정이 달라지지 않는다.
+가짜 aws의 `--query`는 JMESPath 축소 구현(`a.b`, `a[].b`, `a[*].b`, `a[0]`, 평평한 멀티셀렉트 `[a.b,c.d]`)이다. 그 밖의 식(필터·파이프·함수)은 가짜 aws가 종료 코드 97로 끝나고 테스트가 실패한다. 스크립트는 이 부분집합 안에서 `--query`를 쓰거나, 필터는 응답을 받아 셸·python에서 처리한다. 설치된 jmespath 유무로 판정이 달라지지 않는다.
 
 ## 스크립트와 플래그
 
@@ -41,7 +41,7 @@
  "profiles": {"rehearsal-a": "111111111111"}}
 ```
 
-프로필이 표에 없거나 표 파일이 없으면 거부한다. 확인 계정이 `centralRoleArn`·`centralEventBusArn`의 계정과 같아도 4개 스크립트 모두 거부한다.
+프로필이 표에 없거나 표 파일이 없으면 거부한다. 확인 계정이 `centralRoleArn`·`centralEventBusArn`의 계정과 같아도 5개 스크립트(preflight·install·verify·cleanup·replica-check) 모두 거부한다.
 
 ## 로그와 결과표
 
@@ -73,3 +73,14 @@ B·C 계정 태그 흐름, untag 후 NEEDS_REVIEW와 STOP_MONITORING, 허용 목
 ## 플랫폼
 
 가짜 aws 래퍼는 Python 경로를 슬래시로 바꿔 인용해서 쓴다. 로그 권한 검사는 Windows에서 Git Bash `stat`을 쓴다. Windows(Git Bash) 실행은 이 PR을 작성한 환경에서 확인하지 못했다. Windows PC에서 한 번 돌려 결과를 PR에 남긴다.
+
+## replica-check.sh (#159)
+
+- 스크립트 수는 `common.sh` 제외 5개다. 그중 `replica-check.sh`만 runId가 없다. 로그는 `<REHEARSAL_LOG_DIR>/<profile>/replica-check.md`(고정 이름, 권한 600). `--cleanup-only`는 같은 파일에 이어 쓴다.
+- 환경변수 거부 목록은 공통(`rh_env_check`)에 `replica-check.sh`만 `AWS_ENDPOINT_URL*`, `AWS_CONFIG_FILE`, `AWS_SHARED_CREDENTIALS_FILE`, `AWS_CA_BUNDLE`를 더한다(기존 verify·install 사용자에게 영향 없음).
+- 정리 규칙: 시험 알람 두 개(`AlarmOpsRehearsal-replica-test`, `AlarmOpsRehearsal-replica-unmanaged`)는 고정 이름으로 지운다. 임시 역할 `AlarmOpsRehearsal-WriterReplica`는 태그 `AlarmOpsRehearsal=true`를 확인한 뒤에만(인라인 정책 → 역할 순) 지운다. 태그가 없으면 지우지 않고 실패로 알린다. `cleanup.sh`는 이 역할이 남았으면 경고와 `--cleanup-only` 안내만 하고 직접 지우지 않는다.
+- 종료 코드: 전부 PASS 0, FAIL 행 또는 준비·정리 실패 1, 거부 2·3(공통), SSO 프로필 아님 4, 임시 역할이 이미 있음 5.
+- 결과표는 (a)~(f) 한 줄씩(`| 항목 | 결과 | 비고 |`). 비고에는 오류 코드만 쓴다.
+- 임시 자격증명은 서브셸 안에서만 쓰고 출력·로그에 쓰지 않는다. 모든 출력은 `common.sh`의 `rh_mask`(ExternalId + 자격증명 모양)를 거친다.
+- 가짜 aws: 시나리오 키 `iam_roles`(역할별 `path`·`boundary`·`policies`·`tags`), `caller_arn`, `assume_crlf`, `assume_fail_first`, `cw_overwrite_unmanaged_denied`, `sleep_ops`. 상태는 `$FAKE_AWS_LOG.state`에 둔다.
+- 테스트: `infra/test/test_replica_check.py`.

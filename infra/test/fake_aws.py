@@ -33,6 +33,11 @@ Scenario keys (all optional):
                      AWS_ACCESS_KEY_ID in env are "replica" calls: the credentials must match, and the allow/deny
                      decision comes from the role's stored inline policy (StringEquals + ForAnyValue/ForAllValues on
                      aws:RequestTag/*, aws:ResourceTag/*, aws:TagKeys; explicit Deny wins).
+  cw_overwrite_unmanaged_denied  true: a replica PutMetricAlarm on an existing alarm WITHOUT ManagedBy=AlarmOps is denied
+                     (models CloudWatch applying the resource tag on update); false/absent: the policy decides, so a
+                     request tag ManagedBy=AlarmOps overwrites it (the suspected hole checked by replica-check (f))
+  sleep_ops          {"service op": seconds}: that call touches $FAKE_AWS_LOG.sleeping then sleeps (signal tests)
+  iam_roles entries may carry "path": "/aws-reserved/sso.amazonaws.com/ap-northeast-2/" (iam get-role Arn includes it)
   assume_crlf        true: sts assume-role output ends every line with CRLF (Windows aws.exe)
   assume_fail_first  N: the first N sts assume-role calls fail with AccessDenied (IAM propagation)
   metric_sums        {"Invocations": {"start": N, "step": S, "empty_first": bool}}; the n-th get-metric-statistics call for that
@@ -103,8 +108,10 @@ class UnsupportedQuery(Exception):
 
 
 def query(data, expr: str):
-    """Tiny JMESPath subset: a.b, a[].b, a[*].b, a[0]. Deliberately NOT jmespath, so the verdict never
+    """Tiny JMESPath subset: a.b, a[].b, a[*].b, a[0], [a.b,c.d] (flat multiselect list). Deliberately NOT jmespath, so the verdict never
     depends on what is installed. Anything else (filters, pipes, functions, multiselect) raises."""
+    if expr.startswith("[") and expr.endswith("]") and "." in expr:   # [a.b,c.d] multiselect list
+        return [query(data, e.strip()) for e in expr[1:-1].split(",")]
     cur = data
     for part in expr.split("."):
         m = re.fullmatch(r"([A-Za-z0-9_]*)(\[(\*|\d*)\])?", part)
@@ -248,8 +255,9 @@ def replica_model(scen, service, op, opts, rec, account, first):
             st = json.load(f)
     else:
         st = {"roles": {k: {"boundary": v.get("boundary"), "policies": dict(v.get("policies") or {}),
-                            "tags": dict(v.get("tags") or {})} for k, v in scen["iam_roles"].items()},
-              "alarms": {}, "assume_calls": 0}
+                            "tags": dict(v.get("tags") or {}), "path": v.get("path") or "/"}
+                      for k, v in scen["iam_roles"].items()},
+              "alarms": {}, "alarm_cfg": {}, "assume_calls": 0}
 
     def save():
         with open(sp, "w", encoding="utf-8") as f:
@@ -273,7 +281,8 @@ def replica_model(scen, service, op, opts, rec, account, first):
 
     if key == "iam get-role":
         r = need_role()
-        out = {"RoleName": rname, "Arn": f"arn:aws:iam::{account}:role/{rname}", "Tags": tags_list(r["tags"])}
+        out = {"RoleName": rname, "Arn": f"arn:aws:iam::{account}:role/{r.get('path', '/').lstrip('/')}{rname}",
+               "Tags": tags_list(r["tags"])}
         if r["boundary"]:
             out["PermissionsBoundary"] = {"PermissionsBoundaryType": "Policy", "PermissionsBoundaryArn": r["boundary"]}
         emit({"Role": out}, opts)
@@ -330,10 +339,11 @@ def replica_model(scen, service, op, opts, rec, account, first):
         doc = {"Credentials": {"AccessKeyId": REPLICA_KEY, "SecretAccessKey": REPLICA_SECRET,
                                "SessionToken": REPLICA_TOKEN, "Expiration": "2030-01-01T00:00:00Z"},
                "AssumedRoleUser": {"Arn": f"arn:aws:sts::{account}:assumed-role/{arn_role}/x"}}
-        if scen.get("assume_crlf"):
-            sys.stdout.write(json.dumps(doc, indent=4).replace("\n", "\r\n") + "\r\n")
-        else:
-            emit(doc, opts)
+        if scen.get("assume_crlf"):   # Windows aws.exe: every output line ends with CRLF
+            import io
+
+            sys.stdout = io.TextIOWrapper(sys.stdout.buffer, newline="\r\n", write_through=True)
+        emit(doc, opts)
         return True
 
     if service == "cloudwatch" and op in ("put-metric-alarm", "tag-resource", "delete-alarms", "describe-alarms",
@@ -354,8 +364,12 @@ def replica_model(scen, service, op, opts, rec, account, first):
                 ctx = {"request_tags": req, "resource_tags": (st["alarms"].get(n) or {}) if n else {}}
                 if not evaluate(pol, "cloudwatch:" + camel(op), ctx):
                     error("AccessDenied", camel(op), "User is not authorized to perform: cloudwatch:" + camel(op))
+                if (op == "put-metric-alarm" and scen.get("cw_overwrite_unmanaged_denied") and n in st["alarms"]
+                        and st["alarms"][n].get("ManagedBy") != "AlarmOps"):
+                    error("AccessDenied", camel(op), "User is not authorized to perform: cloudwatch:" + camel(op))
         if op == "put-metric-alarm":
             st["alarms"].setdefault(names[0], {}).update(req)
+            st["alarm_cfg"][names[0]] = {"Threshold": float(first("--threshold") or 0)}
         elif op == "tag-resource":
             if names[0] not in st["alarms"]:
                 error("ResourceNotFound", "TagResource", "alarm not found")
@@ -370,7 +384,12 @@ def replica_model(scen, service, op, opts, rec, account, first):
                 return True
             return False   # fall through to the scenario's static alarms
         elif op == "describe-alarms":
-            return False
+            want = opts.get("--alarm-names")
+            if not want:
+                return False
+            emit({"MetricAlarms": [dict(AlarmName=n, **st["alarm_cfg"].get(n, {})) for n in want if n in st["alarms"]],
+                  "CompositeAlarms": []}, opts)
+            return True
         save()
         emit({}, opts)
         return True
@@ -421,6 +440,13 @@ def main() -> None:
     # describe-stacks is logged only once its real response body is known (see `mark` below).
     if (service, op) != ("cloudformation", "describe-stacks"):
         record()
+
+    sleep_for = (scen.get("sleep_ops") or {}).get(f"{service} {op}")
+    if sleep_for:
+        import time
+
+        open(os.environ["FAKE_AWS_LOG"] + ".sleeping", "w").close()
+        time.sleep(float(sleep_for))
 
     if scen.get("leak") and service != "sts":
         sys.stderr.write(f"warning: request context ExternalId={scen['leak']}\n")

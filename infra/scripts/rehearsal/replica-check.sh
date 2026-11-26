@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # AlarmWriter 복제 역할 실측 (#159, GO-LIVE 4단계 "1회 수동 실측"). 시뮬레이션이 못 보는 CloudWatch의 실제 태그 조건 처리를 본다.
 # 사용: bash replica-check.sh --profile rehearsal-b --confirm-account 12자리 [--cleanup-only]
+# 사전 준비: 별도 터미널에서 SSO 로그인(프로필 rehearsal-<이름>). 종료 코드 1~5 는 표가 나오기 전 중단일 수 있다(GO-LIVE 4단계).
 # 원본 AlarmOps-AlarmWriter 의 권한 정책·권한 경계를 그대로 복사한 임시 역할 AlarmOpsRehearsal-WriterReplica 를 만들고,
 # 본인 SSO 역할로 assume 해서 5개를 확인한다. 끝나면(실패·중단 포함) 만든 것을 모두 지운다.
 # 임시 자격증명은 출력·로그·부모 셸 환경변수에 두지 않는다(호출마다 서브셸 안에서만 export).
@@ -15,6 +16,12 @@ for a in "$@"; do
 done
 RH_ALLOWED=" --profile --confirm-account "
 rh_env_check
+# 이 스크립트만 더 엄격하다: 엔드포인트·설정 파일·CA 번들을 바꾸는 변수는 임시 자격증명이 엉뚱한 곳으로 가게 할 수 있다.
+for v in AWS_CONFIG_FILE AWS_SHARED_CREDENTIALS_FILE AWS_CA_BUNDLE $(compgen -v | grep '^AWS_ENDPOINT_URL' || true); do
+  if [ -n "${!v+set}" ]; then
+    rh_die "환경변수 $v 가 설정되어 있다. replica-check 는 임시 자격증명을 쓰므로 엔드포인트·설정 파일·CA 번들 재지정 변수를 비운 터미널에서만 실행한다." 2
+  fi
+done
 rh_parse_args ${ARGS[@]+"${ARGS[@]}"}
 rh_guard 1
 if [ "$CLEANUP_ONLY" = 1 ]; then rh_log_open replica-check; else rh_log_open replica-check truncate; fi
@@ -30,13 +37,12 @@ RP_AK=""; RP_SK=""; RP_ST=""                        # 임시 자격증명. expor
 RP_OUT=""; RP_ERR=""; RP_RC=0
 DO_CLEANUP=0; CLEAN_FAIL=0; FAILS=0
 
-rp_mask() {
-  local t v
-  t="$(rh_mask "$1")"
+rp_mask() {  # 정확한 값 치환을 더하고, 자격증명 모양 마스킹은 common.sh rh_mask 가 한다
+  local t="$1" v
   for v in "$RP_AK" "$RP_SK" "$RP_ST"; do
     if [ -n "$v" ]; then t="${t//"$v"/****}"; fi
   done
-  printf '%s' "$t" | sed -E 's/(ASIA|AKIA)[A-Z0-9]{12,}/****/g; s#[A-Za-z0-9+/=]{40,}#****#g'
+  rh_mask "$t"
 }
 
 # $1 = person|replica, 나머지 = aws 인자. 결과: RP_OUT(\r 제거), RP_ERR(마스킹됨), RP_RC. 아무것도 출력하지 않는다.
@@ -59,6 +65,32 @@ rp_exec() {
   RP_OUT="$(tr -d '\r' <"$outf")"
   RP_ERR="$(rp_mask "$(tr -d '\r' <"$errf")")"
   rm -f "$outf" "$errf"
+}
+
+# assume-role: 필요한 값 3개만 text 로 받는다. 임시 파일·here-string 을 거치지 않고 명령 치환과 매개변수 확장으로만 나눈다.
+# 성공하면 RP_AK RP_SK RP_ST 를 채운다. 실패하면 비운다(RP_RC != 0).
+rp_assume() {
+  local out rest errf
+  rh_tmpfile; errf="$RH_TMPF"
+  RP_RC=0
+  out="$(aws --profile "$RH_PROFILE" --region "$RH_REGION" sts assume-role --role-arn "$ROLE_ARN" \
+    --role-session-name alarmops-replica-check --duration-seconds 900 \
+    --query '[Credentials.AccessKeyId,Credentials.SecretAccessKey,Credentials.SessionToken]' --output text \
+    2>"$errf" </dev/null)" || RP_RC=$?
+  RP_ERR="$(rp_mask "$(tr -d '\r' <"$errf")")"
+  rm -f "$errf"
+  if [ "$RP_RC" -eq 0 ]; then
+    out="${out//$'\r'/}"
+    RP_AK="${out%%$'\t'*}"; rest="${out#*$'\t'}"
+    RP_SK="${rest%%$'\t'*}"; RP_ST="${rest#*$'\t'}"
+    if [[ ! "$RP_AK" =~ ^[A-Z0-9]+$ ]] || [ -z "$RP_SK" ] || [ -z "$RP_ST" ] || [ "$RP_SK" = "$RP_ST" ] \
+       || [[ "$RP_ST" == *[[:space:]]* ]] || [ "$RP_ST" = None ]; then
+      RP_RC=1
+      RP_ERR="assume-role 응답 형식이 이상하다"
+    fi
+  fi
+  out=""; rest=""
+  if [ "$RP_RC" -ne 0 ]; then RP_AK=""; RP_SK=""; RP_ST=""; fi
 }
 
 # 마지막 호출의 오류 코드만(메시지는 쓰지 않는다)
@@ -118,7 +150,7 @@ sys.exit(0 if any(x.get("Key") == "AlarmOpsRehearsal" and x.get("Value") == "tru
 
 rp_on_exit() {
   local rc=$?
-  trap - EXIT INT TERM
+  trap - EXIT INT TERM HUP
   set +e
   if [ "$DO_CLEANUP" = 1 ]; then rp_cleanup; fi   # 정리 오류는 알리기만 한다. 결과(rc)를 덮지 않는다
   RP_AK=""; RP_SK=""; RP_ST=""; RP_OUT=""
@@ -128,6 +160,7 @@ rp_on_exit() {
 trap rp_on_exit EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+trap 'exit 129' HUP
 
 rh_say "# 복제 역할 실측 $RH_PROFILE ($RH_ACCT)"
 
@@ -164,6 +197,18 @@ print(json.dumps(json.load(sys.stdin)["PolicyDocument"], separators=(",", ":")))
 ' >"$POLICY_FILE" || rh_die "원본 정책 응답을 해석하지 못했다"
 [ -s "$POLICY_FILE" ] || rh_die "원본 정책이 비어 있다"
 
+# ---- 2b) 본인 SSO 역할의 정확한 ARN(경로 포함). 신뢰 정책은 와일드카드 없이 이 ARN 하나로 고정한다
+rp_exec person iam get-role --role-name "$CALLER_ROLE"
+if [ "$RP_RC" -ne 0 ]; then rp_fail_exec "본인 SSO 역할 $CALLER_ROLE 의 ARN 을 읽지 못했다(iam:GetRole 필요). 아무것도 만들지 않았다"; exit 1; fi
+CALLER_ARN="$(printf '%s' "$RP_OUT" | "$RH_PY" -c '
+import json, sys
+print(json.load(sys.stdin).get("Role", {}).get("Arn", ""))
+' | tr -d '\r')" || rh_die "본인 역할 응답을 해석하지 못했다"
+if [[ "$CALLER_ARN" == *[\*\?]* ]] || [[ "$CALLER_ARN" != "arn:"*":iam::${RH_ACCT}:role/"* ]] \
+   || { [[ "$CALLER_ARN" != *"/${CALLER_ROLE}" ]]; }; then
+  rh_die "본인 SSO 역할 ARN 이 예상과 다르다. 아무것도 만들지 않았다" 1
+fi
+
 # ---- 3) 복제 역할이 이미 있으면 멈춘다(재사용·덮어쓰기 금지)
 rp_exec person iam get-role --role-name "$REPLICA"
 if [ "$RP_RC" -eq 0 ]; then
@@ -174,8 +219,8 @@ printf '%s' "$RP_ERR" | grep -q 'NoSuchEntity' || { rp_fail_exec "복제 역할 
 # ---- 4) 복제 역할 생성. 이 시점부터 종료 시 정리한다
 DO_CLEANUP=1
 rh_tmpfile; TRUST_FILE="$RH_TMPF"
-printf '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::%s:root"},"Action":"sts:AssumeRole","Condition":{"ArnLike":{"aws:PrincipalArn":"arn:aws:iam::%s:role/aws-reserved/sso.amazonaws.com/*%s"}}}]}' \
-  "$RH_ACCT" "$RH_ACCT" "$CALLER_ROLE" >"$TRUST_FILE"
+printf '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::%s:root"},"Action":"sts:AssumeRole","Condition":{"StringEquals":{"aws:PrincipalArn":"%s"}}}]}' \
+  "$RH_ACCT" "$CALLER_ARN" >"$TRUST_FILE"
 BOUNDARY_ARGS=()
 if [ -n "$BOUNDARY" ]; then BOUNDARY_ARGS=(--permissions-boundary "$BOUNDARY"); fi
 rp_exec person iam create-role --role-name "$REPLICA" \
@@ -200,8 +245,7 @@ rp_row() {  # $1=항목 $2=PASS|FAIL $3=비고
 ROLE_ARN="arn:aws:iam::${RH_ACCT}:role/${REPLICA}"
 got=0; last=""
 for ((i = 1; i <= RETRIES; i++)); do
-  rp_exec person sts assume-role --role-arn "$ROLE_ARN" --role-session-name alarmops-replica-check \
-    --duration-seconds 900 --output json
+  rp_assume
   if [ "$RP_RC" -eq 0 ]; then got=1; break; fi
   last="$(rp_code)"
   [ "$i" -lt "$RETRIES" ] && sleep "$RETRY_INTERVAL"
@@ -211,15 +255,6 @@ if [ "$got" -ne 1 ]; then
   rh_say ""; rh_say "실패 항목 ${FAILS}개. 이 표만 허브에 보낸다"
   exit 1
 fi
-CREDS="$(printf '%s' "$RP_OUT" | "$RH_PY" -c '
-import json, sys
-c = json.load(sys.stdin)["Credentials"]
-print(c["AccessKeyId"]); print(c["SecretAccessKey"]); print(c["SessionToken"])
-' | tr -d '\r')" || { RP_OUT=""; rh_die "assume-role 응답을 해석하지 못했다"; }
-RP_OUT=""
-{ IFS= read -r RP_AK; IFS= read -r RP_SK; IFS= read -r RP_ST; } <<<"$CREDS"
-CREDS=""
-if [ -z "$RP_AK" ] || [ -z "$RP_SK" ] || [ -z "$RP_ST" ]; then rh_die "assume-role 자격증명이 비었다"; fi
 
 # 정책 전파 확인: 정책이 허용하는 읽기가 될 때까지(정책 미전파 상태에서 (가) 거부가 우연히 통과하지 않게)
 ok=0; last=""
@@ -282,6 +317,7 @@ fi
 
 # (c)(d) 본인 자격증명으로 ManagedBy 없는 알람을 만들고 복제 역할로 건드려 본다
 rp_exec person cloudwatch put-metric-alarm --alarm-name "$ALARM_U" "${BASE[@]}"
+u_prepared=0; [ "$RP_RC" -eq 0 ] && u_prepared=1
 if [ "$RP_RC" -ne 0 ]; then
   prep="준비 실패: 본인 자격증명으로 알람 생성 오류 코드 $(rp_code)"
   rp_row "(c) 태그 없는 알람에 TagResource(ManagedBy) → 거부" FAIL "$prep"
@@ -297,6 +333,49 @@ fi
 rp_exec replica cloudwatch delete-alarms --alarm-names "$ALARM_T"
 if [ "$RP_RC" -eq 0 ]; then rp_row "(e) ManagedBy=AlarmOps 알람 DeleteAlarms → 성공" PASS "성공"
 else rp_row "(e) ManagedBy=AlarmOps 알람 DeleteAlarms → 성공" FAIL "오류 코드 $(rp_code)"; fi
+
+# (f) 복제 역할이 태그 없는 기존 알람(ALARM_U)을 ManagedBy 요청 태그로 덮어쓸 수 있는가.
+#     CreateAlarmWithManagedByTag 는 요청 태그 조건만 있다. 기존 알람에도 적용되는지는 실측으로만 안다. 설정이 바뀌는지 보려고 임계값을 다르게 보낸다.
+F_LABEL="(f) 태그 없는 기존 알람 덮어쓰기(PutMetricAlarm+ManagedBy 요청 태그) → 거부"
+if [ "$u_prepared" != 1 ]; then
+  rp_row "$F_LABEL" FAIL "준비 실패: 본인 자격증명으로 알람을 만들지 못했다"
+else
+  rp_exec replica cloudwatch put-metric-alarm --alarm-name "$ALARM_U" --namespace AlarmOpsRehearsal \
+    --metric-name ReplicaCheck --statistic Average --period 60 --evaluation-periods 1 --threshold 2 \
+    --comparison-operator GreaterThanThreshold --tags Key=ManagedBy,Value=AlarmOps
+  if [ "$RP_RC" -ne 0 ]; then
+    expect_denied "$F_LABEL"
+  else
+    thr=""; tagnote="조회 실패"
+    rp_exec person cloudwatch describe-alarms --alarm-names "$ALARM_U" --output json
+    if [ "$RP_RC" -eq 0 ]; then
+      thr="$(printf '%s' "$RP_OUT" | "$RH_PY" -c '
+import json, sys
+a = json.load(sys.stdin).get("MetricAlarms", [])
+print("%g" % a[0]["Threshold"] if a else "")
+' | tr -d '\r')" || thr=""
+    else
+      thr="조회 실패(코드 $(rp_code))"
+    fi
+    case "$thr" in
+      2) thr="임계값 1→2 변경됨" ;;
+      1) thr="임계값 1 그대로" ;;
+      "") thr="임계값 알 수 없음(알람 없음)" ;;
+      *) thr="임계값 $thr" ;;
+    esac
+    rp_exec person cloudwatch list-tags-for-resource --resource-arn "$ARN_U" --output json
+    if [ "$RP_RC" -eq 0 ]; then
+      if printf '%s' "$RP_OUT" | "$RH_PY" -c '
+import json, sys
+t = json.load(sys.stdin).get("Tags", [])
+sys.exit(0 if any(x.get("Key") == "ManagedBy" and x.get("Value") == "AlarmOps" for x in t) else 1)
+'; then tagnote="태그 ManagedBy=AlarmOps 붙음"; else tagnote="태그 ManagedBy 없음"; fi
+    else
+      tagnote="태그 조회 실패(코드 $(rp_code))"
+    fi
+    rp_row "$F_LABEL" FAIL "기존 고객 알람 덮어쓰기 가능: template.yaml CreateAlarmWithManagedByTag 보완 필요 ($thr, $tagnote)"
+  fi
+fi
 
 rh_say ""
 if [ "$FAILS" -gt 0 ]; then

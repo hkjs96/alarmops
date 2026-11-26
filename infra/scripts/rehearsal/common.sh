@@ -17,10 +17,30 @@ RH_PROFILE=""; RH_CONFIRM=""; RH_CONFIRM_GIVEN=0; RH_RUN_ID=""; RH_STACK=0; RH_S
 RH_LOG=""; RH_TMPS=(); RH_TMPF=""; RH_ALARMS=()
 RH_ALLOWED=" --profile "
 
-rh_die() { printf '오류: %s\n' "$1" >&2; exit "${2:-1}"; }
+rh_die() { printf '오류: %s\n' "$(rh_mask "$1")" >&2; exit "${2:-1}"; }
 
+# 출력에 나가는 모든 문자열의 단일 마스킹 지점(aws_r, rh_say, rh_log, rh_die). ExternalId 원문과 자격증명 모양을 가린다:
+#  - ASIA/AKIA 키 ID
+#  - 키워드(security-token, session_token, secret_access_key; 대소문자 무시) 뒤의 값: X-Amz-Security-Token=..., "SecretAccessKey": "..."
+#  - 40자 이상 base64/URL 인코딩 모양(영문 대·소문자와 숫자를 모두 포함할 때만). 긴 큐 이름·ARN 같은 소문자 이름은 건드리지 않는다.
+# awk 는 구간 표현식 {n,} 를 쓰지 않는다(mawk 호환).
 rh_mask() {
-  if [ -n "$RH_EID" ]; then printf '%s' "${1//"$RH_EID"/****}"; else printf '%s' "$1"; fi
+  local t="$1"
+  if [ -n "$RH_EID" ]; then t="${t//"$RH_EID"/****}"; fi
+  t="$(printf '%s\n' "$t" | sed -E \
+    -e 's/(ASIA|AKIA)[A-Z0-9]{12,}/****/g' \
+    -e "s/(security-token|session_?token|secret_?access_?key)[\"'=: ]+[^[:space:]]+/\\1=****/Ig" |
+    awk '{
+      out = ""; s = $0
+      while (match(s, /[A-Za-z0-9+\/=%_-]+/)) {
+        tok = substr(s, RSTART, RLENGTH)
+        if (length(tok) >= 40 && tok ~ /[A-Z]/ && tok ~ /[a-z]/ && tok ~ /[0-9]/) tok = "****"
+        out = out substr(s, 1, RSTART - 1) tok
+        s = substr(s, RSTART + RLENGTH)
+      }
+      print out s
+    }')"
+  printf '%s' "$t"
 }
 
 rh_cleanup_tmps() {
