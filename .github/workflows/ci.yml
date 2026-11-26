@@ -81,6 +81,44 @@ jobs:
           cat "$RUNNER_TEMP/ci-changes.out"
           cat "$RUNNER_TEMP/ci-changes.out" >> "$GITHUB_OUTPUT"
 
+  # Information only (D-62): classifies the PR as `low` or `human`. Never fails, sets no label, has no write permission. This job
+  # runs the classifier of origin/main via the PR's copy of pr_risk_check.sh, so it is NOT the official verdict: the hub
+  # re-runs `.github/scripts/pr_risk_check.sh <head-sha>` from main. Pull requests only.
+  risk:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      risk: ${{ steps.classify.outputs.risk }}
+      sha: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: classify
+        continue-on-error: true
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # Errors are not fatal here: any failure below leaves the answer `human` and the job green.
+          # For information only: the classifier of the fixed base commit judges base...head. The official verdict is the
+          # hub's (pr_risk_check.sh, which always fetches origin/main itself).
+          fail() {
+            echo "::warning::classifier could not run; risk=human"
+            echo "risk=human" >> "$GITHUB_OUTPUT"
+            echo "sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+          git show "$BASE_SHA:.github/scripts/pr_risk.py" > "$RUNNER_TEMP/pr_risk.py" || fail
+          git diff --name-status --no-renames "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/name-status.txt" || fail
+          git diff --raw --no-renames "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/raw.txt" || fail
+          python3 -I "$RUNNER_TEMP/pr_risk.py" --head "$HEAD_SHA" --raw "$RUNNER_TEMP/raw.txt" < "$RUNNER_TEMP/name-status.txt" || fail
+          exit 0
+
   test:
     needs: changes
     # Skipped only when changes says 'false'. A failed or empty answer runs the job (fail-safe).

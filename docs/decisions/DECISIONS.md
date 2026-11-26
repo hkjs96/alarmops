@@ -2,7 +2,7 @@
 
 계획서: AlarmOps PoC 계획서 v3 (https://claude.ai/artifact/3Kvfvq3tHmGBiDp3WhVxf4). 결정이 바뀌면 이 파일과 계획서를 같이 고친다.
 
-이 문서는 PoC에서 확정된 결정 D-01~D-61을 주제별로 모은 것이다. 구현은 여기서 어긋나지 않는다.
+이 문서는 PoC에서 확정된 결정 D-01~D-62를 주제별로 모은 것이다. 구현은 여기서 어긋나지 않는다.
 
 - 맨 위 색인에서 ID를 눌러 그 결정으로 간다. 색인의 요약은 찾기 위한 이름표이고, 기준은 각 절의 **결정** 문구다.
 - 결정마다 **결정** · **이유** · **확정일**(질문·이슈 번호 포함)을 적는다. 개정·대체·잠정 표시와 취소선은 원문 그대로 둔다.
@@ -74,6 +74,7 @@
 | [D-59](#d-59) | 금지 사항만 정하고 나머지는 에이전트 자율, PoC 배포는 main 병합 시 자동 | 11/24 |
 | [D-60](#d-60) | 개발 프로세스: 만든 에이전트는 검수하지 않고, 실행 결과 검증과 CI 증거로 판정 | 11/24 |
 | [D-61](#d-61) | 운영 DB(Supabase)와 콘솔 함수는 서울 리전에 둔다 | 11/25 |
+| [D-62](#d-62) | 위험이 낮은 PR은 허브가 병합하고, 나머지는 사람이 승인한다 | 11/26 |
 
 <a id="topic-1"></a>
 
@@ -996,7 +997,7 @@ D-60에서 쓰는 방식:
 - **변형 검사 단계(Mutate)**: 구현자가 아닌 에이전트가 핵심 조건 3~5곳을 일부러 망가뜨려 테스트가 잡는지 기록한다. 테스트 품질의 기계 증거다(에이전트의 "말로 확인"은 증거가 아니었다).
 - **시험 환경을 먼저 준다**: DB가 필요한 작업이면 허브가 로컬 Postgres를 띄우고 URL을 `env`로 넘긴다(CI에서만 처음 돈 PG 테스트가 한 번도 통과한 적 없던 일이 있었다).
 - **PR·CI·감사는 워크플로 밖**: 워크플로는 검증까지만 하고, 허브가 PR을 열어 CI를 기다린 뒤 pr-auditor를 돌린다(CI 전에 감사하면 "증거 없음"으로 항상 막힌다). CI 테스트가 덮는 기준은 감사가 verifier 기록을 따로 요구하지 않는다.
-- **병합은 계속 사람 승인**(11/25 사용자 결정, D-61 만들지 않음).
+- **병합은 계속 사람 승인**(11/25 사용자 결정). → 11/26 D-62로 바뀜: 위험이 낮은 PR은 허브가 병합한다.
 - **PR 상태 라벨(표시용)과 판정 근거 댓글**(11/25 사용자 결정, 무신사 merraform·Kubernetes Prow·Ona 방식 참고). 허브가 단계마다 PR에 라벨 하나를 단다. 라벨은 상태를 보여 줄 뿐이고, 실제 차단은 브랜치 보호·CI·사람 병합이 한다.
   | 라벨 | 뜻 | 사람이 할 일 |
   |---|---|---|
@@ -1038,6 +1039,32 @@ D-60에서 쓰는 방식:
 - **이유**: 11/25 리허설에서 운영 DB가 뭄바이(ap-south-1)에 있음을 확인했다. 그래서 엔진(서울)과 콘솔 함수가 DB에 접근할 때마다 인도까지 왕복했고, 온보딩 화면은 약 30초 걸렸다. 데이터도 고객과 같은 나라에 두는 편이 설명하기 쉽다.
 - **이전 절차**: `docs/MIGRATE-DB-REGION.md`. PoC 시험 데이터뿐이라 덤프 대신 다시 온보딩해도 된다.
 - **확정일**: 11/25 (사용자 결정)
+
+<a id="d-62"></a>
+
+### D-62 위험이 낮은 PR은 허브가 병합하고, 나머지는 사람이 승인한다
+
+- **결정**
+  - PR 위험도는 기계가 정한다. `.github/scripts/pr_risk.py`가 변경 파일로 `low` 또는 `human`을 낸다.
+  - **공식 판정은 허브가 main의 분류기로 낸다.** PR이 분류기를 고쳐 스스로 low가 되는 것을 막기 위해서다. 허브는 `bash .github/scripts/pr_risk_check.sh <PR head SHA>`를 실행한다(PR_AUTHOR·PR_TITLE을 환경변수로 준다). 이 스크립트는 `git show origin/main:.github/scripts/pr_risk.py`로 분류기를 꺼내 `git diff --name-status --no-renames origin/main...<sha>`와 `--raw`(파일 모드)를 넘기고, 결과 JSON에 head SHA를 찍는다. 허브는 병합 시점에도 PR head가 그 SHA인지 확인한다. 판정을 못 내면(JSON 없음) human이다. 기준은 `origin/main`으로 고정이다(환경변수·옵션으로 바꿀 수 없고, 먼저 `git fetch origin main`을 강제로 실행한다. 인자는 40자리 16진수만 받는다).
+  - CI `risk` job은 참고 정보다(head SHA와 요약만 남기고, 실패하지 않으며, 라벨·쓰기 권한이 없다). 이 job의 결과로 병합하지 않는다.
+  - **low**: 바뀐 파일이 모두 아래 둘 중 하나일 때만이다.
+    - 문서(`docs/**`): 확장자가 `.md`, `.png`, `.jpg`인 파일만이다(`.html` 목업, `.json`, `.yml`, `.svg`는 human). 추가·수정만이고 일반 파일(모드 100644)이어야 한다. 다음은 제외한다: 에이전트 정의 초안(`docs/process/**`, 사람이 `.claude/`로 복사한다), DECISIONS.md, 테스트가 읽는 문서(`docs/specs/**`, `docs/GO-LIVE.md`, `docs/SETUP-PROD-DB.md`, `docs/SETUP-SUPABASE.md`, `docs/API-CONTRACT.md`), 관문 증거(`docs/qa/**`), 에이전트가 지시로 읽는 문서(`docs/ui/**`, `docs/DATA-MODEL.md`, `docs/PERSONAS.md`; 프롬프트 주입 경로가 될 수 있다), docs 아래의 심볼릭 링크, 문서 삭제
+    - 새 테스트 파일 추가(상태 A, 모드 100644). 테스트 파일은 파일 이름과 위치가 모두 맞아야 한다(이름: `*.test.ts(x)`, `*.test.mjs`, `*.spec.ts`, `test_*.py`, `*_test.py`. 위치: `infra/test/`, `services/*/tests/`, `packages/*/test/`, `apps/console/e2e/*.spec.ts`, 콘솔은 같은 위치 관례라 `apps/console/src/**/*.test.ts(x)`만). 그 밖의 `src` 안(예: `services/x/src/foo.test.ts`)은 human이다. **기존 테스트 파일의 수정은 줄만 추가해도 human이다**(skip 추가 등으로 약화할 수 있다). 삭제도 human이다. `test/` 디렉터리 안이라는 이유만으로는 테스트가 아니다
+  - **human**(기본값): 위 둘 밖의 모든 변경이다. 의존성 파일(`package.json`, 락 파일, `requirements*`, `pyproject.toml` 등)은 Dependabot PR이어도 human이다(예외 없음: 락 파일 내용·alias·URL 버전·위조된 작성자를 기계가 다 막을 수 없어 사람이 승인한다). 리허설 스크립트(`infra/scripts/rehearsal/**`)도 실계정에서 실행되므로 human이다.
+  - **human**(기본값): 그 밖의 모든 변경이다. 특히 `.github/**`(워크플로·배포), `.claude/**`, `CLAUDE.md`, `infra/aws/**`, `infra/customer-stack/**`(IAM·신뢰 정책), `db/**`(마이그레이션), 의존성, DECISIONS.md, 제품 코드(services·packages·apps)가 그렇다.
+  - low이고 다음을 모두 만족하면 허브가 사람 승인 없이 squash 병합한다.
+    - 현재 head에서 CI가 모두 통과했다.
+    - 검토에 해결되지 않은 [차단]이 없다.
+    - 화면 변경이 아니다.
+  - 자동 병합한 PR은 하루 마감 보고에 목록으로 남긴다.
+  - human PR은 지금처럼 사람이 승인한다.
+- **바뀌는 것**: D-59의 "사람의 상시 관문은 PR 병합 승인 하나"를 "위험이 human인 PR의 병합 승인"으로 좁힌다. main 보호, CI, CODEOWNERS는 그대로다.
+- **이유**: 11/25 하루에 승인한 PR이 15개였다. 그중 문서·테스트·스크립트 수정이 절반쯤이었다. 사람의 판단이 필요한 PR에 승인을 집중하기 위해서다.
+- **다시 볼 때**: 실고객 연결 뒤 low PR이 사고를 낸 일이 있으면 범위를 줄인다. 새 테스트 파일은 CI와 개발 PC에서 임의 코드로 실행된다. low로 병합된 뒤 사고가 나면 범위를 다시 줄인다. 허브가 로컬에서 테스트를 돌릴 때는 비밀값과 AWS 프로필이 없는 환경에서만 돌린다.
+  - CI에 secrets나 OIDC를 붙이면 새 테스트 low 정책을 다시 본다.
+  - 문서만 바뀐 low PR은 CI 테스트 job이 돌지 않는다(ci-changes의 docs_only). 이 경우 관문 1의 증거는 `risk` job과 문서 빌드뿐이다. 운영 단계(D-59 "다시 볼 때")에서 다시 정한다.
+- **확정일**: 11/26 (사용자 결정, A안)
 
 ## 이전을 쉽게 만드는 개발 원칙 (D-09에 딸림)
 1. Postgres 표준 기능만. Supabase Auth·Realtime·Storage·Edge Functions, `auth.uid()` 기반 권한 규칙 금지. 로그인은 앱에서 Google SSO.
