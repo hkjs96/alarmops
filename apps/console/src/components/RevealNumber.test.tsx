@@ -57,15 +57,19 @@ describe("RevealNumber: emergency reveal (ADMIN who is not a responder)", () => 
     await press(confirm);
     expect(reveal.fn).toHaveBeenCalledWith("ct_hyunwoo", "PHONE", "SEV-1, nobody answers");
     expect(screen.getByTestId("reveal-value")).toHaveTextContent(VALUE);
-    expect(screen.getByTestId("reveal-note")).toHaveTextContent(/Emergency reveal · logged · Hanbit.s primary responder notified/);
+    // D-35 / #39: delivery is not implemented, so the copy says "recorded", never "notified".
+    expect(screen.getByTestId("reveal-note")).toHaveTextContent("Emergency reveal · logged for review · no alert is sent");
+    expect(screen.getByTestId("reveal-note")).not.toHaveTextContent(/notified/i);
   });
-  it("says so when the customer has no primary responder", async () => {
+  it("uses the same recorded-only copy when the customer has no primary responder", async () => {
     reveal.fn.mockResolvedValue(ok("EMERGENCY"));
     mount({ requiresReason: true, hasPrimary: false });
     await press(screen.getByTestId("reveal-show"));
+    expect(document.body).toHaveTextContent("No alert is sent. The reveal is recorded in the audit log with your name and this reason, under Emergency reveals.");
+    expect(document.body).not.toHaveTextContent(/will be notified/i);
     fireEvent.change(screen.getByTestId("reveal-reason"), { target: { value: "why" } });
     await press(screen.getByRole("button", { name: /Show number and log/ }));
-    expect(screen.getByTestId("reveal-note")).toHaveTextContent("no primary responder is set");
+    expect(screen.getByTestId("reveal-note")).toHaveTextContent("Emergency reveal · logged for review · no alert is sent");
   });
 });
 
