@@ -1091,13 +1091,13 @@ D-60에서 쓰는 방식:
   - **연결·해제 API**: `PUT /customers/{id}/responders/template` 본문 `{ templateId: string|null, previewHash }` + `If-Match`(그 고객 Responders 버전). 미리보기 `POST /customers/{id}/responders/template/preview { templateId|null }`(효과·`blocking`·`previewHash`, 템플릿 미리보기와 같은 `planTemplateChange` 의미). ADMIN만, 고객 전체 범위 직원만(포털 404, 좁은 범위 403 — 템플릿 API와 같은 규칙).
   - **연결**: `Customer.responderTemplateId`를 정하고 템플릿 멤버를 `source=TEMPLATE`·PAGEABLE·목록 끝 순서로 넣는다. 이미 직접(DIRECT) 추가된 멤버는 DIRECT로 남는다(효과 `ALREADY_DIRECT`). **해제(`null`)**: `responderTemplateId`를 비우고 `source=TEMPLATE AND templateId=<이전>` 행만 지운다(DIRECT는 남고 효과 `STAYS_DIRECT`). **교체** = 해제 + 연결을 한 트랜잭션에서(두 템플릿에 다 있는 사람은 행을 지우지 않고 템플릿만 옮긴다). 해지(TERMINATED) 고객은 409 `CUSTOMER_TERMINATED`. 감사는 고객 단계 1행(contactId·templateId만).
   - **잠금 순서**: 템플릿 행(id 순) → 고객 행. 템플릿 PATCH와 같은 순서라 교착이 없다. 그래도 PG 교착(40P01)·직렬화 실패(40001)가 나면 503 `BUSY`(`Retry-After: 1`, 아무것도 쓰지 않음)로 돌려 콘솔이 다시 시도하게 한다.
-  - **UNREACHABLE이 되는 변경은 막는다(override 없음)**: 템플릿 PATCH와 연결·해제 모두, 변경 뒤 영향받는 고객의 호출 건강(`pagingHealth`, `/paging-health`·`callHealth`와 같은 함수)이 **전에는 UNREACHABLE이 아니었는데 UNREACHABLE이 되면** 409 `WOULD_BE_UNREACHABLE`(`details.customerIds`)로 거절한다. 미리보기는 `blocking: [{ customerId, reason }]`로 먼저 알려 준다. 이미 UNREACHABLE인 고객(예: 호출 순서가 아직 없는 새 고객)은 막지 않는다 — 막으면 새 고객에 템플릿을 붙일 수 없다. 저장 트랜잭션 안에서 같은 계산을 다시 한다.
-  - **D-38 한도도 같은 자리에서 막는다**: 변경 뒤 이 고객의 어느 호출 순서가 **새로** `ALL_RESPONDERS` 20명 또는 발송 한도를 넘으면(`sendCapViolation`, Responders 쓰기와 같은 함수) 422 `RESPONDER_LIMIT_EXCEEDED`·`SEND_CAP_EXCEEDED`(`details.customerIds`), 미리보기 `blocking.reason`에도 나온다. 이미 넘어 있던 것은 막지 않는다. UNREACHABLE과 한도가 함께 걸리면 409 `WOULD_BE_UNREACHABLE`이 먼저다.
+  - **UNREACHABLE이 되는 변경은 막는다(override 없음)** (사용자 결정. 단 "전에는 아니었는데 새로 UNREACHABLE이 될 때만"이라는 범위는 허브 해석, 사용자 확인 대기): 템플릿 PATCH와 연결·해제 모두, 변경 뒤 영향받는 고객의 호출 건강(`pagingHealth`, `/paging-health`·`callHealth`와 같은 함수)이 **전에는 UNREACHABLE이 아니었는데 UNREACHABLE이 되면** 409 `WOULD_BE_UNREACHABLE`(`details.customerIds`)로 거절한다. 미리보기는 `blocking: [{ customerId, reason }]`로 먼저 알려 준다. 이미 UNREACHABLE인 고객(예: 호출 순서가 아직 없는 새 고객)은 막지 않는다 — 막으면 새 고객에 템플릿을 붙일 수 없다. 저장 트랜잭션 안에서 같은 계산을 다시 한다.
+  - **D-38 한도도 같은 자리에서 막는다** (허브 해석: 기존 D-38 규칙을 템플릿 경로에도 적용. 사용자 확인 대기): 변경 뒤 이 고객의 어느 호출 순서가 **새로** `ALL_RESPONDERS` 20명 또는 발송 한도를 넘으면(`sendCapViolation`, Responders 쓰기와 같은 함수) 422 `RESPONDER_LIMIT_EXCEEDED`·`SEND_CAP_EXCEEDED`(`details.customerIds`), 미리보기 `blocking.reason`에도 나온다. 이미 넘어 있던 것은 막지 않는다. UNREACHABLE과 한도가 함께 걸리면 409 `WOULD_BE_UNREACHABLE`이 먼저다.
   - **읽기 권한**: `GET /responder-templates`는 MSP 직원 전체(V·I·A)가 읽는다(D-41과 같다). 쓰기(생성·PATCH·미리보기·연결·해제)는 ADMIN이다.
 - **이유**: 템플릿은 한 번에 여러 고객의 호출 경로를 바꾼다. 아무도 못 부르는 상태로 만드는 저장은 화면에서 경고만 하지 않고 서버가 거절한다. 허브·콘솔이 연결을 직접 만지지 않고 한 API로만 바꾼다.
 - **바뀌는 것**: `docs/API-CONTRACT.md` §8.3 "Responder 템플릿", `packages/api`(templatesApi, router, repo 계약), `packages/store-sql`·메모리 저장소. 스키마 변경 없음.
 - **남는 위험**: 호출 건강은 지금 시각 기준이고(인증 만료·교대표 공백은 14일 창), 저장 뒤 시간이 지나 달라질 수 있다. 연결된 고객이 많으면 미리보기가 고객 수만큼 호출 순서를 읽는다(PoC 규모는 문제없음).
-- **확정일**: 11/27 (사용자 결정)
+- **확정일**: 11/27 (사용자 결정: 연결·해제 API, UNREACHABLE 차단·override 없음, 읽기 V·I·A/쓰기 ADMIN. 위 "사용자 확인 대기" 두 항목은 확인되면 이 줄에 적는다)
 
 ## 이전을 쉽게 만드는 개발 원칙 (D-09에 딸림)
 1. Postgres 표준 기능만. Supabase Auth·Realtime·Storage·Edge Functions, `auth.uid()` 기반 권한 규칙 금지. 로그인은 앱에서 Google SSO.
