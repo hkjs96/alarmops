@@ -46,6 +46,9 @@ Scenario keys (all optional):
   cw_ignore_deny_first_n_puts N: DenyOverwriteUnmanaged is ignored for the first N replica PutMetricAlarm calls made
                      while the probe-deny policy is attached (Deny not propagated yet)
   cw_ignore_deny_sid a Sid whose statement is skipped (models a Deny that CloudWatch does not enforce)
+  cw_put_ignores_resource_tags true: replica PutMetricAlarm authorization sees no aws:ResourceTag (existing alarm's tags ignored)
+  cw_preexisting_alarms {name: {"Namespace": "Customer", "tags": {}, "composite": false}}: alarms that exist before the run
+                     and that the script did not create (replica-check state)
   fail_nth           {"service op": N}: the N-th call (1-based) of that operation exits 254 with InternalFailure
   sleep_ops          {"service op": seconds}: that call touches $FAKE_AWS_LOG.sleeping then sleeps (signal tests)
   iam_roles entries may carry "path": "/aws-reserved/sso.amazonaws.com/ap-northeast-2/" (iam get-role Arn includes it)
@@ -312,6 +315,13 @@ def replica_model(scen, service, op, opts, rec, account, first):
                             "tags": dict(v.get("tags") or {}), "path": v.get("path") or "/"}
                       for k, v in scen["iam_roles"].items()},
               "alarms": {}, "alarm_cfg": {}, "assume_calls": 0}
+        # Alarms that exist before the script runs and that it did not create: {name: {"Namespace": ..., "tags": {...}, "composite": bool}}
+        for n, a in (scen.get("cw_preexisting_alarms") or {}).items():
+            st["alarms"][n] = dict(a.get("tags") or {})
+            st["alarm_cfg"][n] = {"Threshold": 1.0, "Namespace": a.get("Namespace", "Customer"), "Composite": bool(a.get("composite"))}
+        if scen.get("cw_preexisting_alarms"):
+            with open(sp, "w", encoding="utf-8") as f:   # persist so the tests can read the state even if nothing else mutates it
+                json.dump(st, f)
 
     def save():
         with open(sp, "w", encoding="utf-8") as f:
@@ -432,6 +442,8 @@ def replica_model(scen, service, op, opts, rec, account, first):
                 if (op == "put-metric-alarm" and n not in st["alarms"]
                         and scen.get("cw_create_resource_tags") == "request"):
                     ctx["resource_tags"] = dict(req)   # hypothesis: CloudWatch evaluates aws:ResourceTag from the request tags on create
+                if op == "put-metric-alarm" and scen.get("cw_put_ignores_resource_tags"):
+                    ctx["resource_tags"] = {}   # hypothesis: PutMetricAlarm authorization never sees the existing alarm's tags
                 if not evaluate(pol, "cloudwatch:" + camel(op), ctx, ignore):
                     error("AccessDenied", camel(op), "User is not authorized to perform: cloudwatch:" + camel(op))
                 if (op == "put-metric-alarm" and scen.get("cw_overwrite_unmanaged_denied") and n in st["alarms"]
@@ -443,7 +455,8 @@ def replica_model(scen, service, op, opts, rec, account, first):
             if names[0] in st["alarms"] and scen.get("cw_update_ignores_tags"):
                 req = {}   # CloudWatch ignores tags on update of an existing alarm (docs)
             st["alarms"].setdefault(names[0], {}).update(req)
-            st["alarm_cfg"][names[0]] = {"Threshold": float(first("--threshold") or 0)}
+            st["alarm_cfg"][names[0]] = {"Threshold": float(first("--threshold") or 0),
+                                         "Namespace": first("--namespace") or ""}
         elif op == "tag-resource":
             if names[0] not in st["alarms"]:
                 error("ResourceNotFound", "TagResource", "alarm not found")
@@ -461,8 +474,10 @@ def replica_model(scen, service, op, opts, rec, account, first):
             want = opts.get("--alarm-names")
             if not want:
                 return False
-            emit({"MetricAlarms": [dict(AlarmName=n, **st["alarm_cfg"].get(n, {})) for n in want if n in st["alarms"]],
-                  "CompositeAlarms": []}, opts)
+            cfg = {n: st["alarm_cfg"].get(n, {}) for n in want if n in st["alarms"]}
+            emit({"MetricAlarms": [dict(AlarmName=n, **{k: v for k, v in c.items() if k != "Composite"})
+                                   for n, c in cfg.items() if not c.get("Composite")],
+                  "CompositeAlarms": [{"AlarmName": n} for n, c in cfg.items() if c.get("Composite")]}, opts)
             return True
         save()
         emit({}, opts)

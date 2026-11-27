@@ -400,6 +400,30 @@ class Reliability(ProbeBase):
             self.assertNotIn("불안정", " ".join(self.table(res)[v]))
 
 
+
+class CanaryBMessages(ProbeBase):
+    """#161 item 7: the note says why canary B disagreed."""
+    RES_NOTE = "PutMetricAlarm 평가에 ResourceTag 가 반영되지 않는 것으로 보임"
+    GENERIC = "Deny 가 반영되지 않았을 수 있다"
+
+    def test_null_variant_denied_means_resource_tag_is_not_evaluated(self):
+        res = self.probe("request", cw_put_ignores_resource_tags=True)
+        self.assertEqual(res.code, 0, res.text)
+        lines = [l for l in res.out.splitlines() if l.startswith("- null: 카나리 B 불일치")]
+        self.assertEqual(len(lines), 1, res.out)
+        self.assertIn("기대 ALLOWED, 실제 DENIED", lines[0])
+        self.assertIn(self.RES_NOTE, lines[0])
+        self.assertNotIn(self.GENERIC, lines[0])
+
+    def test_other_mismatch_keeps_the_generic_note(self):
+        # the Deny is ignored for the first 6 puts made while it is attached: null uses 5, so the stringnotequals canary B is ignored
+        res = self.probe("request", cw_ignore_deny_first_n_puts=6)
+        lines = [l for l in res.out.splitlines() if l.startswith("- stringnotequals: 카나리 B 불일치")]
+        self.assertEqual(len(lines), 1, res.out)
+        self.assertIn("기대 DENIED, 실제 ALLOWED", lines[0])
+        self.assertIn(self.GENERIC, lines[0])
+        self.assertNotIn(self.RES_NOTE, lines[0])
+
 class Docs(unittest.TestCase):
     def test_cell_values_and_flow_are_documented(self):
         gl = (REPO / "docs" / "GO-LIVE.md").read_text(encoding="utf-8")

@@ -392,7 +392,7 @@ class OverwriteCheck(ReplicaBase):
         self.assertNotEqual(res.code, 0, res.text)
         self.assertEqual(self.verdicts(res)["f"], "FAIL", res.out)
         row = self.row(res, "f")
-        self.assertIn("기존 고객 알람 덮어쓰기 가능: template.yaml CreateAlarmWithManagedByTag 보완 필요", row)
+        self.assertIn("스택 갱신 필요(D-63 이전 템플릿) — 갱신 후에도 FAIL 이면 정책 결함", row)
         self.assertRegex(row, r"1\D+2")                  # threshold 1 -> 2 was observed with the person's credentials
         self.assertIn("ManagedBy=AlarmOps", row)         # the tag was observed
         for k in "abcde":
@@ -611,6 +611,276 @@ class MaskTwoTiers(unittest.TestCase):
         self.assertNotIn(long_plain, self.run_bash('rh_mask "$2"', long_plain))
         self.assertEqual(self.run_bash('rh_mask "$2"', LONG_ALARM).strip(), LONG_ALARM)
 
+
+
+
+SECRET40 = "wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY12"      # AWS secret access key shape: 40 chars, [A-Za-z0-9/+], upper+lower+digit
+SECRET40_SLASH = "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY"
+
+
+class MaskSecretKeyShape(unittest.TestCase):
+    """Items 1-3 of #161: human-path secret-key shape rule, narrower bearer/basic rule, URL query values."""
+    COMMON = MaskUnit.COMMON
+
+    def run_bash(self, script, *args):
+        import os
+        import subprocess
+        e = {"PATH": os.environ["PATH"], "HOME": "/tmp"}
+        cp = subprocess.run(["bash", "-c", 'source "$1"; ' + script, "_", self.COMMON, *args],
+                            capture_output=True, text=True, env=e, timeout=30)
+        self.assertEqual(cp.returncode, 0, cp.stderr)
+        return cp.stdout
+
+    def human(self, text):
+        return self.run_bash('rh_mask "$2"', text)
+
+    def data(self, text):
+        return self.run_bash('rh_mask_data "$2"', text)
+
+    def test_fixtures_are_40_chars(self):
+        self.assertEqual(len(SECRET40), 40)
+        self.assertEqual(len(SECRET40_SLASH), 40)
+
+    def test_exactly_40_char_secret_without_plus_or_slash_is_masked(self):
+        for text in (f"key {SECRET40} end", SECRET40, f'"{SECRET40}"', f"x={SECRET40}", f"SecretKey: {SECRET40}"):
+            with self.subTest(text):
+                out = self.human(text)
+                self.assertNotIn(SECRET40, out)
+                self.assertIn("****", out)
+
+    def test_40_char_secret_with_plus_slash_is_masked(self):
+        self.assertNotIn(SECRET40_SLASH, self.human(f"v {SECRET40_SLASH}"))
+
+    def test_names_and_lookalikes_are_not_masked(self):
+        lookalikes = (
+            "A" + "b1-" * 13 + "z",                          # 40 chars but has -
+            ("Ab1_" * 10),                                     # 40 chars but has _
+            ("abcdef0123" * 4),                                # 40 chars, no uppercase (git sha shape)
+            ("ABCDEF0123" * 4),                                # no lowercase
+            ("abcdefghij" * 4).replace("a", "A", 1),           # no digit
+            SECRET40[:39],                                      # 39
+            SECRET40 + "a",                                     # 41
+            f"pre.{SECRET40}", f"{SECRET40}.post",              # adjacent to .
+            LONG_ALARM, SSO_ROLE, "alarmops-rehearsal-" + LONG_RUN,
+            "AlarmOps-SQS-ApproximateNumberOfMessagesVisible-QueueB8Xyz123",
+            "AWSReservedSSO_AdministratorAccess_0123456789abcdef",
+            "arn:aws:iam::111111111111:role/AlarmOps-AlarmWriterRole-1ABCDEFGHIJKL",
+        )
+        for t in lookalikes:
+            with self.subTest(t):
+                self.assertEqual(self.human(t).strip(), t)
+
+    def test_data_path_is_unchanged_for_the_new_rule(self):
+        for t in (f"key {SECRET40} end", SECRET40, SECRET40_SLASH):
+            with self.subTest(t):
+                self.assertEqual(self.data(t).strip(), t)
+
+    def test_plain_basic_prose_is_not_masked(self):
+        for t in ("basic monitoring is enabled for this instance", "Basic monitoring enabled",
+                  "detailed monitoring vs basic ec2metrics"):
+            with self.subTest(t):
+                self.assertEqual(self.data(t).strip(), t)
+                self.assertEqual(self.human(t).strip(), t)
+
+    def test_authorization_header_schemes_are_still_masked(self):
+        for secret, text in (("dXNlcjpwYXNzd29yZA==", "Authorization: Basic dXNlcjpwYXNzd29yZA=="),
+                             ("dXNlcjpwYXNzd29yZA==", "authorization=basic dXNlcjpwYXNzd29yZA=="),
+                             ("abcDEF123xyz.tok", "Authorization: Bearer abcDEF123xyz.tok"),
+                             ("abcDEF123xyz.tok", '{"Authorization": "Bearer abcDEF123xyz.tok", "x": 1}'),
+                             ("abcDEF123xyz.tok", "Proxy-Authorization: Basic abcDEF123xyz.tok")):
+            for fn in (self.data, self.human):
+                with self.subTest(text, fn=fn.__name__):
+                    out = fn(text)
+                    self.assertNotIn(secret, out)
+                    self.assertIn("****", out)
+        self.assertIn('"x": 1', self.data('{"Authorization": "Bearer abcDEF123xyz.tok", "x": 1}'))
+
+    def test_bearer_keyword_value_is_still_masked(self):
+        self.assertNotIn("abcDEF123xyz", self.data("got Bearer abcDEF123xyz now"))
+
+    def test_url_path_is_kept_but_query_values_are_checked(self):
+        url = f"https://sqs.ap-northeast-2.amazonaws.com/111111111111/alarmops-rehearsal-{LONG_RUN}"
+        self.assertEqual(self.human(url).strip(), url)
+        sig = "9f8e7d6c5b4a39281716f5e4d3c2b1a09f8e7d6c5b4a39281716f5e4d3c2b1a0"
+        signed = f"{url}?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature={sig}"
+        out = self.human(signed)
+        self.assertNotIn(sig, out)
+        self.assertIn(url, out)
+        pct = "AbC%2Bdef%2Fghi0123456789jklmnopqrstuvwxyzABCDEFG"
+        self.assertNotIn(pct, self.human(f"{url}?X-Amz-Credential={pct}"))
+        self.assertEqual(self.human("https://example.com/a?b=1").strip(), "https://example.com/a?b=1")
+
+    def test_arn_words_are_still_skipped_whole(self):
+        arn = f"arn:aws:iam::111111111111:role/aws-reserved/sso.amazonaws.com/ap-northeast-2/{SSO_ROLE}"
+        self.assertEqual(self.human(arn).strip(), arn)
+
+
+
+FOREIGN = {"Namespace": "Customer", "tags": {}}
+
+
+class NameCollision(ReplicaBase):
+    """#161 item 6: never delete or overwrite an alarm with a probe/test name that this script did not create."""
+
+    def delete_calls_naming(self, name):
+        return [c for c in self.sb.calls() if c["op"] == "delete-alarms" and name in alarm_names_of(c)]
+
+    def assertUntouched(self, name):
+        st = self.state()
+        self.assertIn(name, st["alarms"], "the foreign alarm must still exist")
+        self.assertEqual(self.delete_calls_naming(name), [])
+        self.assertEqual([c for c in self.sb.calls() if c["op"] == "put-metric-alarm" and name in c["argv"]], [])
+
+    def test_foreign_alarm_with_a_test_name_aborts_before_anything_is_created(self):
+        for name in (TEST_ALARM, UNMANAGED, BRACKET_UNMANAGED):
+            with self.subTest(name):
+                self.setUp()
+                self.scenario(cw_preexisting_alarms={name: FOREIGN})
+                res = self.go()
+                self.assertEqual(res.code, 1, res.text)
+                self.assertIn("오류:", res.text)
+                self.assertIn(name, res.text)
+                self.assertIn("이 스크립트가 만든 것이 아니", res.text)
+                self.assertUntouched(name)
+                ops = self.ops()
+                self.assertNotIn("iam create-role", ops)
+                self.assertNotIn("cloudwatch put-metric-alarm", ops)
+
+    def test_lookup_uses_a_json_array(self):
+        self.scenario()
+        self.go()
+        looks = [c for c in self.sb.calls() if c["op"] == "describe-alarms" and "--alarm-names" in c["argv"]]
+        self.assertTrue(looks)
+        self.assertTrue(option(looks[0]["argv"], "--alarm-names").startswith('["'))
+
+    def test_composite_alarm_with_the_name_is_foreign(self):
+        self.scenario(cw_preexisting_alarms={UNMANAGED: {"composite": True}})
+        res = self.go()
+        self.assertEqual(res.code, 1, res.text)
+        self.assertUntouched(UNMANAGED)
+
+    def test_leftover_of_our_own_namespace_is_not_a_collision(self):
+        self.scenario(cw_preexisting_alarms={UNMANAGED: {"Namespace": "AlarmOpsRehearsal"}})
+        res = self.go()
+        self.assertEqual(res.code, 0, res.text)
+        self.assertCleanedUp()
+
+    def test_lookup_failure_aborts_without_creating(self):
+        self.scenario(fail_nth={"cloudwatch describe-alarms": 1})
+        res = self.go()
+        self.assertEqual(res.code, 1, res.text)
+        self.assertNotIn("iam create-role", self.ops())
+
+    def test_cleanup_only_skips_a_foreign_alarm(self):
+        self.scenario(cw_preexisting_alarms={UNMANAGED: FOREIGN, TEST_ALARM: {"Namespace": "AlarmOpsRehearsal"}})
+        res = self.go(extra_args=["--cleanup-only"])
+        self.assertEqual(res.code, 0, res.text)
+        st = self.state()
+        self.assertIn(UNMANAGED, st["alarms"])
+        self.assertNotIn(TEST_ALARM, st["alarms"])
+        self.assertIn("건너뜀(이 스크립트가 만든 알람이 아님)", res.text)
+        self.assertEqual(self.delete_calls_naming(UNMANAGED), [])
+
+    def test_probe_names_are_checked_too(self):
+        from test_replica_probe import PROBE_FLAG
+        name = "[AlarmOpsRehearsal] probe-null-unmanaged"
+        self.scenario(cw_preexisting_alarms={name: FOREIGN})
+        res = self.go(extra_args=[PROBE_FLAG])
+        self.assertEqual(res.code, 1, res.text)
+        self.assertIn(name, res.text)
+        self.assertUntouched(name)
+        self.assertNotIn("iam create-role", self.ops())
+
+
+class FollowUpNotes(ReplicaBase):
+    """#161 items 5, 7, 10: row names and note texts."""
+
+    def test_d_row_name_keeps_the_87_marker_when_it_is_a_prep_failure(self):
+        # put-metric-alarm calls: (a)=1 (b)=2 ALARM_U=3 -> (c)(d) become prep failures
+        self.scenario(fail_nth={"cloudwatch put-metric-alarm": 3})
+        res = self.go()
+        row = self.row(res, "d")
+        self.assertIn("(d) 태그 없는 알람 DeleteAlarms → 거부 (#87 미확인 항목)", row)
+        self.assertIn("준비 실패", row)
+
+    def test_d_row_name_is_the_same_in_the_normal_row(self):
+        self.scenario()
+        res = self.go()
+        self.assertIn("(d) 태그 없는 알람 DeleteAlarms → 거부 (#87 미확인 항목)", self.row(res, "d"))
+
+    def test_f_fail_note_asks_for_a_stack_update_first(self):
+        self.scenario(policy=OLD_POLICY)
+        res = self.go()
+        row = self.row(res, "f")
+        self.assertIn("스택 갱신 필요(D-63 이전 템플릿) — 갱신 후에도 FAIL 이면 정책 결함", row)
+        self.assertNotIn("보완 필요", row)
+
+    def test_g_error_note_differs_from_the_denied_note(self):
+        # put-metric-alarm calls: (a)=1 (b)=2 ALARM_U=3 (f)=4 bracket alarm=5 replica overwrite=6
+        self.scenario(fail_nth={"cloudwatch put-metric-alarm": 6})
+        err = self.info_row(self.go())
+        self.assertIn("ERROR(", err)
+        self.setUp()
+        self.scenario(cw_overwrite_unmanaged_denied=True)
+        denied = self.info_row(self.go())
+        self.assertIn("DENIED", denied)
+        self.assertNotIn("막힘", err)
+        self.assertIn("판정하지 못함(거부가 아닌 오류)", err)
+        self.assertNotIn("판정하지 못함", denied)
+        self.assertIn("덮어쓰기도 막힘", denied)
+
+
+class CanaryBNote(unittest.TestCase):
+    """#161 item 7: null variant + canary B DENIED means PutMetricAlarm evaluation ignores ResourceTag."""
+
+    def test_documented(self):
+        gl = (REPO / "docs" / "GO-LIVE.md").read_text(encoding="utf-8")
+        ct = (REPO / "infra" / "test" / "REHEARSAL-CONTRACT.md").read_text(encoding="utf-8")
+        for text in (gl, ct):
+            self.assertIn("PutMetricAlarm 평가에 ResourceTag 가 반영되지 않는 것으로 보임", text)
+
+
+class DocsFollowUps(unittest.TestCase):
+    def read(self, rel):
+        return (REPO / rel).read_text(encoding="utf-8")
+
+    def test_update_menu_name_is_identical_in_all_three_places(self):
+        label = "Replace existing template"
+        for rel in ("docs/GO-LIVE.md", "infra/customer-stack/README.md"):
+            text = self.read(rel)
+            self.assertIn(label, text, rel)
+            for old in ("현재 템플릿 바꾸기", "기존 템플릿 바꾸기"):
+                self.assertNotIn(old, text, (rel, old))
+        self.assertGreaterEqual(self.read("docs/GO-LIVE.md").count(label), 2)
+
+    def test_go_live_quotes_the_new_note_texts(self):
+        gl = self.read("docs/GO-LIVE.md")
+        self.assertIn("스택 갱신 필요(D-63 이전 템플릿) — 갱신 후에도 FAIL 이면 정책 결함", gl)
+        self.assertIn("판정하지 못함(거부가 아닌 오류)", gl)
+        self.assertNotIn("template.yaml CreateAlarmWithManagedByTag 보완 필요", gl)
+        self.assertIn("이 스크립트가 만든 것이 아니", gl)
+        self.assertIn("건너뜀(이 스크립트가 만든 알람이 아님)", gl)
+
+    def test_go_live_f_sentence_order(self):
+        gl = self.read("docs/GO-LIVE.md")
+        a = gl.index("(f)는 같은 이름에 `ManagedBy=AlarmOps` 요청 태그를 달아 덮어쓰기를 시도한다.")
+        b = gl.index("성공하면 FAIL이고")
+        c = gl.index("관리 시험 알람과 (g)용 알람은")
+        self.assertLess(a, b)
+        self.assertLess(b, c)
+
+    def test_contract_describes_two_masking_tiers(self):
+        ct = self.read("infra/test/REHEARSAL-CONTRACT.md")
+        self.assertIn("rh_mask_data", ct)
+        self.assertIn("aws_r", ct)
+        self.assertIn("정확히 40자", ct)
+        self.assertNotIn("모든 출력은 `common.sh`의 `rh_mask`(ExternalId + 자격증명 모양)를 거친다", ct)
+
+    def test_decisions_has_the_11_27_measurement(self):
+        d = self.read("docs/decisions/DECISIONS.md")
+        sec = d.split("### D-63", 1)[1]
+        for needle in ("install.sh", "(a)~(f)", "AccessDenied", "ALLOWED", "JSON 배열"):
+            self.assertIn(needle, sec, needle)
 
 class DataPaths(ReplicaBase):
     """Long mixed-case names must survive every script that parses aws_r output (#160 review)."""
