@@ -151,7 +151,7 @@ describe('404 parity: unknown and out-of-scope are the same bytes, never 403 (AP
       expect(res.status, `${r.method} ${path}`).toBe(404);
       tested.push(`${r.method} ${path}`);
     }
-    expect(tested).toHaveLength(47); /* Monitoring: +GET /resources/:id, +POST /resources/:id/monitoring. #69: +8 wizard routes with an id, +GET/PATCH /users/:id. #62: +11 onboarding routes with an id */ // +contacts/:id/reveal (D-35), +legal-hold PUT/DELETE, purge-log, export.csv (D-45), digests/latest (D-46), + paging-health, the four Responders routes and the four status/offboarding routes (D-43)
+    expect(tested).toHaveLength(51); /* Responder templates: +PATCH and POST preview of /responder-templates/:id, D-64: +POST preview and PUT of /customers/:id/responders/template. Monitoring: +GET /resources/:id, +POST /resources/:id/monitoring. #69: +8 wizard routes with an id, +GET/PATCH /users/:id. #62: +11 onboarding routes with an id */ // +contacts/:id/reveal (D-35), +legal-hold PUT/DELETE, purge-log, export.csv (D-45), digests/latest (D-46), + paging-health, the four Responders routes and the four status/offboarding routes (D-43)
     // the scope tree is the only source of slugs/ids: nothing of Hanbit's is in any list response either
     for (const path of ['/scope-tree', '/incidents']) expect(JSON.stringify((await w.call(USERS.yuna, 'GET', path)).body)).not.toMatch(/hanbit|Hanbit|svc_web|shop/);
   });

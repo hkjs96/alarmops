@@ -6,8 +6,8 @@ import { MemoryTickStore, incidentMute, type DigestData, type PurgeLogEntry, typ
 import { inScope, nodeVisible, seesCustomer, type Role, type ScopeFilter } from './auth.js';
 import { emailDomain, normalizeEmail } from './usersApi.js';
 import { isFreeMail } from './onboardingApi.js';
-import { planTemplateChange } from './templatesApi.js';
-import type { ResponderTemplateView, TemplateCreate, TemplateImpactInput, TemplateUpdate, TemplateUpdateOutcome } from './repo.js';
+import { attachBlocking, planTemplateAttach, planTemplateChange, templateBlocking } from './templatesApi.js';
+import type { ResponderTemplateView, TemplateAttachInput, TemplateAttachOutcome, TemplateAttachWrite, TemplateCreate, TemplateImpactInput, TemplatePaging, TemplateRef, TemplateUpdate, TemplateUpdateOutcome } from './repo.js';
 import type { UserInfo } from './audience.js';
 import type { AlarmStateValue, ManagedAlarmFilter, ManagedAlarmRecord, MonitoringCursor, MonitoringOutside, MonitoringPage, MonitoringStateValue, ResourceFilter, ResourceRecord, ValueSourceValue } from './repo.js';
 import type { CustomerProfile, CustomerProfilePatch, CustomerUpdateOutcome, OrgWriteOutcome, ProjectRecord, ServiceRecord, BindGoogleOutcome, EnrolOutcome, NewUser, UserFilter, UserPatch, UserRecord, UserWriteOutcome } from './repo.js';
@@ -910,6 +910,7 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     const t = this.templates.get(id);
     return t ? this.templateView(t) : null;
   }
+  private templatePaging(cid: string): TemplatePaging { return { configs: this.configsOf(cid), world: this.worldOf(cid), slackVerified: this.verifiedSlack.has(cid) }; }
   private impactInput(t: { id: string; name: string; version: number; members: string[] }, proposed: string[]): TemplateImpactInput {
     const ids = [...new Set([...t.members, ...proposed])];
     const names: Record<string, string> = {};
@@ -920,6 +921,7 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
         const src = this.responderSource.get(`${cid}|${r.contactId}`);
         return { contactId: r.contactId, source: src?.source ?? ('DIRECT' as const), templateId: src?.templateId ?? null };
       }),
+      paging: this.templatePaging(cid),
       namedSteps: this.configs.filter((c) => c.customerId === cid).flatMap((c) => c.steps.filter((s) => s.targetType === 'PERSON' && s.targetId && ids.includes(s.targetId)).map((s) => ({ contactId: s.targetId!, stepIndex: s.index + 1 }))),
     }));
     return { templateId: t.id, version: t.version, name: t.name, members: [...t.members], names, customers };
@@ -945,6 +947,8 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     if (!this.staffOk(u.proposal.members)) return 'BAD_MEMBER';
     const plan = planTemplateChange(this.impactInput(t, u.proposal.members), u.proposal);
     if (plan.previewHash !== u.previewHash) return 'STALE';
+    const blocking = templateBlocking(this.impactInput(t, u.proposal.members), plan, u.at);
+    if (blocking.length) return { blocking };
     let affected = 0;
     for (const c of plan.customers) {
       const joins = c.effects.filter((e) => e.kind === 'JOINS').map((e) => e.contactId);
@@ -970,6 +974,65 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     this.audits.push({ ...audit, targetId: t.id, before, after: { name: t.name, members: [...t.members].sort(), version: t.version, added: plan.added, removed: plan.removed } });
     this.bulkChanges.push({ kind: 'TEMPLATE_UPDATE', actorId: u.actorId, params: { templateId: t.id, added: plan.added, removed: plan.removed }, preview: { customers: plan.customers.map((c) => ({ id: c.id, effects: c.effects })), totals: plan.totals }, previewHash: plan.previewHash, at: u.at });
     return { view: this.templateView(t), affected };
+  }
+  // ── one customer's template (D-64) ──
+  private templateRef(id: string | null): TemplateRef | null {
+    const t = id ? this.templates.get(id) : undefined;
+    return t ? { id: t.id, name: t.name, version: t.version, members: [...t.members] } : null;
+  }
+  private attachInput(customerId: string, from: TemplateRef | null, to: TemplateRef | null): TemplateAttachInput {
+    const ids = [...new Set([...(from?.members ?? []), ...(to?.members ?? [])])];
+    const names: Record<string, string> = {};
+    for (const id of ids) names[id] = this.contacts.get(id)?.name ?? id;
+    const c = this.customers.get(customerId)!;
+    return {
+      customer: {
+        id: customerId, name: c.name, status: (c.status ?? 'ACTIVE') as 'ACTIVE' | 'SUSPENDED' | 'TERMINATED', templateId: this.customerTemplate.get(customerId) ?? null,
+        version: this.respondersVersion.get(customerId) ?? 0,
+        responders: this.responders.filter((r) => r.customerId === customerId).map((r) => {
+          const src = this.responderSource.get(`${customerId}|${r.contactId}`);
+          return { contactId: r.contactId, source: src?.source ?? ('DIRECT' as const), templateId: src?.templateId ?? null };
+        }),
+        namedSteps: this.configs.filter((x) => x.customerId === customerId).flatMap((x) => x.steps.filter((s) => s.targetType === 'PERSON' && s.targetId && ids.includes(s.targetId)).map((s) => ({ contactId: s.targetId!, stepIndex: s.index + 1 }))),
+        paging: this.templatePaging(customerId),
+      },
+      from, to, names,
+    };
+  }
+  async customerTemplateAttachInput(customerId: string, toTemplateId: string | null): Promise<TemplateAttachInput | 'NO_TEMPLATE' | null> {
+    if (!this.customers.has(customerId)) return null;
+    if (toTemplateId !== null && !this.templates.has(toTemplateId)) return 'NO_TEMPLATE';
+    return this.attachInput(customerId, this.templateRef(this.customerTemplate.get(customerId) ?? null), this.templateRef(toTemplateId));
+  }
+  async setCustomerTemplate(w: TemplateAttachWrite, audit: AuditInput): Promise<TemplateAttachOutcome> {
+    if (audit.customerId !== w.customerId) throw new Error('setCustomerTemplate: audit must be for the same customer');
+    const cus = this.customers.get(w.customerId);
+    if (!cus) return 'NOT_FOUND';
+    if (w.toTemplateId !== null && !this.templates.has(w.toTemplateId)) return 'NO_TEMPLATE';
+    if ((cus.status ?? 'ACTIVE') === 'TERMINATED') return 'TERMINATED';
+    if ((this.respondersVersion.get(w.customerId) ?? 0) !== w.expectedVersion) return 'CONFLICT';
+    const from = this.templateRef(this.customerTemplate.get(w.customerId) ?? null);
+    const to = this.templateRef(w.toTemplateId);
+    const input = this.attachInput(w.customerId, from, to);
+    const plan = planTemplateAttach(input);
+    if (plan.previewHash !== w.previewHash) return 'STALE';
+    const blocking = attachBlocking(input, plan, w.at);
+    if (blocking.length) return { blocking };
+    for (const id of plan.leaves) {
+      this.responders = this.responders.filter((r) => !(r.customerId === w.customerId && r.contactId === id));
+      this.responderSource.delete(`${w.customerId}|${id}`);
+    }
+    for (const id of plan.retarget) this.responderSource.set(`${w.customerId}|${id}`, { source: 'TEMPLATE', templateId: to!.id, templateName: to!.name });
+    for (const id of plan.joins) {
+      const order = Math.max(-1, ...this.responders.filter((r) => r.customerId === w.customerId).map((r) => r.order ?? 0)) + 1;
+      this.responders.push({ customerId: w.customerId, contactId: id, role: 'PAGEABLE', order });
+      this.responderSource.set(`${w.customerId}|${id}`, { source: 'TEMPLATE', templateId: to!.id, templateName: to!.name });
+    }
+    if (w.toTemplateId === null) this.customerTemplate.delete(w.customerId); else this.customerTemplate.set(w.customerId, w.toTemplateId);
+    const version = w.expectedVersion + 1;
+    this.respondersVersion.set(w.customerId, version);
+    this.audits.push({ ...audit, before: { templateId: from?.id ?? null }, after: { templateId: to?.id ?? null, added: plan.joins, removed: plan.leaves } });
+    return { version, templateId: w.toTemplateId, joins: plan.joins.length, leaves: plan.leaves.length };
   }
   async rotationsWorld(scope: ScopeFilter): Promise<RotationsWorld> {
     const rotations = [...this.rotations.values()].filter((r) => r.scope === 'MSP' || (r.customerId != null && seesCustomer(scope, r.customerId))).map((r) => structuredClone(r));

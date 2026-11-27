@@ -152,7 +152,11 @@ export class SqlTickStore implements TickRepository, RetentionRepository {
   }
 
   async pagingContext(customerId: string): Promise<{ configs: PagingConfig[]; world: PagingWorld }> {
-    const q = this.sql;
+    return this.pagingContextVia(this.sql, customerId);
+  }
+
+  /** `pagingContext` read through `q` (a transaction when the caller must see its own locked state). */
+  protected async pagingContextVia(q: SqlExecutor, customerId: string): Promise<{ configs: PagingConfig[]; world: PagingWorld }> {
     const [cfgRows, contactRows, responderRows, rotationRows] = await Promise.all([
       q.query(
         `SELECT c."id", c."customerId", c."scopeType", c."scopeId", c."style", c."plan", c."edited", c."repeatCount", c."renotifyAfterAckSec", c."version",

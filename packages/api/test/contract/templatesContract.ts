@@ -290,4 +290,232 @@ export function templatesContract(make: MakeFixture<Repo>): void {
       expect(IDS((await respondersOf('cus_mirae')).people)).toEqual(['ct_seojun', 'ct_yuna']);
     });
   });
+
+  // ───────────────────────────── D-64: attach / detach / switch and the blocking rules ─────────────────────────────
+
+  const N = 'rt_night';
+  /** A second template, a customer without a template ("Fresh Co"), and "Solo Co": only template people, ALL_RESPONDERS by SMS, so removing them cuts it off. */
+  const d64 = (seed: MemoryApiStore): void => {
+    seed.templates.set(N, { id: N, name: 'Night desk', version: 0, updatedBy: 'usr_haeun', updatedAt: new Date('2026-11-02T00:00:00Z'), members: ['ct_haeun', 'ct_minjae'] });
+    seed.customers.set('cus_fresh', { id: 'cus_fresh', name: 'Fresh Co', slug: 'fresh' });
+    seed.customers.set('cus_solo', { id: 'cus_solo', name: 'Solo Co', slug: 'solo' });
+    seed.customerTemplate.set('cus_solo', T);
+    const tpl = { source: 'TEMPLATE' as const, templateId: T, templateName: 'Infra core' };
+    seed.responders.push({ customerId: 'cus_solo', contactId: 'ct_haeun', role: 'PAGEABLE', order: 0 }, { customerId: 'cus_solo', contactId: 'ct_junho', role: 'PAGEABLE', order: 1 });
+    seed.responderSource.set('cus_solo|ct_haeun', tpl);
+    seed.responderSource.set('cus_solo|ct_junho', tpl);
+    seed.configs.push(config('cus_solo', [step(0, 0, 'ALL_RESPONDERS', null, ['SMS'])]));
+    // Minjae has no verified phone: joining does not make Solo Co reachable
+    seed.contacts.set('ct_minjae', { ...seed.contacts.get('ct_minjae')!, phoneVerifiedAt: null });
+  };
+  const cpath = (cid: string) => `/customers/${cid}/responders/template`;
+  const cpreview = (cid: string, templateId: string | null, auth: AuthContext = ADMIN) => w.call(auth, 'POST', `${cpath(cid)}/preview`, { body: { templateId } });
+  const put = async (cid: string, templateId: string | null, version?: number, extra: Record<string, unknown> = {}) => {
+    const p = body(await cpreview(cid, templateId));
+    return w.call(ADMIN, 'PUT', cpath(cid), { body: { templateId, previewHash: p.previewHash, ...extra }, headers: version === undefined ? {} : im(version) });
+  };
+  const rows = async (cid: string) => (await respondersOf(cid)).staff.map((s: any) => [s.contactId, s.source, s.templateId ?? null]).sort();
+
+  describe('D-64 attach / detach / switch a customer\'s template', () => {
+    it('attach: the template people join as TEMPLATE rows (appended), the Responders version +1, one customer audit row with ids only', async () => {
+      w = await tworld(make, d64);
+      const pr = await cpreview('cus_fresh', T);
+      expect(pr.status).toBe(200);
+      expect(body(pr)).toMatchObject({ customerId: 'cus_fresh', version: 0, from: null, to: { id: T, name: 'Infra core' }, totals: { joins: 2, leaves: 0, warnings: 0 }, blocking: [] });
+      expect(body(pr).effects.map((e: any) => [e.kind, e.contactId])).toEqual([['JOINS', 'ct_haeun'], ['JOINS', 'ct_junho']]);
+      expect((await w.fx.audits()).filter((a) => a.customerId === 'cus_fresh')).toHaveLength(0); // the preview wrote nothing
+      const r = await put('cus_fresh', T, 0);
+      expect(r.status).toBe(200);
+      expect(r.headers.etag).toBe('"1"');
+      expect(body(r)).toEqual({ customerId: 'cus_fresh', templateId: T, version: 1, joins: 2, leaves: 0 });
+      expect(await rows('cus_fresh')).toEqual([['ct_haeun', 'TEMPLATE', T], ['ct_junho', 'TEMPLATE', T]]);
+      const got = await respondersOf('cus_fresh');
+      expect([got.templateId, got.version]).toEqual([T, 1]);
+      expect(body(await w.call(ADMIN, 'GET', '/responder-templates'))[0].customers.map((c: any) => c.id)).toContain('cus_fresh');
+      const a = (await w.fx.audits()).filter((x) => x.customerId === 'cus_fresh');
+      expect(a).toHaveLength(1);
+      expect(a[0]).toMatchObject({ action: 'responders.template.attach', actorId: 'usr_minjae', targetType: 'Responders', before: { templateId: null }, after: { templateId: T, added: ['ct_haeun', 'ct_junho'], removed: [] } });
+      expect(JSON.stringify(a)).not.toContain('@example.test');
+    });
+
+    it('detach: only the rows of that template go; DIRECT rows stay (STAYS_DIRECT), other customers do not move', async () => {
+      w = await tworld(make, d64);
+      const others = JSON.stringify(await respondersOf('cus_mirae'));
+      const pr = body(await cpreview('cus_hanbit', null));
+      expect(pr).toMatchObject({ from: { id: T }, to: null, totals: { joins: 0, leaves: 1 } });
+      expect(pr.effects.map((e: any) => [e.kind, e.contactId])).toEqual([['LEAVES', 'ct_haeun'], ['STAYS_DIRECT', 'ct_junho']]);
+      const r = await put('cus_hanbit', null, 0);
+      expect([r.status, body(r)]).toEqual([200, { customerId: 'cus_hanbit', templateId: null, version: 1, joins: 0, leaves: 1 }]);
+      expect(await rows('cus_hanbit')).toEqual([['ct_junho', 'DIRECT', null], ['ct_minjae', 'DIRECT', null]]);
+      expect((await respondersOf('cus_hanbit')).templateId).toBeNull();
+      expect(JSON.stringify(await respondersOf('cus_mirae'))).toBe(others);
+      expect((await w.fx.audits()).find((a) => a.action === 'responders.template.detach')).toMatchObject({ customerId: 'cus_hanbit', before: { templateId: T }, after: { templateId: null, added: [], removed: ['ct_haeun'] } });
+      expect(body(await w.call(ADMIN, 'GET', '/responder-templates'))[0].customers.map((c: any) => c.id)).not.toContain('cus_hanbit');
+    });
+
+    it('attach over a DIRECT row: the person stays DIRECT (ALREADY_DIRECT) and no second row appears', async () => {
+      w = await tworld(make, d64);
+      await put('cus_hanbit', null, 0);
+      const pr = body(await cpreview('cus_hanbit', N)); // Night = Haeun + Minjae; Minjae is a direct row
+      expect(pr.effects.map((e: any) => [e.kind, e.contactId])).toEqual([['JOINS', 'ct_haeun'], ['ALREADY_DIRECT', 'ct_minjae']]);
+      expect((await put('cus_hanbit', N, 1)).status).toBe(200);
+      expect(await rows('cus_hanbit')).toEqual([['ct_haeun', 'TEMPLATE', N], ['ct_junho', 'DIRECT', null], ['ct_minjae', 'DIRECT', null]]);
+    });
+
+    it('switch = detach + attach in one write: people in both keep their row (moved to the new template), the others leave or join; STEP_NAMES warns', async () => {
+      w = await tworld(make, d64);
+      const pr = body(await cpreview('cus_mirae', N)); // from Infra core (Haeun, Junho) to Night (Haeun, Minjae)
+      expect(pr).toMatchObject({ from: { id: T }, to: { id: N }, totals: { joins: 1, leaves: 1, warnings: 1 } });
+      expect(pr.effects.map((e: any) => [e.kind, e.contactId, e.stepIndex])).toEqual([['JOINS', 'ct_minjae', undefined], ['LEAVES', 'ct_junho', undefined], ['STEP_NAMES', 'ct_junho', 1]]);
+      const r = await put('cus_mirae', N, 0);
+      expect([r.status, body(r).version]).toEqual([200, 1]);
+      expect(await rows('cus_mirae')).toEqual([['ct_haeun', 'TEMPLATE', N], ['ct_minjae', 'TEMPLATE', N]]);
+      expect((await respondersOf('cus_mirae')).people.map((p: any) => p.contactId).sort()).toEqual(['ct_seojun', 'ct_yuna']); // the customer's own people are untouched
+      expect((await w.fx.audits()).find((a) => a.action === 'responders.template.switch')).toMatchObject({ customerId: 'cus_mirae', before: { templateId: T }, after: { templateId: N, added: ['ct_minjae'], removed: ['ct_junho'] } });
+      // switching back works the same way
+      expect((await put('cus_mirae', T, 1)).status).toBe(200);
+      expect(await rows('cus_mirae')).toEqual([['ct_haeun', 'TEMPLATE', T], ['ct_junho', 'TEMPLATE', T]]);
+    });
+
+    it('same template again (or none to none) is a 200 without a write: no audit, no version', async () => {
+      w = await tworld(make, d64);
+      const n = (await w.fx.audits()).length;
+      const same = await put('cus_mirae', T, 0);
+      expect([same.status, body(same)]).toEqual([200, { customerId: 'cus_mirae', templateId: T, version: 0, joins: 0, leaves: 0 }]);
+      const none = await put('cus_fresh', null, 0);
+      expect([none.status, body(none).version]).toEqual([200, 0]);
+      expect((await w.fx.audits()).length).toBe(n);
+    });
+
+    it('If-Match: missing 400, stale 409 VERSION_CONFLICT with currentVersion; previewHash: missing 400, another change\'s hash or a changed list 409 PREVIEW_STALE; nothing written', async () => {
+      w = await tworld(make, d64);
+      const p = body(await cpreview('cus_fresh', T)).previewHash;
+      const call = (hash: unknown, headers: Record<string, string>) => w.call(ADMIN, 'PUT', cpath('cus_fresh'), { body: { templateId: T, previewHash: hash }, headers });
+      expect((await call(p, {})).status).toBe(400);
+      expect((await call(undefined, im(0))).status).toBe(400);
+      expect((await call('nope', im(0))).status).toBe(400);
+      const stale = await call(p, im(3));
+      expect([stale.status, body(stale).error.code, body(stale).error.details.currentVersion]).toEqual([409, 'VERSION_CONFLICT', 0]);
+      const other = await call(body(await cpreview('cus_fresh', N)).previewHash, im(0));
+      expect([other.status, body(other).error.code]).toEqual([409, 'PREVIEW_STALE']);
+      // preview, then the customer gets Junho as a direct row: what the save would do changed
+      await w.call(ADMIN, 'POST', '/customers/cus_fresh/responders', { body: { contactId: 'ct_junho' }, headers: im(0) });
+      const changed = await call(p, im(1));
+      expect([changed.status, body(changed).error.code]).toEqual([409, 'PREVIEW_STALE']);
+      expect((await respondersOf('cus_fresh')).templateId).toBeNull();
+      expect((await w.fx.audits()).filter((a) => a.customerId === 'cus_fresh' && a.action.startsWith('responders.template'))).toHaveLength(0);
+      expect((await put('cus_fresh', T, 1)).status).toBe(200); // a fresh preview goes through (Junho stays DIRECT)
+      expect(await rows('cus_fresh')).toEqual([['ct_haeun', 'TEMPLATE', T], ['ct_junho', 'DIRECT', null]]);
+    });
+
+    it('TERMINATED customer: 409 CUSTOMER_TERMINATED on preview and save, nothing changes', async () => {
+      w = await tworld(make, d64);
+      const r = await cpreview('cus_old', null);
+      expect([r.status, body(r).error.code]).toEqual([409, 'CUSTOMER_TERMINATED']);
+      const s = await w.call(ADMIN, 'PUT', cpath('cus_old'), { body: { templateId: null, previewHash: 'a'.repeat(64) }, headers: im(0) });
+      expect([s.status, body(s).error.code]).toEqual([409, 'CUSTOMER_TERMINATED']);
+      expect((await w.fx.audits()).filter((a) => a.customerId === 'cus_old')).toHaveLength(0);
+      expect((await respondersOf('cus_old')).templateId).toBe(T);
+    });
+
+    it('who may: portal 404, anonymous 401, narrowed staff 403 FORBIDDEN, VIEWER/OPERATOR 403 ROLE_REQUIRED (after the 404 for unknown customers); another tenant\'s portal user gets 404', async () => {
+      w = await tworld(make, d64);
+      for (const [method, path] of [['POST', `${cpath('cus_mirae')}/preview`], ['PUT', cpath('cus_mirae')]] as const) {
+        const b = { templateId: null, previewHash: 'a'.repeat(64) };
+        for (const auth of [USERS.yuna, USERS.dohyun]) expect((await w.call(auth, method, path, { body: b, headers: im(0) })).status).toBe(404);
+        expect((await w.call(null, method, path, { body: b, headers: im(0) })).status).toBe(401);
+        const narrowed = await w.call({ ...ADMIN, customerIds: ['cus_mirae'] }, method, path, { body: b, headers: im(0) });
+        expect([narrowed.status, body(narrowed).error.code]).toEqual([403, 'FORBIDDEN']);
+        for (const auth of [USERS.viewer, USERS.haeun]) {
+          const r = await w.call(auth, method, path, { body: b, headers: im(0) });
+          expect([r.status, body(r).error.code]).toEqual([403, 'ROLE_REQUIRED']);
+          expect((await w.call(auth, method, path.replace('cus_mirae', 'cus_nope'), { body: b, headers: im(0) })).status).toBe(404);
+        }
+      }
+      expect((await w.fx.audits()).filter((a) => a.action.startsWith('responders.template'))).toHaveLength(0);
+      expect((await respondersOf('cus_mirae')).templateId).toBe(T);
+    });
+
+    it('body: templateId is required (null is a value), unknown template and unknown fields are 400, other tenants stay untouched', async () => {
+      w = await tworld(make, d64);
+      for (const b of [{}, { templateId: 5 }, { templateId: '' }, { templateId: 'rt_nope' }, { templateId: T, customerId: 'cus_hanbit' }, ['x']]) {
+        expect((await w.call(ADMIN, 'POST', `${cpath('cus_fresh')}/preview`, { body: b })).status).toBe(400);
+      }
+      const before = JSON.stringify(await respondersOf('cus_hanbit'));
+      const p = body(await cpreview('cus_fresh', T)).previewHash;
+      expect((await w.call(ADMIN, 'PUT', cpath('cus_fresh'), { body: { templateId: T, previewHash: p, customerId: 'cus_hanbit' }, headers: im(0) })).status).toBe(400);
+      expect((await put('cus_fresh', T, 0)).status).toBe(200);
+      expect(JSON.stringify(await respondersOf('cus_hanbit'))).toBe(before);
+      expect((await w.fx.audits()).filter((a) => a.action.startsWith('responders.template')).every((a) => a.customerId === 'cus_fresh')).toBe(true);
+    });
+  });
+
+  describe('D-64 changes that cut a customer off are refused (no override)', () => {
+    const patchBody = async (members: string[]) => ({ members, previewHash: body(await preview(members)).previewHash });
+
+    it('the PATCH preview reports it in blocking; the PATCH is 409 WOULD_BE_UNREACHABLE with the customer ids, even with ?confirmUnreachable=true; nothing is written', async () => {
+      w = await tworld(make, d64);
+      const pr = body(await preview(['ct_minjae'])); // everybody leaves, Minjae (unverified phone) joins
+      expect(pr.blocking).toEqual([{ customerId: 'cus_solo', reason: 'UNREACHABLE' }]); // Mirae and Hanbit have no call order yet: already UNREACHABLE, not made so
+      expect(body(await preview(['ct_haeun', 'ct_junho', 'ct_minjae'])).blocking).toEqual([]);
+      for (const query of [undefined, { confirmUnreachable: 'true' }]) {
+        const r = await w.call(ADMIN, 'PATCH', `/responder-templates/${T}`, { body: await patchBody(['ct_minjae']), headers: im(0), query });
+        expect([r.status, body(r).error.code, body(r).error.details.customerIds]).toEqual([409, 'WOULD_BE_UNREACHABLE', ['cus_solo']]);
+      }
+      expect(IDS((await respondersOf('cus_solo')).staff)).toEqual(['ct_haeun', 'ct_junho']);
+      expect(body(await w.call(ADMIN, 'GET', '/responder-templates'))[0].version).toBe(0);
+      expect((await w.fx.audits()).filter((a) => a.targetType === 'ResponderTemplate')).toHaveLength(0);
+      // a change that leaves a reachable person is fine
+      const fine = await w.call(ADMIN, 'PATCH', `/responder-templates/${T}`, { body: await patchBody(['ct_haeun', 'ct_minjae']), headers: im(0) });
+      expect(fine.status).toBe(200);
+    });
+
+    it('detach is refused the same way; a switch that keeps a reachable person is allowed', async () => {
+      w = await tworld(make, d64);
+      expect(body(await cpreview('cus_solo', null)).blocking).toEqual([{ customerId: 'cus_solo', reason: 'UNREACHABLE' }]);
+      const detach = await put('cus_solo', null, 0);
+      expect([detach.status, body(detach).error.code, body(detach).error.details.customerIds]).toEqual([409, 'WOULD_BE_UNREACHABLE', ['cus_solo']]);
+      const sw = await put('cus_solo', N, 0); // Night = Haeun (stays) + Minjae: Haeun keeps the line open
+      expect(sw.status).toBe(200);
+      expect((await respondersOf('cus_solo')).templateId).toBe(N);
+    });
+
+    it('switch to a template whose people cannot be reached is refused and writes nothing', async () => {
+      w = await tworld(make, (seed) => { d64(seed); seed.templates.set('rt_minjae', { id: 'rt_minjae', name: 'Only Minjae', version: 0, updatedBy: null, updatedAt: new Date('2026-11-03T00:00:00Z'), members: ['ct_minjae'] }); });
+      expect(body(await cpreview('cus_solo', 'rt_minjae')).blocking).toEqual([{ customerId: 'cus_solo', reason: 'UNREACHABLE' }]);
+      const r = await put('cus_solo', 'rt_minjae', 0);
+      expect([r.status, body(r).error.code]).toEqual([409, 'WOULD_BE_UNREACHABLE']);
+      expect(await rows('cus_solo')).toEqual([['ct_haeun', 'TEMPLATE', T], ['ct_junho', 'TEMPLATE', T]]);
+      expect((await respondersOf('cus_solo')).version).toBe(0);
+      expect((await w.fx.audits()).filter((a) => a.customerId === 'cus_solo')).toHaveLength(0);
+    });
+
+    it('D-38: a change that newly pushes ALL_RESPONDERS over 20 people is refused 422 RESPONDER_LIMIT_EXCEEDED (also in blocking)', async () => {
+      const crowd = Array.from({ length: 21 }, (_, i) => `ct_crowd${i}`);
+      w = await tworld(make, (seed) => {
+        d64(seed);
+        for (const id of crowd) seed.contacts.set(id, { ...seed.contacts.get('ct_haeun')!, id, name: `Crowd ${id}`, email: `${id}@example.test`, phone: '+821000000099', slackUserId: `U_${id}` });
+        seed.templates.set('rt_crowd', { id: 'rt_crowd', name: 'Crowd', version: 0, updatedBy: null, updatedAt: new Date('2026-11-03T00:00:00Z'), members: crowd });
+        seed.configs.push(config('cus_fresh', [step(0, 0, 'ALL_RESPONDERS', null, ['SMS'])]));
+        seed.responders.push({ customerId: 'cus_fresh', contactId: 'ct_haeun', role: 'PAGEABLE', order: 0 });
+      });
+      expect(body(await cpreview('cus_fresh', 'rt_crowd')).blocking).toEqual([{ customerId: 'cus_fresh', reason: 'RESPONDER_LIMIT_EXCEEDED' }]);
+      const r = await put('cus_fresh', 'rt_crowd', 0);
+      expect([r.status, body(r).error.code, body(r).error.details.customerIds]).toEqual([422, 'RESPONDER_LIMIT_EXCEEDED', ['cus_fresh']]);
+      expect(IDS((await respondersOf('cus_fresh')).staff)).toEqual(['ct_haeun']);
+    });
+
+    it('a busy database (deadlock, serialization failure) is a retryable 503 BUSY with Retry-After, on PATCH and on attach/detach', async () => {
+      w = await tworld(make, d64);
+      const a = await put('cus_fresh', T, 0);
+      const p = await save(['ct_haeun']);
+      expect([a.status, p.status]).toEqual([200, 200]); // sanity: both work before the stores report "busy"
+      const repo = w.fx.repo as unknown as { setCustomerTemplate: () => Promise<unknown>; updateResponderTemplate: () => Promise<unknown> };
+      repo.setCustomerTemplate = async () => 'BUSY';
+      repo.updateResponderTemplate = async () => 'BUSY';
+      const a2 = await put('cus_hanbit', null, 0);
+      const p2 = await w.call(ADMIN, 'PATCH', `/responder-templates/${T}`, { body: { members: ['ct_haeun', 'ct_minjae'], previewHash: body(await preview(['ct_haeun', 'ct_minjae'])).previewHash }, headers: im(1) });
+      for (const r of [a2, p2]) expect([r.status, body(r).error.code, r.headers['retry-after']]).toEqual([503, 'BUSY', '1']);
+    });
+  });
 }

@@ -19,7 +19,7 @@ import { listContacts, createContact, patchContact, deleteContact, verifyContact
 import { createProject, createService, getCustomer, listCustomers, listProjects, listServices, patchCustomer, patchProject, patchService } from './orgApi.js';
 import { getResource, listManagedAlarms, listResources, postMonitoring } from './monitoringApi.js';
 import { createUser, getUser, listUsers, patchUser } from './usersApi.js';
-import { createTemplate, listTemplates, patchTemplate, previewTemplate } from './templatesApi.js';
+import { createTemplate, listTemplates, patchTemplate, previewCustomerTemplate, previewTemplate, putCustomerTemplate } from './templatesApi.js';
 import { deleteResponder, getMe, getOncallNow, getPagingHealth, getResponders, listRotations, listStaff, patchResponder, postResponder } from './peopleApi.js';
 
 export interface ApiDeps {
@@ -82,6 +82,9 @@ export const ROUTES: Route[] = [
   route('GET', '/customers/:id/paging-health', (r, d, p) => getPagingHealth(r, d, p[0]!)),
   route('GET', '/customers/:id/responders', (r, d, p) => getResponders(r, d, p[0]!)),
   route('POST', '/customers/:id/responders', (r, d, p) => postResponder(r, d, p[0]!)),
+  // D-64: attach / detach / switch the customer's Responder template. The preview changes nothing (its body is not kept).
+  route('POST', '/customers/:id/responders/template/preview', (r, d, p) => previewCustomerTemplate(r, d, p[0]!), () => false),
+  route('PUT', '/customers/:id/responders/template', (r, d, p) => putCustomerTemplate(r, d, p[0]!)),
   route('PATCH', '/customers/:id/responders/:contactId', (r, d, p) => patchResponder(r, d, p[0]!, p[1]!)),
   route('DELETE', '/customers/:id/responders/:contactId', (r, d, p) => deleteResponder(r, d, p[0]!, p[1]!)),
   route('GET', '/customers/:id/status', (r, d, p) => getCustomerStatus(r, d, p[0]!)),

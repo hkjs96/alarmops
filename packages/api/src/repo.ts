@@ -167,8 +167,15 @@ export interface TemplateImpactInput {
     responders: Array<{ contactId: string; source: ResponderSourceKind; templateId: string | null }>;
     /** PERSON steps of the customer's call orders that name one of the template people; `stepIndex` is 1-based. */
     namedSteps: Array<{ contactId: string; stepIndex: number }>;
+    /** What the call-order health and the send limits (D-64) are computed from; the store fills it. */
+    paging?: TemplatePaging;
   }>;
 }
+/** The inputs of `pagingHealth` / `sendCapViolation` for one customer. */
+export interface TemplatePaging { configs: PagingConfig[]; world: PagingWorld; slackVerified: boolean }
+/** D-64: a change that is refused. UNREACHABLE → 409 WOULD_BE_UNREACHABLE; the other two → 422 (D-38). */
+export type TemplateBlockReason = 'UNREACHABLE' | 'RESPONDER_LIMIT_EXCEEDED' | 'SEND_CAP_EXCEEDED';
+export interface TemplateBlocking { customerId: string; reason: TemplateBlockReason }
 export interface TemplateEffect { kind: 'JOINS' | 'LEAVES' | 'STAYS_DIRECT' | 'ALREADY_DIRECT' | 'STEP_NAMES'; contactId: string; name: string; stepIndex?: number }
 export interface TemplatePlan {
   customers: Array<{ id: string; name: string; effects: TemplateEffect[] }>;
@@ -178,7 +185,29 @@ export interface TemplatePlan {
 export interface TemplateCreate { name: string; members: string[]; actorId: string; at: Date }
 export interface TemplateUpdate { id: string; expectedVersion: number; proposal: TemplateProposal; previewHash: string; actorId: string; at: Date }
 /** 'CONFLICT': version moved. 'STALE': the preview hash no longer matches what would happen now. */
-export type TemplateUpdateOutcome = { view: ResponderTemplateView; affected: number } | 'NOT_FOUND' | 'CONFLICT' | 'STALE' | 'NAME_EXISTS' | 'BAD_MEMBER';
+export type TemplateUpdateOutcome = { view: ResponderTemplateView; affected: number } | { blocking: TemplateBlocking[] } | 'NOT_FOUND' | 'CONFLICT' | 'STALE' | 'NAME_EXISTS' | 'BAD_MEMBER' | 'BUSY';
+
+/** Attach / detach / switch the template of ONE customer (D-64). `from`/`to`: null = no template. */
+export interface TemplateRef { id: string; name: string; version: number; members: string[] }
+export interface TemplateAttachInput {
+  customer: {
+    id: string; name: string; status: 'ACTIVE' | 'SUSPENDED' | 'TERMINATED'; templateId: string | null; version: number;
+    responders: Array<{ contactId: string; source: ResponderSourceKind; templateId: string | null }>;
+    namedSteps: Array<{ contactId: string; stepIndex: number }>;
+    paging?: TemplatePaging;
+  };
+  from: TemplateRef | null; to: TemplateRef | null;
+  names: Record<string, string>;
+}
+export interface TemplateAttachPlan {
+  effects: TemplateEffect[]; joins: string[]; leaves: string[]; retarget: string[];
+  totals: { joins: number; leaves: number; warnings: number }; previewHash: string;
+}
+export interface TemplateAttachWrite { customerId: string; toTemplateId: string | null; expectedVersion: number; previewHash: string; actorId: string; at: Date }
+export type TemplateAttachOutcome =
+  | { version: number; templateId: string | null; joins: number; leaves: number }
+  | { blocking: TemplateBlocking[] }
+  | 'NOT_FOUND' | 'NO_TEMPLATE' | 'TERMINATED' | 'CONFLICT' | 'STALE' | 'BUSY';
 
 /** Rotations a caller may see (MSP ones + those of customers in the scope) with what decides who is on shift. */
 export interface RotationsWorld { rotations: Rotation[]; overrides: Override[]; leaves: Leave[]; contacts: Map<string, Contact> }
@@ -412,6 +441,19 @@ export interface ApiRepository {
    * Customer Responders versions do not move (their audit rows have another targetType).
    */
   updateResponderTemplate(u: TemplateUpdate, audit: AuditInput): Promise<TemplateUpdateOutcome>;
+  /**
+   * D-64. Inputs of `planTemplateAttach` for a customer and the template it should use (null = none). null: no such customer.
+   * 'NO_TEMPLATE': `toTemplateId` names no template.
+   */
+  customerTemplateAttachInput(customerId: string, toTemplateId: string | null): Promise<TemplateAttachInput | 'NO_TEMPLATE' | null>;
+  /**
+   * D-64, one transaction: lock the template row(s) (id order) THEN the customer row (the lock order of updateResponderTemplate), refuse a
+   * TERMINATED customer, check the Responders version, re-read the inputs, compare the hash, refuse a blocking change, then set
+   * `responderTemplateId`, add/remove/retarget the template rows and write ONE customer audit row (targetType 'Responders': the version moves).
+   * `audit.customerId` must be `customerId`; `action`/`before`/`after` are filled by the store from the plan.
+   * 'BUSY': a deadlock or serialization failure — nothing was written.
+   */
+  setCustomerTemplate(w: TemplateAttachWrite, audit: AuditInput): Promise<TemplateAttachOutcome>;
   /** MSP rotations + rotations of the customers in `scope` (CUSTOMER rotations only inside the scope). */
   rotationsWorld(scope: ScopeFilter): Promise<RotationsWorld>;
   /** Active MSP staff contacts (kind INTERNAL), name order. */
