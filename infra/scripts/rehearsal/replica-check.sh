@@ -6,13 +6,19 @@
 # 본인 SSO 역할로 assume 해서 6개((a)~(f))를 확인한다. 끝나면(실패·중단 포함) 만든 것을 모두 지운다.
 # 임시 자격증명은 출력·로그·부모 셸 환경변수에 두지 않는다(호출마다 서브셸 안에서만 export).
 # 종료 코드: 전부 PASS 0, 그 밖 1, 인자·안전 관문 거부 2 이상.
+# 선택 모드 --probe-resource-tag-deny: (a)~(f) 표를 돌리지 않고(대신 쓴다), 원본 정책에 명시적 Deny(DenyOverwriteUnmanaged)를 더한 두 변형
+#   (null = Null aws:ResourceTag/ManagedBy, stringnotequals = StringNotEquals)이 "태그 없는 기존 알람 덮어쓰기"만 막고 새 알람 생성·관리 알람
+#   수정·삭제는 막지 않는지 잰다. 측정이라 판정이 "사용 불가"여도 종료 코드 0. 준비·오류로 중단하면 1(안전 관문 거부는 2 이상). 같은 정리 규칙을 쓴다.
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 CLEANUP_ONLY=0
+PROBE=0
 ARGS=()
 for a in "$@"; do
-  if [ "$a" = "--cleanup-only" ]; then CLEANUP_ONLY=1; else ARGS+=("$a"); fi
+  if [ "$a" = "--cleanup-only" ]; then CLEANUP_ONLY=1
+  elif [ "$a" = "--probe-resource-tag-deny" ]; then PROBE=1
+  else ARGS+=("$a"); fi
 done
 RH_ALLOWED=" --profile --confirm-account "
 rh_env_check
@@ -31,6 +37,14 @@ POLICY_NAME="manage-alarmops-alarms"
 REPLICA="AlarmOpsRehearsal-WriterReplica"
 ALARM_T="AlarmOpsRehearsal-replica-test"
 ALARM_U="AlarmOpsRehearsal-replica-unmanaged"
+PROBE_POLICY="probe-deny"
+PROBE_VARIANTS=(null stringnotequals)
+PROBE_SUFFIXES=(new unmanaged canary other)         # probe-* 이름은 이 스크립트 전용 접두어(AlarmOpsRehearsal-probe-)라 시작할 때 지워도 된다
+probe_alarm_names() {
+  local v x
+  for v in "${PROBE_VARIANTS[@]}"; do for x in "${PROBE_SUFFIXES[@]}"; do printf '%s\n' "AlarmOpsRehearsal-probe-$v-$x"; done; done
+}
+PROBE_WAIT="${REHEARSAL_PROBE_WAIT:-20}"            # 정책을 바꾼 뒤 전파 대기(초). 바꾼 Deny가 늦게 퍼지면 p2 가 잘못 ALLOWED 로 나온다
 RETRIES="${REHEARSAL_ASSUME_RETRIES:-12}"           # 12 x 5초 = 약 60초 (IAM 전파)
 RETRY_INTERVAL="${REHEARSAL_ASSUME_INTERVAL:-5}"
 RP_AK=""; RP_SK=""; RP_ST=""                        # 임시 자격증명. export 하지 않는다.
@@ -118,6 +132,14 @@ rp_cleanup() {
   rp_exec person cloudwatch delete-alarms --alarm-names "$ALARM_T" "$ALARM_U"
   if [ "$RP_RC" -eq 0 ]; then rh_say "- 시험 알람 삭제(없으면 건너뜀): $ALARM_T, $ALARM_U"
   else rp_fail_exec "시험 알람 삭제 실패"; CLEAN_FAIL=$((CLEAN_FAIL + 1)); fi
+  if [ "$PROBE" = 1 ] || [ "$CLEANUP_ONLY" = 1 ]; then   # 실측 모드 잔여물. 일반 실행은 이 호출을 하지 않는다
+    local pn=()
+    mapfile -t pn < <(probe_alarm_names)
+    pn=("${pn[@]%$'\r'}")
+    rp_exec person cloudwatch delete-alarms --alarm-names "${pn[@]}"
+    if [ "$RP_RC" -eq 0 ]; then rh_say "- 실측 알람 삭제(없으면 건너뜀): ${pn[*]}"
+    else rp_fail_exec "실측 알람 삭제 실패"; CLEAN_FAIL=$((CLEAN_FAIL + 1)); fi
+  fi
 
   rp_exec person iam get-role --role-name "$REPLICA"
   if [ "$RP_RC" -ne 0 ]; then
@@ -134,6 +156,11 @@ sys.exit(0 if any(x.get("Key") == "AlarmOpsRehearsal" and x.get("Value") == "tru
       rp_note "오류: 역할 $REPLICA 에 AlarmOpsRehearsal=true 태그가 없어 지우지 않는다. 직접 만든 역할이 아닌지 확인한다"
       CLEAN_FAIL=$((CLEAN_FAIL + 1))
     else
+      if [ "$PROBE" = 1 ] || [ "$CLEANUP_ONLY" = 1 ]; then
+        rp_exec person iam delete-role-policy --role-name "$REPLICA" --policy-name "$PROBE_POLICY"
+        if [ "$RP_RC" -eq 0 ] || printf '%s' "$RP_ERR" | grep -q 'NoSuchEntity'; then rh_say "- 인라인 정책 삭제(없으면 건너뜀): $PROBE_POLICY"
+        else rp_fail_exec "인라인 정책 삭제 실패($PROBE_POLICY)"; CLEAN_FAIL=$((CLEAN_FAIL + 1)); fi
+      fi
       rp_exec person iam delete-role-policy --role-name "$REPLICA" --policy-name "$POLICY_NAME"
       if [ "$RP_RC" -eq 0 ] || printf '%s' "$RP_ERR" | grep -q 'NoSuchEntity'; then rh_say "- 인라인 정책 삭제: $POLICY_NAME"
       else rp_fail_exec "인라인 정책 삭제 실패"; CLEAN_FAIL=$((CLEAN_FAIL + 1)); fi
@@ -232,6 +259,173 @@ rp_exec person iam put-role-policy --role-name "$REPLICA" --policy-name "$POLICY
   --policy-document "file://$(rh_native_path "$POLICY_FILE")"
 [ "$RP_RC" -eq 0 ] || { rp_fail_exec "인라인 정책 부착 실패"; exit 1; }
 rh_say "복제 역할 생성: $REPLICA (경계: ${BOUNDARY:-없음}, 신뢰: $CALLER_ROLE)"
+
+# ---- 실측 모드: (a)~(f) 대신 Deny 변형 두 개를 잰다
+if [ "$PROBE" = 1 ]; then
+  ROLE_ARN="arn:aws:iam::${RH_ACCT}:role/${REPLICA}"
+  BASE=(--namespace AlarmOpsRehearsal --metric-name ReplicaCheck --statistic Average --period 60
+        --evaluation-periods 1 --threshold 1 --comparison-operator GreaterThanThreshold)
+  # 다시 assume 하고(전파 대기 재시도) 읽기가 될 때까지 기다린다. 실패하면 1 로 중단(정리는 트랩이)
+  rp_ready() {
+    local got=0 ok=0 last="" i
+    for ((i = 1; i <= RETRIES; i++)); do
+      rp_assume
+      if [ "$RP_RC" -eq 0 ]; then got=1; break; fi
+      last="$(rp_code)"
+      [ "$i" -lt "$RETRIES" ] && sleep "$RETRY_INTERVAL"
+    done
+    if [ "$got" -ne 1 ]; then rp_note "오류: 복제 역할 assume ${RETRIES}회 시도 실패, 오류 코드 $last"; exit 1; fi
+    for ((i = 1; i <= RETRIES; i++)); do
+      rp_exec replica cloudwatch describe-alarms --max-records 1 --output json
+      if [ "$RP_RC" -eq 0 ]; then ok=1; break; fi
+      last="$(rp_code)"
+      [ "$i" -lt "$RETRIES" ] && sleep "$RETRY_INTERVAL"
+    done
+    if [ "$ok" -ne 1 ]; then rp_note "오류: 정책 전파(DescribeAlarms) ${RETRIES}회 시도 실패, 오류 코드 $last"; exit 1; fi
+  }
+  rp_cell() {  # 직전 rp_exec 결과 → ALLOWED | DENIED | ERROR(코드). 오류 메시지는 쓰지 않는다
+    local code
+    if [ "$RP_RC" -eq 0 ]; then printf 'ALLOWED'; return; fi
+    code="$(rp_code)"
+    case "$code" in AccessDenied*) printf 'DENIED' ;; *) printf 'ERROR(%s)' "$code" ;; esac
+  }
+  rp_cond() {  # 변형 이름 → Deny 조건(JSON)
+    case "$1" in
+      null) printf '{"Null":{"aws:ResourceTag/ManagedBy":"true"}}' ;;
+      stringnotequals) printf '{"StringNotEquals":{"aws:ResourceTag/ManagedBy":"AlarmOps"}}' ;;
+    esac
+  }
+
+  # 시작: probe 알람 이름 전부를 본인 자격증명으로 먼저 지운다(없으면 건너뜀). 남은 태그·설정이 p2 대상을 오염시키지 않게 한다
+  mapfile -t PROBE_ALL < <(probe_alarm_names)
+  PROBE_ALL=("${PROBE_ALL[@]%$'\r'}")
+  rp_exec person cloudwatch delete-alarms --alarm-names "${PROBE_ALL[@]}"
+  [ "$RP_RC" -eq 0 ] || { rp_fail_exec "준비 실패: 이전 probe 알람 삭제"; exit 1; }
+  # 준비 알람: $1=이름 $2=ManagedBy 값(비면 태그 없이). 태그 없는 알람에 ManagedBy 가 보이면 준비 실패로 중단한다
+  rp_prep_alarm() {
+    if [ -n "$2" ]; then
+      rp_exec person cloudwatch put-metric-alarm --alarm-name "$1" "${BASE[@]}" --tags "Key=ManagedBy,Value=$2"
+    else
+      rp_exec person cloudwatch put-metric-alarm --alarm-name "$1" "${BASE[@]}"
+    fi
+    [ "$RP_RC" -eq 0 ] || { rp_fail_exec "준비 실패: 본인 자격증명으로 알람 $1 생성"; exit 1; }
+    [ -z "$2" ] || return 0
+    rp_exec person cloudwatch list-tags-for-resource --resource-arn "arn:aws:cloudwatch:${RH_REGION}:${RH_ACCT}:alarm:$1" --output json
+    [ "$RP_RC" -eq 0 ] || { rp_fail_exec "준비 실패: 알람 $1 의 태그를 확인하지 못함"; exit 1; }
+    if printf '%s' "$RP_OUT" | "$RH_PY" -c '
+import json, sys
+t = json.load(sys.stdin).get("Tags", [])
+sys.exit(0 if any(x.get("Key") == "ManagedBy" for x in t) else 1)
+'; then rp_note "오류: 준비 실패: 태그 없이 만든 알람 $1 에 ManagedBy 태그가 있다"; exit 1; fi
+  }
+  # 덮어쓰기 시도: $1=알람 이름 $2=임계값. ManagedBy=AlarmOps 요청 태그를 단다
+  rp_overwrite() {
+    rp_exec replica cloudwatch put-metric-alarm --alarm-name "$1" --namespace AlarmOpsRehearsal \
+      --metric-name ReplicaCheck --statistic Average --period 60 --evaluation-periods 1 --threshold "$2" \
+      --comparison-operator GreaterThanThreshold --tags Key=ManagedBy,Value=AlarmOps
+  }
+
+  rp_ready
+  rh_say ""
+  rh_say "| 변형 | p1 새 알람 생성 | p2 태그없는 알람 덮어쓰기 | p3 관리 알람 수정 | p4 관리 알람 삭제 | 판정 |"
+  rh_say "|---|---|---|---|---|---|"
+  STAR=0; NOTES=""; vi=0
+  for v in "${PROBE_VARIANTS[@]}"; do
+    NEW="AlarmOpsRehearsal-probe-$v-new"; UN="AlarmOpsRehearsal-probe-$v-unmanaged"
+    CAN="AlarmOpsRehearsal-probe-$v-canary"; OTH="AlarmOpsRehearsal-probe-$v-other"
+    # 1) 앞 변형의 Deny 를 지운다. 두 번째부터는 전파를 기다리고 다시 assume 한다(옛 정책이 남아 거짓 "사용 가능"이 나오지 않게)
+    rp_exec person iam delete-role-policy --role-name "$REPLICA" --policy-name "$PROBE_POLICY"
+    if [ "$RP_RC" -ne 0 ] && ! printf '%s' "$RP_ERR" | grep -q 'NoSuchEntity'; then rp_fail_exec "이전 Deny 정책 삭제 실패"; exit 1; fi
+    if [ "$vi" -gt 0 ]; then
+      if [ "$PROBE_WAIT" -gt 0 ] 2>/dev/null; then sleep "$PROBE_WAIT"; fi
+      rp_ready
+    fi
+    # 2) 카나리 A: Deny 가 없는 상태에서는 원본 정책의 구멍으로 덮어쓰기가 ALLOWED 여야 한다. 아니면 옛 Deny 가 남았거나 구멍이 없다
+    rp_prep_alarm "$CAN" ""
+    rp_overwrite "$CAN" 2
+    if [ "$(rp_cell)" != ALLOWED ]; then
+      rp_note "오류: 카나리 실패($v): Deny 가 없는 상태인데 태그 없는 알람 덮어쓰기가 $(rp_cell). 옛 정책이 남았거나 원본 정책에 구멍이 없다. 첫 변형(null)이면 구멍이 없는 것이니 일반 모드 (f) 결과를 보고, 오류 줄과 종료 코드만 허브에 보낸다. 두 번째 변형이면 REHEARSAL_PROBE_WAIT=60 으로 다시 실행한다"
+      exit 1
+    fi
+    rp_exec person cloudwatch delete-alarms --alarm-names "$CAN"
+    # 3) 준비: 태그 없는 알람(p2 대상), ManagedBy=Other 알람(Deny 카나리 B)
+    rp_prep_alarm "$UN" ""
+    rp_prep_alarm "$OTH" "Other"
+    # 4) Deny 변형을 별도 인라인 정책으로 붙이고 다시 assume
+    rh_tmpfile; DENY_FILE="$RH_TMPF"
+    printf '{"Version":"2012-10-17","Statement":[{"Sid":"DenyOverwriteUnmanaged","Effect":"Deny","Action":"cloudwatch:PutMetricAlarm","Resource":"arn:aws:cloudwatch:*:%s:alarm:*","Condition":%s}]}' \
+      "$RH_ACCT" "$(rp_cond "$v")" >"$DENY_FILE"
+    rp_exec person iam put-role-policy --role-name "$REPLICA" --policy-name "$PROBE_POLICY" \
+      --policy-document "file://$(rh_native_path "$DENY_FILE")"
+    [ "$RP_RC" -eq 0 ] || { rp_fail_exec "Deny 정책($v) 부착 실패"; exit 1; }
+    if [ "$PROBE_WAIT" -gt 0 ] 2>/dev/null; then sleep "$PROBE_WAIT"; fi
+    rp_ready
+    # 5) 카나리 B: ManagedBy=Other 알람 덮어쓰기. 기대값을 변형마다 직접 계산한다.
+    #    null: 리소스 태그가 있으니 Null 조건이 안 걸리고 원본 정책(CreateAlarmWithManagedByTag)대로 ALLOWED.
+    #    stringnotequals: Other != AlarmOps 라 Deny 가 걸려 DENIED.
+    case "$v" in null) exp_b=ALLOWED ;; stringnotequals) exp_b=DENIED ;; esac
+    rp_overwrite "$OTH" 2
+    got_b="$(rp_cell)"
+    [ "$got_b" = "$exp_b" ] || NOTES="$NOTES- $v: 카나리 B 불일치(기대 $exp_b, 실제 $got_b): Deny 가 반영되지 않았을 수 있다
+"
+
+    # p1 새 알람 + ManagedBy 요청 태그
+    rp_exec replica cloudwatch put-metric-alarm --alarm-name "$NEW" "${BASE[@]}" --tags Key=ManagedBy,Value=AlarmOps
+    c1="$(rp_cell)"; star=""
+    if [ "$c1" != ALLOWED ]; then   # p3·p4 도 재도록 본인 자격증명이 태그 달린 관리 알람을 대신 만든다(표에 * 표시)
+      rp_exec person cloudwatch put-metric-alarm --alarm-name "$NEW" "${BASE[@]}" --tags Key=ManagedBy,Value=AlarmOps
+      if [ "$RP_RC" -eq 0 ]; then star="*"; STAR=1; else star="?"; fi
+    fi
+    # p2 태그 없는 기존 알람을 ManagedBy 요청 태그로 덮어쓰기. 전파 지연을 보려고 REHEARSAL_PROBE_WAIT 간격으로 두 번 잰다
+    rp_overwrite "$UN" 2
+    c2a="$(rp_cell)"
+    if [ "$PROBE_WAIT" -gt 0 ] 2>/dev/null; then sleep "$PROBE_WAIT"; fi
+    rp_overwrite "$UN" 2
+    c2="$(rp_cell)"
+    # 본인 자격증명으로 임계값이 실제로 바뀌었는지 본다(거부됐어도 확인: 응답과 실제 상태가 다르면 판정을 믿지 않는다)
+    rp_exec person cloudwatch describe-alarms --alarm-names "$UN" --output json
+    thr="조회 실패"
+    if [ "$RP_RC" -eq 0 ]; then
+      thr="$(printf '%s' "$RP_OUT" | "$RH_PY" -c '
+import json, sys
+a = json.load(sys.stdin).get("MetricAlarms", [])
+print("%g" % a[0]["Threshold"] if a else "")
+' | tr -d '\r')" || thr=""
+      case "$thr" in 2) thr="임계값 1→2 변경됨" ;; 1) thr="임계값 1 그대로" ;; "") thr="알람 없음" ;; *) thr="임계값 $thr" ;; esac
+    fi
+    unstable=0
+    if [ "$c2a" != "$c2" ]; then
+      unstable=1; NOTES="$NOTES- $v: p2 1차 $c2a, 2차 $c2 (결과가 달라 판정하지 않는다)
+"
+    fi
+    [ "$got_b" = "$exp_b" ] || unstable=1
+    if [ "$unstable" = 1 ]; then c2="불안정"
+    elif [ "$c2" = ALLOWED ]; then c2="ALLOWED ($thr)"
+    elif [ "$c2" = DENIED ] && [ "$thr" != "임계값 1 그대로" ]; then c2="DENIED (확인 필요: $thr)"; fi
+    if [ "$star" = "?" ]; then
+      c3="ERROR(준비 실패)"; c4="ERROR(준비 실패)"
+    else
+      # p3 관리 알람 수정(엔진의 제자리 갱신, D-08): 태그 없이 임계값만 바꾼다
+      rp_exec replica cloudwatch put-metric-alarm --alarm-name "$NEW" --namespace AlarmOpsRehearsal \
+        --metric-name ReplicaCheck --statistic Average --period 60 --evaluation-periods 1 --threshold 2 \
+        --comparison-operator GreaterThanThreshold
+      c3="$(rp_cell)$star"
+      # p4 관리 알람 삭제
+      rp_exec replica cloudwatch delete-alarms --alarm-names "$NEW"
+      c4="$(rp_cell)$star"
+    fi
+    verdict="사용 불가"
+    if [ "$unstable" = 1 ]; then verdict="재측정"
+    elif [ "$c1" = ALLOWED ] && [ "$c2" = DENIED ] && [ "$c3" = ALLOWED ] && [ "$c4" = ALLOWED ]; then verdict="사용 가능"; fi
+    rh_say "| $v | $c1 | $c2 | $c3 | $c4 | $verdict |"
+    vi=$((vi + 1))
+  done
+  if [ -n "$NOTES" ]; then rh_say ""; rh_say "$NOTES"; fi
+  rh_say ""
+  if [ "$STAR" = 1 ]; then rh_say "* p1 이 거부돼서 본인 자격증명이 ManagedBy=AlarmOps 태그를 달아 대신 만든 알람으로 p3·p4 를 쟀다."; fi
+  rh_say "측정 완료(판정과 무관하게 종료 코드 0). 이 표와 그 아래 사유 줄만 허브에 보낸다(자격증명·로그는 보내지 않는다)"
+  exit 0
+fi
 
 rh_say ""
 rh_say "| 항목 | 결과 | 비고 |"

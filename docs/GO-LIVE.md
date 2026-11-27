@@ -767,7 +767,41 @@ http://localhost:3107/auth/dev-login?as=admin
        | (f) 태그 없는 기존 알람 덮어쓰기(PutMetricAlarm+ManagedBy 요청 태그) → 거부 | PASS | AccessDenied |
 
      - (c)(d)(f)의 태그 없는 알람 `AlarmOpsRehearsal-replica-unmanaged`는 본인 자격증명으로 만든다. 시험 알람은 `AlarmOpsRehearsal-replica-test`다. (f)는 같은 이름에 `ManagedBy=AlarmOps` 요청 태그를 달아 덮어쓰기를 시도한다. 성공하면 FAIL이고, 비고에 "기존 고객 알람 덮어쓰기 가능: template.yaml CreateAlarmWithManagedByTag 보완 필요"와 임계값·태그가 실제로 바뀌었는지가 적힌다.
-     - 끝나면(실패·Ctrl+C·터미널 닫기 포함) 시험 알람 두 개, 인라인 정책, 임시 역할을 스스로 지운다. 정리 실패 경고가 나오면 같은 명령에 `--cleanup-only`를 붙여 다시 돌린다.
+     - **보완안 실측(선택, (f)가 FAIL일 때)**: 같은 터미널에서 다음을 실행한다. (a)~(f) 표 대신 아래 표만 낸다.
+       ```
+       aws sso login --profile rehearsal-b
+       bash infra/scripts/rehearsal/replica-check.sh --profile rehearsal-b --confirm-account 12자리 --probe-resource-tag-deny
+       ```
+       원본 정책 복사본에 명시적 Deny `DenyOverwriteUnmanaged`(PutMetricAlarm, `aws:ResourceTag/ManagedBy` 가 없을 때)를 두 변형(`null` = `Null` 조건, `stringnotequals` = `StringNotEquals` 조건)으로 별도 인라인 정책 `probe-deny` 에 붙이고, 다시 assume 한 뒤(정책 전파 대기 기본 20초, `REHEARSAL_PROBE_WAIT`) p1~p4 를 잰다. 측정이므로 판정이 "사용 불가"여도 종료 코드 0이다(준비 실패·오류 중단은 1, 안전 관문 거부는 2 이상). 표와 그 아래 사유 줄(`- <변형>: …`, 자격증명 없음)만 허브에 보낸다.
+
+       사용 가능일 때의 모양(예시):
+
+       | 변형 | p1 새 알람 생성 | p2 태그없는 알람 덮어쓰기 | p3 관리 알람 수정 | p4 관리 알람 삭제 | 판정 |
+       |---|---|---|---|---|---|
+       | null | ALLOWED | DENIED | ALLOWED | ALLOWED | 사용 가능 |
+       | stringnotequals | ALLOWED | DENIED | ALLOWED | ALLOWED | 사용 가능 |
+
+       판정은 p1 ALLOWED, p2 DENIED(본인 자격증명으로 임계값이 그대로인 것도 확인), p3 ALLOWED, p4 ALLOWED 일 때만 "사용 가능"이다. p1 이 DENIED 면 CloudWatch 가 새 알람의 `aws:ResourceTag` 를 비어 있다고 보는 것이고 그 변형은 쓸 수 없다.
+
+       | 셀 값 | 뜻 | 할 일 |
+       |---|---|---|
+       | `ALLOWED` | 호출이 성공했다 | 그대로 읽는다 |
+       | `ALLOWED (임계값 1→2 변경됨)` | p2 에서 덮어쓰기가 성공했고 본인 자격증명으로 보니 임계값이 실제로 바뀌었다(구멍이 막히지 않음) | 그 변형은 쓸 수 없을 가능성이 크다. 아래처럼 `REHEARSAL_PROBE_WAIT=60`으로 한 번 더 돌린 뒤 두 표를 모두 보낸다 |
+       | `ALLOWED (임계값 1 그대로)` | 호출은 성공했는데 임계값은 안 바뀌었다 | 판정이 아니므로 허브에 표를 보낸다 |
+       | `ALLOWED (조회 실패)`, `ALLOWED (알람 없음)` | 덮어쓰기 호출은 성공했는데 본인 자격증명으로 결과를 확인하지 못했다 | 판정을 믿지 않고 표를 허브에 보낸다 |
+       | `DENIED` | `AccessDenied` 로 거부됐고 본인 자격증명으로 본 임계값도 그대로다 | 그대로 읽는다 |
+       | `DENIED (확인 필요: …)` | 거부됐다는 응답인데 임계값이 바뀌었거나 조회에 실패했다. 응답과 실제 상태가 다르다 | 판정을 믿지 않고 `REHEARSAL_PROBE_WAIT=60`으로 재측정한다. 같으면 표를 허브에 보낸다 |
+       | `ERROR(코드)` | 거부가 아닌 다른 오류(오류 코드만 표시) | 코드와 함께 표를 허브에 보낸다 |
+       | `ERROR(준비 실패)` | p1 이 거부돼 본인 자격증명이 대신 만들려던 관리 알람 준비도 실패해서 p3·p4 를 못 쟀다 | 표를 허브에 보낸다 |
+       | 값 뒤 `*` | p1 이 거부돼 본인 자격증명이 `ManagedBy=AlarmOps` 태그로 대신 만든 알람에서 쟀다 | 그대로 읽는다. p1 이 DENIED 라 판정은 "사용 불가"다 |
+       | `불안정` | p2 를 `REHEARSAL_PROBE_WAIT` 간격으로 두 번 쟀는데 결과가 다르거나, 카나리가 기대와 달라 Deny 가 반영됐는지 모른다 | 판정하지 않는다. `REHEARSAL_PROBE_WAIT=60`으로 다시 돌린다(판정 칸은 "재측정") |
+       | 판정 `재측정` | 위 `불안정` 때문에 판정을 내지 않았다 | 같음 |
+
+       카나리와 안정성(변형마다): (1) 앞 변형의 `probe-deny`를 지우고(두 번째 변형부터는 대기·재-assume 한 뒤) **Deny 없는 상태의 카나리**를 본다. 본인 자격증명으로 만든 태그 없는 `-canary` 알람을 복제 역할이 `ManagedBy` 요청 태그로 덮어쓰기가 ALLOWED 여야 한다(원본 정책의 구멍이 그대로 보여야 하고 옛 Deny 가 남지 않았다는 뜻). 아니면 `오류: 카나리 실패` 로 종료 코드 1로 멈춘다. 첫 변형에서 이렇게 멈추면 원본 정책에 덮어쓰기 구멍이 없다는 뜻일 가능성이 크다(일반 모드 (f)가 PASS인지 본다). 이때는 대기를 늘려도 소용없으니 `오류:` 줄과 종료 코드만 보낸다. (2) 변형을 붙이고 대기·재-assume 한 뒤 **Deny 카나리**를 본다. 본인 자격증명이 `ManagedBy=Other` 로 만든 `-other` 알람의 덮어쓰기는 `null` 에서 ALLOWED(리소스 태그가 있어 `Null` 조건이 안 걸리고 원본 정책이 허용), `stringnotequals` 에서 DENIED(`Other` 는 `AlarmOps` 가 아니라서)여야 한다. 기대와 다르면 Deny 가 반영되지 않았을 수 있어 p2 를 `불안정`으로 표시한다. (3) p2 는 `REHEARSAL_PROBE_WAIT` 간격으로 두 번 재서 같을 때만 판정한다. 시작할 때 probe 알람 이름 전부(`AlarmOpsRehearsal-probe-<변형>-new`·`-unmanaged`·`-canary`·`-other`)를 본인 자격증명으로 지운다(이 접두어는 이 스크립트 전용이라 지워도 된다). 태그 없이 만든 알람에 `ManagedBy` 태그가 보이면 준비 실패(종료 코드 1)다. 일반 모드의 `AlarmOpsRehearsal-replica-test`·`-unmanaged` 는 기존 동작 그대로다.
+
+       p2 가 ALLOWED 이거나 `불안정`·`재측정`이면 같은 명령을 `REHEARSAL_PROBE_WAIT=60` 을 앞에 붙여 한 번 더 돌린다(IAM 전파가 느린 경우를 걸러낸다). 그래도 같으면 두 번의 표를 모두 보낸다.
+       **표가 일부만 나오고 끝나는 경우**: 준비 실패·카나리 실패·assume 실패 등이면 표의 앞 변형 행만 나오고 `오류:` 줄과 종료 코드 1로 끝난다. 그때는 표(있는 만큼)와 그 아래 사유 줄, `오류:` 줄, 종료 코드만 허브에 보낸다.
+     - 끝나면(실패·Ctrl+C·터미널 닫기 포함) 시험 알람 두 개(실측 모드는 probe 알람 8개: 변형 2 × new·unmanaged·canary·other 도), 인라인 정책(`probe-deny` 포함), 임시 역할을 스스로 지운다. 정리 실패 경고가 나오면 같은 명령에 `--cleanup-only`를 붙여 다시 돌린다.
      - 임시 자격증명은 출력·로그에 나오지 않는다. 로그는 `rehearsal-logs/<profile>/replica-check.md`(올리지 않는다).
      - **표가 나오기 전에 멈추는 경우**: 종료 코드 1~5와 `오류:` 줄이 나온다. 2는 인자·환경변수·확인 계정 거부, 3은 중앙·개발·거부 목록 계정, 4는 프로필이 SSO 역할이 아님, 5는 임시 역할이 이미 있음, 1은 그 밖의 오류(원본 역할·정책 없음, 호출 실패 등)다. 이 코드는 `verify.sh`의 종료 코드 2(SKIP 있음)와 뜻이 다르다. 이때는 `오류:` 줄과 종료 코드만 허브에 보낸다.
      - 표에 FAIL이 있으면 허브에는 **표만** 보낸다. 표의 오류 코드 말고 다른 출력·로그·자격증명은 보내지 않는다.
@@ -810,7 +844,7 @@ http://localhost:3107/auth/dev-login?as=admin
 | 실측 `replica-check.sh`: 표에 `(준비) 복제 역할 assume` 또는 `(준비) 정책 전파(DescribeAlarms)` FAIL | IAM 전파가 느리다. 환경변수 `REHEARSAL_ASSUME_RETRIES`(기본 12, 5초 간격)를 늘려(예: 36) 다시 실행한다. 그래도 같은 오류 코드면 그 코드만 허브에 보낸다 |
 | 실측: `오류: 역할 AlarmOpsRehearsal-WriterReplica 가 이미 있다`(종료 코드 5) | 이전 실행의 잔여물이다. 같은 명령에 `--cleanup-only`를 붙여 정리하고 다시 실행한다 |
 | 실측: `AlarmOpsRehearsal=true 태그가 없어 지우지 않는다` | 같은 이름의 다른 사람이 만든 역할이다. 지우지 않는다. 콘솔에서 누가 만들었는지 확인하고 허브에 알린다 |
-| 실측 (f) FAIL "기존 고객 알람 덮어쓰기 가능" | 정책 결함이다(남의 알람을 `ManagedBy` 요청 태그로 덮어쓸 수 있음). 고객 스택에 AlarmWriter를 켜기 전에 허브에 표를 보내 `template.yaml`의 `CreateAlarmWithManagedByTag` 보완을 이슈로 만든다 |
+| 실측 (f) FAIL "기존 고객 알람 덮어쓰기 가능" | 정책 결함이다(남의 알람을 `ManagedBy` 요청 태그로 덮어쓸 수 있음). 고객 스택에 AlarmWriter를 켜기 전에 허브에 표를 보내 `template.yaml`의 `CreateAlarmWithManagedByTag` 보완을 이슈로 만든다. 보완안(명시적 Deny) 후보를 재려면 `--probe-resource-tag-deny`로 다시 실행해(복제 역할 정리 후) 나온 변형 표를 허브에 보낸다 |
 | 실측 `replica-check.sh`: `환경변수 AWS_CA_BUNDLE 가 설정되어 있다`(또는 `AWS_ENDPOINT_URL*`, `AWS_CONFIG_FILE`, `AWS_SHARED_CREDENTIALS_FILE`)로 거부, 종료 코드 2 | 임시 자격증명이 엉뚱한 곳으로 가지 않게 막은 것이다. 그 터미널에서만 `unset AWS_CA_BUNDLE`(해당 변수)을 하고 다시 실행한다. 회사 TLS 검사 때문에 unset 하면 AWS 호출이 실패하면 허브에 문의한다 |
 
 ### 배경 (읽지 않아도 된다)

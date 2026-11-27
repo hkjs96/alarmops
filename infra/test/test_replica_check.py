@@ -313,7 +313,8 @@ class CleanupOnly(ReplicaBase):
         self.assertNotIn(REPLICA, self.state()["roles"])
         self.assertIn(ORIG, self.state()["roles"], "the original role must never be touched")
         names = {n for c in self.sb.calls() if c["op"] == "delete-alarms" for n in alarm_names_of(c)}
-        self.assertEqual(names, {TEST_ALARM, UNMANAGED})
+        # --cleanup-only also clears --probe-resource-tag-deny leftovers (test_replica_probe.py checks those names)
+        self.assertEqual({n for n in names if "-probe-" not in n}, {TEST_ALARM, UNMANAGED})
         for forbidden in ("create-role", "put-role-policy", "assume-role", "put-metric-alarm"):
             self.assertNotIn(forbidden, [c["op"] for c in self.sb.calls()])
 
