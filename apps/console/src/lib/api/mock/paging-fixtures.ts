@@ -37,7 +37,7 @@ export interface FxCustomerPaging {
 }
 export interface FxPaging {
   contacts: Record<string, FxContact>;
-  templates: Record<string, { name: string; members: string[] }>;
+  templates: Record<string, { name: string; members: string[]; version?: number; updatedAt?: string; updatedByName?: string }>;
   rotations: RotationSummary[];
   byCustomer: Record<string, FxCustomerPaging>;
 }
@@ -162,6 +162,10 @@ export function createPaging(customers: FxCustomer[] = customers34): FxPaging {
   });
   return {
     contacts, rotations, byCustomer,
-    templates: { core: { name: "Infra core", members: ["ct_haeun", "ct_junho", "ct_minjae"] }, data: { name: "Data desk", members: ["ct_taemin", "ct_eunji"] }, night: { name: "Night backup", members: ["ct_jiwoo", "ct_sora"] } },
+    templates: {
+      core: { name: "Infra core", members: ["ct_haeun", "ct_junho", "ct_minjae"], version: 1, updatedAt: "2026-11-04T05:00:00Z", updatedByName: "Junho Park" },
+      data: { name: "Data desk", members: ["ct_taemin", "ct_eunji"], version: 1, updatedAt: "2026-10-28T01:30:00Z", updatedByName: "Haeun Kim" },
+      night: { name: "Night backup", members: ["ct_jiwoo", "ct_sora"], version: 1, updatedAt: "2026-10-20T08:00:00Z", updatedByName: "Junho Park" },
+    },
   };
 }

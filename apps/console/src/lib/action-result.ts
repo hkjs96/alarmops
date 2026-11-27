@@ -14,6 +14,14 @@ function safeDetails(d: Record<string, unknown>): Record<string, unknown> | unde
     const v = d[k];
     if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") out[k] = v;
   }
+  // template refusals (D-64): which customers, and why, as plain ids and reasons the screen words itself
+  if (Array.isArray(d.customerIds)) out.customerIds = d.customerIds.filter((v): v is string => typeof v === "string").slice(0, 200).map((v) => v.slice(0, 128));
+  if (Array.isArray(d.blocking)) {
+    out.blocking = d.blocking.slice(0, 400).flatMap((b) => {
+      const o = (b ?? {}) as Record<string, unknown>;
+      return typeof o.customerId === "string" && typeof o.reason === "string" ? [{ customerId: o.customerId.slice(0, 128), reason: o.reason.slice(0, 40) }] : [];
+    });
+  }
   if (Array.isArray(d.fields)) {
     out.fields = d.fields.slice(0, 20).map((f) => {
       const o = (f ?? {}) as Record<string, unknown>;

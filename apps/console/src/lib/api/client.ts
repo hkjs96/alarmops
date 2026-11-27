@@ -8,6 +8,7 @@ import type {
   NewUserInput, UserItem, UserListQuery, UserPatchInput,
   CustomerRecord, ProjectRecord, ServiceRecord, AccountRecord, AccountStatus, NewAccountInput, AccountCapabilities, ContactRecord, NewContactInput,
   VerifyContactInput, VerifyContactResult, VerifyBulkResult, VerifyPeek, VerifyDone,
+  ResponderTemplate, TemplateProposal, TemplatePreview, TemplateSaveResult, CustomerTemplatePreview, CustomerTemplateResult,
   ResourceListQuery, ResourceListResponse, ManagedAlarmListResponse, MonitoringAction, MonitoringCommandResult,
 } from "./types";
 
@@ -35,6 +36,23 @@ export const isHidden = (e: unknown): boolean => e instanceof ApiError && (e.sta
  * the console never confirms that an id of another tenant is real.
  */
 export const isNotFoundLike = (e: unknown): boolean => e instanceof ApiError && (e.status === 404 || e.code === "CROSS_CUSTOMER");
+
+const defaultSleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * 503 BUSY (API-CONTRACT §8.3 "잠금·재시도"): the system was busy with another change and wrote nothing, so the same request may be
+ * sent again. It is sent once more after Retry-After (at most 5 s); a second BUSY is the caller's error to show.
+ */
+export async function withBusyRetry<T>(send: () => Promise<T>, sleep: (ms: number) => Promise<void> = defaultSleep): Promise<T> {
+  try {
+    return await send();
+  } catch (e) {
+    if (!(e instanceof ApiError) || e.status !== 503 || e.code !== "BUSY") throw e;
+    const s = typeof e.details.retryAfterSec === "number" && Number.isFinite(e.details.retryAfterSec) ? e.details.retryAfterSec : 1;
+    await sleep(Math.min(Math.max(s, 0), 5) * 1000);
+    return send();
+  }
+}
 
 /** Typed surface of API-CONTRACT §8 the console uses. */
 export interface ConsoleApi {
@@ -78,6 +96,20 @@ export interface ConsoleApi {
   listRotations(q?: { scope?: "MSP" | "CUSTOMER"; customerId?: string }): Promise<RotationSummary[]>;
   /** GET /staff?q= */
   listStaff(q?: string): Promise<StaffSummary[]>;
+
+  /* ---- Responder templates (API-CONTRACT §8.3, D-64). Reads: MSP staff. Writes and previews: ADMIN with all customers. 503 BUSY is retried once. ---- */
+  /** GET /responder-templates (by name; each item is also its detail) */
+  listResponderTemplates(): Promise<ResponderTemplate[]>;
+  /** POST /responder-templates → 201. 409 ALREADY_EXISTS (name), 400 VALIDATION_FAILED (members must be active MSP staff). */
+  createResponderTemplate(body: { name: string; members: string[] }): Promise<ResponderTemplate>;
+  /** POST /responder-templates/{id}/preview: nothing is written */
+  previewResponderTemplate(id: string, proposal: TemplateProposal): Promise<TemplatePreview>;
+  /** PATCH /responder-templates/{id}. If-Match = `version` of the template the user saw; `previewHash` of the preview of this very change. 409 VERSION_CONFLICT / PREVIEW_STALE / WOULD_BE_UNREACHABLE / ALREADY_EXISTS, 422 RESPONDER_LIMIT_EXCEEDED / SEND_CAP_EXCEEDED. */
+  saveResponderTemplate(id: string, proposal: TemplateProposal, opts: { version: number; previewHash: string }): Promise<TemplateSaveResult>;
+  /** POST /customers/{id}/responders/template/preview: `templateId: null` detaches */
+  previewCustomerTemplate(customerId: string, templateId: string | null): Promise<CustomerTemplatePreview>;
+  /** PUT /customers/{id}/responders/template. If-Match = the Responders `version` of the preview. 409 CUSTOMER_TERMINATED too. */
+  putCustomerTemplate(customerId: string, templateId: string | null, opts: { version: number; previewHash: string }): Promise<CustomerTemplateResult>;
 
   /* ---- Customer status and offboarding (API-CONTRACT 8.4) ---- */
   /** GET /customers/{id}/status. ADMIN only (403 for other staff). */
@@ -163,7 +195,7 @@ export function toQuery(params: Record<string, string | number | boolean | undef
   return s ? `?${s}` : "";
 }
 
-export function createHttpApi(opts: { baseUrl: string; fetch?: typeof fetch; headers?: () => Record<string, string> }): ConsoleApi {
+export function createHttpApi(opts: { baseUrl: string; fetch?: typeof fetch; headers?: () => Record<string, string>; sleep?: (ms: number) => Promise<void> }): ConsoleApi {
   const f = opts.fetch ?? fetch;
   const base = opts.baseUrl.replace(/\/$/, "") + "/api/v1";
 
@@ -181,7 +213,10 @@ export function createHttpApi(opts: { baseUrl: string; fetch?: typeof fetch; hea
       } catch {
         /* non-JSON error */
       }
-      throw new ApiError(res.status, err.code, err.message, err.requestId, err.details ?? {});
+      const details: Record<string, unknown> = { ...(err.details ?? {}) };
+      const header = res.headers?.get("retry-after") ?? null;
+      if (details.retryAfterSec === undefined && header !== null && Number.isFinite(Number(header)) && Number(header) >= 0) details.retryAfterSec = Number(header);
+      throw new ApiError(res.status, err.code, err.message, err.requestId, details);
     }
     if (res.status === 204) return undefined as T;
     return (await res.json()) as T;
@@ -194,6 +229,7 @@ export function createHttpApi(opts: { baseUrl: string; fetch?: typeof fetch; hea
     try { err = ((await res.json()) as ApiErrorBody).error ?? err; } catch { /* non-JSON error */ }
     throw new ApiError(res.status, err.code, err.message, err.requestId, err.details ?? {});
   }
+  const busy = <T,>(send: () => Promise<T>) => withBusyRetry(send, opts.sleep);
   const unreachable = (o: ResponderWriteOptions) => toQuery({ confirmUnreachable: o.confirmUnreachable ? true : undefined });
 
   return {
@@ -223,6 +259,12 @@ export function createHttpApi(opts: { baseUrl: string; fetch?: typeof fetch; hea
     removeResponder: (id, contactId, o) => call("DELETE", `/customers/${enc(id)}/responders/${enc(contactId)}` + unreachable(o), undefined, { "If-Match": String(o.version) }),
     listRotations: (q = {}) => call("GET", "/rotations" + toQuery({ ...q })),
     listStaff: (q) => call("GET", "/staff" + toQuery({ q })),
+    listResponderTemplates: () => call("GET", "/responder-templates"),
+    createResponderTemplate: (body) => busy(() => call("POST", "/responder-templates", body)),
+    previewResponderTemplate: (id, p) => busy(() => call("POST", `/responder-templates/${enc(id)}/preview`, p)),
+    saveResponderTemplate: (id, p, o) => busy(() => call("PATCH", `/responder-templates/${enc(id)}`, { ...p, previewHash: o.previewHash }, { "If-Match": String(o.version) })),
+    previewCustomerTemplate: (id, templateId) => busy(() => call("POST", `/customers/${enc(id)}/responders/template/preview`, { templateId })),
+    putCustomerTemplate: (id, templateId, o) => busy(() => call("PUT", `/customers/${enc(id)}/responders/template`, { templateId, previewHash: o.previewHash }, { "If-Match": String(o.version) })),
     getCustomerStatus: (id) => call("GET", `/customers/${enc(id)}/status`),
     patchCustomerStatus: (id, body, version) => call("PATCH", `/customers/${enc(id)}/status`, body, { "If-Match": String(version) }),
     getOffboarding: (id) => call("GET", `/customers/${enc(id)}/offboarding`),
