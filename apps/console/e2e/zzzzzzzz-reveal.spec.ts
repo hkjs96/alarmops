@@ -92,7 +92,7 @@ test.describe("Show number, emergency (an Admin who is not the customer's Respon
     const dlg = page.getByTestId("confirm-dialog");
     await expect(dlg).toBeVisible();
     await expect(page.getByTestId("reveal-explain")).toContainText("You are not a responder for Hanbit");
-    await expect(dlg).toContainText("primary responder will be notified");
+    await expect(dlg).toContainText("No alert is sent. The reveal is recorded in the audit log with your name and this reason, under Emergency reveals.");
     const go = dlg.locator('button[data-role="confirm"]');
     await expect(go).toBeDisabled();
     await page.getByTestId("reveal-reason").fill("   ");
@@ -103,7 +103,7 @@ test.describe("Show number, emergency (an Admin who is not the customer's Respon
     await expect(dlg).toHaveCount(0);
     await expect(eunbi.getByTestId("reveal-phone-value")).toHaveText(FULL_PHONE);
     await expect(eunbi.getByTestId("reveal-phone-note")).toContainText("Emergency reveal · logged");
-    await expect(eunbi.getByTestId("reveal-phone-note")).toContainText("primary responder notified");
+    await expect(eunbi.getByTestId("reveal-phone-note")).toContainText("Emergency reveal · logged for review · no alert is sent");
 
     // Cancel does nothing: no value, no log
     await person(page, "Sungmin Yoon").getByTestId("reveal-email-show").click();

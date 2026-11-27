@@ -8,7 +8,7 @@ import type { FxCustomer } from "./scope-fixtures";
 /**
  * Mock of POST /contacts/{id}/reveal and GET /contact-reveals (API-CONTRACT §8.4, D-35), following the contract's order:
  * out of scope → the one 404 first; then who may open it; every call writes one log row (never the value); an
- * emergency reveal needs a typed reason and notifies the customer's primary Responder.
+ * emergency reveal needs a typed reason and records the customer's primary Responder as notified (not sent; #39).
  * The fixtures hold only masked values; a full value is made up from the same masked text (stable, fake).
  */
 export interface RevealStore { log: ContactRevealEntry[]; hits: Map<string, number[]>; seq: number }

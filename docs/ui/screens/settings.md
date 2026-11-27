@@ -22,7 +22,7 @@
 | Suppression | flapping 창·임계, dedup 창, re-notify 간격 | GET/PUT `/settings/suppression` |
 | Integrations | 고객사 횡단 소스 목록 | (미결) |
 | Users | 가입 승인, 역할 | GET/PATCH `/users` |
-| Audit log | 전체 기록 + 보기 `Emergency reveals`(D-35): ADMIN 비상 연락처 열람 목록 — 누가 · 누구의 연락처 · 고객 · 사유 · 언제 · 알림 받은 주 Responder. 값 자체는 없다 | GET `/audit-logs`, GET `/contact-reveals?mode=EMERGENCY` |
+| Audit log | 전체 기록 + 보기 `Emergency reveals`(D-35): ADMIN 비상 연락처 열람 목록 — 누가 · 누구의 연락처 · 고객 · 사유 · 언제 · 알림 대상으로 기록된 주 Responder(열 `Told`; 발송은 #39 전까지 없음). 값 자체는 없다 | GET `/audit-logs`, GET `/contact-reveals?mode=EMERGENCY` |
 
 ## 상태
 | 상태 | 표시 |

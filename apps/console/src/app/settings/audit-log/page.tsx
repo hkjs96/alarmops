@@ -93,9 +93,9 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
           <EmptyState title={mode === "EMERGENCY" && !filtered ? "No emergency reveals" : "No reveals match"} detail={filtered ? "Change or clear the filters to see more." : "Nobody has opened a contact outside their own customers."} />
         ) : (
           <>
-            <p className="sm mut" data-testid="rr-count">{items.length} {items.length === 1 ? "reveal" : "reveals"}{next ? " on this page" : ""}, newest first. “Told” is who was notified; a dash means nobody (a normal reveal).</p>
+            <p className="sm mut" data-testid="rr-count">{items.length} {items.length === 1 ? "reveal" : "reveals"}{next ? " on this page" : ""}, newest first. “Told” is who is recorded to be told, the primary Responder; nothing is sent yet. A dash means nobody (a normal reveal).</p>
             <table className="rr-table" data-testid="reveal-table">
-              <thead><tr><th scope="col">When</th><th scope="col">Type</th><th scope="col">Who</th><th scope="col">Contact</th><th scope="col">Customer</th><th scope="col">Reason</th><th scope="col"><abbr title="Who was told. A dash means nobody was notified (a normal reveal).">Told</abbr></th></tr></thead>
+              <thead><tr><th scope="col">When</th><th scope="col">Type</th><th scope="col">Who</th><th scope="col">Contact</th><th scope="col">Customer</th><th scope="col">Reason</th><th scope="col"><abbr title="Who is recorded to be told (nothing is sent yet). A dash means nobody (a normal reveal).">Told</abbr></th></tr></thead>
               <tbody>
                 {items.map((e) => (
                   <tr key={e.id} data-testid="reveal-row" data-mode={e.mode}>
@@ -105,7 +105,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
                     <td data-label="Contact">{e.contact.name} · {CHANNEL[e.channel]}</td>
                     <td data-label="Customer">{e.org.customer?.name ?? "—"}</td>
                     <td data-label="Reason">{e.reason ?? "—"}</td>
-                    <td data-label="Told" title={e.notified.length ? undefined : "Nobody notified (normal reveal)"}>{e.notified.length ? e.notified.map((n) => n.name).join(", ") : "—"}</td>
+                    <td data-label="Told" title={e.notified.length ? undefined : "Nobody recorded (normal reveal)"}>{e.notified.length ? e.notified.map((n) => n.name).join(", ") : "—"}</td>
                   </tr>
                 ))}
               </tbody>

@@ -807,11 +807,11 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 | channel | enum `PHONE, EMAIL, SLACK` | |
 | mode | enum `NORMAL, EMERGENCY` | NORMAL = 그 고객의 Responder(또는 포털 사용자), EMERGENCY = Responder가 아닌 ADMIN |
 | reason | text? | EMERGENCY면 필수(CHECK `mode <> 'EMERGENCY' OR length(btrim(reason)) > 0`), 500자 이하. NORMAL은 선택 |
-| notifiedContactIds | text[] | EMERGENCY: 알림을 넣은 주 Responder(없으면 다른 ADMIN). NORMAL은 빈 배열 |
+| notifiedContactIds | text[] | EMERGENCY: 알림 대상으로 기록한 주 Responder(없으면 다른 ADMIN). 미발송(#39). NORMAL은 빈 배열 |
 | requestId, ip, userAgent | | |
 
 - **연락처 값(전화번호·이메일)은 저장하지 않는다.** 가린 값도 저장하지 않는다.
-- INSERT만. 열람 응답과 같은 트랜잭션에서 쓰고, 실패하면 값을 주지 않는다. EMERGENCY면 같은 트랜잭션에서 NotificationJob(주 Responder 알림, 값 미포함)도 넣는다.
+- INSERT만. 열람 응답과 같은 트랜잭션에서 쓰고, 실패하면 값을 주지 않는다. EMERGENCY면 알림 대상을 `notifiedContactIds`에 기록만 하고 NotificationJob에는 넣지 않는다(발송은 #39, API-CONTRACT §8.4).
 - AuditLog에도 한 줄(`action: contact.reveal`, targetType `Contact`, `after: { revealLogId, mode }`) — 전체 감사 기록에서 보이게.
 - IX(customerId, at desc), IX(mode, at desc) — 검토 보기 `Emergency reveals`, IX(actorUserId, at desc), IX(contactId, at desc).
 - "주 Responder"의 정의는 미결(API-CONTRACT Q-API-14). 현재: 고객 단계 PagingConfig 1단계의 첫 대상(로테이션이면 지금 당번).

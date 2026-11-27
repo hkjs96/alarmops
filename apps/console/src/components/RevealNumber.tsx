@@ -22,11 +22,12 @@ interface Shown { value: string; mode: "NORMAL" | "EMERGENCY"; until: number }
  *    timer, on "Hide", when the tab is hidden and when the component goes away (navigation). It is never put in a
  *    URL, storage, a data attribute or the console log;
  *  - every press is logged by the API; the line under the value says so.
+ *  - emergency copy says "recorded", never "notified": delivery waits on hkjs96/alarmops#39.
  */
-export function RevealNumber({ contactId, name, customerName, channel, canReveal, requiresReason, hasPrimary = true, testId = "reveal" }: {
+export function RevealNumber({ contactId, name, customerName, channel, canReveal, requiresReason, testId = "reveal" }: {
   contactId: string; name: string; customerName: string; channel: RevealChannel;
   canReveal: boolean; requiresReason: boolean;
-  /** the customer has someone to notify about an emergency reveal (from the Responders list); false = say so instead of promising it */
+  /** kept for callers; the copy no longer depends on it (nobody is messaged yet, see the #39 note on the emergency copy) */
   hasPrimary?: boolean; testId?: string;
 }) {
   const [shown, setShown] = useState<Shown | null>(null);
@@ -87,7 +88,7 @@ export function RevealNumber({ contactId, name, customerName, channel, canReveal
           <button type="button" className="btn sm rv-btn" data-testid={`${testId}-hide`} ref={trigger} onClick={hide}>Hide</button>
           {/* said once, when the value appears (and once more when it hides); the countdown is for the eyes only */}
           <span className="xs mut rv-note" data-testid={`${testId}-note`}>
-            {shown.mode === "EMERGENCY" ? <>Emergency reveal · logged · {hasPrimary ? <>{customerName}’s primary responder notified</> : "no primary responder is set"}</> : <>Shown to you · logged</>}
+            {shown.mode === "EMERGENCY" ? <>Emergency reveal · logged for review · no alert is sent</> : <>Shown to you · logged</>}
             <span aria-hidden="true">{" · "}hides in {left} s</span>
           </span>
         </>
@@ -108,11 +109,13 @@ export function RevealNumber({ contactId, name, customerName, channel, canReveal
         confirmLabel={busy ? "Working…" : `${word} and log`} cancelLabel="Cancel"
         onConfirm={() => { if (reasonOk) void go(reason.trim()); }} onCancel={() => { if (!busy) { setAsking(false); setErr(null); setTimeout(() => trigger.current?.focus(), 0); } }}
       >
+        {/* COPY: says only "recorded" because notification delivery is not built yet (hkjs96/alarmops#39, API-CONTRACT §8.4).
+            When #39 ships, change this text, the note under the value, and the audit-log "Told" column text together. */}
         <p style={{ marginTop: 0 }} data-testid="reveal-explain">You are not a responder for {customerName}. Tell us why you need this contact.</p>
         <label className="cs-f"><span className="b sm">Reason (required)</span>
           <textarea className="inp cs-ta" data-testid="reveal-reason" rows={3} maxLength={REASON_MAX} value={reason} onChange={(e) => setReason(e.target.value)} aria-describedby="reveal-reason-n" />
         </label>
-        <span className="xs mut" id="reveal-reason-n">{hasPrimary ? `${customerName}’s primary responder will be notified.` : "No primary responder is set; other admins will be notified."} The reveal is logged with your name and this reason. Up to {REASON_MAX} characters.</span>
+        <span className="xs mut" id="reveal-reason-n">No alert is sent. The reveal is recorded in the audit log with your name and this reason, under Emergency reveals. Up to {REASON_MAX} characters.</span>
         {err ? <div className="co-err cs-errbox" role="alert" data-testid="reveal-dialog-err"><span>{err}</span></div> : null}
       </ConfirmDialog>
     </span>
