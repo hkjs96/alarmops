@@ -24,7 +24,8 @@
 | Cover or swap | 상대 수락 후 반영(D-28 유지). 여러 날·모든 고객은 People › Leave & replace로 안내 |
 
 ## API
-GET/POST `/rotations?scope=MSP|CUSTOMER&customerId=`, PATCH `/rotations/{id}` (members[] 순서, cadence, handover), GET `/rotations/{id}/shifts?from=&to=`, GET `/rotations/{id}/usage` → 참조 고객·단계, POST `/rotations/{id}/overrides` (COVER/SWAP, PENDING→ACCEPTED).
+GET/POST `/rotations?scope=MSP|CUSTOMER&customerId=`, POST `/rotations/{id}/preview`, PATCH `/rotations/{id}` (name, members[] 순서, handover. **cadence는 만든 뒤 바뀌지 않는다**: 바꾸려면 새 로테이션), DELETE `/rotations/{id}`, GET `/rotations/{id}/shifts?from=&to=`, GET `/rotations/{id}/usage` → 참조 고객·단계, POST `/rotations/{id}/overrides` (COVER/SWAP, PENDING→ACCEPTED).
+미리보기 `rows`는 옛·새 시간표 경계의 합집합이라 인계 시각이 바뀌면 8행/4행을 넘을 수 있다(같은 멤버 집합의 순서만 바꾸면 정확히 8/4행). 화면의 "다음 시프트" 8행/4행은 GET `/rotations/{id}/shifts` 표 얘기다.
 
 ## v4 점검 반영 (2026-11-09)
 - 샘플: 수락된 부분 대리는 Wed 11(Jiwoo 교대, Junho 18:00–23:00), Haeun의 대기 요청은 Fri 13 전체 교대(Minjae). 행 문구와 PENDING 배너가 같은 내용.

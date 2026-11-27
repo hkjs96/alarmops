@@ -577,15 +577,28 @@ AH의 `awsExternalId`, `ingestToken`은 각각 `CloudAccount.externalId`, `Integ
 | customerId | text? FK | scope=CUSTOMER면 필수(CHECK) |
 | name | text | UQ(customerId, name) |
 | cadence | enum `DAILY, WEEKLY` | |
-| handoverDow, handoverMin | smallint | 예: 매일 09:00, 월 10:00 |
-| anchorAt | timestamptz | 1번 멤버가 시작한 교대 |
-| timezone | text default `Asia/Seoul` | |
+| handoverDow, handoverMin | smallint | 예: 매일 09:00, 월 10:00. **읽지 않는 거울 값**이다. 인계 시각의 정본은 `anchorAt`(그 KST 시·분·요일)이고, 생성·수정 때마다 `anchorAt`에서 유도해 쓴다. 요일은 0 = 일요일 … 6 = 토요일. DAILY는 `handoverDow`에 anchorAt의 KST 요일을 넣고 의미 없이 둔다 |
+| anchorAt | timestamptz | 교대 격자의 기준(`anchorAt + k·길이`). 1번 멤버가 시작한 교대 |
+| timezone | text default `Asia/Seoul` | 고정(KST +9, DST 없음) |
+| version | int default 0 | PATCH·DELETE의 If-Match·ETag. 이름·멤버·인계가 바뀔 때마다 +1 |
 
 | RotationMember | 비고 |
 |---|---|
 | rotationId, contactId, order | PK(rotationId, contactId). MSP 로테이션은 INTERNAL만. CUSTOMER 로테이션은 INTERNAL + 그 고객의 PAGEABLE Responder |
 
-당번 = members[(교대 번호) mod N] → 수락된 Override → 활성 Leave 대체 순으로 덮는다.
+### RotationPin (순서·인계 변경이 지금 당번을 옮기지 않게 하는 고정 구간)
+| 필드 | 타입 | 비고 |
+|---|---|---|
+| id | PK | |
+| rotationId | FK → Rotation | ON DELETE CASCADE |
+| contactId | FK → Contact | ON DELETE RESTRICT. 진행 중·미래 pin이 있는 사람의 연락처 삭제는 409 `IN_USE`, 보존기간 정리는 Contact 삭제 바로 앞에서 그 고객 연락처의 pin을 먼저 지운다 |
+| startAt, endAt | timestamptz | CHECK startAt < endAt. 한 로테이션 안에서 겹치지 않는다(코드에서 단언) |
+| reason | text? | `CURRENT_SHIFT`(지금 교대 유지) \| `KEEP_OVERRIDE`(대타 요청이 걸린 교대 유지) |
+| createdAt | timestamptz | |
+
+순서·인원·인계 변경 때 그 로테이션의 pin은 모두 지우고 새 집합으로 바꾼다(끝난 pin은 남기지 않는다). RLS는 다른 테이블과 같다(D-40).
+
+당번 = **pin(그 시각을 덮는 것이 있으면) 아니면 members[(교대 번호) mod N]** → 수락된 Override → 활성 Leave 대체 순으로 덮는다. 틱·`/oncall/now`·paging-path·paging-health·shifts·until이 모두 이 한 해석을 쓴다.
 
 ### Override (대체 근무, 한 로테이션)
 | 필드 | 타입 | 비고 |
