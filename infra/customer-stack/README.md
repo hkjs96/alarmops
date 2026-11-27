@@ -1,6 +1,6 @@
 # infra/customer-stack — 고객 연결 스택 (D-07)
 
-`template.yaml` 하나가 고객 계정에 역할 5개와 EventBridge 규칙 2개를 만든다. 스택은 고객이 쓰는 리전(PoC는 서울 ap-northeast-2)에 만든다. 중앙 버스는 어느 리전·파티션(aws, aws-cn, aws-us-gov)에 있어도 된다. 고객이 직접 만든다(콘솔이 파라미터를 채운 링크/명령을 준다). 해지는 [OFFBOARDING.md](OFFBOARDING.md).
+`template.yaml` 하나가 고객 계정에 역할 5개와 EventBridge 규칙 2개를 만든다. 스택은 고객이 쓰는 리전(PoC는 서울 ap-northeast-2)에 만든다. 중앙 버스는 어느 리전에 있어도 되고, 파티션은 고객 스택과 같아야 한다(aws·aws-cn·aws-us-gov). 고객이 직접 만든다(콘솔이 파라미터를 채운 링크/명령을 준다). 해지는 [OFFBOARDING.md](OFFBOARDING.md).
 
 ## 파라미터
 
@@ -42,7 +42,7 @@
 - `aws:PrincipalOrgID`, `aws:PrincipalOrgPaths`, `organizations:*` 사용 없음. 신뢰는 `CentralRoleArn` 한 개와 ExternalId뿐이다.
 - StackSets·Control Tower 자원 없음. 일반 스택(`CreateStack`) 하나로 CT 관리 계정, CT 멤버 계정, 일반 계정 어디서나 만든다.
 - 하드코딩된 파티션 없음(정책 ARN은 `${AWS::Partition}`, 역할·정책 ARN 파라미터 패턴은 `arn:aws[a-z-]*:`, `CentralEventBusArn`은 `aws`·`aws-cn`·`aws-us-gov`만).
-- 남은 외부 의존: `CentralEventBusArn`은 리전을 고정하지 않는다(`arn:<파티션>:events:<리전>:<12자리 계정>:event-bus/<이름>`, 파티션은 `aws`·`aws-cn`·`aws-us-gov`). 중앙 버스가 다른 리전에 있으면 고객 스택의 규칙이 리전 간 전송을 한다. 중앙 버스의 계정 허용 목록은 `infra/aws`의 별도 절차다. SCP가 리전이나 `events:PutEvents`를 막는 조직은 이 두 가지를 직접 확인해야 한다.
+- 남은 외부 의존: `CentralEventBusArn`은 리전을 고정하지 않는다(`arn:<파티션>:events:<리전>:<12자리 계정>:event-bus/<이름>`, 파티션은 `aws`·`aws-cn`·`aws-us-gov`). 중앙 버스가 다른 리전에 있으면 고객 스택의 규칙이 리전 간 전송을 한다(같은 파티션 안에서만. EventBridge는 파티션을 넘어 보내지 않는다). 중앙 버스의 계정 허용 목록은 `infra/aws`의 별도 절차다. SCP가 리전이나 `events:PutEvents`를 막는 조직은 이 두 가지를 직접 확인해야 한다.
 - 실제 SCP·경계 하에서의 `CreateStack` 성공은 이 환경에서 검증하지 못했다(미확인).
 
 ## 역할별 권한 목록
