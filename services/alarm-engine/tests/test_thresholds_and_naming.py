@@ -200,3 +200,28 @@ def test_property_threshold_eval_period_changes_never_rename(rtype, thr, m, extr
     changed = build_desired(ResourceRef(rtype, "res-1", "ap-northeast-2", ACCOUNT_ID, {**tags, **tag_over}), cw,
                             lambda k: (lv, lv, lv))
     assert {d.metric_key: d.name for d in changed.alarms} == base
+
+
+# D-63: the customer AlarmWriter may only create alarms whose name starts with "[" (IAM resource `alarm:[*`).
+_NAME_EDGE_LABELS = ["", "web-1", "서버-1", "🚀🔥 prod", "a" * 300, "한" * 300, "🚀" * 300, "{}[]() (TagName: x)"]
+_NAME_EDGE_IDS = ["", "i-0abc", "arn:aws:elasticloadbalancing:ap-northeast-2:111122223333:loadbalancer/app/x/1", "r" * 400]
+_NAME_EDGE_METRICS = ["CPUUtilization", "Disk_root", "Disk_" + "d" * 300, "unknown_metric", "m" * 400, ""]
+
+
+def test_alarm_name_always_starts_with_bracket_for_every_type_and_edge_input():
+    resource_types = list(types()) + [""]
+    assert len(resource_types) > 5
+    n = 0
+    for rt in resource_types:
+        for label, rid, mk in itertools.product(_NAME_EDGE_LABELS, _NAME_EDGE_IDS, _NAME_EDGE_METRICS):
+            name = naming.alarm_name(rt, rid, label, mk)
+            assert name.startswith("["), (rt, label, rid, mk, name)
+            assert len(name) <= naming.MAX_NAME
+            n += 1
+    assert n > 1000
+
+
+@given(st.text(), st.text(), st.text(), st.text())
+@settings(max_examples=200, deadline=None)
+def test_alarm_name_starts_with_bracket_for_arbitrary_text(rt, rid, label, mk):
+    assert naming.alarm_name(rt, rid, label, mk).startswith("[")

@@ -1071,7 +1071,7 @@ D-60에서 쓰는 방식:
 
 ### D-63 AlarmWriter의 알람 생성 허용은 이름이 `[`로 시작하는 알람으로만 좁힌다
 
-- **결정(A안)**: 고객 연결 스택 AlarmWriter 정책의 `CreateAlarmWithManagedByTag` 문장 `Resource`를 `arn:${AWS::Partition}:cloudwatch:*:${AWS::AccountId}:alarm:[*`로 좁힌다. `ChangeOwnAlarms`(`aws:ResourceTag/ManagedBy=AlarmOps`)는 그대로 둔다. 알람 이름 규칙(D-08)은 바꾸지 않는다. 엔진이 만드는 이름은 항상 `[{type}] ...`이다(`services/alarm-engine/src/alarm_engine/naming.py` `alarm_name`). IAM `Resource`의 와일드카드는 `*`와 `?`뿐이라 `[`는 글자 그대로다.
+- **결정(A안)**: 고객 연결 스택 AlarmWriter 정책의 `CreateAlarmWithManagedByTag` 문장 `Resource`를 `arn:${AWS::Partition}:cloudwatch:*:${AWS::AccountId}:alarm:[*`로 좁힌다. `ChangeOwnAlarms`(`aws:ResourceTag/ManagedBy=AlarmOps`)는 그대로 둔다. 알람 이름 규칙(D-08)은 바꾸지 않는다. 엔진이 만드는 이름은 항상 `[{type}] ...`이다(`services/alarm-engine/src/alarm_engine/naming.py` `alarm_name`). 엔진은 생성 경로(`AlarmWriter.put`)에서 이름이 `[`로 시작하지 않으면 AWS 쓰기 호출 전에 `ForbiddenAlarmName`으로 중단한다(갱신 경로는 `ResourceTag` 기준이라 점검하지 않는다). IAM `Resource`의 와일드카드는 `*`와 `?`뿐이라 `[`는 글자 그대로다.
 - **이유(11/26-27 테스트 계정 실측, `replica-check.sh`)**:
   - 기존 정책에서는 `PutMetricAlarm`에 요청 태그 `ManagedBy=AlarmOps`를 달면, 태그 없는 기존 고객 알람의 이름으로 그 알람을 덮어쓸 수 있었다(임계값 1→2 변경, 갱신 때 태그는 무시됨). `CreateAlarmWithManagedByTag`가 `aws:RequestTag`만 보기 때문이다.
   - 탐침(`--probe-resource-tag-deny`): `aws:ResourceTag/ManagedBy`가 없을 때 막는 명시적 Deny(`Null` 또는 `StringNotEquals`)는 새 알람 생성도 막는다(CloudWatch가 생성 때 `aws:ResourceTag`를 빈 값으로 본다). 그래서 쓸 수 없다.

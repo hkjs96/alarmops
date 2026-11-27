@@ -67,6 +67,12 @@ class ForbiddenTagKey(Exception):
     """Programming error: TagResource/UntagResource must never name ManagedBy (IAM Deny, D-43)."""
 
 
+class ForbiddenAlarmName(Exception):
+    """Programming error: the customer AlarmWriter may only CREATE alarms named `[...` (D-63, IAM `alarm:[*`)."""
+
+
+CREATE_NAME_PREFIX = "["
+
 PROTECTED_TAG_KEYS = frozenset({"ManagedBy"})
 
 
@@ -267,6 +273,12 @@ class AlarmWriter:
         extra = list(extra_tags or [])
         existing = self._existing(name)
         if existing is None:
+            # D-63: creation is allowed by IAM only for `alarm:[*`. Fail here, not with AccessDenied in a real account.
+            # Create path only: updates are authorised by ResourceTag/ManagedBy (ChangeOwnAlarms), not by name, so a
+            # managed alarm with a legacy name must stay updatable.
+            if not name.startswith(CREATE_NAME_PREFIX):
+                raise ForbiddenAlarmName(f"refusing to create alarm {name!r}: D-63 allows creation only for names "
+                                         f"starting with {CREATE_NAME_PREFIX!r}")
             tags = [{"Key": "ManagedBy", "Value": naming.MANAGED_BY}, {"Key": "Severity", "Value": severity}] + extra
             self._check_limit()
             guarded_call(self.cw.put_metric_alarm, **params, Tags=tags)
