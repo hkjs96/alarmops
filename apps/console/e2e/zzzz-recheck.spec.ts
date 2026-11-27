@@ -182,7 +182,13 @@ test.describe("P2-B the same on the other lists, and P3", () => {
     await min.fill(String(Number(was) + 1));
     await assertNoRowShift(page, {
       name: "callorder.save", rows: CO, at: page.getByTestId("co-save"),
-      then: async () => { await expect(toast(page)).toContainText("Saved for Hanbit Logistics › Fulfilment › Orders API"); },
+      // The toast shows ~150 ms (CI under load: 300+ ms) before the route change that closes the panel and widens the list.
+      // Wait for that too: measuring in between sees the new layout while the scroll position is still the old one (#147).
+      then: async () => {
+        await expect(toast(page)).toContainText("Saved for Hanbit Logistics › Fulfilment › Orders API");
+        await expect(page.locator(".co-panel")).toHaveCount(0);
+        await expect(page).toHaveURL(/\/call-order(\?|$)/);
+      },
     });
     await page.waitForTimeout(READ);
     await toast(page).getByRole("button", { name: "Undo" }).click();
