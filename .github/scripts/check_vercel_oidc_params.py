@@ -11,7 +11,7 @@ import re
 import sys
 
 PROVIDER_RE = re.compile(r"arn:aws[a-z-]*:iam::[0-9]{12}:oidc-provider/oidc\.vercel\.com(?:/([a-z0-9][a-z0-9-]{0,62}))?")
-SLUG_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
+SLUG_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,62}")
 PROJECT_RE = re.compile(r"[A-Za-z0-9._-]{1,100}")
 
 
@@ -21,7 +21,7 @@ def check(provider, slug, project):
     if not m:
         errors.append("VERCEL_OIDC_PROVIDER_ARN is not an oidc.vercel.com provider ARN (Global or Team)")
     if not SLUG_RE.fullmatch(slug):
-        errors.append("VERCEL_TEAM_SLUG has characters outside [A-Za-z0-9_-] or a bad length")
+        errors.append("VERCEL_TEAM_SLUG must be lowercase letters, digits and hyphens (1-63 characters, not starting with a hyphen)")
     if not PROJECT_RE.fullmatch(project):
         errors.append("VERCEL_PROJECT_NAME has characters outside [A-Za-z0-9._-] or a bad length")
     if m and m.group(1) is not None and m.group(1) != slug:

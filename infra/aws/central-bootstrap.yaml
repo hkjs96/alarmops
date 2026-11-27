@@ -44,7 +44,8 @@ Parameters:
   VercelTeamSlug:
     Type: String
     Default: ""
-    AllowedPattern: '^$|^[A-Za-z0-9_-]{1,64}$'
+    AllowedPattern: '^$|^[a-z0-9][a-z0-9-]{0,62}$'
+    ConstraintDescription: Vercel team slug, lowercase letters, digits and hyphens only (1-63 characters, starts with a letter or digit).
     Description: Vercel team slug. Audience of the new Vercel provider is https://vercel.com/<slug>. Needed only when VercelOidcProviderArn is empty.
   VercelOidcProviderArn:
     Type: String

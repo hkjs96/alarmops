@@ -36,6 +36,14 @@ class CheckVercelOidcParams(unittest.TestCase):
             with self.subTest(args=args):
                 self.assertEqual(run(*args)[0], 1)
 
+    def test_slug_must_be_lowercase_digits_hyphen(self):
+        for slug in ("Acme", "acme_team", "-acme", "a" * 64):
+            with self.subTest(slug=slug):
+                self.assertEqual(run(GLOBAL, slug, "p")[0], 1)
+        for slug in ("acme-team", "a1", "a" * 63):
+            with self.subTest(slug=slug):
+                self.assertEqual(run(GLOBAL, slug, "p")[0], 0)
+
     def test_usage(self):
         self.assertEqual(run(TEAM)[0], 2)
 

@@ -421,6 +421,16 @@ class CentralTemplate(unittest.TestCase):
                     # CloudFormation matches the whole value (Java matches); Python's `$` also accepts a trailing newline.
                     self.assertIsNone(re.fullmatch(pat, bad))
 
+    def test_vercel_slug_pattern_is_lowercase_digits_hyphen_in_both_templates(self):
+        for tpl, empty_ok in ((C, False), (BOOT, True)):
+            pat = tpl["Parameters"]["VercelTeamSlug"]["AllowedPattern"]
+            self.assertIn("ConstraintDescription", tpl["Parameters"]["VercelTeamSlug"])
+            for ok in ("acme-team", "a1", "a", "a" * 63):
+                self.assertIsNotNone(re.fullmatch(pat, ok), ok)
+            for bad in ("Acme", "acme_team", "-acme", "a" * 64, "ACME"):
+                self.assertIsNone(re.fullmatch(pat, bad), bad)
+            self.assertEqual(re.fullmatch(pat, "") is not None, empty_ok)
+
     def test_vercel_trust_sub_is_production_only(self):
         for arn in ("arn:aws:iam::123456789012:oidc-provider/oidc.vercel.com/acme-team",
                     "arn:aws:iam::123456789012:oidc-provider/oidc.vercel.com"):
