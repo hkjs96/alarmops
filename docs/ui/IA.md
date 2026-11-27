@@ -241,7 +241,7 @@ SHOWING:  Mirae Pay × › Core × › All services                 Outside this
   - 가린 값이 기본.
   - 전체 값은 그 고객의 Responder만.
   - MSP ADMIN은 사유를 적는 비상 열람만.
-  - 모든 열람 기록, 비상 열람은 검토 목록 + 주 Responder 알림
+  - 모든 열람 기록, 비상 열람은 검토 목록 + 주 Responder를 알림 대상으로 기록(발송은 #39)
 - **시간** (DATA-MODEL §0)
   - KST 표시, 상대 시각 + 절대 시각 툴팁
 - **다크 모드** (ui/README)
