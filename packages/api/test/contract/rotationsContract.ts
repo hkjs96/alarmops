@@ -9,7 +9,7 @@
  *  - POST body: { scope, customerId?, name, cadence, handover: { dow?, minute }, members: [contactId, ...] } (PATCH/preview: any of name, cadence, handover, members)
  *  - handover.minute = minutes after midnight KST, handover.dow = 0 (Sun) ... 6 (Sat)
  *  - preview: { previewHash, rows: [{ start, end, before: { contactId }, after: { contactId }, changed }], nextShift: { before, after }, totals: { changedRows } }
- *  - shifts: { rows: [{ start, end, contactId, pinned, overrides: [{ status }] }] }; usage: { customers: [{ id, name, nodes: [{ level, id, name, stepIndex }] }] }
+ *  - shifts: { rows: [{ start, end, contactId, pinned, overrides: [{ status }] }] }; usage: { customers: [{ id, name, steps: [{ pagingConfigId, level, scopeId, stepIndex, shared }] }] }
  *  - memory store extras the seed uses: Rotation.handoverDow / handoverMin / version, MemoryApiStore.rotationPins (see fixture.ts rotationPins)
  *
  * World (now = Tue 2026-11-10 12:00 KST): MSP rotation rot_abc = DAILY [A=Haeun, B=Junho, C=Minjae], handover 09:00 KST, stored handoverDow=1 / handoverMin=0 and
@@ -117,7 +117,7 @@ export function rotationsContract(make: MakeFixture<Repo>): void {
     const pins = await w.fx.rotationPins!(id);
     for (let i = 1; i < pins.length; i++) expect(pins[i]!.startAt.getTime()).toBeGreaterThanOrEqual(pins[i - 1]!.endAt.getTime());
   };
-  const usageRows = (b: any): string[][] => b.customers.flatMap((c: any) => c.nodes.map((n: any) => [c.id, n.level, n.id, String(n.stepIndex)]));
+  const usageRows = (b: any): string[][] => b.customers.flatMap((c: any) => c.steps.map((n: any) => [c.id, n.level, n.scopeId, String(n.stepIndex)]));
   const getRot = async (id: string) => {
     const r = await w.call(ADMIN, 'GET', '/rotations');
     expect(r.status).toBe(200);
@@ -546,6 +546,25 @@ export function rotationsContract(make: MakeFixture<Repo>): void {
       expect(audits.filter((a) => a.action === 'rotation.update')).toHaveLength(1);
       const applied = audits.filter((a) => a.action === 'rotation.apply');
       expect(applied.map((a) => a.customerId).sort()).toEqual(['cus_hanbit', 'cus_mirae']);
+    });
+  });
+
+  describe('an MSP schedule change outside the preview window still audits every affected customer', () => {
+    it('10 members reordered so only the 9th and 10th shift after the current one differ: changedRows 0, yet one rotation.apply per customer', async () => {
+      const S = extraStaff(10);
+      await open((seed) => {
+        addStaff(seed, 10);
+        seed.rotations.get('rot_abc')!.members = S.map((contactId, order) => ({ contactId, order })); // rot_abc is paged by both customers
+      });
+      const proposal = { members: [S[9]!, ...S.slice(1, 9), S[0]!] };
+      const p = body(await pv('rot_abc', proposal));
+      expect(p.totals.changedRows).toBe(0);
+      const before = (await w.fx.audits()).length;
+      const r = await patch('rot_abc', { ...proposal, previewHash: p.previewHash }, 0);
+      expect([r.status, body(r).version]).toEqual([200, 1]);
+      const audits = (await w.fx.audits()).slice(before);
+      expect(audits.filter((a) => a.action === 'rotation.update')).toHaveLength(1);
+      expect(audits.filter((a) => a.action === 'rotation.apply').map((a) => a.customerId).sort()).toEqual(['cus_hanbit', 'cus_mirae']);
     });
   });
 

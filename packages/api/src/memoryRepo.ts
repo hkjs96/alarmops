@@ -1133,7 +1133,7 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     cur.version = (cur.version ?? 0) + 1;
     const pinsAfter = this.rotationPins.filter((p) => p.rotationId === u.id);
     this.audits.push({ ...audit, customerId: cur.customerId ?? null, targetId: u.id, before, after: { ...snap(cur, pinsAfter), version: cur.version } });
-    const apply = ev.scheduleChanged && cur.scope === 'MSP' && ev.plan.changedRows > 0;
+    const apply = ev.scheduleChanged && cur.scope === 'MSP';
     if (apply) {
       for (const c of state.customers) this.audits.push({ ...audit, customerId: c.id, action: 'rotation.apply', targetId: u.id, before: null, after: { rotationId: u.id, changedRows: ev.plan.changedRows, pins: ev.plan.pins.length } });
     }

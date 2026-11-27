@@ -52,17 +52,17 @@ export function evaluateRotationChange(state: RotationState, p: RotationProposal
   return { plan, previewHash, members, handover, membersChanged, handoverChanged, scheduleChanged: membersChanged || handoverChanged, nameChanged: p.name !== r.name };
 }
 
-/** The body of GET /rotations/{id}/usage (and `details.usage` of IN_USE): customers by name, their nodes by level then step. */
-export function usageBody(rotationId: string, rows: RotationUsageRow[]) {
+/** The body of GET /rotations/{id}/usage (and `details.usage` of IN_USE): customers by name, their steps by level then step. `shared` = the rotation is an MSP rotation shared by all customers. */
+export function usageBody(rotationId: string, rows: RotationUsageRow[], shared: boolean) {
   const level = { CUSTOMER: 0, PROJECT: 1, SERVICE: 2 } as const;
-  const by = new Map<string, { id: string; name: string; slug: string; status: string; nodes: Array<Record<string, unknown> & { level: string; id: string; stepIndex: number }> }>();
+  const by = new Map<string, { id: string; name: string; slug: string; status: string; steps: Array<{ pagingConfigId: string; level: string; scopeId: string; stepIndex: number; shared: boolean }> }>();
   for (const r of rows) {
-    const c = by.get(r.customerId) ?? { id: r.customerId, name: r.customerName, slug: r.customerSlug, status: r.customerStatus, nodes: [] };
-    c.nodes.push({ level: r.level, id: r.scopeId, name: r.scopeName, stepIndex: r.stepIndex, pagingConfigId: r.pagingConfigId });
+    const c = by.get(r.customerId) ?? { id: r.customerId, name: r.customerName, slug: r.customerSlug, status: r.customerStatus, steps: [] };
+    c.steps.push({ pagingConfigId: r.pagingConfigId, level: r.level, scopeId: r.scopeId, stepIndex: r.stepIndex, shared });
     by.set(r.customerId, c);
   }
   const customers = [...by.values()].sort((a, b) => a.name.localeCompare(b.name) || (a.id < b.id ? -1 : 1));
-  for (const c of customers) c.nodes.sort((a, b) => level[a.level as keyof typeof level] - level[b.level as keyof typeof level] || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0) || a.stepIndex - b.stepIndex);
+  for (const c of customers) c.steps.sort((a, b) => level[a.level as keyof typeof level] - level[b.level as keyof typeof level] || (a.scopeId < b.scopeId ? -1 : a.scopeId > b.scopeId ? 1 : 0) || a.stepIndex - b.stepIndex);
   return { rotationId, customers };
 }
 
@@ -205,7 +205,7 @@ export async function getRotationShifts(req: ApiRequest, deps: Deps, id: string)
 export async function getRotationUsage(req: ApiRequest, deps: Deps, id: string): Promise<ApiResponse> {
   const { scope, state } = await readGate(req, deps, id);
   const rows = await deps.repo.rotationUsage(id, scope);
-  return ok(usageBody(state.rotation.id, rows));
+  return ok(usageBody(state.rotation.id, rows, state.rotation.scope === 'MSP'));
 }
 
 // ───────────────────────────── POST /rotations ─────────────────────────────
@@ -327,6 +327,6 @@ export async function deleteRotation(req: ApiRequest, deps: Deps, id: string): P
   if (out === 'BUSY') throw busy();
   if (out === 'NOT_FOUND') throw notFound();
   if (out === 'CONFLICT') throw versionConflict('The rotation', (await deps.repo.rotationState(id))?.rotation.version ?? 0);
-  if (typeof out === 'object') throw new ApiError(409, 'IN_USE', 'Customers still page this rotation. Change their call orders first.', { usage: usageBody(id, out.inUse) });
+  if (typeof out === 'object') throw new ApiError(409, 'IN_USE', 'Customers still page this rotation. Change their call orders first.', { usage: usageBody(id, out.inUse, state.rotation.scope === 'MSP') });
   return ok({ id, deleted: true });
 }

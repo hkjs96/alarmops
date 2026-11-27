@@ -1083,7 +1083,7 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
         }
         const version = Number(cur.version) + 1;
         await insertAudit(tx, { ...audit, customerId, targetId: u.id, before, after: { name: u.name, memberIds, handover: handoverOf(r.cadence, anchorAt), anchorAt: anchorAt.toISOString(), pins: pinJson(pins), version } });
-        if (ev.scheduleChanged && cur.scope === 'MSP' && ev.plan.changedRows > 0) {
+        if (ev.scheduleChanged && cur.scope === 'MSP') {
           for (const c of state.customers) await insertAudit(tx, { ...audit, customerId: c.id, action: 'rotation.apply', targetId: u.id, before: null, after: { rotationId: u.id, changedRows: ev.plan.changedRows, pins: ev.plan.pins.length } });
         }
         return { affected: ev.scheduleChanged ? state.customers.length : 0 };
