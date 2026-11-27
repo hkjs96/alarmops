@@ -696,7 +696,10 @@ class MaskSecretKeyShape(unittest.TestCase):
         self.assertIn('"x": 1', self.data('{"Authorization": "Bearer abcDEF123xyz.tok", "x": 1}'))
 
     def test_bearer_keyword_value_is_still_masked(self):
-        self.assertNotIn("abcDEF123xyz", self.data("got Bearer abcDEF123xyz now"))
+        # #168: a value is a secret only after : or = (a plain space no longer counts)
+        for t in ("got Bearer: abcDEF123xyz now", "got bearer=abcDEF123xyz now", '{"Bearer": "abcDEF123xyz"}'):
+            with self.subTest(t):
+                self.assertNotIn("abcDEF123xyz", self.data(t))
 
     def test_url_path_is_kept_but_query_values_are_checked(self):
         url = f"https://sqs.ap-northeast-2.amazonaws.com/111111111111/alarmops-rehearsal-{LONG_RUN}"
@@ -1077,3 +1080,99 @@ def alarm_names_of(c):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MaskFollowUps168(unittest.TestCase):
+    """#168 items 1-3: keyword delimiter, URL userinfo/signature, 40-char rule before a sentence-ending period."""
+    COMMON = MaskUnit.COMMON
+
+    def run_bash(self, fn, text):
+        import os
+        import subprocess
+        e = {"PATH": os.environ["PATH"], "HOME": "/tmp"}
+        cp = subprocess.run(["bash", "-c", 'source "$1"; ' + fn + ' "$2"', "_", self.COMMON, text],
+                            capture_output=True, text=True, env=e, timeout=30)
+        self.assertEqual(cp.returncode, 0, cp.stderr)
+        return cp.stdout.rstrip("\n")
+
+    def data(self, t):
+        return self.run_bash("rh_mask_data", t)
+
+    def human(self, t):
+        return self.run_bash("rh_mask", t)
+
+    def test_space_after_keyword_is_not_a_delimiter(self):
+        names = ("[RDS] Password Expiry", "[RDS] Password Expiry Warning for orders",
+                 "[EC2] Signature Verification Failures", "Secret Key Rotation Overdue",
+                 "[SQS] Access Token Refresh Backlog-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789AbCdEfGh")
+        for n in names:
+            for fn in (self.data, self.human):
+                with self.subTest(n, fn=fn.__name__):
+                    self.assertEqual(fn(n), n)
+        # data path as the scripts use it: JSON with a 50+ char mixed-case name
+        js = '{"AlarmName": "[RDS] Password Expiry-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789AbCdEfGhIj", "x": 1}'
+        self.assertEqual(self.data(js), js)
+
+    def test_colon_or_equals_still_marks_a_secret(self):
+        for t in ("Password: hunter2", "password=hunter2", '{"Password": "hunter2", "k": 1}', "Password = hunter2"):
+            with self.subTest(t):
+                for fn in (self.data, self.human):
+                    self.assertNotIn("hunter2", fn(t))
+        self.assertIn('"k": 1', self.data('{"Password": "hunter2", "k": 1}'))
+
+    def test_signature_keywords(self):
+        for t in ("X-Amz-Signature=abc123def", "signature: abc123def", "&Signature=abc123def&x=1"):
+            with self.subTest(t):
+                self.assertNotIn("abc123def", self.data(t))
+                self.assertNotIn("abc123def", self.human(t))
+
+    def test_url_userinfo_is_masked_on_the_human_path(self):
+        out = self.human("connect postgres://admin:s3cr3tpw@db.example.com:5432/app now")
+        self.assertNotIn("s3cr3tpw", out)
+        self.assertNotIn("admin", out)
+        self.assertIn("postgres://****@db.example.com:5432/app", out)
+        self.assertEqual(self.human("https://example.com/a@b/path"), "https://example.com/a@b/path")
+
+    def test_hex_query_value_of_64_plus_is_masked_but_paths_are_not(self):
+        hx = "0123456789abcdef" * 4
+        url = "https://sqs.ap-northeast-2.amazonaws.com/111111111111/q"
+        out = self.human(f"{url}?sig={hx}&n=1")
+        self.assertNotIn(hx, out)
+        self.assertIn("&n=1", out)
+        self.assertEqual(self.human(f"{url}/{hx}"), f"{url}/{hx}")
+        short = "0123456789abcdef"
+        self.assertEqual(self.human(f"{url}?sig={short}"), f"{url}?sig={short}")
+
+    def test_secret_before_sentence_ending_period_is_masked(self):
+        for t in (f"the key is {SECRET40}.", f"{SECRET40}. Next", f"({SECRET40}).", f"{SECRET40}."):
+            with self.subTest(t):
+                self.assertNotIn(SECRET40, self.human(t))
+
+    def test_dotted_names_are_still_kept(self):
+        for t in (f"{SECRET40}.post", f"pre.{SECRET40}", f"{SECRET40}.0"):
+            with self.subTest(t):
+                self.assertEqual(self.human(t), t)
+
+
+class ReplicaCheckSingleDeletePath(unittest.TestCase):
+    def test_name_based_alarm_deletes_go_through_the_owned_helper(self):
+        src = (REPO / "infra" / "scripts" / "rehearsal" / "replica-check.sh").read_text(encoding="utf-8")
+        lines = [l for l in src.splitlines() if "cloudwatch delete-alarms" in l and "rp_exec person" in l]
+        self.assertEqual(len(lines), 1, lines)   # only inside rp_delete_alarms_owned
+        self.assertIn("own[@]", lines[0])
+
+
+class DocsMatchScriptOutput168(unittest.TestCase):
+    def read(self, rel):
+        return (REPO / rel).read_text(encoding="utf-8")
+
+    def test_g_row_error_prefix_is_quoted_exactly(self):
+        sh = self.read("infra/scripts/rehearsal/replica-check.sh")
+        self.assertIn('g_row "$g_cell: 판정하지 못함(거부가 아닌 오류).', sh)
+        for rel in ("docs/GO-LIVE.md", "infra/test/REHEARSAL-CONTRACT.md"):
+            self.assertIn("`ERROR(코드): 판정하지 못함(거부가 아닌 오류)…`", self.read(rel), rel)
+
+    def test_namespace_none_is_documented_as_a_collision(self):
+        gl = self.read("docs/GO-LIVE.md")
+        self.assertGreaterEqual(gl.count("Namespace None"), 2)
+        self.assertIn("Namespace None", self.read("infra/test/REHEARSAL-CONTRACT.md"))

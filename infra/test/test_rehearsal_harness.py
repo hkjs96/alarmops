@@ -399,6 +399,14 @@ class CleanupScope(Base):
                 self.assertEqual(self.deleted_alarms(), set())
                 self.assertEqual(self.deleted_queues(), set())
 
+    def test_alarm_lookup_is_retried_once(self):
+        q1, q2 = self.prepare()
+        self.sb.calls_file.unlink(missing_ok=True)
+        self.sb.set_scenario(**self.scenario(q1, q2), fail_nth={"cloudwatch describe-alarms": 1})
+        res = self.sb.run("cleanup.sh", self.args("cleanup.sh", run_id="run-one"))
+        self.assertEqual(res.code, 0, res.text)
+        self.assertTrue(self.deleted_alarms(), "the second lookup succeeded, so the run's alarms are deleted")
+
     def test_unknown_run_id_deletes_nothing(self):
         q1, q2 = self.prepare()
         self.sb.set_scenario(**self.scenario(q1, q2))
