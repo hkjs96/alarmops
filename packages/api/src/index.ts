@@ -17,3 +17,4 @@ export { isFreeMail } from './onboardingApi.js';
 export { slugFromName, freeSlug, roleArn, newExternalId } from './onboardingApi.js';
 export { revealStanding, revealFlags, REVEAL_LIMITS, REASON_MAX as REVEAL_REASON_MAX, VIEWER_RESPONDER_MAY_REVEAL } from './revealApi.js';
 export { resourceItem, alarmItem } from './monitoringApi.js';
+export { planTemplateChange, TEMPLATE_NAME_MAX, TEMPLATE_MEMBERS_MAX } from './templatesApi.js';

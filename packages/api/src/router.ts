@@ -19,6 +19,7 @@ import { listContacts, createContact, patchContact, deleteContact, verifyContact
 import { createProject, createService, getCustomer, listCustomers, listProjects, listServices, patchCustomer, patchProject, patchService } from './orgApi.js';
 import { getResource, listManagedAlarms, listResources, postMonitoring } from './monitoringApi.js';
 import { createUser, getUser, listUsers, patchUser } from './usersApi.js';
+import { createTemplate, listTemplates, patchTemplate, previewTemplate } from './templatesApi.js';
 import { deleteResponder, getMe, getOncallNow, getPagingHealth, getResponders, listRotations, listStaff, patchResponder, postResponder } from './peopleApi.js';
 
 export interface ApiDeps {
@@ -92,6 +93,11 @@ export const ROUTES: Route[] = [
   route('GET', '/customers/:id/purge-log', (r, d, p) => getPurgeLog(r, d, p[0]!)),
   route('GET', '/customers/:id/export.csv', (r, d, p) => exportCsv(r, d, p[0]!)),
   route('GET', '/digests/latest', (r, d) => getLatestDigest(r, d)),
+  route('GET', '/responder-templates', (r, d) => listTemplates(r, d)),
+  route('POST', '/responder-templates', (r, d) => createTemplate(r, d)),
+  route('PATCH', '/responder-templates/:id', (r, d, p) => patchTemplate(r, d, p[0]!)),
+  // A preview changes nothing: running it again IS the replay, so its body is not kept.
+  route('POST', '/responder-templates/:id/preview', (r, d, p) => previewTemplate(r, d, p[0]!), () => false),
   route('GET', '/rotations', (r, d) => listRotations(r, d)),
   route('GET', '/staff', (r, d) => listStaff(r, d)),
   // D-35. The reveal response carries a contact value: never stored for replay (security review SQL R-7), a second call runs and is logged again.

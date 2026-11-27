@@ -5,7 +5,7 @@
  */
 import { createHash } from 'node:crypto';
 import { incidentMute, type DigestData, type PurgeLogEntry, type Contact, type Leave, type Override, type Rotation, type AuditInput, type DeliveryLog, type IncidentEventInput, type IncidentRow, type MaintenanceWindow, type PagingConfig } from '@alarmops/core';
-import { nodeVisible, type ApiRepository, type ManagedAlarmFilter, type ManagedAlarmRecord, type MonitoringCursor, type MonitoringPage, type ResourceFilter, type ResourceRecord, type AlertMemberRow, type IdempotentEntry, type IncidentFilter, type IncidentPage, type NodeFilter, type NotifiedPerson, type OpenCounts, type OrgTree, type ScopeFilter, type StatusCounts, type UndoRecord, type UserInfo, type Principal, type ResponderOp, type ResponderWriteOutcome, type RespondersState, type RotationsWorld, type ChangeStatusOutcome, type CustomerStatusState, type CustomerStatusValue, type ExportIncidentRow, type RetentionView, type MarkStepOutcome, type OffboardStep, type OffboardStepKey, type OffboardingState, type RevealLogFilter, type RevealLogRow, type RevealWrite, type RevealWriteOutcome, type AccountPatch, type AccountWriteOutcome, type AuditTemplate, type CloudAccountRecord, type ContactPatch, type ContactScopeInfo, type ContactWriteOutcome, type ContactsWorld, type NewAccount, type NewContact, type VerificationIssue, type VerificationLimits, type IssueOutcome, type VerificationLink, type VerificationTaken, type VerifyChannelValue, type CustomerProfile, type CustomerProfilePatch, type CustomerUpdateOutcome, type OrgWriteOutcome, type ProjectRecord, type ServiceRecord, type BindGoogleOutcome, type EnrolOutcome, type NewUser, type UserFilter, type UserPatch, type UserRecord, type UserWriteOutcome, OFFBOARD_STEP_KEYS, normalizeEmail, emailDomain, isFreeMail } from '@alarmops/api';
+import { nodeVisible, type ApiRepository, type ManagedAlarmFilter, type ManagedAlarmRecord, type MonitoringCursor, type MonitoringPage, type ResourceFilter, type ResourceRecord, type AlertMemberRow, type IdempotentEntry, type IncidentFilter, type IncidentPage, type NodeFilter, type NotifiedPerson, type OpenCounts, type OrgTree, type ScopeFilter, type StatusCounts, type UndoRecord, type UserInfo, type Principal, type ResponderOp, type ResponderWriteOutcome, type RespondersState, type RotationsWorld, type ChangeStatusOutcome, type CustomerStatusState, type CustomerStatusValue, type ExportIncidentRow, type RetentionView, type MarkStepOutcome, type OffboardStep, type OffboardStepKey, type OffboardingState, type RevealLogFilter, type RevealLogRow, type RevealWrite, type RevealWriteOutcome, type AccountPatch, type AccountWriteOutcome, type AuditTemplate, type CloudAccountRecord, type ContactPatch, type ContactScopeInfo, type ContactWriteOutcome, type ContactsWorld, type NewAccount, type NewContact, type VerificationIssue, type VerificationLimits, type IssueOutcome, type VerificationLink, type VerificationTaken, type VerifyChannelValue, type CustomerProfile, type CustomerProfilePatch, type CustomerUpdateOutcome, type OrgWriteOutcome, type ProjectRecord, type ServiceRecord, type BindGoogleOutcome, type EnrolOutcome, type NewUser, type UserFilter, type UserPatch, type UserRecord, type UserWriteOutcome, OFFBOARD_STEP_KEYS, normalizeEmail, emailDomain, isFreeMail, planTemplateChange, type ResponderTemplateView, type TemplateCreate, type TemplateImpactInput, type TemplateUpdate, type TemplateUpdateOutcome } from '@alarmops/api';
 import { PG, pgCode, type SqlExecutor } from './client.js';
 import { purgeLogOf } from './retentionSql.js';
 import { CONTACT_COLS, toContact, Params, d, dReq, incidentCols, iso, js, newId, num, toEvent, toIncident, toLog } from './rows.js';
@@ -717,6 +717,126 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
       });
     } catch (err) {
       if (pgCode(err) === PG.UNIQUE) return 'EXISTS';
+      throw err;
+    }
+  }
+
+  // ───────────────────────────── Responder templates (MSP-level; API-CONTRACT §8.3) ─────────────────────────────
+
+  private async templateViews(q: SqlExecutor, id: string | null): Promise<ResponderTemplateView[]> {
+    const ts = await q.query(`SELECT "id", "name", "version", "updatedAt", "updatedBy" FROM "ResponderTemplate" WHERE ($1::text IS NULL OR "id" = $1) ORDER BY "name", "id"`, [id]);
+    if (!ts.length) return [];
+    const ids = ts.map((t) => t.id as string);
+    const [ms, cs] = await Promise.all([
+      q.query(`SELECT m."templateId", m."contactId", c."name" FROM "ResponderTemplateMember" m JOIN "Contact" c ON c."id" = m."contactId" WHERE m."templateId" = ANY($1::text[]) ORDER BY c."name", m."contactId"`, [ids]),
+      q.query(`SELECT "id", "name", "responderTemplateId" AS "tid" FROM "Customer" WHERE "responderTemplateId" = ANY($1::text[]) AND "status" <> 'TERMINATED' ORDER BY "name", "id"`, [ids]),
+    ]);
+    return ts.map((t) => ({
+      id: t.id, name: t.name, version: t.version, updatedAt: dReq(t.updatedAt), updatedBy: t.updatedBy ?? null,
+      members: ms.filter((m) => m.templateId === t.id).map((m) => ({ contactId: m.contactId, name: m.name })),
+      customers: cs.filter((c) => c.tid === t.id).map((c) => ({ id: c.id, name: c.name })),
+    }));
+  }
+  async listResponderTemplates(): Promise<ResponderTemplateView[]> { return this.templateViews(this.sql, null); }
+  async getResponderTemplate(id: string): Promise<ResponderTemplateView | null> { return (await this.templateViews(this.sql, id))[0] ?? null; }
+
+  /** The impact inputs, read through `q` (the save reads them inside its transaction, after locking the customers). */
+  private async impactInput(q: SqlExecutor, id: string, proposed: string[], lock: boolean): Promise<TemplateImpactInput | null> {
+    const [t] = await q.query(`SELECT "id", "name", "version" FROM "ResponderTemplate" WHERE "id" = $1`, [id]);
+    if (!t) return null;
+    const members = (await q.query(`SELECT "contactId" FROM "ResponderTemplateMember" WHERE "templateId" = $1 ORDER BY "contactId"`, [id])).map((r) => r.contactId as string);
+    const all = [...new Set([...members, ...proposed])];
+    // customers locked in id order (every writer of a Responders list takes the customer row first)
+    const custs = await q.query(`SELECT "id", "name" FROM "Customer" WHERE "responderTemplateId" = $1 AND "status" <> 'TERMINATED' ORDER BY "id"${lock ? ' FOR UPDATE' : ''}`, [id]);
+    const cids = custs.map((c) => c.id as string);
+    const [names, rs, steps] = await Promise.all([
+      all.length ? q.query(`SELECT "id", "name" FROM "Contact" WHERE "id" = ANY($1::text[])`, [all]) : Promise.resolve([]),
+      cids.length ? q.query(`SELECT "customerId", "contactId", "source", "templateId" FROM "Responder" WHERE "customerId" = ANY($1::text[])`, [cids]) : Promise.resolve([]),
+      cids.length && all.length
+        ? q.query(`SELECT pc."customerId", es."index", es."targetId" FROM "PagingConfig" pc JOIN "EscalationStep" es ON es."pagingConfigId" = pc."id"
+                    WHERE pc."customerId" = ANY($1::text[]) AND es."targetType" = 'PERSON' AND es."targetId" = ANY($2::text[])`, [cids, all])
+        : Promise.resolve([]),
+    ]);
+    return {
+      templateId: t.id, version: t.version, name: t.name, members,
+      names: Object.fromEntries(names.map((n) => [n.id as string, n.name as string])),
+      customers: custs.map((c) => ({
+        id: c.id, name: c.name,
+        responders: rs.filter((r) => r.customerId === c.id).map((r) => ({ contactId: r.contactId, source: r.source, templateId: r.templateId ?? null })),
+        namedSteps: steps.filter((x) => x.customerId === c.id).map((x) => ({ contactId: x.targetId as string, stepIndex: (x.index as number) + 1 })),
+      })),
+    };
+  }
+  async responderTemplateImpactInput(id: string, proposedMembers: string[]): Promise<TemplateImpactInput | null> {
+    return this.sql.transaction((tx) => this.impactInput(tx, id, proposedMembers, false));
+  }
+
+  private async allStaff(q: SqlExecutor, ids: string[]): Promise<boolean> {
+    if (!ids.length) return false;
+    const [r] = await q.query(`SELECT count(*)::int AS "n" FROM "Contact" WHERE "id" = ANY($1::text[]) AND "kind" = 'INTERNAL' AND "active"`, [ids]);
+    return (r?.n as number) === ids.length;
+  }
+
+  async createResponderTemplate(t: TemplateCreate, audit: AuditInput): Promise<ResponderTemplateView | 'NAME_EXISTS' | 'BAD_MEMBER'> {
+    try {
+      return await this.sql.transaction(async (tx) => {
+        if (!(await this.allStaff(tx, t.members))) return 'BAD_MEMBER' as const;
+        const id = newId('rt');
+        await tx.query(`INSERT INTO "ResponderTemplate"("id", "name", "updatedBy", "updatedAt", "version") VALUES ($1, $2, $3, $4::timestamptz, 0)`, [id, t.name, t.actorId, iso(t.at)]);
+        for (const c of t.members) await tx.query(`INSERT INTO "ResponderTemplateMember"("templateId", "contactId") VALUES ($1, $2)`, [id, c]);
+        await insertAudit(tx, { ...audit, customerId: null, targetType: 'ResponderTemplate', targetId: id });
+        return (await this.templateViews(tx, id))[0]!;
+      });
+    } catch (err) {
+      if (pgCode(err) === PG.UNIQUE) return 'NAME_EXISTS';
+      throw err;
+    }
+  }
+
+  async updateResponderTemplate(u: TemplateUpdate, audit: AuditInput): Promise<TemplateUpdateOutcome> {
+    try {
+      return await this.sql.transaction(async (tx): Promise<TemplateUpdateOutcome> => {
+        const [cur] = await tx.query(`SELECT "name", "version" FROM "ResponderTemplate" WHERE "id" = $1 FOR UPDATE`, [u.id]);
+        if (!cur) return 'NOT_FOUND';
+        if (cur.version !== u.expectedVersion) return 'CONFLICT';
+        if (!(await this.allStaff(tx, u.proposal.members))) return 'BAD_MEMBER';
+        // The same function the preview used, on data read now with the customers locked: the hash is checked against what WILL happen.
+        const input = await this.impactInput(tx, u.id, u.proposal.members, true);
+        if (!input) return 'NOT_FOUND';
+        const plan = planTemplateChange(input, u.proposal);
+        if (plan.previewHash !== u.previewHash) return 'STALE';
+        let affected = 0;
+        for (const c of plan.customers) {
+          const joins = c.effects.filter((e) => e.kind === 'JOINS').map((e) => e.contactId);
+          const leaves = c.effects.filter((e) => e.kind === 'LEAVES').map((e) => e.contactId);
+          for (const id of joins) {
+            await tx.query(
+              `INSERT INTO "Responder"("customerId", "contactId", "role", "order", "source", "templateId", "createdBy", "createdAt")
+               VALUES ($1, $2, 'PAGEABLE', COALESCE((SELECT max("order") + 1 FROM "Responder" WHERE "customerId" = $1), 0), 'TEMPLATE', $3, $4, ${this.sql.now()})`,
+              [c.id, id, u.id, u.actorId]);
+          }
+          if (leaves.length) await tx.query(`DELETE FROM "Responder" WHERE "customerId" = $1 AND "contactId" = ANY($2::text[]) AND "source" = 'TEMPLATE' AND "templateId" = $3`, [c.id, leaves, u.id]);
+          if (joins.length || leaves.length) {
+            affected += 1;
+            // another targetType than 'Responders': the customer's Responders version does not move (API-CONTRACT)
+            await insertAudit(tx, { ...audit, customerId: c.id, action: 'responder_template.apply', targetType: 'ResponderTemplate', targetId: u.id, before: null, after: { added: joins, removed: leaves } });
+          }
+        }
+        await tx.query(`UPDATE "ResponderTemplate" SET "name" = $2, "version" = "version" + 1, "updatedBy" = $3, "updatedAt" = $4::timestamptz WHERE "id" = $1`, [u.id, u.proposal.name, u.actorId, iso(u.at)]);
+        if (plan.removed.length) await tx.query(`DELETE FROM "ResponderTemplateMember" WHERE "templateId" = $1 AND "contactId" = ANY($2::text[])`, [u.id, plan.removed]);
+        for (const id of plan.added) await tx.query(`INSERT INTO "ResponderTemplateMember"("templateId", "contactId") VALUES ($1, $2)`, [u.id, id]);
+        await tx.query(
+          `INSERT INTO "BulkChange"("id", "kind", "actorId", "params", "preview", "previewHash", "createdAt") VALUES ($1, 'TEMPLATE_UPDATE'::"BulkChangeKind", $2, $3::jsonb, $4::jsonb, $5, $6::timestamptz)`,
+          [newId('bc'), u.actorId, js({ templateId: u.id, added: plan.added, removed: plan.removed }), js({ customers: plan.customers.map((c) => ({ id: c.id, effects: c.effects })), totals: plan.totals }), plan.previewHash, iso(u.at)]);
+        await insertAudit(tx, {
+          ...audit, customerId: null, targetType: 'ResponderTemplate', targetId: u.id,
+          before: { name: input.name, members: [...input.members].sort(), version: input.version },
+          after: { name: u.proposal.name, members: [...u.proposal.members].sort(), version: input.version + 1, added: plan.added, removed: plan.removed },
+        });
+        return { view: (await this.templateViews(tx, u.id))[0]!, affected };
+      });
+    } catch (err) {
+      if (pgCode(err) === PG.UNIQUE) return 'NAME_EXISTS';
       throw err;
     }
   }

@@ -148,6 +148,38 @@ export type ResponderOp =
  */
 export type ResponderWriteOutcome = { contactId: string; version: number } | 'CONFLICT' | 'EXISTS' | 'GONE';
 
+
+// ── Responder templates (API-CONTRACT §8.3) ──
+export interface ResponderTemplateView {
+  id: string; name: string; version: number; updatedAt: Date; updatedBy: string | null;
+  members: Array<{ contactId: string; name: string }>;
+  /** Customers that use the template, TERMINATED ones left out. */
+  customers: Array<{ id: string; name: string }>;
+}
+export interface TemplateProposal { name: string; members: string[] }
+/** Everything the impact of a change depends on (read in the same transaction as the write). */
+export interface TemplateImpactInput {
+  templateId: string; version: number; name: string; members: string[];
+  /** Display names of every contact id named in `members` (current or proposed). */
+  names: Record<string, string>;
+  customers: Array<{
+    id: string; name: string;
+    responders: Array<{ contactId: string; source: ResponderSourceKind; templateId: string | null }>;
+    /** PERSON steps of the customer's call orders that name one of the template people; `stepIndex` is 1-based. */
+    namedSteps: Array<{ contactId: string; stepIndex: number }>;
+  }>;
+}
+export interface TemplateEffect { kind: 'JOINS' | 'LEAVES' | 'STAYS_DIRECT' | 'ALREADY_DIRECT' | 'STEP_NAMES'; contactId: string; name: string; stepIndex?: number }
+export interface TemplatePlan {
+  customers: Array<{ id: string; name: string; effects: TemplateEffect[] }>;
+  totals: { customers: number; affected: number; joins: number; leaves: number; warnings: number };
+  previewHash: string; added: string[]; removed: string[];
+}
+export interface TemplateCreate { name: string; members: string[]; actorId: string; at: Date }
+export interface TemplateUpdate { id: string; expectedVersion: number; proposal: TemplateProposal; previewHash: string; actorId: string; at: Date }
+/** 'CONFLICT': version moved. 'STALE': the preview hash no longer matches what would happen now. */
+export type TemplateUpdateOutcome = { view: ResponderTemplateView; affected: number } | 'NOT_FOUND' | 'CONFLICT' | 'STALE' | 'NAME_EXISTS' | 'BAD_MEMBER';
+
 /** Rotations a caller may see (MSP ones + those of customers in the scope) with what decides who is on shift. */
 export interface RotationsWorld { rotations: Rotation[]; overrides: Override[]; leaves: Leave[]; contacts: Map<string, Contact> }
 
@@ -366,6 +398,20 @@ export interface ApiRepository {
    * the version goes up by one and `audit` is written. The audit row is what carries the version (SQL store).
    */
   writeResponders(customerId: string, expectedVersion: number, op: ResponderOp, audit: AuditInput): Promise<ResponderWriteOutcome>;
+  /** Responder templates, name order. MSP-level (no scope): the API only calls these for staff who see every customer. */
+  listResponderTemplates(): Promise<ResponderTemplateView[]>;
+  getResponderTemplate(id: string): Promise<ResponderTemplateView | null>;
+  /** The inputs of `planTemplateChange` for a template and a proposed member list; null when the template does not exist. */
+  responderTemplateImpactInput(id: string, proposedMembers: string[]): Promise<TemplateImpactInput | null>;
+  /** One transaction: template + members + `audit` (MSP-level row). 'BAD_MEMBER': not an active staff contact. */
+  createResponderTemplate(t: TemplateCreate, audit: AuditInput): Promise<ResponderTemplateView | 'NAME_EXISTS' | 'BAD_MEMBER'>;
+  /**
+   * One transaction: lock the template, check the version, re-read the impact INSIDE the transaction, compare its hash with
+   * `previewHash`, then replace members, add/remove the customers' template rows, bump the version, write BulkChange
+   * (TEMPLATE_UPDATE) and the audit rows (`audit` template for the MSP-level row, one `responder_template.apply` row per changed customer).
+   * Customer Responders versions do not move (their audit rows have another targetType).
+   */
+  updateResponderTemplate(u: TemplateUpdate, audit: AuditInput): Promise<TemplateUpdateOutcome>;
   /** MSP rotations + rotations of the customers in `scope` (CUSTOMER rotations only inside the scope). */
   rotationsWorld(scope: ScopeFilter): Promise<RotationsWorld>;
   /** Active MSP staff contacts (kind INTERNAL), name order. */
