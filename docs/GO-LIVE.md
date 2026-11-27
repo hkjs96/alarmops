@@ -603,7 +603,7 @@ http://localhost:3107/auth/dev-login?as=admin
 4. 순서대로 한다. AWS 쪽 공급자는 위 스택이 만들었다.
    1. 어디서: Vercel 프로젝트 Settings → Security → Secure backend access with OIDC federation
    2. 발급자 모드는 **Global**이나 **Team** 어느 쪽이든 된다. 템플릿이 공급자 ARN에서 조건 키 접두사를 계산한다. Team이면 사람이 IAM에서 URL `https://oidc.vercel.com/<팀 슬러그>`, 대상 `https://vercel.com/<팀 슬러그>`로 공급자를 만들고 그 ARN을 `VercelOidcProviderArn`으로 쓴다(부트스트랩 스택은 Global만 만든다).
-   3. 스택 파라미터 `VercelTeamSlug`가 이 팀 슬러그와 같은지 확인한다(공급자 대상이 `https://vercel.com/<팀 슬러그>`다).
+   3. 스택 파라미터 `VercelTeamSlug`가 이 팀 슬러그와 같은지 확인한다(공급자 대상이 `https://vercel.com/<팀 슬러그>`다). Team 모드면 공급자 ARN 끝의 `<팀 슬러그>`와 변수 `VERCEL_TEAM_SLUG`가 글자 그대로 같아야 한다. 다르면 `plan`의 "Check the required variables" 단계가 `::error::the Team provider path in VERCEL_OIDC_PROVIDER_ARN does not equal VERCEL_TEAM_SLUG`로 멈춘다(AWS 호출 전, `.github/scripts/check_vercel_oidc_params.py`).
    4. 공급자 ARN은 스택 출력 `VercelOidcProviderArn`이다. 4-2의 스크립트가 변수 `VERCEL_OIDC_PROVIDER_ARN`에 넣는다.
       - ARN 모양(Global): `arn:aws:iam::<중앙 계정 ID>:oidc-provider/oidc.vercel.com`
       - ARN 모양(Team): `arn:aws:iam::<중앙 계정 ID>:oidc-provider/oidc.vercel.com/<팀 슬러그>`(슬러그는 소문자·숫자·하이픈)
@@ -842,6 +842,7 @@ http://localhost:3107/auth/dev-login?as=admin
 | `Not authorized to perform sts:AssumeRoleWithWebIdentity` | CloudTrail의 `AssumeRoleWithWebIdentity` 이벤트에서 `userIdentity.userName`의 실제 sub를 확인하고, 스택 `alarmops-central-bootstrap`의 파라미터 `GitHubRepo`를 그 값(`owner@ID/repo@ID`)으로 업데이트한다 |
 | `plan`: `Check the central bus stack exists`에서 실패 | 버스 스택이 없거나 이름이 `alarmops-central-bus`가 아니다. 4-1의 1~2번 |
 | `plan`: 파라미터 `VercelOidcProviderArn` 형식 오류 | ARN이 `…:oidc-provider/oidc.vercel.com` 또는 `…:oidc-provider/oidc.vercel.com/<팀 슬러그>`로 끝나야 한다. 4-1의 4번 |
+| `plan`: `the Team provider path in VERCEL_OIDC_PROVIDER_ARN does not equal VERCEL_TEAM_SLUG` | Team 모드 공급자 ARN 끝의 슬러그와 `VERCEL_TEAM_SLUG`가 다르다. 둘 중 틀린 쪽을 고친다(4-1의 3번). 신뢰 정책은 바뀌지 않았다 |
 | 콘솔 "The check could not be queued", CloudTrail `AssumeRoleWithWebIdentity` AccessDenied, `identityProvider`가 `…/oidc.vercel.com/<팀>` | 신뢰 정책이 다른 공급자를 가리킨다. `aws iam get-role --role-name AlarmOpsCentral-VercelConsole`의 `Federated`와 조건 키를 본다. GitHub `central` 환경 변수 `VERCEL_OIDC_PROVIDER_ARN`을 실제 공급자 ARN(Team이면 `…/oidc.vercel.com/<팀>`)으로 바꾸고 deploy-central을 Run workflow로 다시 돌린다. 신뢰 정책이 바뀌므로 먼저 `infra/aws/deploy-role-policy.md` 4장의 임시 권한(`AlarmOpsDeployCentral-TrustChange`)을 붙인다 |
 | deploy-central `apply`가 `UPDATE_ROLLBACK_FAILED`, 알림 메일 `iam-denied` `UpdateAssumeRolePolicy` AccessDenied | 신뢰 정책 변경에 임시 권한이 없었다. 임시 권한을 붙이고 `aws cloudformation continue-update-rollback --stack-name alarmops-central`(리소스 건너뛰지 않음) → `UPDATE_ROLLBACK_COMPLETE` 확인 → Run workflow로 다시 배포 → 임시 권한 삭제 |
 | `plan`: `SesFromAddress is required when SesIdentityArn is set` | `SES_FROM_ADDRESS`도 같이 넣는다 |
