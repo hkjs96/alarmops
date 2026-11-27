@@ -1168,7 +1168,7 @@ us-east-1 (`AlarmOpsGuard-iam-denied`):
 4. 파라미터. 대부분 기본값 그대로 둔다.
    - `GitHubOidcProviderArn`: 이 계정에 `token.actions.githubusercontent.com` 공급자가 **이미 있으면** IAM → 자격 증명 공급자에서 ARN을 복사해 붙인다. 없으면 비워 둔다(스택이 만든다). 공급자는 계정에 하나뿐이라 있는데 비워 두면 생성이 실패하고 스택이 롤백된다(피해는 없다).
    - `VercelOidcProviderArn`: `oidc.vercel.com` 공급자가 이미 있으면 ARN을, 없으면 비운다. 비우면 `VercelTeamSlug`가 필수다(Rules가 막는다).
-   - `VercelTeamSlug`: Vercel 팀 슬러그. 새 공급자의 대상(aud)이 `https://vercel.com/<슬러그>`가 된다.
+   - `VercelTeamSlug`: Vercel 팀 슬러그(소문자·숫자·하이픈, 1~63자). 새 공급자의 대상(aud)이 `https://vercel.com/<슬러그>`가 된다.
    - `SamArtifactBucketName`: 버킷이 이미 있으면 그 이름을, 없으면 비운다(스택이 `alarmops-central-artifacts-<계정 ID>`를 만든다).
    - `GitHubRepo`: 기본 `hkjs96@75015048/alarmops@1451138684`(GitHub가 보내는 sub 형식 그대로, 불변 ID 포함).
    - `CentralStackName`·`BusStackName`·`BusName`·`ResourcePrefix`·`PermissionsBoundaryName`: 기본값. `central.yaml`·`central-bus.yaml`에서 이름을 바꾼 경우에만 같이 바꾼다.

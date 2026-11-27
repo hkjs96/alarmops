@@ -409,6 +409,37 @@ class CentralTemplate(unittest.TestCase):
                 self.assertNotIn("*", json.dumps(st))
                 self.assertNotIn("StringLike", json.dumps(st))
 
+    BAD_CHARS = ('a"b', "a\\b", "a,b", "a b", "a\nb", "a\n", "a:b", "a*b")
+
+    def test_vercel_slug_and_project_patterns_reject_json_breaking_characters(self):
+        pats = {"slug-central": C["Parameters"]["VercelTeamSlug"]["AllowedPattern"],
+                "slug-bootstrap": BOOT["Parameters"]["VercelTeamSlug"]["AllowedPattern"],
+                "project": C["Parameters"]["VercelProjectName"]["AllowedPattern"]}
+        for name, pat in pats.items():
+            for bad in self.BAD_CHARS:
+                with self.subTest(param=name, bad=bad):
+                    # CloudFormation matches the whole value (Java matches); Python's `$` also accepts a trailing newline.
+                    self.assertIsNone(re.fullmatch(pat, bad))
+
+    def test_vercel_slug_pattern_is_lowercase_digits_hyphen_in_both_templates(self):
+        for tpl, empty_ok in ((C, False), (BOOT, True)):
+            pat = tpl["Parameters"]["VercelTeamSlug"]["AllowedPattern"]
+            self.assertIn("ConstraintDescription", tpl["Parameters"]["VercelTeamSlug"])
+            for ok in ("acme-team", "a1", "a", "a" * 63):
+                self.assertIsNotNone(re.fullmatch(pat, ok), ok)
+            for bad in ("Acme", "acme_team", "-acme", "a" * 64, "ACME"):
+                self.assertIsNone(re.fullmatch(pat, bad), bad)
+            self.assertEqual(re.fullmatch(pat, "") is not None, empty_ok)
+
+    def test_vercel_trust_sub_is_production_only(self):
+        for arn in ("arn:aws:iam::123456789012:oidc-provider/oidc.vercel.com/acme-team",
+                    "arn:aws:iam::123456789012:oidc-provider/oidc.vercel.com"):
+            (st,) = self._render_vercel_trust(arn)["Statement"]
+            (sub,) = [v for k, v in st["Condition"]["StringEquals"].items() if k.endswith(":sub")]
+            self.assertTrue(sub.endswith(":environment:production"))
+            self.assertNotIn("preview", json.dumps(st))
+            self.assertNotIn("development", json.dumps(st))
+
     def test_vercel_trust_has_no_principal_when_provider_is_in_another_account(self):
         doc = self._render_vercel_trust("arn:aws:iam::123456789012:oidc-provider/oidc.vercel.com/acme-team", in_account=False)
         (st,) = doc["Statement"]

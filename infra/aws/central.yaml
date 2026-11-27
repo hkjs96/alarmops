@@ -40,7 +40,8 @@ Parameters:
       Team issuer mode: ...:oidc-provider/oidc.vercel.com/<team slug>. The trust condition keys are derived from this ARN.
   VercelTeamSlug:
     Type: String
-    AllowedPattern: '^[A-Za-z0-9_-]{1,64}$'
+    AllowedPattern: '^[a-z0-9][a-z0-9-]{0,62}$'
+    ConstraintDescription: Vercel team slug, lowercase letters, digits and hyphens only (1-63 characters, starts with a letter or digit).
   VercelProjectName:
     Type: String
     AllowedPattern: '^[A-Za-z0-9._-]{1,100}$'
