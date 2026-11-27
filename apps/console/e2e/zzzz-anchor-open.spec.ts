@@ -16,14 +16,16 @@ const top = (page: Page, key: string) => page.evaluate(([sel, k]) => {
   return el ? Math.round(el.getBoundingClientRect().top * 10) / 10 : null;
 }, [CO, key] as const);
 const keys = (page: Page) => page.$$eval(CO, (els) => els.map((e) => (e as HTMLElement).dataset.rowKey ?? ""));
-/** scroll the list (the column on desktop, the window on a phone) so that the row `key` sits `at` px from the top of the view */
-const scrollRowTo = (page: Page, key: string, at: number) => page.evaluate(([sel, k, y]) => {
-  const el = [...document.querySelectorAll<HTMLElement>(sel as string)].find((e) => e.dataset.rowKey === k)!;
-  const d = el.getBoundingClientRect().top - (y as number);
-  let p: HTMLElement | null = el.parentElement;
-  while (p && p !== document.body && !((p.scrollHeight > p.clientHeight) && /auto|scroll/.test(getComputedStyle(p).overflowY))) p = p.parentElement;
-  if (p && p !== document.body) p.scrollTop += d; else window.scrollBy(0, d);
-}, [CO, key, at] as const);
+/** scroll the list with the mouse wheel (what a user does) until the row `key` sits `at` px from the top of the view */
+async function scrollRowTo(page: Page, key: string, at: number) {
+  await page.mouse.move(page.viewportSize()!.width > 800 ? 800 : 200, 450);
+  for (let i = 0; i < 8; i++) {
+    const d = Math.round((await top(page, key))! - at);
+    if (Math.abs(d) <= 1) return;
+    await page.mouse.wheel(0, d);
+    await page.waitForTimeout(250);
+  }
+}
 const ORDERS = "hanbit/fulfilment/orders-api";
 async function scrolledList(page: Page, want = ORDERS) {
   await noScrollAnchoring(page);

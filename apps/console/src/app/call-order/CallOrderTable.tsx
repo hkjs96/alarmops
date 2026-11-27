@@ -6,7 +6,7 @@ import { Mark, customerHasProblem, cx, useStableRows } from "@alarmops/design-sy
 import type { CallOrderRow, PagingPathStep } from "@/lib/api/types";
 import { STYLE_LABEL, callOrderPath, firstName, howText, parseScopeKey, partsText, repeatText, targetParts } from "@/lib/call-order/model";
 import { setEditIntent, takeFocusRow } from "@/lib/call-order/flags";
-import { settleRow, takeHeldRow } from "@/lib/call-order/row-anchor";
+import { clearOpened, forgetOpened, noteOpen, settleRow, takeHeldRow, trackUserScroll } from "@/lib/call-order/row-anchor";
 import { useShell } from "@/components/ShellContext";
 
 type Row = CallOrderRow & { id: string };
@@ -78,11 +78,19 @@ export function CallOrderTable({ rows, listQuery, openKey, filterKey }: { rows: 
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
+  useEffect(() => trackUserScroll(), []);
+
   // after a save or a close the row that was being looked at is at the same place in the view (#172): the panel noted it
   // before it left, the list corrects the scroll once it has its wider layout
   useLayoutEffect(() => {
-    if (openKey) return;
+    if (openKey) {
+      // a panel opened from this list: its route has a new `.page` that starts at the top, put the row back (#184)
+      forgetOpened();
+      const a = takeHeldRow();
+      return a ? settleRow(a) : undefined;
+    }
     const a = takeHeldRow();
+    clearOpened();
     return a ? settleRow(a) : undefined;
   }, [openKey]);
 
@@ -96,6 +104,7 @@ export function CallOrderTable({ rows, listQuery, openKey, filterKey }: { rows: 
   }, [openKey]);
 
   const open = (key: string, edit = false) => shell.requestLeave(() => {
+    noteOpen(key);
     if (edit) setEditIntent({ scope: key });
     router.push(callOrderPath(parseScopeKey(key)) + listQuery);
   }, "continue");
@@ -144,7 +153,7 @@ export function CallOrderTable({ rows, listQuery, openKey, filterKey }: { rows: 
                   className={cx(!left && r.health?.level === "UNREACHABLE" && "hot", !left && r.health?.level === "AT_RISK" && "amb", openKey === r.key && "cur", left && "dim")} onClick={(e) => onRow(e, r.key)}>
                   <td className="c-path">
                     <Link href={callOrderPath(parseScopeKey(r.key)) + listQuery} data-key={r.key} className="co-path" data-testid="co-path" aria-current={openKey === r.key ? "true" : undefined}
-                      aria-label={`Call order for ${label}`} onKeyDown={(e) => onKey(e, r.key)}>
+                      aria-label={`Call order for ${label}`} onKeyDown={(e) => onKey(e, r.key)} onClick={() => noteOpen(r.key)}>
                       <span><b>{customer}</b>{r.org.project ? <span className="chain" aria-hidden="true">›</span> : null}</span>
                       {r.org.project ? <span>{r.org.project.name}{r.org.service ? <span className="chain" aria-hidden="true">›</span> : null}</span> : null}
                       {r.org.service ? <span>{r.org.service.name}</span> : null}
