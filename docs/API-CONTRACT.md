@@ -64,7 +64,7 @@ Slack ──▶ POST /api/slack/interactive        문자·음성 업체 ──�
 | 403 | `NOT_A_RESPONDER` | 연락처 열람: 그 고객의 Responder가 아니고 ADMIN도 아님(D-35) |
 | 422 | `EMERGENCY_REASON_REQUIRED` | 연락처 비상 열람: Responder가 아닌 ADMIN이 `reason` 없이(또는 공백만) 호출(D-35) |
 | 409 | `VERSION_CONFLICT`, `ALREADY_EXISTS`, `INVALID_TRANSITION`, `TAG_WINS`, `NOT_SUPPORTED` | 경합, 중복 생성(4b5b079), 상태 전이 불가, 리소스 태그가 값 결정(D-08) |
-| 409 | `WOULD_BE_UNREACHABLE`, `IN_USE`, `FROM_TEMPLATE` | Responders 쓰기: 고객이 UNREACHABLE이 됨(`?confirmUnreachable=true`로 확인 후 실행) / 단계가 그 사람을 지정함 / 템플릿에서 온 직원(§8.3 Responders) |
+| 409 | `WOULD_BE_UNREACHABLE`, `IN_USE`, `FROM_TEMPLATE` | Responders 쓰기: 고객이 UNREACHABLE이 됨(`?confirmUnreachable=true`로 확인 후 실행; 템플릿 변경·연결·해제는 확인 플래그 없이 거절, D-64) / 단계가 그 사람을 지정함 / 템플릿에서 온 직원(§8.3 Responders) |
 | 413 | `PAYLOAD_TOO_LARGE` | 수집 본문 1MB 초과 |
 | 422 | `ROLE_UPDATE_REQUIRED` | 고객 스택이 옛 버전 |
 | 409 | `MUTED_BY_MAINTENANCE` | 수동 Escalate: 점검 창이 덮고 SEV-1이 아님. `details.mutedUntil`(D-17) |
@@ -73,6 +73,7 @@ Slack ──▶ POST /api/slack/interactive        문자·음성 업체 ──�
 | 422 | `IDEMPOTENCY_KEY_REUSED` | 같은 `Idempotency-Key`를 다른 요청(메서드·경로·`If-Match`·본문)에 사용 |
 | 422 | `CROSS_CUSTOMER`, `NOT_PAGEABLE` | 단계 대상이 다른 고객의 사람·로테이션 / Notify-only 사람 |
 | 429 | `RATE_LIMITED` | **응답 헤더 `Retry-After: <초>`**와 같은 값의 `details.retryAfterSec`. 현재 쓰임: 수동 Escalate(인시던트당 60초에 1회), 콘솔 `GET /auth/session`(주소당 120회·세션당 30회 / 60초, 인스턴스별 메모리 카운터) |
+| 503 | `BUSY` | 템플릿 변경·연결·해제 중 DB 교착·직렬화 실패(D-64). 쓴 것 없음, `Retry-After: 1`, 같은 요청을 다시 보낸다 |
 | 503 | `NOT_CONFIGURED` | 필수 비밀 미설정(fail-closed, org-tenant 새 구현 1, oncall R4-8) |
 
 메시지는 영어(D-01).
@@ -419,7 +420,7 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 | POST `/customers/{id}/responders`, PATCH/DELETE `/customers/{id}/responders/{contactId}` | 아래 "Responders" 참조. `If-Match: <목록 version>` 필수 | A, I |
 | GET/POST `/rotations?scope=&customerId=`, PATCH/DELETE `/rotations/{id}`, GET `/rotations/{id}/shifts?from=&to=`, GET `/rotations/{id}/usage` | Rotation(scope MSP\|CUSTOMER). usage = 참조 고객·단계 | 읽기 V, I · 쓰기 A, I (D-41) |
 | POST `/rotations/{id}/overrides`, POST `/overrides/{id}/accept\|decline` | COVER/SWAP, 상대 수락 후 반영(D-28) | O |
-| GET/POST `/responder-templates`, PATCH `/responder-templates/{id}`, POST `/responder-templates/{id}/preview` | **구현됨.** 아래 "Responder 템플릿" 참조. 템플릿 변경 시 영향 고객 미리보기, PATCH는 `previewHash`·`If-Match` 필수 | 읽기 V, I · POST·PATCH·preview A (D-41의 같은 규칙). 포털 404, 고객 범위가 좁은 직원 403 `FORBIDDEN` |
+| GET/POST `/responder-templates`, PATCH `/responder-templates/{id}`, POST `/responder-templates/{id}/preview`, POST·PUT `/customers/{id}/responders/template[/preview]` | **구현됨**(연결·해제 D-64). 아래 "Responder 템플릿" 참조. 템플릿 변경 시 영향 고객 미리보기, PATCH는 `previewHash`·`If-Match` 필수 | 읽기 V, I · POST·PATCH·preview·연결·해제 A (D-41·D-64). 포털 404, 고객 범위가 좁은 직원 403 `FORBIDDEN` |
 | GET `/rotations?scope=MSP\|CUSTOMER&customerId=` (구현된 읽기) | `RotationSummary[]`: `{ id, scope, customerId?, name, onShift: { contactId, name, until, channels } \| null, next: 다음 당번 이름 \| null }`. MSP 로테이션 + 범위 안 고객의 로테이션. `customerId`가 있으면 MSP 것 + 그 고객 것(범위 밖·없는 고객은 404). `channels`는 아래 채널 상태 | V, I |
 | GET `/staff?q=` (구현됨) | 활성 MSP 직원 Contact `[{ contactId, name, channels }]`, 이름 순, `q`는 이름 부분 일치. 연락처 값은 없다 | V, I |
 | GET `/staff/{id}/coverage` | People: `{customerCount, onShift[], nextShift, customers[{id, via[]}]}` | V |
@@ -474,7 +475,19 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 - 검사 순서: 포털 404 → 좁은 범위 403 → 템플릿 없음 404 → 역할 403 → If-Match → 본문 검증 400 → previewHash(저장 안에서).
 - **고객 Responders `version`은 템플릿 동기화로 오르지 않는다**(위 "version" 규칙 그대로): 감사는 `targetType = 'ResponderTemplate'`라 그 수에 들어가지 않는다. 이 쓰기로 목록이 바뀐 고객은 다음 GET에서 새 목록을 본다.
 - 감사: 템플릿 쓰기마다 AuditLog 1행(`customerId` 없음, `responder_template.create|update`, targetType `ResponderTemplate`, `before/after`는 이름·멤버 id·버전) + 목록이 실제로 바뀐 고객마다 1행(`responder_template.apply`, 그 고객 `customerId`, `{added[], removed[]}` contactId만). `BulkChange.params = { templateId, added[], removed[] }`, `preview`는 위 `customers[{id,effects}]`·`totals`.
-- 알려진 틈: 미리보기는 호출 건강(paging-health)·발송 한도(D-38)를 다시 계산하지 않는다. 멤버를 빼서 고객이 UNREACHABLE이 되거나 `ALL_RESPONDERS` 한도를 넘는 것은 `STEP_NAMES` 경고 말고는 막지 않는다. 고객에 템플릿을 연결·해제하는 API는 아직 없다(결정 필요).
+- **막는 변경 (D-64)**: PATCH와 아래 연결·해제는 변경 뒤 영향받는 고객의 `pagingHealth`가 **전에는 UNREACHABLE이 아니었는데 UNREACHABLE이 되면** 409 `WOULD_BE_UNREACHABLE`(`details.customerIds[]`)로 거절하고 아무것도 쓰지 않는다. override 플래그는 없다. 이미 UNREACHABLE인 고객은 막지 않는다. D-38: 새로 `ALL_RESPONDERS` 20명·발송 한도를 넘게 되면 422 `RESPONDER_LIMIT_EXCEEDED`·`SEND_CAP_EXCEEDED`(`details.customerIds[]`, UNREACHABLE과 함께면 409가 먼저). 저장 트랜잭션 안에서 다시 계산한다. 미리보기 응답은 같은 사실을 `blocking: [{ customerId, reason: UNREACHABLE|RESPONDER_LIMIT_EXCEEDED|SEND_CAP_EXCEEDED }]`로 준다(PATCH 미리보기에도 추가, `previewHash`에는 넣지 않는다 — 시각에 따라 달라지므로 저장 때 다시 계산).
+- **잠금·재시도**: 템플릿 행(id 순) → 고객 행 순서. PG 교착·직렬화 실패는 503 `BUSY` + `Retry-After: 1`(쓴 것 없음, 같은 요청을 다시 보내면 된다).
+- 읽기 권한(D-64): `GET /responder-templates`는 MSP 직원 전체(V·I·A). 쓰기는 ADMIN.
+
+**고객에 템플릿 연결·해제 (D-64, 11/27)** — 고객은 템플릿을 하나만 쓴다(`Customer.responderTemplateId`). 포털 404 → 좁은 범위 403 `FORBIDDEN` → 고객 없음 404 → 역할 403(ADMIN) → (PUT) `If-Match` → 본문 400 → 해지 고객 409 `CUSTOMER_TERMINATED` → (저장 안에서) 버전·해시·막는 변경.
+
+| 요청 | 본문 | 규칙 |
+|---|---|---|
+| POST `/customers/{id}/responders/template/preview` | `{ templateId: string\|null }`(키가 꼭 있어야 한다. 모르는 템플릿 id는 400 `templateId`) | 쓰는 것 없음(멱등 저장 안 함). 응답 `{ customerId, version, from: {id,name}\|null, to: {id,name}\|null, effects: [{ kind, contactId, name, stepIndex? }], totals: { joins, leaves, warnings }, blocking: [{ customerId, reason }], previewHash }`. `effects`는 템플릿 미리보기와 같다(`JOINS`·`LEAVES`·`STAYS_DIRECT`·`ALREADY_DIRECT`·`STEP_NAMES`). 이미 같은 템플릿이면 효과 없음. `version`은 고객 Responders 버전 |
+| PUT `/customers/{id}/responders/template` | `{ templateId: string\|null, previewHash }` | `If-Match: <Responders 버전>` 필수(다르면 409 `VERSION_CONFLICT` + `details.currentVersion`). 저장 트랜잭션 안에서 같은 계산을 다시 해 해시가 다르면 409 `PREVIEW_STALE`. 연결: `responderTemplateId` 설정 + 템플릿 멤버를 `source=TEMPLATE`·PAGEABLE·목록 끝 순서로 추가(이미 직접 추가된 사람은 DIRECT 그대로). 해제(`null`): `source=TEMPLATE AND templateId=<이전>` 행만 삭제, DIRECT는 남음. 교체 = 해제 + 연결(둘 다에 있는 사람은 행을 두고 `templateId`만 옮긴다). 같은 템플릿(또는 이미 없음)이면 아무것도 쓰지 않고 200. 응답 200 `{ customerId, templateId, version, joins, leaves }` + `ETag` |
+
+- 감사: 변경마다 그 고객의 AuditLog 1행(`targetType = 'Responders'`이라 **Responders 버전이 1 오른다**, `responders.template.attach|detach|switch`, `before {templateId}`, `after {templateId, added[], removed[]}` contactId·templateId만). `BulkChange`는 만들지 않는다.
+- 해지(TERMINATED)가 아닌 정지(SUSPENDED) 고객은 허용한다.
 
 ### 8.4 조직·계정·연동
 | 메서드 경로 | 설명 | 권한 |

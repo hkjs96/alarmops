@@ -2,7 +2,7 @@
 
 계획서: AlarmOps PoC 계획서 v3 (https://claude.ai/artifact/3Kvfvq3tHmGBiDp3WhVxf4). 결정이 바뀌면 이 파일과 계획서를 같이 고친다.
 
-이 문서는 PoC에서 확정된 결정 D-01~D-63을 주제별로 모은 것이다. 구현은 여기서 어긋나지 않는다.
+이 문서는 PoC에서 확정된 결정 D-01~D-64을 주제별로 모은 것이다. 구현은 여기서 어긋나지 않는다.
 
 - 맨 위 색인에서 ID를 눌러 그 결정으로 간다. 색인의 요약은 찾기 위한 이름표이고, 기준은 각 절의 **결정** 문구다.
 - 결정마다 **결정** · **이유** · **확정일**(질문·이슈 번호 포함)을 적는다. 개정·대체·잠정 표시와 취소선은 원문 그대로 둔다.
@@ -76,6 +76,7 @@
 | [D-61](#d-61) | 운영 DB(Supabase)와 콘솔 함수는 서울 리전에 둔다 | 11/25 |
 | [D-62](#d-62) | 위험이 낮은 PR은 허브가 병합하고, 나머지는 사람이 승인한다 | 11/26 |
 | [D-63](#d-63) | AlarmWriter의 알람 생성 허용은 이름이 `[`로 시작하는 알람으로만 좁힌다 | 11/27 |
+| [D-64](#d-64) | Responder 템플릿: 고객 연결·해제 API, UNREACHABLE이 되는 변경은 막는다, 읽기는 직원 전체 | 11/27 |
 
 <a id="topic-1"></a>
 
@@ -1080,6 +1081,23 @@ D-60에서 쓰는 방식:
 - **바뀌는 것**: `infra/customer-stack/template.yaml`(기존 고객 스택은 갱신해야 적용), `infra/scripts/rehearsal/replica-check.sh`(시험 알람 이름, (f) 기대값 PASS, 정보 행 (g)). 엔진 코드는 바뀌지 않는다(생성 이름이 이미 `[`로 시작).
 - **다시 볼 때**: 엔진 이름 형식을 `[`로 시작하지 않게 바꾸려 할 때, 고객이 `[` 이름 알람을 쓴다고 할 때, CloudWatch가 생성 때 리소스 태그를 평가하는 방식이 바뀔 때.
 - **확정일**: 11/27 (사용자 결정, A안)
+
+<a id="d-64"></a>
+
+### D-64 Responder 템플릿: 고객 연결·해제 API, UNREACHABLE이 되는 변경은 막는다, 읽기는 직원 전체
+
+- **배경**: 템플릿 백엔드(#175)와 security 검토(차단 없음) 뒤에 남은 틈 셋: 고객에 템플릿을 연결·해제하는 API가 없다, 템플릿 변경이 고객을 UNREACHABLE로 만들어도 막지 않는다, 읽기 권한이 문서에 따로 적혀 있지 않다.
+- **결정**
+  - **연결·해제 API**: `PUT /customers/{id}/responders/template` 본문 `{ templateId: string|null, previewHash }` + `If-Match`(그 고객 Responders 버전). 미리보기 `POST /customers/{id}/responders/template/preview { templateId|null }`(효과·`blocking`·`previewHash`, 템플릿 미리보기와 같은 `planTemplateChange` 의미). ADMIN만, 고객 전체 범위 직원만(포털 404, 좁은 범위 403 — 템플릿 API와 같은 규칙).
+  - **연결**: `Customer.responderTemplateId`를 정하고 템플릿 멤버를 `source=TEMPLATE`·PAGEABLE·목록 끝 순서로 넣는다. 이미 직접(DIRECT) 추가된 멤버는 DIRECT로 남는다(효과 `ALREADY_DIRECT`). **해제(`null`)**: `responderTemplateId`를 비우고 `source=TEMPLATE AND templateId=<이전>` 행만 지운다(DIRECT는 남고 효과 `STAYS_DIRECT`). **교체** = 해제 + 연결을 한 트랜잭션에서(두 템플릿에 다 있는 사람은 행을 지우지 않고 템플릿만 옮긴다). 해지(TERMINATED) 고객은 409 `CUSTOMER_TERMINATED`. 감사는 고객 단계 1행(contactId·templateId만).
+  - **잠금 순서**: 템플릿 행(id 순) → 고객 행. 템플릿 PATCH와 같은 순서라 교착이 없다. 그래도 PG 교착(40P01)·직렬화 실패(40001)가 나면 503 `BUSY`(`Retry-After: 1`, 아무것도 쓰지 않음)로 돌려 콘솔이 다시 시도하게 한다.
+  - **UNREACHABLE이 되는 변경은 막는다(override 없음)**: 템플릿 PATCH와 연결·해제 모두, 변경 뒤 영향받는 고객의 호출 건강(`pagingHealth`, `/paging-health`·`callHealth`와 같은 함수)이 **전에는 UNREACHABLE이 아니었는데 UNREACHABLE이 되면** 409 `WOULD_BE_UNREACHABLE`(`details.customerIds`)로 거절한다. 미리보기는 `blocking: [{ customerId, reason }]`로 먼저 알려 준다. 이미 UNREACHABLE인 고객(예: 호출 순서가 아직 없는 새 고객)은 막지 않는다 — 막으면 새 고객에 템플릿을 붙일 수 없다. 저장 트랜잭션 안에서 같은 계산을 다시 한다.
+  - **D-38 한도도 같은 자리에서 막는다**: 변경 뒤 이 고객의 어느 호출 순서가 **새로** `ALL_RESPONDERS` 20명 또는 발송 한도를 넘으면(`sendCapViolation`, Responders 쓰기와 같은 함수) 422 `RESPONDER_LIMIT_EXCEEDED`·`SEND_CAP_EXCEEDED`(`details.customerIds`), 미리보기 `blocking.reason`에도 나온다. 이미 넘어 있던 것은 막지 않는다. UNREACHABLE과 한도가 함께 걸리면 409 `WOULD_BE_UNREACHABLE`이 먼저다.
+  - **읽기 권한**: `GET /responder-templates`는 MSP 직원 전체(V·I·A)가 읽는다(D-41과 같다). 쓰기(생성·PATCH·미리보기·연결·해제)는 ADMIN이다.
+- **이유**: 템플릿은 한 번에 여러 고객의 호출 경로를 바꾼다. 아무도 못 부르는 상태로 만드는 저장은 화면에서 경고만 하지 않고 서버가 거절한다. 허브·콘솔이 연결을 직접 만지지 않고 한 API로만 바꾼다.
+- **바뀌는 것**: `docs/API-CONTRACT.md` §8.3 "Responder 템플릿", `packages/api`(templatesApi, router, repo 계약), `packages/store-sql`·메모리 저장소. 스키마 변경 없음.
+- **남는 위험**: 호출 건강은 지금 시각 기준이고(인증 만료·교대표 공백은 14일 창), 저장 뒤 시간이 지나 달라질 수 있다. 연결된 고객이 많으면 미리보기가 고객 수만큼 호출 순서를 읽는다(PoC 규모는 문제없음).
+- **확정일**: 11/27 (사용자 결정)
 
 ## 이전을 쉽게 만드는 개발 원칙 (D-09에 딸림)
 1. Postgres 표준 기능만. Supabase Auth·Realtime·Storage·Edge Functions, `auth.uid()` 기반 권한 규칙 금지. 로그인은 앱에서 Google SSO.
