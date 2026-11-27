@@ -4,7 +4,7 @@
 // The WebKit project (PW_WEBKIT=1, playwright.config.ts) runs this file: Safari has no scroll anchoring at all.
 import { mkdirSync } from "node:fs";
 import { test, expect, type Page } from "@playwright/test";
-import { assertNoRowShift, noScrollAnchoring } from "./helpers/no-row-shift";
+import { assertAnchorRowHeld, assertNoRowShift, noScrollAnchoring } from "./helpers/no-row-shift";
 
 const SHOTS = process.env.SHOTS;
 if (SHOTS) mkdirSync(SHOTS, { recursive: true });
@@ -159,7 +159,7 @@ for (const vp of VIEWPORTS) {
 test.describe("P2-B the same on the other lists, and P3", () => {
   test.use({ viewport: { width: 1440, height: 900 } });
 
-  test("Incidents and the Call order list hold their rows without scroll anchoring", async ({ page }) => {
+  test("Incidents hold their rows without scroll anchoring; the Call order list does too while nothing is scrolled (see the anchor test below)", async ({ page }) => {
     await signIn(page, "/incidents");
     await page.evaluate(() => document.fonts.ready);
     const row = page.locator(INC).filter({ has: page.getByRole("button", { name: /^Acknowledge / }) }).first();
@@ -190,6 +190,32 @@ test.describe("P2-B the same on the other lists, and P3", () => {
         await expect(page).toHaveURL(/\/call-order(\?|$)/);
       },
     });
+    await page.waitForTimeout(READ);
+    await toast(page).getByRole("button", { name: "Undo" }).click();
+    await expect(toast(page)).toContainText("Undone");
+  });
+
+  // #172: assertNoRowShift above compares row positions only while nothing was scrolled; saving closes the panel, the list
+  // widens and the scroll changes, so that comparison says nothing here. This one holds the row the user was looking at
+  // to the same place in the VIEWPORT, whatever scrolled, and never skips.
+  test("Call order: after a save the row you were looking at stays at the same place in the view (+0, +700, +1600 ms)", async ({ page }) => {
+    await signIn(page, "/c/hanbit/fulfilment/orders-api/call-order");
+    await page.evaluate(() => document.fonts.ready);
+    await page.getByTestId("co-edit").click();
+    const min = page.getByLabel("Step 2 minutes");
+    await min.fill(String(Number(await min.inputValue()) + 1));
+    // make the page scrolled, so a wrong scroll correction would show: the edited row near the bottom of the list's own view
+    const edited = page.locator(`${CO}[data-key="hanbit/fulfilment/orders-api"]`);
+    await edited.evaluate((el) => el.scrollIntoView({ block: "end" }));
+    const anchor = await assertAnchorRowHeld(page, {
+      name: "callorder.save.anchor", rows: CO, preferKey: "hanbit/fulfilment/orders-api", at: page.getByTestId("co-save"),
+      then: async () => {
+        await expect(toast(page)).toContainText("Saved for Hanbit Logistics › Fulfilment › Orders API");
+        await expect(page.locator(".co-panel")).toHaveCount(0);
+        await expect(page).toHaveURL(/\/call-order(\?|$)/);
+      },
+    });
+    expect(anchor.key).toBe("hanbit/fulfilment/orders-api");
     await page.waitForTimeout(READ);
     await toast(page).getByRole("button", { name: "Undo" }).click();
     await expect(toast(page)).toContainText("Undone");

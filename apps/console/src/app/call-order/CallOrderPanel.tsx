@@ -10,6 +10,7 @@ import {
   type CoScope, type Directory, type ScopeNames,
 } from "@/lib/call-order/model";
 import { announceDrafts, clearDraft, loadDraft, saveDraft, type CallOrderDraft } from "@/lib/call-order/draft-store";
+import { holdRow } from "@/lib/call-order/row-anchor";
 import { setBackGuard, setEditIntent, setFocusRow, takeBackGuard, takeEditIntent } from "@/lib/call-order/flags";
 import { scopeQuery } from "@/lib/scope";
 import { SIGN_OUT, hasRole, isPortal, roleReason, useShell } from "@/components/ShellContext";
@@ -220,7 +221,7 @@ export function CallOrderPanel({ data, listHref, listQuery }: { data: PanelData;
     nav.dirtyKey = null; nav.leftKey = key; nav.leftAt = Date.now();
   }, [key]);
 
-  const close = () => shell.requestLeave(() => { setFocusRow(key); router.push(listHref); }, "continue");
+  const close = () => shell.requestLeave(() => { setFocusRow(key); holdRow(key); router.push(listHref); }, "continue");
 
   /* ---- save ---- */
   /** a save that was asked for on the way out and did not happen: the user is still here, and is told so */
@@ -263,7 +264,7 @@ export function CallOrderPanel({ data, listHref, listQuery }: { data: PanelData;
         shell.toast(r.ok ? `Undone · ${label} is back to how it was` : r.code === "VERSION_CONFLICT" ? `Could not undo — ${label} was changed again` : `Could not undo — ${errorLine(r, { what: "Changing the call order", where: label })}`);
       },
     };
-    setFocusRow(key);
+    setFocusRow(key); holdRow(key);
     const next = after ?? waiting?.proceed;
     if (next) leaveNow(next); else router.push(listHref);
     shell.toast(text, undo);
@@ -326,7 +327,7 @@ export function CallOrderPanel({ data, listHref, listQuery }: { data: PanelData;
     const r = await callAction(() => removeOwnSteps(scope, path.version));
     setBusy(false); setAskRemove(false);
     if (!r.ok) { if (r.code === "VERSION_CONFLICT") setConflict(true); else setError(errorLine(r, { what: "Changing the call order", where: label })); return; }
-    clearDraft(uid, key); announceDrafts(); setMode("read"); setFocusRow(parentKey);
+    clearDraft(uid, key); announceDrafts(); setMode("read"); setFocusRow(parentKey); holdRow(key);
     leaveNow(() => router.push(listHref));
     shell.toast(`Own steps removed for ${label} · it follows ${parentLabel} again`);
   };
