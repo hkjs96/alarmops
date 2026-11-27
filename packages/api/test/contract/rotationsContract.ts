@@ -78,6 +78,14 @@ const withoutHanbitAbc = (seed: MemoryApiStore): void => {
 const MSP_BODY = { scope: 'MSP', name: 'Weekend desk', cadence: 'DAILY', handover: { minute: 540 }, members: [A, B, C] };
 const HANBIT_BODY = { scope: 'CUSTOMER', customerId: 'cus_hanbit', name: 'Hanbit night', cadence: 'WEEKLY', handover: { dow: 1, minute: 540 }, members: ['ct_dohyun', 'ct_sora'] };
 
+const extraStaff = (n: number): string[] => Array.from({ length: n }, (_, i) => `ct_s${i}`);
+/** n more active MSP staff (ct_s0..), same shape as the seeded MSP contact A. */
+const addStaff = (s: MemoryApiStore, n: number): void => {
+  for (const [i, id] of extraStaff(n).entries()) {
+    s.contacts.set(id, { ...s.contacts.get(A)!, id, name: `Staff ${i}`, email: `s${i}@example.test`, phone: `+8210555${String(10000 + i)}`, slackUserId: `U_s${i}` });
+  }
+};
+
 export function rotationsContract(make: MakeFixture<Repo>): void {
   let w: RWorld;
   const open = async (customize?: (s: MemoryApiStore) => void): Promise<RWorld> => { await w?.fx.close(); return (w = await rworld(make, customize)); };
@@ -322,10 +330,21 @@ export function rotationsContract(make: MakeFixture<Repo>): void {
       expect(a[0]).toMatchObject({ actorId: 'usr_minjae', targetId: b.id });
     });
 
-    it('invalid bodies are 400 VALIDATION_FAILED on the named field and write nothing', async () => {
-      await open((s) => { s.contacts.set('ct_off', { ...s.contacts.get(A)!, id: 'ct_off', name: 'Off Duty', email: 'off@example.test', phone: '+821077770001', slackUserId: 'U_off', active: false }); });
+    it('the limits are inclusive: 50 real members and an 80-char name are 201; 51 real members is 400 members', async () => {
+      await open((s) => { addStaff(s, 48); });
+      const fifty = [A, B, C, ...extraStaff(47)];
+      const ok = await w.call(ADMIN, 'POST', '/rotations', { body: { ...MSP_BODY, name: 'n'.repeat(80), members: fifty } });
+      expect([ok.status, body(ok).members?.length, body(ok).name?.length]).toEqual([201, 50, 80]);
       const before = await counts();
-      const fiftyOne = Array.from({ length: 51 }, (_, i) => `ct_x${i}`);
+      const over = await w.call(ADMIN, 'POST', '/rotations', { body: { ...MSP_BODY, name: 'Over limit', members: [...fifty, extraStaff(48)[47]] } });
+      expect([over.status, err(over).code, hasField(over, 'members')]).toEqual([400, 'VALIDATION_FAILED', true]);
+      await expectNone(before);
+    });
+
+    it('invalid bodies are 400 VALIDATION_FAILED on the named field and write nothing', async () => {
+      await open((s) => { addStaff(s, 48); s.contacts.set('ct_off', { ...s.contacts.get(A)!, id: 'ct_off', name: 'Off Duty', email: 'off@example.test', phone: '+821077770001', slackUserId: 'U_off', active: false }); });
+      const before = await counts();
+      const fiftyOne = [A, B, C, ...extraStaff(48)]; // 51 real, active MSP staff: only the limit can reject this
       const cases: Array<[string, Record<string, unknown>, string]> = [
         ['name empty', { ...MSP_BODY, name: '' }, 'name'], ['name 81', { ...MSP_BODY, name: 'n'.repeat(81) }, 'name'],
         ['cadence typo', { ...MSP_BODY, cadence: 'DAYLY' }, 'cadence'],
@@ -621,6 +640,24 @@ export function rotationsContract(make: MakeFixture<Repo>): void {
       expect(now.rotations.find((r: any) => r.id === 'rot_abc').onShift.contactId).toBe(B);
     });
 
+    it('every path reads the pins the same where the schedule and the pin differ: after 09:00 -> 08:00, Wed 08:30 is pin B (the schedule says C) in tick, paging-path nowIds and /oncall/now', async () => {
+      await open();
+      expect((await apply('rot_abc', { handover: { minute: 480 } }, 0)).status).toBe(200);
+      const t = kst('2026-11-11T08:30');
+      w.setNow(t);
+      const path = body(await w.call(ADMIN, 'GET', '/oncall/paging-path', { query: { customerId: 'cus_mirae' } }));
+      expect(path.steps[0].nowIds).toEqual([B]);
+      const now = body(await w.call(ADMIN, 'GET', '/oncall/now'));
+      expect(now.rotations.find((r: any) => r.id === 'rot_abc').onShift.contactId).toBe(B);
+      expect(await openAt(t)).toBe(B);
+      // and right after the pin the schedule takes over in all three
+      const t2 = WED09;
+      w.setNow(t2);
+      expect(body(await w.call(ADMIN, 'GET', '/oncall/paging-path', { query: { customerId: 'cus_mirae' } })).steps[0].nowIds).toEqual([C]);
+      expect(body(await w.call(ADMIN, 'GET', '/oncall/now')).rotations.find((r: any) => r.id === 'rot_abc').onShift.contactId).toBe(C);
+      expect(await openAt(t2)).toBe(C);
+    });
+
     it('earlier handover (09:00 -> 08:00): pin [Tue 09:00, Wed 09:00) B only; C has a short first shift [Wed 09:00, Thu 08:00), A [Thu 08:00, Fri 08:00); B until Wed 09:00, C next; incidents Wed 08:30 -> B, Wed 09:00 -> C', async () => {
       await open();
       expect((await apply('rot_abc', { handover: { minute: 480 } }, 0)).status).toBe(200);
@@ -750,6 +787,23 @@ export function rotationsContract(make: MakeFixture<Repo>): void {
       expect(ok.status).toBe(200);
       expect(await w.fx.repo.getContact('ct_tae')).toBeNull();
       expect(await w.fx.rotationPins!(c.id)).toEqual([]);
+    });
+
+    it('DELETE /contacts/{id}: a pin that has not started yet ([Thu 09:00, Fri 09:00), now Tue 12:00) is 409 IN_USE too', async () => {
+      await open((s) => {
+        tae(s);
+        s.rotations.set('rot_future', { id: 'rot_future', scope: 'MSP', customerId: null, name: 'Future pin', cadence: 'DAILY', anchorAt: kst('2026-11-09T09:00'), handoverDow: 1, handoverMin: 0,
+          members: [{ contactId: A, order: 0 }, { contactId: C, order: 1 }] } as never);
+        ((s as unknown as { rotationPins?: Array<Record<string, unknown>> }).rotationPins ??= []).push(
+          { id: 'pin_future_tae', rotationId: 'rot_future', contactId: 'ct_tae', startAt: THU09, endAt: kst('2026-11-13T09:00') });
+      });
+      expect(w.now.getTime()).toBeLessThan(THU09.getTime());
+      const before = await counts();
+      const r = await w.call(ADMIN, 'DELETE', '/contacts/ct_tae');
+      expect([r.status, err(r).code]).toEqual([409, 'IN_USE']);
+      expect(await w.fx.repo.getContact('ct_tae')).not.toBeNull();
+      expect((await w.fx.rotationPins!('rot_future')).map((p) => p.contactId)).toEqual(['ct_tae']);
+      await expectNone(before);
     });
   });
 }
