@@ -44,7 +44,20 @@ export function scrollParent(el: HTMLElement): HTMLElement | null {
 
 /** Called by the panel right before it asks the router to leave. Replaces any earlier note. */
 export function holdRow(preferKey: string, root: ParentNode = document): void {
-  held = pickAnchor(boxes(root), window.innerHeight, preferKey);
+  const a = pickAnchor(boxes(root), window.innerHeight, preferKey);
+  held = a && isScrolled(a.key, root) ? a : null;
+}
+
+/**
+ * Nothing to hold while the view is at the top: the list just goes back to where it starts. Holding a row there would
+ * scroll the page away from its top only because the panel's layout above the list differs from the list's own (#172 CI:
+ * every row 156 px up after a save, with nothing scrolled). Only a view the user has scrolled has a place worth keeping.
+ */
+function isScrolled(key: string, root: ParentNode): boolean {
+  const el = [...root.querySelectorAll<HTMLElement>(ROWS)].find((e) => e.dataset.rowKey === key && e.getClientRects().length > 0);
+  if (!el) return false;
+  const sp = scrollParent(el);
+  return (sp ? sp.scrollTop : window.scrollY) > 0.5;
 }
 
 /** Scrolls so the held row is back at its place. Returns true while the row was found. */

@@ -28,7 +28,8 @@ describe("correction", () => {
 });
 
 describe("holdRow / restoreRow on a page", () => {
-  afterEach(() => { document.body.innerHTML = ""; vi.restoreAllMocks(); takeHeldRow(); });
+  const scrolledTo = (y: number) => Object.defineProperty(window, "scrollY", { value: y, configurable: true });
+  afterEach(() => { document.body.innerHTML = ""; vi.restoreAllMocks(); takeHeldRow(); scrolledTo(0); });
   const page = (tops: Record<string, number>) => {
     document.body.innerHTML = Object.keys(tops).map((k) => `<table><tbody><tr data-row-key="${k}"></tr></tbody></table>`).join("");
     for (const tr of document.querySelectorAll<HTMLElement>("tr")) {
@@ -43,6 +44,7 @@ describe("holdRow / restoreRow on a page", () => {
     window.scrollBy = by as unknown as typeof window.scrollBy;
     const tops = { a: 100, b: 820 };
     page(tops);
+    scrolledTo(300);
     holdRow("b");
     const a = takeHeldRow()!;
     expect(a).toEqual({ key: "b", top: 820 });
@@ -63,8 +65,17 @@ describe("holdRow / restoreRow on a page", () => {
   it("takes the note once", () => {
     Object.defineProperty(window, "innerHeight", { value: 900, configurable: true });
     page({ a: 100 });
+    scrolledTo(300);
     holdRow("a");
     expect(takeHeldRow()).not.toBeNull();
+    expect(takeHeldRow()).toBeNull();
+  });
+
+  it("holds nothing while the view is at the top: the list goes back to where it starts", () => {
+    Object.defineProperty(window, "innerHeight", { value: 900, configurable: true });
+    page({ a: 100, b: 820 });
+    scrolledTo(0);
+    holdRow("b");
     expect(takeHeldRow()).toBeNull();
   });
 });
