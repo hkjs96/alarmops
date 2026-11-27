@@ -635,6 +635,33 @@ class DataPaths(ReplicaBase):
         urls = [u for c in self.sb.calls() if c["op"] == "delete-queue" for u in option_values(c["argv"], "--queue-url")]
         self.assertEqual([u.rsplit("/", 1)[-1] for u in urls], [q])
 
+    def test_cleanup_deletes_engine_alarms_whose_names_start_with_a_bracket(self):
+        """The real CLI parses a list argument starting with `[` as JSON, so names like `[SQS] ...` must go as a JSON array."""
+        from test_rehearsal_harness import alarm
+        from rehearsal_support import alarm_names
+        q = "alarmops-rehearsal-" + LONG_RUN
+        names = ['[SQS] queue ApproximateAgeOfOldestMessage (TagName: q)', '[SQS] odd "quote" \\ back (TagName: q)']
+        self.write_run_log("run-one", q)
+        self.sb.set_scenario(
+            queues={q: {"tags": {"AlarmOpsRehearsal": "true", "AlarmOpsRehearsalRun": "run-one"}}},
+            alarms=[alarm(n, q, {"ManagedBy": "AlarmOps"}) for n in names])
+        res = self.sb.run("cleanup.sh", self.sb.good_args("cleanup.sh", run_id="run-one"))
+        self.assertEqual(res.code, 0, res.text)
+        dels = [c for c in self.sb.calls() if c["op"] == "delete-alarms"]
+        self.assertEqual(sorted(n for c in dels for n in alarm_names(c)), sorted(names))
+        for c in dels:
+            i = c["argv"].index("--alarm-names")
+            self.assertIsInstance(json.loads(c["argv"][i + 1]), list, "one JSON array argument")
+            self.assertTrue(i + 2 == len(c["argv"]) or c["argv"][i + 2].startswith("--"), "no further bare names")
+
+    def test_json_array_helper_escapes_quote_and_backslash(self):
+        import subprocess
+        script = 'source "$1"; rh_json_array "[A] x" \'q"uote\' \'b\\s\''
+        out = subprocess.run(["bash", "-c", script, "_", str(REPO / "infra/scripts/rehearsal/common.sh")],
+                             capture_output=True, text=True)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(json.loads(out.stdout), ["[A] x", 'q"uote', "b\\s"])
+
     def test_verify_keeps_the_long_queue_url(self):
         res = self.sb.run("verify.sh", self.sb.good_args("verify.sh", run_id=LONG_RUN), stdin_text="y\n" * 12)
         queue = "alarmops-rehearsal-" + LONG_RUN

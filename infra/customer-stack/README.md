@@ -13,6 +13,17 @@
 | `PermissionsBoundaryArn` | 선택, 기본 빈값. 값이 있으면 역할 5개 모두에 권한 경계로 붙는다. 비면 붙이지 않는다(`AWS::NoValue`) |
 | `EnableAlarmWriter`, `EnableTagWriter`, `EnableRemediator` | 기본 `false` |
 
+## 기존 스택 갱신 (D-63 이전 템플릿으로 설치한 고객)
+
+템플릿이 바뀌어도 고객 스택은 자동으로 바뀌지 않는다. D-63(AlarmWriter 생성 허용을 `[`로 시작하는 이름으로 좁힘)을 적용하려면 고객이 스택을 갱신한다. 바뀌는 것은 AlarmWriter 인라인 정책의 `Resource`와 역할 설명뿐이고 역할은 교체되지 않는다.
+
+1. CloudFormation 콘솔(서울) → 스택 `alarmops-customer` → 업데이트.
+2. 기존 템플릿 바꾸기 → 새 `template.yaml` 올리기.
+3. 파라미터는 이전 값을 그대로 둔다(특히 `ExternalId`).
+4. `CAPABILITY_NAMED_IAM` 승인에 체크하고 제출한다. "No updates are to be performed"가 나오면 이미 최신이다.
+
+고객 안내: 이름이 `[`로 시작하는 알람은 AlarmOps/MSP용으로 예약된다. 그런 이름의 알람은 AlarmOps가 설정을 덮어쓸 수 있다.
+
 ## 고객 조직이 권한 경계나 SCP를 요구할 때 (D-58)
 
 실고객 조직은 SCP나 권한 경계가 없으면 `iam:CreateRole`을 막는 경우가 있다. 이때 스택 생성이 `CreateRole`에서 실패한다.
@@ -57,7 +68,7 @@
 
 - **ManagedBy 값은 `AlarmOps`** (엔진 `naming.MANAGED_BY`). 기존 도구의 `AlarmManager` 값은 이 역할로 지울 수 없다(옛 알람 이전은 별도 절차, D-08).
 - **`DeleteAlarms`의 `aws:ResourceTag` 지원** 은 AWS 문서의 CloudWatch 작업·조건 키 표(`DeleteAlarms` 행의 alarm 리소스 유형)로 사람이 한 번 확인해야 한다. 지원하지 않으면 IAM은 삭제를 막지 못하고 엔진의 재확인(`offboard.py`·`sync.py`가 삭제 직전에 태그를 다시 읽음)이 유일한 방어가 된다. 이 환경에서는 문서를 조회하지 못해 **미확인**이다.
-- **같은 이름의 고객 알람 덮어쓰기(D-63)**: `PutMetricAlarm`은 기존 알람을 갱신할 때 요청 태그를 무시하므로, 요청 태그 조건(`aws:RequestTag`)만으로는 같은 이름의 태그 없는 고객 알람 덮어쓰기를 막지 못한다(11/26-27 실측: 임계값 1→2 변경). `aws:ResourceTag/ManagedBy`가 없을 때 막는 명시적 Deny는 새 알람 생성도 막아 쓸 수 없다(CloudWatch가 생성 때 리소스 태그를 빈 값으로 본다). 그래서 생성 허용을 `[`로 시작하는 이름으로 좁혔다. **남는 위험**: 이름이 `[`로 시작하는 태그 없는 알람(기존 alert-manager 알람은 같은 모양이다)은 여전히 덮어쓸 수 있고, 보호는 엔진이 쓰기 전에 하는 `DescribeAlarms`·`ManagedBy` 확인(`NotOwned`)뿐이다. 기존 스택은 이 템플릿으로 갱신해야 적용된다(`docs/GO-LIVE.md` 4단계 "B 계정 스택 갱신").
+- **같은 이름의 고객 알람 덮어쓰기(D-63)**: `PutMetricAlarm`은 기존 알람을 갱신할 때 요청 태그를 무시하므로, 요청 태그 조건(`aws:RequestTag`)만으로는 같은 이름의 태그 없는 고객 알람 덮어쓰기를 막지 못한다(11/26-27 실측: 임계값 1→2 변경). `aws:ResourceTag/ManagedBy`가 없을 때 막는 명시적 Deny는 새 알람 생성도 막아 쓸 수 없다(CloudWatch가 생성 때 리소스 태그를 빈 값으로 본다). 그래서 생성 허용을 `[`로 시작하는 이름으로 좁혔다. **남는 위험**: 이름이 `[`로 시작하는 태그 없는 알람(기존 alert-manager 알람은 같은 모양이다)은 여전히 덮어쓸 수 있고, 보호는 엔진이 쓰기 전에 하는 `DescribeAlarms`·`ManagedBy` 확인(`NotOwned`)뿐이다. `NotOwned`는 엔진 코드 안의 점검이라, 중앙 자격증명이 탈취되면 `[` 이름 알람의 설정(`AlarmActions`·`ActionsEnabled` 포함)이 바뀔 수 있다. 삭제와 태그 변경은 `ManagedBy` 태그 조건 때문에 여전히 막힌다. 기존 스택은 이 템플릿으로 갱신해야 적용된다(`docs/GO-LIVE.md` 4단계 "B 계정 스택 갱신").
 - `UntagResource`는 `AlarmOps:Console:*` 같은 콘솔 태그를 지우기 위해 소유 알람에 허용된다(엔진 `engine.py`). `ManagedBy` 키는 Deny로 보호한다.
 - `tag:TagResources` 자체의 `aws:TagKeys` 지원과 서비스별 태그 API의 조건 키 지원은 검증 과제에서 유형별로 확인한다. 지원하지 않는 유형은 이 역할에서 뺀다.
 

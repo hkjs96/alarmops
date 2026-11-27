@@ -139,14 +139,14 @@ rp_cleanup() {
   CLEAN_FAIL=0
   rh_say ""
   rh_say "## 정리"
-  rp_exec person cloudwatch delete-alarms --alarm-names "$ALARM_T" "$ALARM_U" "$ALARM_V"
+  rp_exec person cloudwatch delete-alarms --alarm-names "$(rh_json_array "$ALARM_T" "$ALARM_U" "$ALARM_V")"
   if [ "$RP_RC" -eq 0 ]; then rh_say "- 시험 알람 삭제(없으면 건너뜀): $ALARM_T, $ALARM_U, $ALARM_V"
   else rp_fail_exec "시험 알람 삭제 실패"; CLEAN_FAIL=$((CLEAN_FAIL + 1)); fi
   if [ "$PROBE" = 1 ] || [ "$CLEANUP_ONLY" = 1 ]; then   # 실측 모드 잔여물. 일반 실행은 이 호출을 하지 않는다
     local pn=()
     mapfile -t pn < <(probe_alarm_names)
     pn=("${pn[@]%$'\r'}")
-    rp_exec person cloudwatch delete-alarms --alarm-names "${pn[@]}"
+    rp_exec person cloudwatch delete-alarms --alarm-names "$(rh_json_array "${pn[@]}")"
     if [ "$RP_RC" -eq 0 ]; then rh_say "- 실측 알람 삭제(없으면 건너뜀): ${pn[*]}"
     else rp_fail_exec "실측 알람 삭제 실패"; CLEAN_FAIL=$((CLEAN_FAIL + 1)); fi
   fi
@@ -309,7 +309,7 @@ if [ "$PROBE" = 1 ]; then
   # 시작: probe 알람 이름 전부를 본인 자격증명으로 먼저 지운다(없으면 건너뜀). 남은 태그·설정이 p2 대상을 오염시키지 않게 한다
   mapfile -t PROBE_ALL < <(probe_alarm_names)
   PROBE_ALL=("${PROBE_ALL[@]%$'\r'}")
-  rp_exec person cloudwatch delete-alarms --alarm-names "${PROBE_ALL[@]}"
+  rp_exec person cloudwatch delete-alarms --alarm-names "$(rh_json_array "${PROBE_ALL[@]}")"
   [ "$RP_RC" -eq 0 ] || { rp_fail_exec "준비 실패: 이전 probe 알람 삭제"; exit 1; }
   # 준비 알람: $1=이름 $2=ManagedBy 값(비면 태그 없이). 태그 없는 알람에 ManagedBy 가 보이면 준비 실패로 중단한다
   rp_prep_alarm() {
@@ -357,7 +357,7 @@ sys.exit(0 if any(x.get("Key") == "ManagedBy" for x in t) else 1)
       rp_note "오류: 카나리 실패($v): Deny 가 없는 상태인데 태그 없는 알람 덮어쓰기가 $(rp_cell). 옛 정책이 남았거나 원본 정책에 구멍이 없다. 첫 변형(null)이면 구멍이 없는 것이니 일반 모드 (f) 결과를 보고, 오류 줄과 종료 코드만 허브에 보낸다. 두 번째 변형이면 REHEARSAL_PROBE_WAIT=60 으로 다시 실행한다"
       exit 1
     fi
-    rp_exec person cloudwatch delete-alarms --alarm-names "$CAN"
+    rp_exec person cloudwatch delete-alarms --alarm-names "$(rh_json_array "$CAN")"
     # 3) 준비: 태그 없는 알람(p2 대상), ManagedBy=Other 알람(Deny 카나리 B)
     rp_prep_alarm "$UN" ""
     rp_prep_alarm "$OTH" "Other"
@@ -393,7 +393,7 @@ sys.exit(0 if any(x.get("Key") == "ManagedBy" for x in t) else 1)
     rp_overwrite "$UN" 2
     c2="$(rp_cell)"
     # 본인 자격증명으로 임계값이 실제로 바뀌었는지 본다(거부됐어도 확인: 응답과 실제 상태가 다르면 판정을 믿지 않는다)
-    rp_exec person cloudwatch describe-alarms --alarm-names "$UN" --output json
+    rp_exec person cloudwatch describe-alarms --alarm-names "$(rh_json_array "$UN")" --output json
     thr="조회 실패"
     if [ "$RP_RC" -eq 0 ]; then
       thr="$(printf '%s' "$RP_OUT" | "$RH_PY" -c '
@@ -421,7 +421,7 @@ print("%g" % a[0]["Threshold"] if a else "")
         --comparison-operator GreaterThanThreshold
       c3="$(rp_cell)$star"
       # p4 관리 알람 삭제
-      rp_exec replica cloudwatch delete-alarms --alarm-names "$NEW"
+      rp_exec replica cloudwatch delete-alarms --alarm-names "$(rh_json_array "$NEW")"
       c4="$(rp_cell)$star"
     fi
     verdict="사용 불가"
@@ -496,7 +496,7 @@ rp_exec replica cloudwatch put-metric-alarm --alarm-name "$ALARM_T" "${BASE[@]}"
 a_created=0; [ "$RP_RC" -eq 0 ] && a_created=1
 expect_denied "(a) 태그 없는 PutMetricAlarm → 거부"
 if [ "$a_created" = 1 ]; then   # 잘못 만들어졌다: (b)가 새로 만들기를 시험하도록 치운다
-  rp_exec person cloudwatch delete-alarms --alarm-names "$ALARM_T"
+  rp_exec person cloudwatch delete-alarms --alarm-names "$(rh_json_array "$ALARM_T")"
 fi
 
 # (b) ManagedBy=AlarmOps 태그를 단 PutMetricAlarm
@@ -555,7 +555,7 @@ else
   else
     f_overwrote=1
     thr=""; tagnote="조회 실패"
-    rp_exec person cloudwatch describe-alarms --alarm-names "$ALARM_U" --output json
+    rp_exec person cloudwatch describe-alarms --alarm-names "$(rh_json_array "$ALARM_U")" --output json
     if [ "$RP_RC" -eq 0 ]; then
       thr="$(printf '%s' "$RP_OUT" | "$RH_PY" -c '
 import json, sys
@@ -588,7 +588,7 @@ HOLD=0
 
 # (f)가 덮어썼다면 알람이 오염됐다(설정·ManagedBy 태그). (c)(d)를 위해 지우고 태그 없이 다시 만든다. 못 하면 (c)(d)는 준비 실패.
 if [ "$f_overwrote" = 1 ]; then
-  rp_exec person cloudwatch delete-alarms --alarm-names "$ALARM_U"
+  rp_exec person cloudwatch delete-alarms --alarm-names "$(rh_json_array "$ALARM_U")"
   if [ "$RP_RC" -ne 0 ]; then
     u_prepared=0; U_REASON="(f)로 덮어써진 알람을 지우지 못함(코드 $(rp_code))"
   elif rp_make_u; then
@@ -606,12 +606,12 @@ if [ "$u_prepared" != 1 ]; then
 else
   rp_exec replica cloudwatch tag-resource --resource-arn "$ARN_U" --tags Key=ManagedBy,Value=AlarmOps
   expect_denied "(c) 태그 없는 알람에 TagResource(ManagedBy) → 거부"
-  rp_exec replica cloudwatch delete-alarms --alarm-names "$ALARM_U"
+  rp_exec replica cloudwatch delete-alarms --alarm-names "$(rh_json_array "$ALARM_U")"
   expect_denied "(d) 태그 없는 알람 DeleteAlarms → 거부 (#87 미확인 항목)"
 fi
 
 # (e) 관리 알람 삭제
-rp_exec replica cloudwatch delete-alarms --alarm-names "$ALARM_T"
+rp_exec replica cloudwatch delete-alarms --alarm-names "$(rh_json_array "$ALARM_T")"
 if [ "$RP_RC" -eq 0 ]; then rp_row "(e) ManagedBy=AlarmOps 알람 DeleteAlarms → 성공" PASS "성공"
 else rp_row "(e) ManagedBy=AlarmOps 알람 DeleteAlarms → 성공" FAIL "오류 코드 $(rp_code)"; fi
 rh_say "$HELD"

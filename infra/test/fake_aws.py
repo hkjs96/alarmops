@@ -100,6 +100,31 @@ def split_argv(argv: list[str]):
     return service, op, opts
 
 
+def expand_list_params(opts: dict):
+    """Real AWS CLI (v1 1.46 and v2): a list-type argument whose value starts with `[` is parsed as JSON. A name such as
+    "[EC2] web CPU" therefore fails with `Invalid JSON`, and a JSON array is accepted and replaces the values. The check is
+    done on every value (the strictest reading; the CLI's behaviour for several values is not verified). Returns the error
+    text for the first bad option, or None. Mutates opts in place."""
+    for name in MULTI:
+        vals = opts.get(name)
+        if not vals or not any(v.startswith("[") for v in vals):
+            continue
+        out = []
+        for v in vals:
+            if not v.startswith("["):
+                out.append(v)
+                continue
+            try:
+                arr = json.loads(v)
+            except ValueError as e:
+                return f"Error parsing parameter '{name}': Invalid JSON: {e}\nJSON received: {v}"
+            if not isinstance(arr, list):
+                return f"Error parsing parameter '{name}': Invalid JSON: not a list"
+            out.extend(x if isinstance(x, str) else json.dumps(x) for x in arr)
+        opts[name] = out
+    return None
+
+
 def read_files(argv: list[str]) -> dict:
     out = {}
     for a in argv:
@@ -476,6 +501,7 @@ def main() -> None:
     secret = scen.get("leak") or scen.get("fail_writes") or scen.get("fail_reads")
     rec = {"argv": argv, "service": service, "op": op, "files": read_files(argv), "stdin": stdin, "echo": echo,
            "as_replica": "AWS_ACCESS_KEY_ID" in os.environ, "env_profile": "AWS_PROFILE" in os.environ}
+    param_error = expand_list_params(opts)
     done = []
 
     def record():
@@ -489,6 +515,11 @@ def main() -> None:
     # describe-stacks is logged only once its real response body is known (see `mark` below).
     if (service, op) != ("cloudformation", "describe-stacks"):
         record()
+
+    if param_error:   # the CLI rejects the call before sending anything
+        record()
+        sys.stderr.write("\n" + param_error + "\n")
+        sys.exit(255)
 
     sleep_for = (scen.get("sleep_ops") or {}).get(f"{service} {op}")
     if sleep_for:

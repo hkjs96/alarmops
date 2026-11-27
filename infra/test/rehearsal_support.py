@@ -169,6 +169,18 @@ def option_values(argv: list[str], name: str) -> list[str]:
     return out
 
 
+def _names_of(v: str) -> list[str]:
+    """A value that is a JSON array (the only way to pass names starting with `[` to the real CLI) yields its members."""
+    if v.startswith("["):
+        try:
+            arr = json.loads(v)
+        except ValueError:
+            return [v]
+        if isinstance(arr, list):
+            return [str(x) for x in arr]
+    return [v]
+
+
 def alarm_names(c: dict) -> list[str]:
     """Exact alarm names a delete-alarms call targets: every value after --alarm-names (until the next
     option), plus AlarmNames of any JSON given via file:// or stdin. Values are kept verbatim (no substring
@@ -178,10 +190,10 @@ def alarm_names(c: dict) -> list[str]:
         if a == "--alarm-names":
             j = i + 1
             while j < len(argv) and not argv[j].startswith("--"):
-                out.append(argv[j])
+                out.extend(_names_of(argv[j]))
                 j += 1
         elif a.startswith("--alarm-names="):
-            out.append(a.split("=", 1)[1])
+            out.extend(_names_of(a.split("=", 1)[1]))
     for text in [*c.get("files", {}).values(), c.get("stdin", "")]:
         try:
             doc = json.loads(text)

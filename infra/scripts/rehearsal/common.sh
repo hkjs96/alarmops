@@ -239,6 +239,21 @@ rh_poll() {
   done
 }
 
+# 이름 목록 -> JSON 배열 문자열 한 개(stdout). aws CLI 는 리스트형 인자 값이 `[` 로 시작하면 JSON 으로 해석하므로
+# `--alarm-names "[SQS] ..."` 는 "Invalid JSON" 으로 실패한다. 엔진 알람 이름은 `[{type}] ...` 이라 `--alarm-names` 에는
+# 항상 이 함수의 결과(JSON 배열 하나)를 넘긴다: --alarm-names "$(rh_json_array "${names[@]}")". 백슬래시와 큰따옴표는 이스케이프한다.
+rh_json_array() {
+  local out="" first=1 n
+  for n in "$@"; do
+    n="${n//$'\r'/}"
+    n="${n//\\/\\\\}"
+    n="${n//\"/\\\"}"
+    if [ "$first" = 1 ]; then first=0; else out="$out,"; fi
+    out="$out\"$n\""
+  done
+  printf '[%s]' "$out"
+}
+
 # 이 큐를 차원(QueueName)으로 가진 ManagedBy=AlarmOps 알람 이름을 전역 배열 RH_ALARMS 에 담는다 (B2, B10).
 # 조회가 하나라도 실패하면 1을 돌려준다(없음과 구분). 프로세스 치환·명령 치환으로 부르지 말고
 # 직접 호출해 종료 코드를 확인할 것.

@@ -40,6 +40,27 @@ NULL_COND = {"Null": {"aws:ResourceTag/ManagedBy": "true"}}
 SNE_COND = {"StringNotEquals": {"aws:ResourceTag/ManagedBy": "AlarmOps"}}
 
 
+class FakeCliListParsing(unittest.TestCase):
+    """Like the real CLI, a list argument value starting with `[` must be JSON (hub measured awscli 1.46.3)."""
+
+    def test_bracket_name_is_invalid_json(self):
+        _, _, opts = fake_aws.split_argv(["cloudwatch", "delete-alarms", "--alarm-names", "[AlarmOpsRehearsal] replica-test"])
+        err = fake_aws.expand_list_params(opts)
+        self.assertIn("Error parsing parameter '--alarm-names': Invalid JSON", err)
+
+    def test_json_array_is_accepted_and_expanded(self):
+        _, _, opts = fake_aws.split_argv(["cloudwatch", "delete-alarms", "--alarm-names",
+                                          '["[A] x","plain"]'])
+        self.assertIsNone(fake_aws.expand_list_params(opts))
+        self.assertEqual(opts["--alarm-names"], ["[A] x", "plain"])
+
+    def test_plain_names_and_scalar_option_untouched(self):
+        _, _, opts = fake_aws.split_argv(["cloudwatch", "put-metric-alarm", "--alarm-name", "[A] x",
+                                          "--alarm-names", "plain"])
+        self.assertIsNone(fake_aws.expand_list_params(opts))
+        self.assertEqual(opts["--alarm-name"], ["[A] x"])
+
+
 class FakeResourceModel(unittest.TestCase):
     """The fake must match Resource ARNs like IAM (only * and ? wildcards, `[` literal), or the D-63 tests prove nothing."""
 
@@ -193,7 +214,7 @@ class Probe(ProbeBase):
             self.assertEqual(option(p2[0]["argv"], "--threshold"), "2")
             dels = [alarm_names_of(c) for c in rep if c["op"] == "delete-alarms" and new in alarm_names_of(c)]
             self.assertEqual(dels, [[new]])
-            own = [c for c in calls if not c["as_replica"] and c["op"] == "describe-alarms" and un in c["argv"]]
+            own = [c for c in calls if not c["as_replica"] and c["op"] == "describe-alarms" and un in alarm_names_of(c)]
             self.assertTrue(own, "the person's own credentials verify the unmanaged alarm")
             made = [c for c in calls if not c["as_replica"] and c["op"] == "put-metric-alarm" and un in c["argv"]]
             self.assertEqual(len(made), 1)
