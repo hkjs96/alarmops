@@ -32,15 +32,15 @@
 
 ### Responders 카드의 Template 칸 (D-64, 11/27)
 카드 맨 위 한 줄: `Template: <이름>`(없으면 `none`) + 버튼 `Change template…`(없으면 `Attach a template…`). ADMIN만, 호출 순서를 편집 중이면 꺼지고 이유가 옆에 나온다. 포털에는 없다.
-- 누르면 확인창: 선택 칸 `Template`(`No template` + 템플릿들, 현재 것은 `(current)`). 고르면 서버 미리보기: `<고객>: N will join, M will leave`, 효과 줄(`+ X joins Responders` / `− X leaves Responders` / `= X stays (added directly)` / `= X is already in Responders (added directly) — no change` / `! step N still names X — fix in the customer`), 막히면 `Can’t save: this would break 1 customer` 상자.
+- 누르면 확인창: 선택 칸 `Template`(`No template` + 템플릿들, 현재 것은 `(current)`). 고르면 서버 미리보기: `<고객>: N will join, M will leave`, 효과 줄(`+ X joins Responders` / `− X leaves Responders` / `= X stays (added directly)` / `= X is already in Responders (added directly) — no change` / `! step N still names X — fix in the customer`), 막히면 `Can’t save: this would break 1 customer` 상자. 템플릿 멤버 중 비활성 직원은 건너뛰고(11/27 결정) 미리보기에 `Skipped (inactive): A, B — they won't be added.`를 보인다.
 - 확인 버튼: 연결 `Attach <템플릿>`, 교체 `Switch to <템플릿>`, 해제 `Detach <템플릿>`. 막힌 변경·미리보기 중·같은 선택이면 꺼진다(우회 없음).
-- 저장 뒤 토스트 `<…> attached to <고객> · N joined, M left` + `Undo`(이전 템플릿을 같은 미리보기 → 저장으로 되돌린다; 막히면 `Could not undo — …`).
+- 저장 뒤 토스트 `<…> attached to <고객> · N joined, M left` + `Undo`. 건너뛴 사람이 있으면 토스트에 `Skipped (inactive): A, B — not added.`가 붙는다. Undo는 이전 템플릿을 같은 미리보기 → 저장으로 되돌린다(막히면 `Could not undo — …`).
 - 오류: 해지 고객 `Not changed. <고객> is terminated and keeps its data as it is. Nothing was changed.`, 나머지는 템플릿 화면과 같은 문구(`oncall-templates.md`). 503 BUSY는 한 번 자동 재시도.
 
 역할 정의: **Pageable** = 전화·문자 가능, 단계·로테이션에 지정 가능, "everyone"에 포함. **Notify only** = 상태 메일만(범위 안 인시던트). Approver·Portal은 둘 중 어디에나 추가.
 
 ## API
-GET `/customers/{id}/responders` → `{ staff[{contactId,source:TEMPLATE|DIRECT,templateId}], people[{contactId,role,extras[],scope}], templateId }`; POST/DELETE `/customers/{id}/responders`; PATCH `/customers/{id}/responders/{contactId}` (role); GET/PUT `/customers/{id}/paging` (`style, plan, sharedRotationId?, steps[], repeatCount`, If-Match); PUT/DELETE `/customers/{id}/paging-overrides/{scopeType}/{scopeId}`.
+GET `/customers/{id}/responders` → `{ staff[{contactId,source:TEMPLATE|DIRECT,templateId}], people[{contactId,role,extras[],scope}], templateId, templateName }`(템플릿이 없으면 둘 다 null); POST/DELETE `/customers/{id}/responders`; PATCH `/customers/{id}/responders/{contactId}` (role); GET/PUT `/customers/{id}/paging` (`style, plan, sharedRotationId?, steps[], repeatCount`, If-Match); PUT/DELETE `/customers/{id}/paging-overrides/{scopeType}/{scopeId}`.
 
 ## 390px
 패널은 전체 화면. 읽기 화면은 문장 → 이름 → 단계 → 출처 순서, `Edit` 버튼은 아래 고정(44px 이상). 단계 행은 번호 + (분 / 대상 / 수단) 세로. Responders 카드는 단계 아래.

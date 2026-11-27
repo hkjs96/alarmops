@@ -46,7 +46,7 @@ export function ConfirmDialog({ open, title, children, confirmLabel, cancelLabel
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onCancel(); return; }
     if (e.key !== "Tab") { e.stopPropagation(); return; }
-    const f = Array.from(ref.current?.querySelectorAll<HTMLElement>("button:not([disabled]), a[href], input:not([disabled]), textarea:not([disabled])") ?? []);
+    const f = Array.from(ref.current?.querySelectorAll<HTMLElement>("button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled])") ?? []);
     const first = f[0];
     const last = f[f.length - 1];
     if (!first || !last) return;

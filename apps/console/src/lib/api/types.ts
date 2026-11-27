@@ -506,7 +506,9 @@ export interface CustomerPersonResponder extends ResponderDisplay {
  * the new version. `slackChannel`: whether the customer's Slack channel is connected (VERIFIED) or not (NOT_SET),
  * which is what a SLACK_CHANNEL step needs.
  */
-export interface RespondersResponse { staff: StaffResponder[]; people: CustomerPersonResponder[]; templateId: string | null; version: number; slackChannel?: ChannelState }
+export interface RespondersResponse { staff: StaffResponder[]; people: CustomerPersonResponder[]; templateId: string | null;
+  /** name of that template; null together with templateId (API-CONTRACT §8.3, D-64) */
+  templateName: string | null; version: number; slackChannel?: ChannelState }
 /** POST /contacts/{id}/reveal (D-35). The value is shown for a moment and never kept. */
 export type RevealChannel = "PHONE" | "EMAIL" | "SLACK";
 export interface RevealResult { channel: RevealChannel; value: string; mode: "NORMAL" | "EMERGENCY"; revealedAt: string; auditId: string }
@@ -759,8 +761,11 @@ export interface CustomerTemplatePreview {
   from: { id: string; name: string } | null;
   to: { id: string; name: string } | null;
   effects: TemplateEffect[];
+  /** inactive staff of the template that are skipped, by name: nobody is added for them (11/27) */
+  skippedInactive: SkippedInactive[];
   totals: { joins: number; leaves: number; warnings: number };
   blocking: TemplateBlocking[];
   previewHash: string;
 }
-export interface CustomerTemplateResult { customerId: string; templateId: string | null; version: number; joins: number; leaves: number }
+export interface SkippedInactive { contactId: string; name: string }
+export interface CustomerTemplateResult { customerId: string; templateId: string | null; version: number; joins: number; leaves: number; skippedInactive: SkippedInactive[] }

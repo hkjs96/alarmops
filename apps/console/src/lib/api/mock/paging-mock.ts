@@ -33,14 +33,14 @@ export function directoryOf(paging: FxPaging, c: FxCustomer): Directory {
   const tpl = cp.templateId ? paging.templates[cp.templateId] : undefined;
   const staff: StaffResponder[] = [
     // a person who was added directly stays a direct row even when a template names them too (D-64 "ALREADY_DIRECT")
-    ...(tpl?.members ?? []).filter((id) => !cp.staff.includes(id)).map((id) => ({ contactId: id, source: "TEMPLATE" as const, templateId: cp.templateId!, templateName: tpl!.name, ...disp(paging.contacts[id]!) })),
+    ...(tpl?.members ?? []).filter((id) => !cp.staff.includes(id) && paging.contacts[id]?.active !== false).map((id) => ({ contactId: id, source: "TEMPLATE" as const, templateId: cp.templateId!, templateName: tpl!.name, ...disp(paging.contacts[id]!) })),
     ...cp.staff.map((id) => ({ contactId: id, source: "DIRECT" as const, ...disp(paging.contacts[id]!) })),
   ];
   const people: CustomerPersonResponder[] = cp.people.map((p) => ({ contactId: p.contactId, role: p.role, extras: [...p.extras], scope: { ...p.scope }, ...disp(paging.contacts[p.contactId]!) }));
   return {
     customerName: c.name, staff, people,
     rotations: paging.rotations.filter((r) => r.scope === "MSP" || r.customerId === c.id),
-    allStaff: Object.values(paging.contacts).filter((x) => x.kind === "STAFF").map((x) => ({ contactId: x.id, name: x.name, title: x.title, channels: x.channels })),
+    allStaff: Object.values(paging.contacts).filter((x) => x.kind === "STAFF" && x.active !== false).map((x) => ({ contactId: x.id, name: x.name, title: x.title, channels: x.channels })),
     slackChannel: cp.slackChannel,
   };
 }
@@ -270,7 +270,7 @@ export function createPagingApi(x: Ctx): PagingApi {
         const r = revealRule({ me: who, directory: () => d }, c, paging.contacts[p.contactId]!);
         return { ...p, canReveal: r.ok, revealRequiresReason: r.reason };
       };
-      return structuredClone({ staff: d.staff.map(flag), people: d.people.map(flag), templateId: cp.templateId, version: cp.respondersVersion, slackChannel: cp.slackChannel });
+      return structuredClone({ staff: d.staff.map(flag), people: d.people.map(flag), templateId: cp.templateId, templateName: cp.templateId ? paging.templates[cp.templateId]?.name ?? null : null, version: cp.respondersVersion, slackChannel: cp.slackChannel });
     },
     async addResponder(customerId, input, opts) {
       const c = customerById(customerId);
