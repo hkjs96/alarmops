@@ -6,6 +6,8 @@ import { MemoryTickStore, incidentMute, type DigestData, type PurgeLogEntry, typ
 import { inScope, nodeVisible, seesCustomer, type Role, type ScopeFilter } from './auth.js';
 import { emailDomain, normalizeEmail } from './usersApi.js';
 import { isFreeMail } from './onboardingApi.js';
+import { attachBlocking, planTemplateAttach, planTemplateChange, templateBlocking } from './templatesApi.js';
+import type { ResponderTemplateView, TemplateAttachInput, TemplateAttachOutcome, TemplateAttachWrite, TemplateCreate, TemplateImpactInput, TemplatePaging, TemplateRef, TemplateUpdate, TemplateUpdateOutcome } from './repo.js';
 import type { UserInfo } from './audience.js';
 import type { AlarmStateValue, ManagedAlarmFilter, ManagedAlarmRecord, MonitoringCursor, MonitoringOutside, MonitoringPage, MonitoringStateValue, ResourceFilter, ResourceRecord, ValueSourceValue } from './repo.js';
 import type { CustomerProfile, CustomerProfilePatch, CustomerUpdateOutcome, OrgWriteOutcome, ProjectRecord, ServiceRecord, BindGoogleOutcome, EnrolOutcome, NewUser, UserFilter, UserPatch, UserRecord, UserWriteOutcome } from './repo.js';
@@ -53,6 +55,10 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
   respondersVersion = new Map<string, number>();
   responderSource = new Map<string, { source: 'DIRECT' | 'TEMPLATE'; templateId: string; templateName: string }>();
   customerTemplate = new Map<string, string>();
+  /** Responder templates (id → row). Members are staff contact ids. */
+  templates = new Map<string, { id: string; name: string; version: number; updatedBy: string | null; updatedAt: Date; members: string[] }>();
+  bulkChanges: Array<{ kind: 'TEMPLATE_UPDATE'; actorId: string; params: unknown; preview: unknown; previewHash: string; at: Date }> = [];
+  private templateSeq = 0;
   private newContactSeq = 0;
   /** ContactRevealLog (D-35), append only. */
   revealLogs: RevealLogEntry[] = [];
@@ -886,6 +892,147 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     this.respondersVersion.set(customerId, version);
     this.audits.push({ ...audit, targetId: contactId });
     return { contactId, version };
+  }
+  // ── Responder templates ──
+  private templateView(t: { id: string; name: string; version: number; updatedBy: string | null; updatedAt: Date; members: string[] }): ResponderTemplateView {
+    const nameOf = (id: string) => this.contacts.get(id)?.name ?? id;
+    return {
+      id: t.id, name: t.name, version: t.version, updatedAt: t.updatedAt, updatedBy: t.updatedBy,
+      members: [...t.members].map((contactId) => ({ contactId, name: nameOf(contactId) })).sort((a, b) => a.name.localeCompare(b.name) || (a.contactId < b.contactId ? -1 : 1)),
+      customers: [...this.customerTemplate].filter(([cid, tid]) => tid === t.id && (this.customers.get(cid)?.status ?? 'ACTIVE') !== 'TERMINATED')
+        .map(([cid]) => ({ id: cid, name: this.customers.get(cid)?.name ?? cid })).sort((a, b) => a.name.localeCompare(b.name) || (a.id < b.id ? -1 : 1)),
+    };
+  }
+  async listResponderTemplates(): Promise<ResponderTemplateView[]> {
+    return [...this.templates.values()].map((t) => this.templateView(t)).sort((a, b) => a.name.localeCompare(b.name) || (a.id < b.id ? -1 : 1));
+  }
+  async getResponderTemplate(id: string): Promise<ResponderTemplateView | null> {
+    const t = this.templates.get(id);
+    return t ? this.templateView(t) : null;
+  }
+  private templatePaging(cid: string): TemplatePaging { return { configs: this.configsOf(cid), world: this.worldOf(cid), slackVerified: this.verifiedSlack.has(cid) }; }
+  private impactInput(t: { id: string; name: string; version: number; members: string[] }, proposed: string[]): TemplateImpactInput {
+    const ids = [...new Set([...t.members, ...proposed])];
+    const names: Record<string, string> = {};
+    for (const id of ids) names[id] = this.contacts.get(id)?.name ?? id;
+    const customers = [...this.customerTemplate].filter(([cid, tid]) => tid === t.id && (this.customers.get(cid)?.status ?? 'ACTIVE') !== 'TERMINATED').map(([cid]) => ({
+      id: cid, name: this.customers.get(cid)?.name ?? cid,
+      responders: this.responders.filter((r) => r.customerId === cid).map((r) => {
+        const src = this.responderSource.get(`${cid}|${r.contactId}`);
+        return { contactId: r.contactId, source: src?.source ?? ('DIRECT' as const), templateId: src?.templateId ?? null };
+      }),
+      paging: this.templatePaging(cid),
+      namedSteps: this.configs.filter((c) => c.customerId === cid).flatMap((c) => c.steps.filter((s) => s.targetType === 'PERSON' && s.targetId && ids.includes(s.targetId)).map((s) => ({ contactId: s.targetId!, stepIndex: s.index + 1 }))),
+    }));
+    return { templateId: t.id, version: t.version, name: t.name, members: [...t.members], names, customers };
+  }
+  async responderTemplateImpactInput(id: string, proposedMembers: string[]): Promise<TemplateImpactInput | null> {
+    const t = this.templates.get(id);
+    return t ? this.impactInput(t, proposedMembers) : null;
+  }
+  private staffOk = (ids: string[]) => ids.every((id) => { const c = this.contacts.get(id); return !!c && c.kind === 'INTERNAL' && c.active; });
+  async createResponderTemplate(t: TemplateCreate, audit: AuditInput): Promise<ResponderTemplateView | 'NAME_EXISTS' | 'BAD_MEMBER'> {
+    if ([...this.templates.values()].some((x) => x.name === t.name)) return 'NAME_EXISTS';
+    if (!this.staffOk(t.members)) return 'BAD_MEMBER';
+    const row = { id: `rt_${++this.templateSeq}`, name: t.name, version: 0, updatedBy: t.actorId, updatedAt: t.at, members: [...t.members] };
+    this.templates.set(row.id, row);
+    this.audits.push({ ...audit, targetId: row.id });
+    return this.templateView(row);
+  }
+  async updateResponderTemplate(u: TemplateUpdate, audit: AuditInput): Promise<TemplateUpdateOutcome> {
+    const t = this.templates.get(u.id);
+    if (!t) return 'NOT_FOUND';
+    if (t.version !== u.expectedVersion) return 'CONFLICT';
+    if ([...this.templates.values()].some((x) => x.id !== t.id && x.name === u.proposal.name)) return 'NAME_EXISTS';
+    if (!this.staffOk(u.proposal.members)) return 'BAD_MEMBER';
+    const plan = planTemplateChange(this.impactInput(t, u.proposal.members), u.proposal);
+    if (plan.previewHash !== u.previewHash) return 'STALE';
+    const blocking = templateBlocking(this.impactInput(t, u.proposal.members), plan, u.at);
+    if (blocking.length) return { blocking };
+    let affected = 0;
+    for (const c of plan.customers) {
+      const joins = c.effects.filter((e) => e.kind === 'JOINS').map((e) => e.contactId);
+      const leaves = c.effects.filter((e) => e.kind === 'LEAVES').map((e) => e.contactId);
+      for (const id of joins) {
+        const order = Math.max(-1, ...this.responders.filter((r) => r.customerId === c.id).map((r) => r.order ?? 0)) + 1;
+        this.responders.push({ customerId: c.id, contactId: id, role: 'PAGEABLE', order });
+        this.responderSource.set(`${c.id}|${id}`, { source: 'TEMPLATE', templateId: t.id, templateName: u.proposal.name });
+      }
+      for (const id of leaves) {
+        this.responders = this.responders.filter((r) => !(r.customerId === c.id && r.contactId === id));
+        this.responderSource.delete(`${c.id}|${id}`);
+      }
+      if (joins.length || leaves.length) {
+        affected += 1;
+        this.audits.push({ ...audit, customerId: c.id, action: 'responder_template.apply', targetId: t.id, before: null, after: { added: joins, removed: leaves } });
+      }
+      // a renamed template: the rows of its customers show the new name
+      for (const [k, v] of this.responderSource) if (v.templateId === t.id) this.responderSource.set(k, { ...v, templateName: u.proposal.name });
+    }
+    const before = { name: t.name, members: [...t.members].sort(), version: t.version };
+    t.name = u.proposal.name; t.members = [...u.proposal.members]; t.version += 1; t.updatedBy = u.actorId; t.updatedAt = u.at;
+    this.audits.push({ ...audit, targetId: t.id, before, after: { name: t.name, members: [...t.members].sort(), version: t.version, added: plan.added, removed: plan.removed } });
+    this.bulkChanges.push({ kind: 'TEMPLATE_UPDATE', actorId: u.actorId, params: { templateId: t.id, added: plan.added, removed: plan.removed }, preview: { customers: plan.customers.map((c) => ({ id: c.id, effects: c.effects })), totals: plan.totals }, previewHash: plan.previewHash, at: u.at });
+    return { view: this.templateView(t), affected };
+  }
+  // ── one customer's template (D-64) ──
+  private templateRef(id: string | null): TemplateRef | null {
+    const t = id ? this.templates.get(id) : undefined;
+    return t ? { id: t.id, name: t.name, version: t.version, members: [...t.members] } : null;
+  }
+  private attachInput(customerId: string, from: TemplateRef | null, to: TemplateRef | null): TemplateAttachInput {
+    const ids = [...new Set([...(from?.members ?? []), ...(to?.members ?? [])])];
+    const names: Record<string, string> = {};
+    for (const id of ids) names[id] = this.contacts.get(id)?.name ?? id;
+    const c = this.customers.get(customerId)!;
+    return {
+      customer: {
+        id: customerId, name: c.name, status: (c.status ?? 'ACTIVE') as 'ACTIVE' | 'SUSPENDED' | 'TERMINATED', templateId: this.customerTemplate.get(customerId) ?? null,
+        version: this.respondersVersion.get(customerId) ?? 0,
+        responders: this.responders.filter((r) => r.customerId === customerId).map((r) => {
+          const src = this.responderSource.get(`${customerId}|${r.contactId}`);
+          return { contactId: r.contactId, source: src?.source ?? ('DIRECT' as const), templateId: src?.templateId ?? null };
+        }),
+        namedSteps: this.configs.filter((x) => x.customerId === customerId).flatMap((x) => x.steps.filter((s) => s.targetType === 'PERSON' && s.targetId && ids.includes(s.targetId)).map((s) => ({ contactId: s.targetId!, stepIndex: s.index + 1 }))),
+        paging: this.templatePaging(customerId),
+      },
+      from, to, names,
+    };
+  }
+  async customerTemplateAttachInput(customerId: string, toTemplateId: string | null): Promise<TemplateAttachInput | 'NO_TEMPLATE' | null> {
+    if (!this.customers.has(customerId)) return null;
+    if (toTemplateId !== null && !this.templates.has(toTemplateId)) return 'NO_TEMPLATE';
+    return this.attachInput(customerId, this.templateRef(this.customerTemplate.get(customerId) ?? null), this.templateRef(toTemplateId));
+  }
+  async setCustomerTemplate(w: TemplateAttachWrite, audit: AuditInput): Promise<TemplateAttachOutcome> {
+    if (audit.customerId !== w.customerId) throw new Error('setCustomerTemplate: audit must be for the same customer');
+    const cus = this.customers.get(w.customerId);
+    if (!cus) return 'NOT_FOUND';
+    if (w.toTemplateId !== null && !this.templates.has(w.toTemplateId)) return 'NO_TEMPLATE';
+    if ((cus.status ?? 'ACTIVE') === 'TERMINATED') return 'TERMINATED';
+    if ((this.respondersVersion.get(w.customerId) ?? 0) !== w.expectedVersion) return 'CONFLICT';
+    const from = this.templateRef(this.customerTemplate.get(w.customerId) ?? null);
+    const to = this.templateRef(w.toTemplateId);
+    const input = this.attachInput(w.customerId, from, to);
+    const plan = planTemplateAttach(input);
+    if (plan.previewHash !== w.previewHash) return 'STALE';
+    const blocking = attachBlocking(input, plan, w.at);
+    if (blocking.length) return { blocking };
+    for (const id of plan.leaves) {
+      this.responders = this.responders.filter((r) => !(r.customerId === w.customerId && r.contactId === id));
+      this.responderSource.delete(`${w.customerId}|${id}`);
+    }
+    for (const id of plan.retarget) this.responderSource.set(`${w.customerId}|${id}`, { source: 'TEMPLATE', templateId: to!.id, templateName: to!.name });
+    for (const id of plan.joins) {
+      const order = Math.max(-1, ...this.responders.filter((r) => r.customerId === w.customerId).map((r) => r.order ?? 0)) + 1;
+      this.responders.push({ customerId: w.customerId, contactId: id, role: 'PAGEABLE', order });
+      this.responderSource.set(`${w.customerId}|${id}`, { source: 'TEMPLATE', templateId: to!.id, templateName: to!.name });
+    }
+    if (w.toTemplateId === null) this.customerTemplate.delete(w.customerId); else this.customerTemplate.set(w.customerId, w.toTemplateId);
+    const version = w.expectedVersion + 1;
+    this.respondersVersion.set(w.customerId, version);
+    this.audits.push({ ...audit, before: { templateId: from?.id ?? null }, after: { templateId: to?.id ?? null, added: plan.joins, removed: plan.leaves } });
+    return { version, templateId: w.toTemplateId, joins: plan.joins.length, leaves: plan.leaves.length };
   }
   async rotationsWorld(scope: ScopeFilter): Promise<RotationsWorld> {
     const rotations = [...this.rotations.values()].filter((r) => r.scope === 'MSP' || (r.customerId != null && seesCustomer(scope, r.customerId))).map((r) => structuredClone(r));

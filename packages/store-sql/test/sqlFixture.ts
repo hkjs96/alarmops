@@ -161,6 +161,16 @@ export async function sqlFixture(db: TestDb, seed: MemoryTickStore): Promise<Sql
       [u.id, u.email ?? `${u.id}@example.test`, u.name, u.status ?? 'ACTIVE', customerId, u.role ?? (customerId ? 'VIEWER' : 'OPERATOR'), u.googleSub ?? null]);
     if (u.contactId) await q(`UPDATE "Contact" SET "userId" = $1 WHERE "id" = $2`, [u.id, u.contactId]);
   }
+  // Responder templates (MemoryApiStore.templates / customerTemplate / responderSource)
+  for (const t of api.templates?.values() ?? []) {
+    await q(`INSERT INTO "ResponderTemplate"("id", "name", "version", "updatedBy", "updatedAt") VALUES ($1, $2, $3, $4, $5::timestamptz)`, [t.id, t.name, t.version, t.updatedBy, iso(t.updatedAt)]);
+    for (const m of t.members) await q(`INSERT INTO "ResponderTemplateMember"("templateId", "contactId") VALUES ($1, $2)`, [t.id, m]);
+  }
+  for (const [cid, tid] of api.customerTemplate ?? []) await q(`UPDATE "Customer" SET "responderTemplateId" = $2 WHERE "id" = $1`, [cid, tid]);
+  for (const [key, src] of api.responderSource ?? []) {
+    const [cid, ctid] = key.split('|');
+    await q(`UPDATE "Responder" SET "source" = $3::"ResponderSource", "templateId" = $4 WHERE "customerId" = $1 AND "contactId" = $2`, [cid, ctid, src.source, src.source === 'TEMPLATE' ? src.templateId : null]);
+  }
   for (const [i, s] of (api.contactScopes ?? []).entries()) {
     await q(`INSERT INTO "ContactScope"("id", "customerId", "contactId", "scopeType", "scopeId", "role", "createdAt") VALUES ($1, $2, $3, $4::"ScopeType", $5, $6::"ContactScopeRole", now() + make_interval(secs => $7))`, [`cs_${i}`, s.customerId, s.contactId, s.scopeType, s.scopeId, s.role, i]);
   }

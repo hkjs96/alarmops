@@ -23,4 +23,4 @@
 템플릿은 고객 Responders의 출처일 뿐 페이징 순서를 갖지 않는다. 순서는 고객 단계 또는 로테이션.
 
 ## API
-GET/POST `/responder-templates`, PATCH `/responder-templates/{id}` (`members[]`, `previewHash`), POST `/responder-templates/{id}/preview` → `{customers[{id,effects[]}]}`.
+GET/POST `/responder-templates`, PATCH `/responder-templates/{id}` (`name?`, `members[]`, `previewHash`, `If-Match`), POST `/responder-templates/{id}/preview` → `{customers[{id,name,effects[]}], totals, previewHash}`. 정의는 API-CONTRACT §8.3 "Responder 템플릿".
