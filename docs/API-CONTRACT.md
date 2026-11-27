@@ -419,7 +419,7 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 | POST `/customers/{id}/responders`, PATCH/DELETE `/customers/{id}/responders/{contactId}` | 아래 "Responders" 참조. `If-Match: <목록 version>` 필수 | A, I |
 | GET/POST `/rotations?scope=&customerId=`, PATCH/DELETE `/rotations/{id}`, GET `/rotations/{id}/shifts?from=&to=`, GET `/rotations/{id}/usage` | Rotation(scope MSP\|CUSTOMER). usage = 참조 고객·단계 | 읽기 V, I · 쓰기 A, I (D-41) |
 | POST `/rotations/{id}/overrides`, POST `/overrides/{id}/accept\|decline` | COVER/SWAP, 상대 수락 후 반영(D-28) | O |
-| GET/POST `/responder-templates`, PATCH `/responder-templates/{id}`, POST `/responder-templates/{id}/preview` | 템플릿 변경 시 영향 고객 미리보기, PATCH는 `previewHash` 필수 | A |
+| GET/POST `/responder-templates`, PATCH `/responder-templates/{id}`, POST `/responder-templates/{id}/preview` | **구현됨.** 아래 "Responder 템플릿" 참조. 템플릿 변경 시 영향 고객 미리보기, PATCH는 `previewHash`·`If-Match` 필수 | 읽기 V, I · POST·PATCH·preview A (D-41의 같은 규칙). 포털 404, 고객 범위가 좁은 직원 403 `FORBIDDEN` |
 | GET `/rotations?scope=MSP\|CUSTOMER&customerId=` (구현된 읽기) | `RotationSummary[]`: `{ id, scope, customerId?, name, onShift: { contactId, name, until, channels } \| null, next: 다음 당번 이름 \| null }`. MSP 로테이션 + 범위 안 고객의 로테이션. `customerId`가 있으면 MSP 것 + 그 고객 것(범위 밖·없는 고객은 404). `channels`는 아래 채널 상태 | V, I |
 | GET `/staff?q=` (구현됨) | 활성 MSP 직원 Contact `[{ contactId, name, channels }]`, 이름 순, `q`는 이름 부분 일치. 연락처 값은 없다 | V, I |
 | GET `/staff/{id}/coverage` | People: `{customerCount, onShift[], nextShift, customers[{id, via[]}]}` | V |
@@ -458,6 +458,23 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 - **409 `WOULD_BE_UNREACHABLE`** (권고 6): PATCH·DELETE 결과 고객의 paging-health가 UNREACHABLE이 되면(전에는 아니었는데) 실행하지 않는다. `?confirmUnreachable=true`(사용자가 경고를 본 뒤)이면 실행한다. `details.level`.
 - **D-38**: 목록을 늘리는 쓰기(POST, PATCH→PAGEABLE)가 이 고객의 어느 호출 순서를 한도 밖으로 밀면 422 `RESPONDER_LIMIT_EXCEEDED`(`details {field, responders, limit}`) / `SEND_CAP_EXCEEDED` — 호출 순서 저장과 같은 `sendCapViolation`. 이미 넘어 있던 것은 막지 않는다(paging-health가 보여 준다).
 - 감사: 쓰기마다 AuditLog 1행 `responders.add|create|role|remove`, `before/after`는 버전·역할만(이메일·전화 없음).
+
+#### Responder 템플릿 (D-31 개정, D-33, 11/27 구현)
+
+템플릿은 MSP 것이다(고객 칸이 없다). 고객이 쓰는 템플릿은 `Customer.responderTemplateId`(하나, 선택)이고, **해지(TERMINATED) 고객은 영향 계산·적용에서 뺀다**(보관 중인 데이터를 바꾸지 않는다). 포털 사용자는 경로가 없는 것과 같은 404(파라미터를 보기 전에). 고객 범위가 좁은 직원은 MSP 전체에 닿는 변경이라 403 `FORBIDDEN`(`POST /customers`와 같은 규칙, D-33 "MSP 전체 변경").
+
+`GET /responder-templates` → `[{ id, name, version, updatedAt, updatedByName?, members: [{ contactId, name }], customers: [{ id, name }] }]`(이름 순). `members`는 활성 INTERNAL Contact뿐, 연락처 값은 없다(D-35). 목록 항목이 곧 상세이며 `version`이 PATCH의 `If-Match` 값이다.
+
+| 요청 | 본문 | 규칙 |
+|---|---|---|
+| POST `/responder-templates` | `{ name, members: [contactId…] }` | 201 + 템플릿 한 건(`ETag: "<version>"`, 처음 `version: 0`, `customers: []`). 이름 1~80자·정확히 같은 이름은 409 `ALREADY_EXISTS`(`UQ(name)`), `members` 1~50명·중복 없음·**활성 직원만**(없는 id·고객 사람·비활성은 **같은 400** `VALIDATION_FAILED`, field `members`). 쓸 고객이 없어 미리보기 없이 저장한다. 감사 `responder_template.create` |
+| POST `/responder-templates/{id}/preview` | `{ name?, members? }`(제안; 둘 다 없으면 400) | 쓰는 것 없음(재시도 가능, 멱등 저장 안 함). 응답 `{ templateId, version, customers: [{ id, name, effects: [{ kind, contactId, name, stepIndex? }] }], totals: { customers, affected, joins, leaves, warnings }, previewHash }`. `customers` = 이 템플릿을 쓰는 비해지 고객 전부(이름 순, 효과가 없어도 포함 — "This change affects N customers"의 N). `effects.kind`: `JOINS`(템플릿 행으로 추가됨) · `LEAVES`(템플릿에서 온 행이라 빠짐) · `STAYS_DIRECT`(빼려는 사람이 직접 추가한 행이라 남음) · `ALREADY_DIRECT`(넣으려는 사람이 이미 직접 추가돼 있어 행이 그대로) · `STEP_NAMES`(빠지는 사람을 호출 순서의 PERSON 단계가 아직 지정함, `stepIndex`는 1부터, 고객에서 고친다 — 막지는 않는다). `previewHash` = 제안(이름·멤버 id 정렬)과 지금 템플릿 버전·고객별 효과의 SHA-256 |
+| PATCH `/responder-templates/{id}` | `{ name?, members?, previewHash }` | `If-Match: <version>` 필수(없으면 400, 다르면 409 `VERSION_CONFLICT` + `details.currentVersion`). `previewHash` 필수(없으면 400). **저장 트랜잭션 안에서** 같은 계산을 다시 해 해시가 다르면 409 `PREVIEW_STALE`(미리보기 뒤 템플릿·고객 Responders·단계가 바뀜, `details.currentVersion`)이고 아무것도 쓰지 않는다. 같으면 한 트랜잭션에서 멤버 교체, `JOINS` 행 추가(`source=TEMPLATE`, `templateId`, `PAGEABLE`, 목록 끝 `order`), `LEAVES` 행 삭제, `version`+1, `BulkChange(TEMPLATE_UPDATE)` 1행, AuditLog. 이름·멤버가 지금과 같으면 아무것도 쓰지 않고 200(버전·감사 불변). 응답 200 + 템플릿 한 건 + `affected` 고객 수 |
+
+- 검사 순서: 포털 404 → 좁은 범위 403 → 템플릿 없음 404 → 역할 403 → If-Match → 본문 검증 400 → previewHash(저장 안에서).
+- **고객 Responders `version`은 템플릿 동기화로 오르지 않는다**(위 "version" 규칙 그대로): 감사는 `targetType = 'ResponderTemplate'`라 그 수에 들어가지 않는다. 이 쓰기로 목록이 바뀐 고객은 다음 GET에서 새 목록을 본다.
+- 감사: 템플릿 쓰기마다 AuditLog 1행(`customerId` 없음, `responder_template.create|update`, targetType `ResponderTemplate`, `before/after`는 이름·멤버 id·버전) + 목록이 실제로 바뀐 고객마다 1행(`responder_template.apply`, 그 고객 `customerId`, `{added[], removed[]}` contactId만). `BulkChange.params = { templateId, added[], removed[] }`, `preview`는 위 `customers[{id,effects}]`·`totals`.
+- 알려진 틈: 미리보기는 호출 건강(paging-health)·발송 한도(D-38)를 다시 계산하지 않는다. 멤버를 빼서 고객이 UNREACHABLE이 되거나 `ALL_RESPONDERS` 한도를 넘는 것은 `STEP_NAMES` 경고 말고는 막지 않는다. 고객에 템플릿을 연결·해제하는 API는 아직 없다(결정 필요).
 
 ### 8.4 조직·계정·연동
 | 메서드 경로 | 설명 | 권한 |
