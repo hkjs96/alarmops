@@ -12,6 +12,7 @@ import { hasRole, isPortal, roleReason, useShell } from "@/components/ShellConte
 import { callAction } from "@/lib/session-ended";
 import { RevealNumber } from "@/components/RevealNumber";
 import { addResponder, removeResponder, setResponderRole } from "./actions";
+import { ResponderTemplateField } from "./ResponderTemplateField";
 
 const CH_NAME: Record<ContactChannelKey, string> = { SLACK: "Slack DM", EMAIL: "Email", SMS: "SMS", VOICE: "Call" };
 const STATE: Record<Exclude<ChannelState, "VERIFIED">, string> = { UNVERIFIED: "not verified", EXPIRED: "link expired", LINK_SENT: "link sent", NOT_SET: "not set" };
@@ -338,6 +339,11 @@ export function RespondersCard({ customer, customerName, services, responders, s
         {why && !portal ? <p className="sm mut co-resp-n" id="co-resp-why" data-testid="co-resp-why">{why}</p> : null}
         <p className="sm mut co-resp-n">“Everyone in Responders” is {pageable === 1 ? "this 1 person" : `these ${pageable} people`}: all MSP staff here plus the Pageable people of {customerName}. Responders belong to the whole customer, whatever level this panel shows.</p>
 
+        {portal ? null : (
+          <ResponderTemplateField customer={customer} customerName={customerName} templateId={responders.templateId} disabledWhy={why}
+            templateName={responders.staff.find((p) => p.source === "TEMPLATE")?.templateName ?? null}
+            onApplied={(v) => { ver.current = Math.max(ver.current, v); }} />
+        )}
         <div className="ov co-resp-g">MSP staff ({responders.staff.length})</div>
         <ul className="co-people" data-testid="co-staff-list">
           {staffRows.rows.map(({ item: p, gone }) => {

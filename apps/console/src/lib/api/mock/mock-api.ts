@@ -11,6 +11,7 @@ import { createRevealApi, createRevealStore, type RevealStore } from "./reveal-m
 import { createRetentionApi, createRetentionStore, type RetentionStore } from "./retention-mock";
 import { createUsersApi, createUsersStore, type UsersStore } from "./users-mock";
 import { createOnboardingApi, createOnboardingStore, type OnboardingStore } from "./onboarding-mock";
+import { createTemplatesApi, createTemplatesStore, type TemplatesStore } from "./templates-mock";
 import { createMonitoringApi, createMonitoringStore, type MonitoringStore } from "./monitoring-mock";
 
 interface Store {
@@ -25,6 +26,7 @@ interface Store {
   users: UsersStore;
   onboarding: OnboardingStore;
   monitoring: MonitoringStore;
+  templates: TemplatesStore;
 }
 
 export interface MockUser { id: string; contactId: string; name: string; email: string; role: Role; kind?: "INTERNAL" | "CUSTOMER" }
@@ -51,6 +53,7 @@ export function createStore(opts: { customers?: 14 | 34 } = {}): Store {
     customers, paging: createPaging(customers), customerStatus: createStatusStore(), reveals: createRevealStore(customers), retention: createRetentionStore(), users: createUsersStore(),
     onboarding: createOnboardingStore(),
     monitoring: createMonitoringStore(customers),
+    templates: createTemplatesStore(),
     incidents: structuredClone([...fx.openIncidents, ...fx.resolvedIncidents, ...fx.suppressedIncidents]),
     timelines: structuredClone(fx.timelines),
     undo: new Map(),
@@ -163,6 +166,12 @@ export function createMockApi(store: Store = createStore(), clock: () => number 
     err: (status, code, message, details) => new ApiError(status, code, message, `req_mock_${++reqSeq}`, details),
   });
 
+  const templatesApi = createTemplatesApi({
+    store: store.templates, customers: store.customers, paging: store.paging, me: ME, now: nowIso,
+    terminated: () => new Set(Object.entries(store.customerStatus.status).filter(([, s]) => s.status === "TERMINATED").map(([id]) => id)),
+    err: (status, code, message, details) => new ApiError(status, code, message, `req_mock_${++reqSeq}`, details),
+  });
+
   const usersApi = createUsersApi({
     store: store.users, customers: store.customers, terminated: () => new Set(Object.entries(store.customerStatus.status).filter(([, s]) => s.status === "TERMINATED").map(([id]) => id)),
     me: ME, now: nowIso, err: (status, code, message, details) => new ApiError(status, code, message, `req_mock_${++reqSeq}`, details),
@@ -180,6 +189,7 @@ export function createMockApi(store: Store = createStore(), clock: () => number 
 
   return {
     ...pagingApi,
+    ...templatesApi,
     ...revealApi,
     ...statusApi,
     ...retentionApi,

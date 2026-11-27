@@ -7,6 +7,9 @@ import { MAX_ALL_RESPONDERS, MAX_MINUTE, MAX_REPEAT, MAX_SENDS_PER_CYCLE, MAX_SE
 
 export interface Failure { code: string; message: string; requestId?: string; details?: Record<string, unknown> }
 const ROLE_NAME: Record<string, string> = { ADMIN: "Admin", OPERATOR: "Operator", VIEWER: "Viewer" };
+/** `details.customerIds` of the template refusals (409 WOULD_BE_UNREACHABLE, 422 limits): how many customers the change was refused for, null when there is no such list */
+const countIds = (v: unknown): number | null => (Array.isArray(v) ? v.length : null);
+const forCustomers = (n: number, where?: string): string => (n === 1 ? where ?? "1 customer" : `${n} customers`);
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
 /** "steps[3].atMin" → { step: 4, field: "atMin" } */
@@ -48,12 +51,16 @@ export function errorText(f: Failure, ctx: ErrorContext = {}): string {
       return fields.length ? fields.slice(0, 3).map(fieldText).join(" ") : f.message || "A value is not valid.";
     }
     case "SEND_CAP_EXCEEDED": {
+      const n = countIds(d.customerIds);
+      if (n !== null) return `Not saved. After this change a call order would send more notifications per incident than the limit allows (${MAX_SENDS_PER_CYCLE} per pass of the steps, ${MAX_SENDS_PER_HOUR} per hour) for ${forCustomers(n, ctx.where)}. Nothing was changed. Use fewer people, or shorten those call orders.`;
       const [c, h] = [num(d.perCycle), num(d.perHour)];
       const over = c !== null && c > MAX_SENDS_PER_CYCLE ? `${c} notifications per incident in one pass of the steps (the limit is ${MAX_SENDS_PER_CYCLE})`
         : h !== null ? `${h} notifications per incident within one hour, repeats included (the limit is ${MAX_SENDS_PER_HOUR})` : "more notifications per incident than the limit allows";
       return `Too many notifications: this call order would send ${over}. Use fewer steps, fewer ways to send per step, or fewer repeats, or call fewer people per step.`;
     }
     case "RESPONDER_LIMIT_EXCEEDED": {
+      const n0 = countIds(d.customerIds);
+      if (n0 !== null) return `Not saved. After this change a step that calls everyone in Responders would reach more than ${MAX_ALL_RESPONDERS} people for ${forCustomers(n0, ctx.where)}. Nothing was changed. Use fewer people, or change those call orders to call a rotation or named people.`;
       const p = parseField(d.field);
       const n = num(d.responders);
       return `${p.step ? `Step ${p.step} calls` : "A step that calls"} everyone in Responders${n !== null ? `: ${n} people` : ""}, and the limit is ${num(d.limit) ?? MAX_ALL_RESPONDERS}. Call a rotation or named people instead, or reduce the Responders.`;
@@ -93,7 +100,14 @@ export function errorText(f: Failure, ctx: ErrorContext = {}): string {
     }
     case "IDEMPOTENCY_KEY_REUSED": return "This request was sent twice with different content. Reload and try again.";
     case "NOT_CONFIGURED": return "This part of AlarmOps is not configured yet. Nothing was changed.";
-    case "WOULD_BE_UNREACHABLE": return f.message || "This would leave nobody reachable.";
+    case "WOULD_BE_UNREACHABLE": {
+      // the template writes (D-64) refuse without a way around: the list says for how many customers
+      const n = countIds(d.customerIds);
+      if (n !== null) return `Not saved. After this change nobody could be called for ${forCustomers(n, ctx.where)}. Nothing was changed. Preview again to see which, then change the people, or fix that call order first.`;
+      return f.message || "This would leave nobody reachable.";
+    }
+    case "PREVIEW_STALE": return "Not saved. The template or its customers changed after the preview was made. Nothing was changed. Review the new preview, then save again.";
+    case "BUSY": return "The system was busy with another change, so this was not done. Nothing was changed. Try again in a moment.";
     case "INVALID_INPUT": return f.message;
     default: return f.message || "Something went wrong. Nothing was changed.";
   }

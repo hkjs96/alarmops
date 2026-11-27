@@ -1,0 +1,23 @@
+/* Responder template effects and blocking. Tokens only; every state has a mark and words besides its colour. */
+.te-list { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 2px; font-size: 14px; }
+.te-fx { display: flex; gap: 8px; align-items: baseline; overflow-wrap: anywhere; }
+.te-mark { flex: none; width: 1.2em; text-align: center; font-weight: 700; font-family: var(--mono); }
+.te-JOINS .te-mark { color: var(--green); }
+.te-LEAVES .te-mark { color: var(--red); }
+.te-STEP_NAMES { color: var(--amber); }
+.te-STEP_NAMES b { color: var(--amber); }
+.te-STAYS_DIRECT, .te-ALREADY_DIRECT { color: var(--ink2); }
+.te-none { margin: 4px 0 0; }
+.te-blocked { margin: 12px 0; padding: 10px 12px; border-left: 3px solid var(--red); background: var(--red-t); color: var(--ink); font-size: 14px; }
+.te-blocked-h { margin: 0 0 4px; color: var(--red); }
+.te-blocked ul { margin: 0 0 6px; padding-left: 18px; }
+.te-blocked p { margin: 0; }
+
+/* the template field of a customer's Responders */
+.co-tplf { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 0 0 8px; }
+.co-tplf .btn { min-height: 44px; }
+.co-tplf-l { display: block; font-size: 13px; font-weight: 600; margin: 8px 0 2px; }
+.co-tplf-sel { min-height: 44px; width: 100%; max-width: 100%; }
+.co-tplf-err { margin-top: 12px; justify-content: space-between; flex-wrap: wrap; }
+.co-tplf-dlg .dguard-acts .btn, .co-tplf-err .btn { min-height: 44px; }
+@media (max-width: 760px) { .co-tplf-sel { font-size: 16px; } }

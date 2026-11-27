@@ -724,3 +724,43 @@ export interface ManagedAlarmItem {
 export interface ManagedAlarmListResponse extends Paginated<ManagedAlarmItem> { outside: MonitoringOutside | null }
 /** POST /resources/{id}/monitoring → 202 */
 export interface MonitoringCommandResult { commandId: string; status: "queued" }
+
+/* ---- Responder templates (API-CONTRACT §8.3 "Responder 템플릿", D-64) ---- */
+export interface ResponderTemplate {
+  id: string;
+  name: string;
+  /** the If-Match of PATCH */
+  version: number;
+  updatedAt: string;
+  updatedByName?: string;
+  members: { contactId: string; name: string }[];
+  /** the customers that use it (not terminated ones) */
+  customers: { id: string; name: string }[];
+}
+export type TemplateEffectKind = "JOINS" | "LEAVES" | "STAYS_DIRECT" | "ALREADY_DIRECT" | "STEP_NAMES";
+export interface TemplateEffect { kind: TemplateEffectKind; contactId: string; name: string; /** STEP_NAMES: 1-based */ stepIndex?: number }
+export type TemplateBlockReason = "UNREACHABLE" | "RESPONDER_LIMIT_EXCEEDED" | "SEND_CAP_EXCEEDED";
+export interface TemplateBlocking { customerId: string; reason: TemplateBlockReason }
+/** the proposal of a preview or a save: what to change (at least one) */
+export interface TemplateProposal { name?: string; members?: string[] }
+export interface TemplatePreview {
+  templateId: string;
+  version: number;
+  customers: { id: string; name: string; effects: TemplateEffect[] }[];
+  totals: { customers: number; affected: number; joins: number; leaves: number; warnings: number };
+  blocking: TemplateBlocking[];
+  previewHash: string;
+}
+export type TemplateSaveResult = ResponderTemplate & { affected: number };
+export interface CustomerTemplatePreview {
+  customerId: string;
+  /** the version of the customer's Responders: the If-Match of the PUT */
+  version: number;
+  from: { id: string; name: string } | null;
+  to: { id: string; name: string } | null;
+  effects: TemplateEffect[];
+  totals: { joins: number; leaves: number; warnings: number };
+  blocking: TemplateBlocking[];
+  previewHash: string;
+}
+export interface CustomerTemplateResult { customerId: string; templateId: string | null; version: number; joins: number; leaves: number }

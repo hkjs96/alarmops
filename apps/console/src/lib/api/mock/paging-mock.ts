@@ -32,8 +32,9 @@ export function directoryOf(paging: FxPaging, c: FxCustomer): Directory {
   const disp = (x: FxContact) => ({ name: x.name, title: x.title, channels: x.channels, emailMasked: x.emailMasked, phoneMasked: x.phoneMasked });
   const tpl = cp.templateId ? paging.templates[cp.templateId] : undefined;
   const staff: StaffResponder[] = [
-    ...(tpl?.members ?? []).map((id) => ({ contactId: id, source: "TEMPLATE" as const, templateId: cp.templateId!, templateName: tpl!.name, ...disp(paging.contacts[id]!) })),
-    ...cp.staff.filter((id) => !tpl?.members.includes(id)).map((id) => ({ contactId: id, source: "DIRECT" as const, ...disp(paging.contacts[id]!) })),
+    // a person who was added directly stays a direct row even when a template names them too (D-64 "ALREADY_DIRECT")
+    ...(tpl?.members ?? []).filter((id) => !cp.staff.includes(id)).map((id) => ({ contactId: id, source: "TEMPLATE" as const, templateId: cp.templateId!, templateName: tpl!.name, ...disp(paging.contacts[id]!) })),
+    ...cp.staff.map((id) => ({ contactId: id, source: "DIRECT" as const, ...disp(paging.contacts[id]!) })),
   ];
   const people: CustomerPersonResponder[] = cp.people.map((p) => ({ contactId: p.contactId, role: p.role, extras: [...p.extras], scope: { ...p.scope }, ...disp(paging.contacts[p.contactId]!) }));
   return {

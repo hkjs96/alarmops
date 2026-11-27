@@ -8,6 +8,7 @@ import { assertId, assertVersion, InvalidInputError } from "@/lib/validate";
 import { assertAddResponder, assertPagingInput, assertReachable, assertRole, assertScope } from "@/lib/call-order/input";
 import { levelOf, type CoScope, type Directory } from "@/lib/call-order/model";
 import { fail, type ActionResult } from "@/lib/action-result";
+import type { CustomerTemplatePreview, CustomerTemplateResult, ResponderTemplate } from "@/lib/api/types";
 
 /**
  * Session first, then the role — every action here writes the call order or the Responders, which is for admins
@@ -96,5 +97,33 @@ export async function removeResponder(customer: string, contactId: string, versi
     const [id, v] = [assertId(contactId, "contactId"), assertVersion(version)];
     const { api, customerId } = await resolve(assertScope({ customer }));
     return { version: (await api.removeResponder(customerId, id, { version: v, confirmUnreachable: confirmUnreachable === true })).version };
+  });
+}
+
+/**
+ * The template of a customer's Responders (API-CONTRACT §8.3, D-64): attach, detach or switch. `templateId: null` detaches. The preview says
+ * what happens to the list and whether the change is refused; the write carries its hash and the Responders version it was made for.
+ */
+const hash64 = (v: unknown): string => {
+  if (typeof v !== "string" || !/^[0-9a-f]{64}$/.test(v)) throw new InvalidInputError("Preview the change first.");
+  return v;
+};
+const templateIdOf = (v: unknown): string | null => (v === null ? null : assertId(v, "template"));
+
+export async function listTemplatesForCustomer(): Promise<ActionResult<ResponderTemplate[]>> {
+  return run(async () => (await getApi()).listResponderTemplates());
+}
+export async function previewCustomerTemplate(customer: string, to: unknown): Promise<ActionResult<CustomerTemplatePreview>> {
+  return run(async () => {
+    const t = templateIdOf(to);
+    const { api, customerId } = await resolve(assertScope({ customer }));
+    return api.previewCustomerTemplate(customerId, t);
+  });
+}
+export async function setCustomerTemplate(customer: string, to: unknown, version: number, previewHash: string): Promise<ActionResult<CustomerTemplateResult>> {
+  return run(async () => {
+    const [t, v, h] = [templateIdOf(to), assertVersion(version), hash64(previewHash)];
+    const { api, customerId } = await resolve(assertScope({ customer }));
+    return api.putCustomerTemplate(customerId, t, { version: v, previewHash: h });
   });
 }

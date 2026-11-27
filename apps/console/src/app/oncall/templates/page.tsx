@@ -1,5 +1,6 @@
-import { StubPage } from "@/components/StubPage";
+import { redirect } from "next/navigation";
 
+/** D-26: Templates is a tab of Call order. The old address goes there. */
 export default function Page() {
-  return <StubPage title="On-call" spec="docs/ui/screens/oncall-templates.md" />;
+  redirect("/call-order/templates");
 }

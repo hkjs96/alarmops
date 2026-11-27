@@ -30,6 +30,13 @@
 | Responders | MSP staff: 템플릿 이름(멤버) · Change · + Add staff, 행마다 출처(from Infra core / added directly), 지정 단계, 문제 채널. <고객> people: 역할 배지(Pageable / Notify only / Auto-fix approver / Portal), "step 2"·"in rotation" 배지, Notified for 범위, 채널 칩, 역할 선택(Pageable ↔ Notify only) |
 | Add customer person (서랍) | 이름, 이메일·전화, Role(Pageable (calls, SMS) / Notify only) + Auto-fix approver·Portal 체크, Notified for 범위, **Call them at**: "Not in a named step" 또는 "New step k+1, after step k" + 분(앞뒤 단계 사이 기본값) → 미리보기 문장에 새 이름. 저장 후 확인 링크 |
 
+### Responders 카드의 Template 칸 (D-64, 11/27)
+카드 맨 위 한 줄: `Template: <이름>`(없으면 `none`) + 버튼 `Change template…`(없으면 `Attach a template…`). ADMIN만, 호출 순서를 편집 중이면 꺼지고 이유가 옆에 나온다. 포털에는 없다.
+- 누르면 확인창: 선택 칸 `Template`(`No template` + 템플릿들, 현재 것은 `(current)`). 고르면 서버 미리보기: `<고객>: N will join, M will leave`, 효과 줄(`+ X joins Responders` / `− X leaves Responders` / `= X stays (added directly)` / `= X is already in Responders (added directly) — no change` / `! step N still names X — fix in the customer`), 막히면 `Can’t save: this would break 1 customer` 상자.
+- 확인 버튼: 연결 `Attach <템플릿>`, 교체 `Switch to <템플릿>`, 해제 `Detach <템플릿>`. 막힌 변경·미리보기 중·같은 선택이면 꺼진다(우회 없음).
+- 저장 뒤 토스트 `<…> attached to <고객> · N joined, M left` + `Undo`(이전 템플릿을 같은 미리보기 → 저장으로 되돌린다; 막히면 `Could not undo — …`).
+- 오류: 해지 고객 `Not changed. <고객> is terminated and keeps its data as it is. Nothing was changed.`, 나머지는 템플릿 화면과 같은 문구(`oncall-templates.md`). 503 BUSY는 한 번 자동 재시도.
+
 역할 정의: **Pageable** = 전화·문자 가능, 단계·로테이션에 지정 가능, "everyone"에 포함. **Notify only** = 상태 메일만(범위 안 인시던트). Approver·Portal은 둘 중 어디에나 추가.
 
 ## API
