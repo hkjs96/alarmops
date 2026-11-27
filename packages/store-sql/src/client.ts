@@ -52,7 +52,13 @@ export const txPreamble = (statementMs = STATEMENT_TIMEOUT_MS, lockMs = LOCK_TIM
   `SET TRANSACTION ISOLATION LEVEL READ COMMITTED; SET LOCAL statement_timeout = ${Math.floor(statementMs)}; SET LOCAL lock_timeout = ${Math.floor(lockMs)}; SET LOCAL idle_in_transaction_session_timeout = ${Math.floor(idleMs)}`;
 
 /** Postgres error codes the repositories react to. */
-export const PG = { UNIQUE: '23505', QUERY_CANCELED: '57014', LOCK_NOT_AVAILABLE: '55P03', SERIALIZATION: '40001', DEADLOCK: '40P01' } as const;
+export const PG = { UNIQUE: '23505', FK_VIOLATION: '23503', QUERY_CANCELED: '57014', LOCK_NOT_AVAILABLE: '55P03', SERIALIZATION: '40001', DEADLOCK: '40P01' } as const;
+/**
+ * Failures of a template save that wrote nothing and are safe to repeat: deadlock, serialization failure, lock_timeout (55P03),
+ * statement_timeout (57014), and a foreign-key violation (23503: a contact was deleted between the read and the insert).
+ */
+export const isBusyCode = (code: string | undefined): boolean =>
+  code === PG.DEADLOCK || code === PG.SERIALIZATION || code === PG.LOCK_NOT_AVAILABLE || code === PG.QUERY_CANCELED || code === PG.FK_VIOLATION;
 export const pgCode = (e: unknown): string | undefined => {
   const c = (e as { code?: unknown } | null)?.code;
   return typeof c === 'string' ? c : undefined;

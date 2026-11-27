@@ -61,6 +61,54 @@ export function templatesContract(make: MakeFixture<Repo>): void {
   };
   const respondersOf = async (cid: string) => body(await w.call(ADMIN, 'GET', `/customers/${cid}/responders`));
 
+  describe('GET /customers/{id}/responders carries the customer template (#178)', () => {
+    it('templateId and templateName are the customer\'s template, whether or not any member came in DIRECT; null when none', async () => {
+      w = await tworld(make, (seed) => { seed.customers.set('cus_bare', { id: 'cus_bare', name: 'Bare Co', slug: 'bare' }); });
+      // Hanbit: Junho was added directly, Haeun comes from the template
+      expect(await respondersOf('cus_hanbit')).toMatchObject({ templateId: T, templateName: 'Infra core' });
+      expect((await respondersOf('cus_hanbit')).staff.map((s: any) => s.source).sort()).toContain('DIRECT');
+      const bare = await respondersOf('cus_bare');
+      expect([bare.templateId, bare.templateName]).toEqual([null, null]);
+      await fixtureRename('Infra core 2');
+      expect(await respondersOf('cus_mirae')).toMatchObject({ templateId: T, templateName: 'Infra core 2' });
+    });
+
+    it('a customer with a template but no member rows still names it', async () => {
+      w = await tworld(make, (seed) => {
+        seed.customers.set('cus_empty', { id: 'cus_empty', name: 'Empty Co', slug: 'empty' });
+        seed.customerTemplate.set('cus_empty', T);
+      });
+      const r = await respondersOf('cus_empty');
+      expect([r.staff.length, r.templateId, r.templateName]).toEqual([0, T, 'Infra core']);
+    });
+  });
+
+  const fixtureRename = async (name: string) => {
+    const members = ['ct_haeun', 'ct_junho'];
+    const p = body(await w.call(ADMIN, 'POST', `/responder-templates/${T}/preview`, { body: { name, members } }));
+    const r = await w.call(ADMIN, 'PATCH', `/responder-templates/${T}`, { body: { name, members, previewHash: p.previewHash }, headers: im(0) });
+    expect(r.status).toBe(200);
+  };
+
+  describe('a member deactivated since it was added (#176)', () => {
+    const inactiveJunho = (seed: MemoryApiStore): void => { seed.contacts.set('ct_junho', { ...seed.contacts.get('ct_junho')!, active: false }); };
+    it('a rename-only PATCH succeeds (name only, or the same member list sent back); only newly added people must be active staff', async () => {
+      w = await tworld(make, inactiveJunho);
+      const rename = async (extra: Record<string, unknown>, version: number, name: string) => {
+        const p = await w.call(ADMIN, 'POST', `/responder-templates/${T}/preview`, { body: { name, ...extra } });
+        expect(p.status).toBe(200);
+        return w.call(ADMIN, 'PATCH', `/responder-templates/${T}`, { body: { name, ...extra, previewHash: body(p).previewHash }, headers: im(version) });
+      };
+      const a = await rename({}, 0, 'Infra core v2');
+      expect([a.status, body(a).name]).toEqual([200, 'Infra core v2']);
+      const b = await rename({ members: ['ct_haeun', 'ct_junho'] }, 1, 'Infra core v3');
+      expect([b.status, body(b).name]).toEqual([200, 'Infra core v3']);
+      // a newly added person is still checked
+      const c = await w.call(ADMIN, 'POST', `/responder-templates/${T}/preview`, { body: { members: ['ct_haeun', 'ct_junho', 'ct_nobody'] } });
+      expect([c.status, body(c).error.code]).toEqual([400, 'VALIDATION_FAILED']);
+    });
+  });
+
   describe('GET /responder-templates', () => {
     it('any MSP staff role reads; members and customers (terminated left out), no contact values', async () => {
       w = await tworld(make);

@@ -93,7 +93,7 @@ function respondersView(state: RespondersState, world: PagingWorld, slackVerifie
       staff.push({ contactId: e.contactId, source: e.source, ...(e.templateId ? { templateId: e.templateId } : {}), ...(e.templateName ? { templateName: e.templateName } : {}), ...display(c, e.contactId, now), ...revealFlags(auth, callerIsResponder, 'INTERNAL') });
     }
   }
-  return { staff, people, templateId: state.templateId, version: state.version, slackChannel: slackVerified ? 'VERIFIED' : 'NOT_SET' };
+  return { staff, people, templateId: state.templateId, templateName: state.templateName, version: state.version, slackChannel: slackVerified ? 'VERIFIED' : 'NOT_SET' };
 }
 
 export async function getResponders(req: ApiRequest, deps: Deps, customerId: string): Promise<ApiResponse> {

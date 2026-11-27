@@ -135,7 +135,7 @@ export interface PersonScopeRow { contactId: string; scopeType: 'CUSTOMER' | 'PR
  * The Responders list of one customer. `version` is the list's optimistic-lock version (API-CONTRACT §8.3
  * "Responders 버전"): it goes up by one with every write through `writeResponders` and never restarts.
  */
-export interface RespondersState { version: number; templateId: string | null; entries: ResponderEntry[]; scopes: PersonScopeRow[] }
+export interface RespondersState { version: number; templateId: string | null; templateName: string | null; entries: ResponderEntry[]; scopes: PersonScopeRow[] }
 
 export type ResponderOp =
   | { kind: 'add'; contactId: string; role: 'PAGEABLE' | 'NOTIFY_ONLY' }
@@ -451,7 +451,7 @@ export interface ApiRepository {
    * TERMINATED customer, check the Responders version, re-read the inputs, compare the hash, refuse a blocking change, then set
    * `responderTemplateId`, add/remove/retarget the template rows and write ONE customer audit row (targetType 'Responders': the version moves).
    * `audit.customerId` must be `customerId`; `action`/`before`/`after` are filled by the store from the plan.
-   * 'BUSY': a deadlock or serialization failure — nothing was written.
+   * 'BUSY': a deadlock, serialization failure, lock/statement timeout or a foreign-key race — nothing was written.
    */
   setCustomerTemplate(w: TemplateAttachWrite, audit: AuditInput): Promise<TemplateAttachOutcome>;
   /** MSP rotations + rotations of the customers in `scope` (CUSTOMER rotations only inside the scope). */

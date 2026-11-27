@@ -74,7 +74,7 @@ Slack ──▶ POST /api/slack/interactive        문자·음성 업체 ──�
 | 422 | `IDEMPOTENCY_KEY_REUSED` | 같은 `Idempotency-Key`를 다른 요청(메서드·경로·`If-Match`·본문)에 사용 |
 | 422 | `CROSS_CUSTOMER`, `NOT_PAGEABLE` | 단계 대상이 다른 고객의 사람·로테이션 / Notify-only 사람 |
 | 429 | `RATE_LIMITED` | **응답 헤더 `Retry-After: <초>`**와 같은 값의 `details.retryAfterSec`. 현재 쓰임: 수동 Escalate(인시던트당 60초에 1회), 콘솔 `GET /auth/session`(주소당 120회·세션당 30회 / 60초, 인스턴스별 메모리 카운터) |
-| 503 | `BUSY` | 템플릿 변경·연결·해제 중 DB 교착·직렬화 실패(D-64). 쓴 것 없음, `Retry-After: 1`, 같은 요청을 다시 보낸다 |
+| 503 | `BUSY` | 템플릿 변경·연결·해제 중 DB 교착·직렬화 실패·잠금 대기 초과(55P03)·문장 시간 초과(57014)·외래 키 경합(23503, 저장 중 연락처가 지워짐)(D-64). 쓴 것 없음(롤백), `Retry-After: 1`, 같은 요청을 다시 보낸다 |
 | 503 | `NOT_CONFIGURED` | 필수 비밀 미설정(fail-closed, org-tenant 새 구현 1, oncall R4-8) |
 
 메시지는 영어(D-01).
@@ -440,8 +440,9 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
                "emailMasked": "h•••@msp.example", "phoneMasked": "010-••••-1234" }],
   "people": [{ "contactId": "ct_…", "role": "PAGEABLE|NOTIFY_ONLY", "extras": ["APPROVER","PORTAL_USER"], "scope": { "level": "CUSTOMER|PROJECT|SERVICE", "id": "…", "name": "…" },
                "name": "Yuna Seo", "channels": { … }, "emailMasked": "…", "phoneMasked": "…" }],
-  "templateId": null, "version": 3, "slackChannel": "VERIFIED|NOT_SET" }
+  "templateId": "rt_…|null", "templateName": "…|null", "version": 3, "slackChannel": "VERIFIED|NOT_SET" }
 ```
+- **`templateId`·`templateName`**(최상위, 추가 필드): 이 고객이 쓰는 템플릿(`Customer.responderTemplateId`)과 그 이름, 없으면 둘 다 `null`. `staff[]`에 템플릿에서 온 행이 있는지와 무관하다(직접 추가된 행만 있거나 행이 하나도 없어도 채워진다).
 - 순서는 `Responder.order`, 같으면 contactId. `staff` = INTERNAL Contact, `people` = 그 고객의 Contact. `scope`는 그 사람의 NOTIFY ContactScope(없으면 첫 ContactScope, 그것도 없으면 고객). `extras`는 APPROVER·PORTAL_USER ContactScope.
 - **채널 상태**(`channels`): `SLACK`·`EMAIL`·`SMS`·`VOICE`마다 `VERIFIED`(값 + 유효한 확인 시각) / `UNVERIFIED`(값만) / `NOT_SET`. SMS·VOICE는 전화 하나를 본다. 콘솔 타입에는 `EXPIRED`·`LINK_SENT`도 있으나 API는 아직 보내지 않는다.
 - **`canReveal` / `revealRequiresReason`**(staff·people 항목마다, 구현됨): 호출자 기준. 그 고객 Responder `true/false`, Responder가 아닌 ADMIN은 people `true/true`·staff `false/false`, 그 밖(VIEWER Responder 포함, 임시) `false/false`. `POST /contacts/{id}/reveal`과 같은 함수(`revealStanding`)가 정한다.
@@ -477,7 +478,8 @@ group_wait 30초는 1분 틱 정밀도로는 지켜지지 않는다. 그룹 열 
 - **고객 Responders `version`은 템플릿 동기화로 오르지 않는다**(위 "version" 규칙 그대로): 감사는 `targetType = 'ResponderTemplate'`라 그 수에 들어가지 않는다. 이 쓰기로 목록이 바뀐 고객은 다음 GET에서 새 목록을 본다.
 - 감사: 템플릿 쓰기마다 AuditLog 1행(`customerId` 없음, `responder_template.create|update`, targetType `ResponderTemplate`, `before/after`는 이름·멤버 id·버전) + 목록이 실제로 바뀐 고객마다 1행(`responder_template.apply`, 그 고객 `customerId`, `{added[], removed[]}` contactId만). `BulkChange.params = { templateId, added[], removed[] }`, `preview`는 위 `customers[{id,effects}]`·`totals`.
 - **막는 변경 (D-64)**: PATCH와 아래 연결·해제는 변경 뒤 영향받는 고객의 `pagingHealth`가 **전에는 UNREACHABLE이 아니었는데 UNREACHABLE이 되면** 409 `WOULD_BE_UNREACHABLE`(`details.customerIds[]`)로 거절하고 아무것도 쓰지 않는다. override 플래그는 없다. 이미 UNREACHABLE인 고객은 막지 않는다. D-38: 새로 `ALL_RESPONDERS` 20명·발송 한도를 넘게 되면 422 `RESPONDER_LIMIT_EXCEEDED`·`SEND_CAP_EXCEEDED`(`details.customerIds[]`, UNREACHABLE과 함께면 409가 먼저). 저장 트랜잭션 안에서 다시 계산한다. 미리보기 응답은 같은 사실을 `blocking: [{ customerId, reason: UNREACHABLE|RESPONDER_LIMIT_EXCEEDED|SEND_CAP_EXCEEDED }]`로 준다(PATCH 미리보기에도 추가, `previewHash`에는 넣지 않는다 — 시각에 따라 달라지므로 저장 때 다시 계산).
-- **잠금·재시도**: 템플릿 행(id 순) → 고객 행 순서. PG 교착·직렬화 실패는 503 `BUSY` + `Retry-After: 1`(쓴 것 없음, 같은 요청을 다시 보내면 된다).
+- **잠금·재시도**: 템플릿 행(id 순) → 고객 행 순서. PG 교착(40P01)·직렬화 실패(40001)·`lock_timeout`(55P03)·`statement_timeout`(57014)·외래 키 위반(23503, 저장 중 연락처가 지워진 경합)은 503 `BUSY` + `Retry-After: 1`(PATCH와 연결·해제 모두. 쓴 것 없음, 같은 요청을 다시 보내면 된다). 고객 행 잠금을 쥔 채 읽는 시간을 줄이려고 고객별 호출 순서 상태는 한 번에 묶어 읽는다.
+- **멤버 검증은 새로 넣는 사람만**: PATCH의 `members` 검사(활성 직원)는 지금 멤버가 아닌 새 사람에게만 한다. 그 뒤 비활성이 된 기존 멤버가 있어도 이름만 바꾸는 PATCH(또는 같은 멤버 목록을 다시 보내는 PATCH)는 400이 아니다.
 - 읽기 권한(D-64): `GET /responder-templates`는 MSP 직원 전체(V·I·A). 쓰기는 ADMIN.
 
 **고객에 템플릿 연결·해제 (D-64, 11/27)** — 고객은 템플릿을 하나만 쓴다(`Customer.responderTemplateId`). 포털 404 → 좁은 범위 403 `FORBIDDEN` → 고객 없음 404 → 역할 403(ADMIN) → (PUT) `If-Match` → 본문 400 → 해지 고객 409 `CUSTOMER_TERMINATED` → (저장 안에서) 버전·해시·막는 변경.

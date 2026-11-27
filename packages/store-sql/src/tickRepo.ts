@@ -157,40 +157,55 @@ export class SqlTickStore implements TickRepository, RetentionRepository {
 
   /** `pagingContext` read through `q` (a transaction when the caller must see its own locked state). */
   protected async pagingContextVia(q: SqlExecutor, customerId: string): Promise<{ configs: PagingConfig[]; world: PagingWorld }> {
+    return (await this.pagingContextsVia(q, [customerId])).get(customerId)!;
+  }
+
+  /**
+   * `pagingContextVia` for many customers in a constant number of statements (the template save reads every customer of
+   * the template while it holds their row locks: one round per customer would keep the locks for N × the latency).
+   * Each customer gets exactly what the single-customer read gives: the staff + its own contacts, its own responders, the
+   * MSP rotations + its own, and their overrides and leaves.
+   */
+  protected async pagingContextsVia(q: SqlExecutor, customerIds: string[]): Promise<Map<string, { configs: PagingConfig[]; world: PagingWorld }>> {
+    const out = new Map<string, { configs: PagingConfig[]; world: PagingWorld }>();
+    if (!customerIds.length) return out;
     const [cfgRows, contactRows, responderRows, rotationRows] = await Promise.all([
       q.query(
         `SELECT c."id", c."customerId", c."scopeType", c."scopeId", c."style", c."plan", c."edited", c."repeatCount", c."renotifyAfterAckSec", c."version",
                 COALESCE((SELECT jsonb_agg(jsonb_build_object('index', s."index", 'atMin', s."atMin", 'targetType', s."targetType", 'targetId', s."targetId",
                            'channels', to_jsonb(s."channels"), 'advanceOnAllFail', s."advanceOnAllFail") ORDER BY s."index")
                             FROM "EscalationStep" s WHERE s."pagingConfigId" = c."id"), '[]'::jsonb) AS "steps"
-           FROM "PagingConfig" c WHERE c."customerId" = $1 ORDER BY c."id"`, [customerId]),
-      q.query(`SELECT ${CONTACT_COLS} FROM "Contact" WHERE "kind" = 'INTERNAL' OR "customerId" = $1`, [customerId]),
-      q.query(`SELECT "customerId", "contactId", "role", "order" FROM "Responder" WHERE "customerId" = $1 ORDER BY "order", "contactId"`, [customerId]),
+           FROM "PagingConfig" c WHERE c."customerId" = ANY($1::text[]) ORDER BY c."id"`, [customerIds]),
+      q.query(`SELECT ${CONTACT_COLS} FROM "Contact" WHERE "kind" = 'INTERNAL' OR "customerId" = ANY($1::text[])`, [customerIds]),
+      q.query(`SELECT "customerId", "contactId", "role", "order" FROM "Responder" WHERE "customerId" = ANY($1::text[]) ORDER BY "order", "contactId"`, [customerIds]),
       q.query(
         `SELECT r."id", r."scope", r."customerId", r."name", r."cadence", r."anchorAt",
                 COALESCE((SELECT jsonb_agg(jsonb_build_object('contactId', m."contactId", 'order', m."order") ORDER BY m."order", m."contactId")
                             FROM "RotationMember" m WHERE m."rotationId" = r."id"), '[]'::jsonb) AS "members"
-           FROM "Rotation" r WHERE r."scope" = 'MSP' OR r."customerId" = $1`, [customerId]),
+           FROM "Rotation" r WHERE r."scope" = 'MSP' OR r."customerId" = ANY($1::text[])`, [customerIds]),
     ]);
-    const contacts = new Map<string, Contact>(contactRows.map((r) => [r.id as string, toContact(r)]));
-    const rotations = new Map<string, Rotation>(rotationRows.map((r) => [r.id as string, {
-      id: r.id, scope: r.scope, customerId: r.customerId ?? null, name: r.name, cadence: r.cadence, anchorAt: dReq(r.anchorAt), members: r.members,
-    }]));
-    const rotationIds = [...rotations.keys()];
-    const contactIds = [...contacts.keys()];
+    const rotationIds = rotationRows.map((r) => r.id as string);
+    const contactIds = contactRows.map((r) => r.id as string);
     const [overrideRows, leaveRows] = await Promise.all([
       rotationIds.length ? q.query(`SELECT "rotationId", "contactId", "startAt", "endAt", "status" FROM "Override" WHERE "rotationId" = ANY($1::text[]) ORDER BY "startAt", "id"`, [rotationIds]) : Promise.resolve([] as SqlRow[]),
       // Leave dates are KST calendar days (inclusive); they travel as 'yyyy-mm-dd' strings.
       contactIds.length ? q.query(`SELECT "contactId", "replacementId", to_char("startDate", 'YYYY-MM-DD') AS "startDate", to_char("endDate", 'YYYY-MM-DD') AS "endDate", "cancelledAt" FROM "Leave" WHERE "contactId" = ANY($1::text[]) ORDER BY "startDate", "id"`, [contactIds]) : Promise.resolve([] as SqlRow[]),
     ]);
-    const configs: PagingConfig[] = cfgRows.map((r) => ({
-      id: r.id, customerId: r.customerId, scopeType: r.scopeType, scopeId: r.scopeId, style: r.style, plan: r.plan, edited: r.edited, repeatCount: r.repeatCount,
-      renotifyAfterAckSec: r.renotifyAfterAckSec ?? null, version: r.version, steps: r.steps,
-    }));
-    const responders: Responder[] = responderRows.map((r) => ({ customerId: r.customerId, contactId: r.contactId, role: r.role, order: r.order }));
-    const overrides: Override[] = overrideRows.map((r) => ({ rotationId: r.rotationId, contactId: r.contactId, startAt: dReq(r.startAt), endAt: dReq(r.endAt), status: r.status }));
-    const leaves: Leave[] = leaveRows.map((r) => ({ contactId: r.contactId, replacementId: r.replacementId, startDate: r.startDate, endDate: r.endDate, cancelledAt: d(r.cancelledAt) }));
-    return { configs, world: { customerId, contacts, responders, rotations, overrides, leaves } };
+    for (const customerId of new Set(customerIds)) {
+      const contacts = new Map<string, Contact>(contactRows.filter((r) => r.kind === 'INTERNAL' || r.customerId === customerId).map((r) => [r.id as string, toContact(r)]));
+      const rotations = new Map<string, Rotation>(rotationRows.filter((r) => r.scope === 'MSP' || r.customerId === customerId).map((r) => [r.id as string, {
+        id: r.id, scope: r.scope, customerId: r.customerId ?? null, name: r.name, cadence: r.cadence, anchorAt: dReq(r.anchorAt), members: r.members,
+      }]));
+      const configs: PagingConfig[] = cfgRows.filter((r) => r.customerId === customerId).map((r) => ({
+        id: r.id, customerId: r.customerId, scopeType: r.scopeType, scopeId: r.scopeId, style: r.style, plan: r.plan, edited: r.edited, repeatCount: r.repeatCount,
+        renotifyAfterAckSec: r.renotifyAfterAckSec ?? null, version: r.version, steps: r.steps,
+      }));
+      const responders: Responder[] = responderRows.filter((r) => r.customerId === customerId).map((r) => ({ customerId: r.customerId, contactId: r.contactId, role: r.role, order: r.order }));
+      const overrides: Override[] = overrideRows.filter((r) => rotations.has(r.rotationId as string)).map((r) => ({ rotationId: r.rotationId, contactId: r.contactId, startAt: dReq(r.startAt), endAt: dReq(r.endAt), status: r.status }));
+      const leaves: Leave[] = leaveRows.filter((r) => contacts.has(r.contactId as string)).map((r) => ({ contactId: r.contactId, replacementId: r.replacementId, startDate: r.startDate, endDate: r.endDate, cancelledAt: d(r.cancelledAt) }));
+      out.set(customerId, { configs, world: { customerId, contacts, responders, rotations, overrides, leaves } });
+    }
+    return out;
   }
 
   async commitGroupDelivery(c: GroupDeliveryCommit): Promise<'OK' | 'CONFLICT' | 'ALREADY_DELIVERED'> {

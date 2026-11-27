@@ -222,7 +222,8 @@ async function readProposal(req: ApiRequest, deps: Deps, cur: ResponderTemplateV
   if (b.name === undefined && b.members === undefined) throw invalid('members', 'name or members is required.');
   const name = b.name === undefined ? cur.name : readName(b.name);
   const members = b.members === undefined ? cur.members.map((m) => m.contactId) : readMembers(b.members);
-  if (b.members !== undefined) await assertStaff(deps, members);
+  // only people being added must be active staff (a rename must not fail because an existing member was deactivated)
+  if (b.members !== undefined) await assertStaff(deps, members.filter((id) => !cur.members.some((m) => m.contactId === id)));
   return { name, members };
 }
 

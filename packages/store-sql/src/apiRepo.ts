@@ -6,7 +6,7 @@
 import { createHash } from 'node:crypto';
 import { incidentMute, type DigestData, type PurgeLogEntry, type Contact, type Leave, type Override, type Rotation, type AuditInput, type DeliveryLog, type IncidentEventInput, type IncidentRow, type MaintenanceWindow, type PagingConfig } from '@alarmops/core';
 import { nodeVisible, type ApiRepository, type ManagedAlarmFilter, type ManagedAlarmRecord, type MonitoringCursor, type MonitoringPage, type ResourceFilter, type ResourceRecord, type AlertMemberRow, type IdempotentEntry, type IncidentFilter, type IncidentPage, type NodeFilter, type NotifiedPerson, type OpenCounts, type OrgTree, type ScopeFilter, type StatusCounts, type UndoRecord, type UserInfo, type Principal, type ResponderOp, type ResponderWriteOutcome, type RespondersState, type RotationsWorld, type ChangeStatusOutcome, type CustomerStatusState, type CustomerStatusValue, type ExportIncidentRow, type RetentionView, type MarkStepOutcome, type OffboardStep, type OffboardStepKey, type OffboardingState, type RevealLogFilter, type RevealLogRow, type RevealWrite, type RevealWriteOutcome, type AccountPatch, type AccountWriteOutcome, type AuditTemplate, type CloudAccountRecord, type ContactPatch, type ContactScopeInfo, type ContactWriteOutcome, type ContactsWorld, type NewAccount, type NewContact, type VerificationIssue, type VerificationLimits, type IssueOutcome, type VerificationLink, type VerificationTaken, type VerifyChannelValue, type CustomerProfile, type CustomerProfilePatch, type CustomerUpdateOutcome, type OrgWriteOutcome, type ProjectRecord, type ServiceRecord, type BindGoogleOutcome, type EnrolOutcome, type NewUser, type UserFilter, type UserPatch, type UserRecord, type UserWriteOutcome, OFFBOARD_STEP_KEYS, normalizeEmail, emailDomain, isFreeMail, planTemplateChange, planTemplateAttach, templateBlocking, attachBlocking, type ResponderTemplateView, type TemplateCreate, type TemplateImpactInput, type TemplateUpdate, type TemplateUpdateOutcome, type TemplateAttachInput, type TemplateAttachOutcome, type TemplateAttachWrite, type TemplateRef, type TemplatePaging } from '@alarmops/api';
-import { PG, pgCode, type SqlExecutor } from './client.js';
+import { PG, isBusyCode, pgCode, type SqlExecutor } from './client.js';
 import { purgeLogOf } from './retentionSql.js';
 import { CONTACT_COLS, toContact, Params, d, dReq, incidentCols, iso, js, newId, num, toEvent, toIncident, toLog } from './rows.js';
 import { SqlTickStore, insertAudit, toWindow } from './tickRepo.js';
@@ -105,6 +105,13 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
       `SELECT 1 FROM "NotificationChannel" WHERE "customerId" = $1 AND "scopeType" = 'CUSTOMER' AND "scopeId" = $1 AND "kind" IN ('SLACK_BOT', 'SLACK_WEBHOOK') AND "enabled" AND "verifiedAt" IS NOT NULL LIMIT 1`,
       [customerId],
     )).length > 0;
+  }
+  private async slackVerifiedMany(q: SqlExecutor, customerIds: string[]): Promise<Set<string>> {
+    if (!customerIds.length) return new Set();
+    const rows = await q.query(
+      `SELECT DISTINCT "customerId" FROM "NotificationChannel" WHERE "customerId" = ANY($1::text[]) AND "scopeType" = 'CUSTOMER' AND "scopeId" = "customerId" AND "kind" IN ('SLACK_BOT', 'SLACK_WEBHOOK') AND "enabled" AND "verifiedAt" IS NOT NULL`,
+      [customerIds]);
+    return new Set(rows.map((r) => r.customerId as string));
   }
   async findResource(scope: ScopeFilter, resourceId: string) {
     const p = new Params();
@@ -663,11 +670,11 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
                                               WHEN 'PROJECT' THEN (SELECT x."name" FROM "Project" x WHERE x."id" = cs."scopeId" AND x."customerId" = $1)
                                               ELSE (SELECT x."name" FROM "Service" x WHERE x."id" = cs."scopeId" AND x."customerId" = $1) END, cs."scopeId") AS "scopeName"
            FROM "ContactScope" cs WHERE cs."customerId" = $1 ORDER BY cs."createdAt", cs."id"`, [customerId]),
-      this.sql.query(`SELECT "responderTemplateId" FROM "Customer" WHERE "id" = $1`, [customerId]),
+      this.sql.query(`SELECT c."responderTemplateId", t."name" AS "templateName" FROM "Customer" c LEFT JOIN "ResponderTemplate" t ON t."id" = c."responderTemplateId" WHERE c."id" = $1`, [customerId]),
       this.respondersVersionOf(this.sql, customerId),
     ]);
     return {
-      version, templateId: (cust[0]?.responderTemplateId ?? null) as string | null,
+      version, templateId: (cust[0]?.responderTemplateId ?? null) as string | null, templateName: (cust[0]?.templateName ?? null) as string | null,
       entries: entries.map((r) => ({ contactId: r.contactId, role: r.role, source: r.source, templateId: r.templateId ?? null, templateName: r.templateName ?? null, order: r.order })),
       scopes: scopes.map((r) => ({ contactId: r.contactId, scopeType: r.scopeType, scopeId: r.scopeId, scopeName: r.scopeName, role: r.role })),
     };
@@ -758,11 +765,10 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
                     WHERE pc."customerId" = ANY($1::text[]) AND es."targetType" = 'PERSON' AND es."targetId" = ANY($2::text[])`, [cids, all])
         : Promise.resolve([]),
     ]);
+    // one batched read for all customers (the locks are held while it runs)
+    const [ctxs, slackOk] = await Promise.all([this.pagingContextsVia(q, cids), this.slackVerifiedMany(q, cids)]);
     const paging = new Map<string, TemplatePaging>();
-    for (const id of cids) {
-      const { configs, world } = await this.pagingContextVia(q, id);
-      paging.set(id, { configs, world, slackVerified: await this.slackVerifiedVia(q, id) });
-    }
+    for (const id of cids) { const { configs, world } = ctxs.get(id)!; paging.set(id, { configs, world, slackVerified: slackOk.has(id) }); }
     return {
       templateId: t.id, version: t.version, name: t.name, members,
       names: Object.fromEntries(names.map((n) => [n.id as string, n.name as string])),
@@ -805,7 +811,10 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
         const [cur] = await tx.query(`SELECT "name", "version" FROM "ResponderTemplate" WHERE "id" = $1 FOR UPDATE`, [u.id]);
         if (!cur) return 'NOT_FOUND';
         if (cur.version !== u.expectedVersion) return 'CONFLICT';
-        if (!(await this.allStaff(tx, u.proposal.members))) return 'BAD_MEMBER';
+        // only people being ADDED must be active staff: a rename (or any save) must not fail because an existing member was deactivated since
+        const have = new Set((await tx.query(`SELECT "contactId" FROM "ResponderTemplateMember" WHERE "templateId" = $1`, [u.id])).map((r) => r.contactId as string));
+        const added = u.proposal.members.filter((m) => !have.has(m));
+        if (added.length && !(await this.allStaff(tx, added))) return 'BAD_MEMBER';
         // The same function the preview used, on data read now with the customers locked: the hash is checked against what WILL happen.
         const input = await this.impactInput(tx, u.id, u.proposal.members, true);
         if (!input) return 'NOT_FOUND';
@@ -845,7 +854,7 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
       });
     } catch (err) {
       if (pgCode(err) === PG.UNIQUE) return 'NAME_EXISTS';
-      if (pgCode(err) === PG.DEADLOCK || pgCode(err) === PG.SERIALIZATION) return 'BUSY';
+      if (isBusyCode(pgCode(err))) return 'BUSY';
       throw err;
     }
   }
@@ -930,7 +939,7 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
         return { version: w.expectedVersion + 1, templateId: w.toTemplateId, joins: plan.joins.length, leaves: plan.leaves.length };
       });
     } catch (err) {
-      if (pgCode(err) === PG.DEADLOCK || pgCode(err) === PG.SERIALIZATION) return 'BUSY';
+      if (isBusyCode(pgCode(err))) return 'BUSY';
       throw err;
     }
   }
