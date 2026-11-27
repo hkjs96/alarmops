@@ -865,8 +865,8 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
     if (!id) return null;
     const [t] = await q.query(`SELECT "id", "name", "version" FROM "ResponderTemplate" WHERE "id" = $1`, [id]);
     if (!t) return null;
-    const ms = await q.query(`SELECT "contactId" FROM "ResponderTemplateMember" WHERE "templateId" = $1 ORDER BY "contactId"`, [id]);
-    return { id: t.id, name: t.name, version: t.version, members: ms.map((m) => m.contactId as string) };
+    const ms = await q.query(`SELECT m."contactId", c."active" FROM "ResponderTemplateMember" m LEFT JOIN "Contact" c ON c."id" = m."contactId" WHERE m."templateId" = $1 ORDER BY m."contactId"`, [id]);
+    return { id: t.id, name: t.name, version: t.version, members: ms.map((m) => m.contactId as string), inactive: ms.filter((m) => m.active !== true).map((m) => m.contactId as string) };
   }
 
   /** Everything `planTemplateAttach` needs, read through `q` (the save reads it inside its transaction, after the locks). */
@@ -936,7 +936,7 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
         await tx.query(`UPDATE "Customer" SET "responderTemplateId" = $2, "updatedAt" = ${this.sql.now()} WHERE "id" = $1`, [w.customerId, w.toTemplateId]);
         // targetType 'Responders': the customer's Responders version (the number of these rows) moves by one
         await insertAudit(tx, { ...audit, before: { templateId: input.from?.id ?? null }, after: { templateId: to?.id ?? null, added: plan.joins, removed: plan.leaves } });
-        return { version: w.expectedVersion + 1, templateId: w.toTemplateId, joins: plan.joins.length, leaves: plan.leaves.length };
+        return { version: w.expectedVersion + 1, templateId: w.toTemplateId, joins: plan.joins.length, leaves: plan.leaves.length, skippedInactive: plan.skippedInactive };
       });
     } catch (err) {
       if (isBusyCode(pgCode(err))) return 'BUSY';

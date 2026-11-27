@@ -979,7 +979,7 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
   // ── one customer's template (D-64) ──
   private templateRef(id: string | null): TemplateRef | null {
     const t = id ? this.templates.get(id) : undefined;
-    return t ? { id: t.id, name: t.name, version: t.version, members: [...t.members] } : null;
+    return t ? { id: t.id, name: t.name, version: t.version, members: [...t.members], inactive: [...t.members].filter((m) => !this.contacts.get(m)?.active) } : null;
   }
   private attachInput(customerId: string, from: TemplateRef | null, to: TemplateRef | null): TemplateAttachInput {
     const ids = [...new Set([...(from?.members ?? []), ...(to?.members ?? [])])];
@@ -1033,7 +1033,7 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     const version = w.expectedVersion + 1;
     this.respondersVersion.set(w.customerId, version);
     this.audits.push({ ...audit, before: { templateId: from?.id ?? null }, after: { templateId: to?.id ?? null, added: plan.joins, removed: plan.leaves } });
-    return { version, templateId: w.toTemplateId, joins: plan.joins.length, leaves: plan.leaves.length };
+    return { version, templateId: w.toTemplateId, joins: plan.joins.length, leaves: plan.leaves.length, skippedInactive: plan.skippedInactive };
   }
   async rotationsWorld(scope: ScopeFilter): Promise<RotationsWorld> {
     const rotations = [...this.rotations.values()].filter((r) => r.scope === 'MSP' || (r.customerId != null && seesCustomer(scope, r.customerId))).map((r) => structuredClone(r));
