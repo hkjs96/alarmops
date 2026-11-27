@@ -246,8 +246,8 @@
 
 | 위치 | 하드코딩 | 옮길 때 영향 | 후속 |
 |---|---|---|---|
-| `packages/api/src/onboardingApi.ts` 113행 `roleArn()` | 파티션 `aws` 고정(`arn:aws:iam::<계정>:role/...`) | 상용 파티션 안에서는 없다. 다른 파티션(GovCloud·중국) 고객이면 틀린 ARN이 DB에 저장된다 | 1 |
-| `packages/api/src/sqsCommandPublisher.ts` 7·8행 | 리전 `ap-northeast-2`, 큐 URL 정규식이 `sqs.ap-northeast-2.amazonaws.com` 고정 | 서울 안에서는 없다. 다른 리전이면 시작 때 오류 | 2 |
+| `packages/api/src/onboardingApi.ts` `roleArn()` | `AWS_PARTITION`(기본 `aws`)을 따른다(#189). 콘솔이 아직 `partition`을 넘기지 않아 실제로는 `aws` | 상용 파티션 안에서는 없다. 콘솔 연결 전에 다른 파티션(GovCloud·중국) 고객이면 틀린 ARN이 DB에 저장된다 | 1 |
+| `packages/api/src/sqsCommandPublisher.ts` | 큐 URL은 어느 리전이든 통과한다(#189) | 콘솔 SQS 클라이언트(`sqs-client.ts` 22행)는 아직 서울 고정이라, 서울 밖 URL이면 시작은 되고 첫 전송에서 실패한다 | 2 |
 | `infra/customer-stack/template.yaml` 35행 | `CentralEventBusArn` 패턴이 `events:ap-northeast-2` 고정(파티션은 `aws[a-z-]*`로 열려 있음) | 새 버스가 서울이면 없다. 다른 리전이면 템플릿 수정이 필요해 "파라미터만 업데이트"가 깨진다 | 2 |
 | `apps/console/src/lib/server/central.ts` 4·5행 (범위 밖) | `ROLE_RE`가 `arn:aws:iam::`, `BUS_RE`가 `ap-northeast-2` 고정 | 새 값이 안 맞으면 키트에서 값이 빠진다. 상용·서울이면 없다 | 2, 3 |
 | `apps/console/src/lib/server/sqs-client.ts` 22행 (범위 밖) | SQS 클라이언트 리전 `ap-northeast-2` | 다른 리전이면 큐와 어긋난다 | 2 |
@@ -267,8 +267,8 @@
 
 코드는 이 이슈에서 고치지 않는다. 필요하면 이슈를 따로 만든다.
 
-1. (backend) `roleArn()`이 파티션을 고정한다. 고객 계정의 파티션을 받거나 설정에서 읽게 한다. 지금은 상용 파티션 고객만 받으므로 급하지 않다.
-2. (backend, console, infra) 리전을 `ap-northeast-2`로 고정한 곳이 넷이다(큐 URL 정규식, 콘솔 SQS 클라이언트, 콘솔 `BUS_RE`, 고객 스택의 `CentralEventBusArn` 패턴). 서울 밖으로 옮길 계획이 생기면 같이 푼다. 고객 스택 패턴을 먼저 풀어 두어야 "파라미터만 업데이트"가 유지된다.
+1. (backend) `roleArn()`의 파티션: packages/api는 완료(#189, `AWS_PARTITION`). 콘솔이 `createApi({ partition })`로 넘기는 연결이 남았다.
+2. (backend, console, infra) 리전을 `ap-northeast-2`로 고정한 곳이 셋 남았다(콘솔 SQS 클라이언트, 콘솔 `BUS_RE`, 고객 스택의 `CentralEventBusArn` 패턴. 큐 URL 정규식은 #189에서 풀었다). 서울 밖으로 옮길 계획이 생기면 같이 푼다. 고객 스택 패턴을 먼저 풀어 두어야 "파라미터만 업데이트"가 유지된다.
 3. (console) `central.ts`의 `ROLE_RE`·`BUS_RE`가 파티션 `aws`를 고정한다. 고객 스택 템플릿처럼 `aws[a-z-]*`로 맞춘다.
 4. (infra) `bus-allowlist`는 `CENTRAL_BUS_DEPLOY_ROLE_ARN`이 가리키는 한 계정의 버스만 바꾼다. 옛 버스에서 제거하려면 변수를 되돌려야 한다(2-5). 필요하면 대상을 고르는 입력을 만든다.
 5. (허브) D-58은 파라미터를 둘만 적었다. Remediator를 켠 고객은 `RemediatorCallerRoleArn`까지 셋이다(3-1). D-58 문구 보강 여부를 정한다.
