@@ -5,7 +5,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { MemoryApiStore } from '../../api/src/index.js';
-import type { AuditInput } from '../../api/src/index.js';
+import type { AuditInput } from '@alarmops/core';
 import { SqlApiStore, type SqlClient, type SqlExecutor } from '../src/index.js';
 import { seedWorld } from '../../core/test/world.js';
 import { openTestDb, type TestDb } from './db.js';
