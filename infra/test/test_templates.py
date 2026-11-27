@@ -1148,11 +1148,6 @@ class CustomerStackBoundary(unittest.TestCase):
                        "StackSet", "AWS::ControlTower"):
             self.assertNotIn(needle, raw)
 
-
-if __name__ == "__main__":
-    unittest.main()
-
-
 class CustomerStackCentralBusRegion(unittest.TestCase):
     """#97 / D-58: the central bus may live in any region and partition; the customer stack stays in the customer's region."""
 
@@ -1186,3 +1181,7 @@ class CustomerStackCentralBusRegion(unittest.TestCase):
 
     def test_description_does_not_fix_a_region(self):
         self.assertNotIn("ap-northeast-2", T["Parameters"]["CentralEventBusArn"]["Description"])
+
+
+if __name__ == "__main__":
+    unittest.main()
