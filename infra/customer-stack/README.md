@@ -33,7 +33,7 @@
 - **CloudFormation 실행 주체**: 스택을 만드는 사람의 권한에도 `iam:CreateRole`, `iam:PutRolePolicy`(경계가 있으면 `iam:PermissionsBoundary` 조건)가 필요하다. 이는 고객 쪽 조직이 정한다.
 
 > **역할 경로 미지원**: 백엔드(`packages/api/src/onboardingApi.ts`의 `roleArn()`)는 역할 ARN을 `arn:aws:iam::<계정>:role/AlarmOps-<역할>`로 조립하고 중앙 `infra/aws/central.yaml`도 `role/AlarmOps-*`만 가정한다. 그래서 `RolePath` 파라미터는 두지 않았다. 필요하면 db(`rolePath`), `packages/api`, 중앙 정책 확장을 묶은 별도 이슈로 다룬다.
-> 파티션도 같은 상태다: 템플릿 패턴과 정책은 `aws`, `aws-cn`, `aws-us-gov`를 받지만 백엔드 `roleArn()`은 `aws`로 고정이다.
+> 파티션: 템플릿 패턴과 정책은 `aws`, `aws-cn`, `aws-us-gov`를 받는다. 백엔드 `roleArn()`은 `AWS_PARTITION`(기본 `aws`)을 따르지만 콘솔이 아직 넘기지 않아 실제로는 `aws`다(#97).
 
 ### Organizations·Control Tower 의존 점검
 
