@@ -18,7 +18,7 @@
 템플릿이 바뀌어도 고객 스택은 자동으로 바뀌지 않는다. D-63(AlarmWriter 생성 허용을 `[`로 시작하는 이름으로 좁힘)을 적용하려면 고객이 스택을 갱신한다. 바뀌는 것은 AlarmWriter 인라인 정책의 `Resource`와 역할 설명뿐이고 역할은 교체되지 않는다.
 
 1. CloudFormation 콘솔(서울) → 스택 `alarmops-customer` → 업데이트.
-2. 기존 템플릿 바꾸기 → 새 `template.yaml` 올리기.
+2. `Replace existing template`(기존 템플릿을 새 파일로 바꾸는 선택지. 한국어 콘솔 표기는 다를 수 있다) → 새 `template.yaml` 올리기.
 3. 파라미터는 이전 값을 그대로 둔다(특히 `ExternalId`).
 4. `CAPABILITY_NAMED_IAM` 승인에 체크하고 제출한다. "No updates are to be performed"가 나오면 이미 최신이다.
 

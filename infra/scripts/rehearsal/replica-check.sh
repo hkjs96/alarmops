@@ -41,6 +41,7 @@ REPLICA="AlarmOpsRehearsal-WriterReplica"
 ALARM_T="[AlarmOpsRehearsal] replica-test"
 ALARM_U="AlarmOpsRehearsal-replica-unmanaged"
 ALARM_V="[AlarmOpsRehearsal] replica-unmanaged-bracket"
+ALARM_NS="AlarmOpsRehearsal"                         # 이 스크립트가 만드는 모든 알람의 Namespace. 다르면 우리가 만든 알람이 아니다
 PROBE_POLICY="probe-deny"
 PROBE_VARIANTS=(null stringnotequals)
 PROBE_SUFFIXES=(new unmanaged canary other)         # probe 이름은 이 스크립트 전용 접두어("[AlarmOpsRehearsal] probe-")라 시작할 때 지워도 된다. `[` 로 시작해야 원본 정책의 생성 허용(D-63)이 닿는다
@@ -124,6 +125,46 @@ rp_cell_of_last() {  # 직전 rp_exec 결과(실패) → DENIED | ERROR(코드).
   case "$code" in AccessDenied*) printf 'DENIED' ;; *) printf 'ERROR(%s)' "$code" ;; esac
 }
 
+# 이름이 겹치는 알람이 있으면 그것이 이 스크립트가 만든 것인지 본다(Namespace 가 AlarmOpsRehearsal 인 메트릭 알람만 우리 것).
+# $@ = 알람 이름. 결과: RP_OWN(없거나 우리 것) / RP_SKIP("이름 (사유)": 다른 Namespace·복합 알람·Namespace 없는 메트릭 수식 알람).
+# 조회(describe-alarms)가 실패하면 1 을 돌려준다. 이름이 `[` 로 시작하므로 JSON 배열로 넘긴다.
+rp_split_owned() {
+  local out n line k nm why found
+  RP_OWN=(); RP_SKIP=()
+  rp_exec person cloudwatch describe-alarms --alarm-names "$(rh_json_array "$@")" --alarm-types MetricAlarm CompositeAlarm --output json
+  [ "$RP_RC" -eq 0 ] || return 1
+  out="$(printf '%s' "$RP_OUT" | "$RH_PY" -c '
+import json, sys
+ns = sys.argv[1]
+d = json.load(sys.stdin)
+for a in d.get("MetricAlarms", []):
+    if a.get("Namespace") != ns:
+        print(a["AlarmName"] + "\tNamespace " + str(a.get("Namespace")))
+for a in d.get("CompositeAlarms", []):
+    print(a["AlarmName"] + "\tcomposite alarm")
+' "$ALARM_NS" | tr -d '\r')" || return 1
+  for n in "$@"; do
+    found=0
+    while IFS=$'\t' read -r nm why; do
+      if [ -n "$nm" ] && [ "$nm" = "$n" ]; then found=1; RP_SKIP+=("$n ($why)"); break; fi
+    done <<<"$out"
+    if [ "$found" = 0 ]; then RP_OWN+=("$n"); fi
+  done
+  return 0
+}
+
+# 시작 전 점검: 시험·probe 알람 이름과 같은 이름의 알람이 우리 것이 아니면 아무것도 만들지 않고 중단한다(지우거나 덮어쓰지 않는다).
+rp_precheck_names() {
+  local k
+  rp_split_owned "$@" || { rp_fail_exec "시작 전 점검 실패: 같은 이름의 알람이 있는지 조회하지 못했다. 아무것도 만들지 않았다"; exit 1; }
+  if [ "${#RP_SKIP[@]}" -gt 0 ]; then
+    for k in "${RP_SKIP[@]}"; do
+      rp_note "오류: 알람 $k 이 이미 있고 이 스크립트가 만든 것이 아니다(만든 알람은 Namespace $ALARM_NS). 지우거나 덮어쓰지 않고 중단한다. 이름이 겹치는 고객 알람인지 확인한다. 아무것도 만들지 않았다"
+    done
+    exit 1
+  fi
+}
+
 rp_note() {  # 사람에게(stderr)와 로그에 알린다. 이미 마스킹된 문장만 넣을 것
   printf '%s\n' "$1" >&2
   rh_log "$1"
@@ -134,21 +175,34 @@ rp_fail_exec() {  # 호출 실패를 오류 코드와 함께 알린다(메시지
   if [ -n "$RP_ERR" ]; then printf '%s\n' "$RP_ERR" >&2; fi
 }
 
+# 정리용 삭제: 이름이 같아도 이 스크립트가 만든 알람(Namespace AlarmOpsRehearsal)이 아니면 지우지 않고 건너뛴다. $1=표시 이름 나머지=알람 이름
+rp_delete_alarms_owned() {
+  local label="$1" k
+  shift
+  if ! rp_split_owned "$@"; then
+    rp_fail_exec "$label 삭제 전 점검 실패(같은 이름의 알람을 조회하지 못해 지우지 않았다)"; CLEAN_FAIL=$((CLEAN_FAIL + 1)); return
+  fi
+  if [ "${#RP_SKIP[@]}" -gt 0 ]; then
+    for k in "${RP_SKIP[@]}"; do rh_say "- 건너뜀(이 스크립트가 만든 알람이 아님): $k"; done
+  fi
+  if [ "${#RP_OWN[@]}" -eq 0 ]; then return; fi
+  local own=("${RP_OWN[@]}")
+  rp_exec person cloudwatch delete-alarms --alarm-names "$(rh_json_array "${own[@]}")"
+  if [ "$RP_RC" -eq 0 ]; then rh_say "- $label 삭제(없으면 건너뜀): ${own[*]}"
+  else rp_fail_exec "$label 삭제 실패"; CLEAN_FAIL=$((CLEAN_FAIL + 1)); fi
+}
+
 rp_cleanup() {
   local c
   CLEAN_FAIL=0
   rh_say ""
   rh_say "## 정리"
-  rp_exec person cloudwatch delete-alarms --alarm-names "$(rh_json_array "$ALARM_T" "$ALARM_U" "$ALARM_V")"
-  if [ "$RP_RC" -eq 0 ]; then rh_say "- 시험 알람 삭제(없으면 건너뜀): $ALARM_T, $ALARM_U, $ALARM_V"
-  else rp_fail_exec "시험 알람 삭제 실패"; CLEAN_FAIL=$((CLEAN_FAIL + 1)); fi
+  rp_delete_alarms_owned "시험 알람" "$ALARM_T" "$ALARM_U" "$ALARM_V"
   if [ "$PROBE" = 1 ] || [ "$CLEANUP_ONLY" = 1 ]; then   # 실측 모드 잔여물. 일반 실행은 이 호출을 하지 않는다
     local pn=()
     mapfile -t pn < <(probe_alarm_names)
     pn=("${pn[@]%$'\r'}")
-    rp_exec person cloudwatch delete-alarms --alarm-names "$(rh_json_array "${pn[@]}")"
-    if [ "$RP_RC" -eq 0 ]; then rh_say "- 실측 알람 삭제(없으면 건너뜀): ${pn[*]}"
-    else rp_fail_exec "실측 알람 삭제 실패"; CLEAN_FAIL=$((CLEAN_FAIL + 1)); fi
+    rp_delete_alarms_owned "실측 알람" "${pn[@]}"
   fi
 
   rp_exec person iam get-role --role-name "$REPLICA"
@@ -252,6 +306,14 @@ if [ "$RP_RC" -eq 0 ]; then
   rh_die "역할 $REPLICA 가 이미 있다. 재사용·덮어쓰지 않는다. 이전 실행의 잔여물이면 --cleanup-only 로 먼저 정리한다: bash infra/scripts/rehearsal/replica-check.sh --profile $RH_PROFILE --confirm-account <12자리> --cleanup-only" 5
 fi
 printf '%s' "$RP_ERR" | grep -q 'NoSuchEntity' || { rp_fail_exec "복제 역할 조회 실패"; exit 1; }
+
+# ---- 3b) 같은 이름의 알람이 우리 것이 아니면 중단한다(정리·시작 삭제가 고객 알람을 지우지 않게). 아직 아무것도 만들지 않았다
+PRECHECK_NAMES=("$ALARM_T" "$ALARM_U" "$ALARM_V")
+if [ "$PROBE" = 1 ]; then
+  mapfile -t _pn < <(probe_alarm_names)
+  PRECHECK_NAMES+=("${_pn[@]%$'\r'}")
+fi
+rp_precheck_names "${PRECHECK_NAMES[@]}"
 
 # ---- 4) 복제 역할 생성. 이 시점부터 종료 시 정리한다
 DO_CLEANUP=1
@@ -376,8 +438,13 @@ sys.exit(0 if any(x.get("Key") == "ManagedBy" for x in t) else 1)
     case "$v" in null) exp_b=ALLOWED ;; stringnotequals) exp_b=DENIED ;; esac
     rp_overwrite "$OTH" 2
     got_b="$(rp_cell)"
-    [ "$got_b" = "$exp_b" ] || NOTES="$NOTES- $v: 카나리 B 불일치(기대 $exp_b, 실제 $got_b): Deny 가 반영되지 않았을 수 있다
+    if [ "$got_b" != "$exp_b" ]; then
+      # null 인데 DENIED: 리소스 태그(ManagedBy=Other)가 있는 알람인데도 Null 조건이 걸렸다 = PutMetricAlarm 평가가 기존 알람의 태그를 못 본다.
+      if [ "$v" = null ] && [ "$got_b" = DENIED ]; then why="PutMetricAlarm 평가에 ResourceTag 가 반영되지 않는 것으로 보임"
+      else why="Deny 가 반영되지 않았을 수 있다"; fi
+      NOTES="$NOTES- $v: 카나리 B 불일치(기대 $exp_b, 실제 $got_b): $why
 "
+    fi
 
     # p1 새 알람 + ManagedBy 요청 태그
     rp_exec replica cloudwatch put-metric-alarm --alarm-name "$NEW" "${BASE[@]}" --tags Key=ManagedBy,Value=AlarmOps
@@ -581,7 +648,7 @@ sys.exit(0 if any(x.get("Key") == "ManagedBy" and x.get("Value") == "AlarmOps" f
     else
       tagnote="태그 조회 실패(코드 $(rp_code))"
     fi
-    rp_row "$F_LABEL" FAIL "기존 고객 알람 덮어쓰기 가능: template.yaml CreateAlarmWithManagedByTag 보완 필요 ($thr, $tagnote)"
+    rp_row "$F_LABEL" FAIL "스택 갱신 필요(D-63 이전 템플릿) — 갱신 후에도 FAIL 이면 정책 결함 ($thr, $tagnote)"
   fi
 fi
 HOLD=0
@@ -599,15 +666,16 @@ if [ "$f_overwrote" = 1 ]; then
 fi
 
 # (c)(d)
+D_LABEL="(d) 태그 없는 알람 DeleteAlarms → 거부 (#87 미확인 항목)"   # 준비 실패 행도 같은 이름을 쓴다
 if [ "$u_prepared" != 1 ]; then
   prep="준비 실패: $U_REASON"
   rp_row "(c) 태그 없는 알람에 TagResource(ManagedBy) → 거부" FAIL "$prep"
-  rp_row "(d) 태그 없는 알람 DeleteAlarms → 거부" FAIL "$prep"
+  rp_row "$D_LABEL" FAIL "$prep"
 else
   rp_exec replica cloudwatch tag-resource --resource-arn "$ARN_U" --tags Key=ManagedBy,Value=AlarmOps
   expect_denied "(c) 태그 없는 알람에 TagResource(ManagedBy) → 거부"
   rp_exec replica cloudwatch delete-alarms --alarm-names "$(rh_json_array "$ALARM_U")"
-  expect_denied "(d) 태그 없는 알람 DeleteAlarms → 거부 (#87 미확인 항목)"
+  expect_denied "$D_LABEL"
 fi
 
 # (e) 관리 알람 삭제
@@ -631,7 +699,10 @@ else
     g_row "ALLOWED: 예상된 한계. 엔진의 사전 점검(NotOwned)이 유일한 보호. 고객 안내: 이름이 [ 로 시작하는 알람은 AlarmOps용"
   else
     g_cell="$(rp_cell_of_last)"
-    g_row "$g_cell: 이 계정에서는 [ 이름의 태그 없는 알람 덮어쓰기도 막힘(D-63 남는 위험이 더 작음)"
+    case "$g_cell" in
+      DENIED) g_row "DENIED: 이 계정에서는 [ 이름의 태그 없는 알람 덮어쓰기도 막힘(D-63 남는 위험이 더 작음)" ;;
+      *) g_row "$g_cell: 판정하지 못함(거부가 아닌 오류). 이 계정에서 [ 이름 알람 덮어쓰기가 막히는지는 모른다. 다시 실행하고, 같으면 오류 코드를 허브에 보낸다" ;;
+    esac
   fi
 fi
 

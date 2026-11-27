@@ -1075,6 +1075,7 @@ D-60에서 쓰는 방식:
 - **이유(11/26-27 테스트 계정 실측, `replica-check.sh`)**:
   - 기존 정책에서는 `PutMetricAlarm`에 요청 태그 `ManagedBy=AlarmOps`를 달면, 태그 없는 기존 고객 알람의 이름으로 그 알람을 덮어쓸 수 있었다(임계값 1→2 변경, 갱신 때 태그는 무시됨). `CreateAlarmWithManagedByTag`가 `aws:RequestTag`만 보기 때문이다.
   - 탐침(`--probe-resource-tag-deny`): `aws:ResourceTag/ManagedBy`가 없을 때 막는 명시적 Deny(`Null` 또는 `StringNotEquals`)는 새 알람 생성도 막는다(CloudWatch가 생성 때 `aws:ResourceTag`를 빈 값으로 본다). 그래서 쓸 수 없다.
+- **적용 실측(11/27, B 계정)**: `infra/scripts/rehearsal/install.sh`로 스택을 갱신한 뒤 `replica-check.sh`를 다시 돌렸다. (a)~(f) 전부 PASS였고 (f)는 `AccessDenied`다(갱신 전에는 FAIL: 임계값 1→2 변경). (g)는 예상대로 `ALLOWED`(알려진 한계). 정리는 이름이 `[`로 시작하는 알람을 JSON 배열(`--alarm-names '["[이름] ..."]'`)로 넘겨 Git Bash + `aws.exe`에서 지워졌다.
 - **남는 위험**: 이름이 `[`로 시작하는 태그 없는 알람(기존 alert-manager의 알람도 같은 모양이다. 고객이 그렇게 이름 지을 수도 있다)은 여전히 덮어쓸 수 있다. 이 경우 보호는 엔진의 사전 점검(`NotOwned`, `aws.py`)뿐이다. `NotOwned`는 엔진 코드 안의 점검이라 중앙 자격증명이 탈취되면 `[` 이름 알람의 설정(`AlarmActions`·`ActionsEnabled` 포함)이 바뀔 수 있다. 삭제와 태그 변경은 여전히 막힌다. 고객 안내: 이름이 `[`로 시작하는 알람은 AlarmOps/MSP용으로 예약한다.
 - **바뀌는 것**: `infra/customer-stack/template.yaml`(기존 고객 스택은 갱신해야 적용), `infra/scripts/rehearsal/replica-check.sh`(시험 알람 이름, (f) 기대값 PASS, 정보 행 (g)). 엔진 코드는 바뀌지 않는다(생성 이름이 이미 `[`로 시작).
 - **다시 볼 때**: 엔진 이름 형식을 `[`로 시작하지 않게 바꾸려 할 때, 고객이 `[` 이름 알람을 쓴다고 할 때, CloudWatch가 생성 때 리소스 태그를 평가하는 방식이 바뀔 때.
