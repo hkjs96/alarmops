@@ -274,4 +274,27 @@ export function retentionContract(make: MakeApiFixture): void {
       expect(body(await w.call(USERS.viewer, 'GET', '/digests/latest'))).toMatchObject({ businessDay: '2026-11-11', suspended: [], terminatedResiduals: [], empty: true });
     });
   });
+
+  describe('rotation pins of a terminated customer (D-45)', () => {
+    it('purging a TERMINATED customer whose own rotation has a past and a future pin of its contact deletes the contact and leaves no RotationPin, without an FK error', async () => {
+      await open((s) => {
+        s.rotations.set('rot_mirae_own', { id: 'rot_mirae_own', scope: 'CUSTOMER', customerId: 'cus_mirae', name: 'Mirae own', cadence: 'DAILY', anchorAt: new Date('2026-11-09T00:00:00Z'), handoverDow: 1, handoverMin: 0,
+          members: [{ contactId: 'ct_yuna', order: 0 }, { contactId: 'ct_haeun', order: 1 }] } as never);
+        const store = s as unknown as { rotationPins?: Array<Record<string, unknown>> };
+        (store.rotationPins ??= []).push(
+          { id: 'pin_past', rotationId: 'rot_mirae_own', contactId: 'ct_yuna', startAt: new Date(T0.getTime() - 2 * DAY), endAt: new Date(T0.getTime() - DAY) },
+          { id: 'pin_future', rotationId: 'rot_mirae_own', contactId: 'ct_yuna', startAt: new Date(T0.getTime() + 10 * DAY), endAt: new Date(T0.getTime() + 11 * DAY) },
+        );
+      });
+      expect((await w.fx.rotationPins!('rot_mirae_own')).length).toBe(2);
+      await terminate();
+      await completeOffboarding();
+      await retain(day(2));
+      await retain(day(32));
+      expect(await stages()).toEqual(['CONNECTIONS', 'RETURN_PERIOD']);
+      expect(await w.fx.repo.getContact('ct_yuna')).toBeNull();
+      expect(await w.fx.rotationPins!('rot_mirae_own')).toEqual([]);
+      expect(await w.fx.repo.getContact('ct_haeun')).not.toBeNull(); // staff are not customer data
+    });
+  });
 }

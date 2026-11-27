@@ -124,6 +124,10 @@ export async function sqlFixture(db: TestDb, seed: MemoryTickStore): Promise<Sql
     await q(`INSERT INTO "Rotation"("id", "scope", "customerId", "name", "cadence", "handoverDow", "handoverMin", "anchorAt") VALUES ($1, $2::"RotationScope", $3, $4, $5::"Cadence", 1, 0, $6::timestamptz)`, [r.id, r.scope, r.customerId, r.name, r.cadence, iso(r.anchorAt)]);
     for (const m of r.members) await q(`INSERT INTO "RotationMember"("rotationId", "contactId", "order") VALUES ($1, $2, $3)`, [r.id, m.contactId, m.order]);
   }
+  // RotationPin rows of the seed (MemoryApiStore.rotationPins, when the store has them)
+  for (const [i, p] of ((api as unknown as { rotationPins?: Array<Record<string, any>> }).rotationPins ?? []).entries()) {
+    await q(`INSERT INTO "RotationPin"("id", "rotationId", "contactId", "startAt", "endAt") VALUES ($1, $2, $3, $4::timestamptz, $5::timestamptz)`, [p.id ?? `pin_${i}`, p.rotationId, p.contactId, iso(p.startAt), iso(p.endAt)]);
+  }
   for (const [i, o] of seed.overrides.entries()) {
     await q(`INSERT INTO "Override"("id", "rotationId", "contactId", "startAt", "endAt", "createdBy", "kind", "status") VALUES ($1, $2, $3, $4::timestamptz, $5::timestamptz, 'seed', 'COVER', $6::"OverrideStatus")`, [`ov_${i}`, o.rotationId, o.contactId, iso(o.startAt), iso(o.endAt), o.status]);
   }
@@ -216,6 +220,22 @@ export async function sqlFixture(db: TestDb, seed: MemoryTickStore): Promise<Sql
     async audits() {
       return (await q(`SELECT * FROM "AuditLog" ORDER BY "at", "id"`)).map((r) => ({ at: dReq(r.at), customerId: r.customerId ?? null, actorType: r.actorType, actorId: r.actorId ?? null, action: r.action,
         targetType: r.targetType, targetId: r.targetId, before: r.before ?? undefined, after: r.after ?? undefined, requestId: r.requestId ?? null }));
+    },
+    async rotationCounts() {
+      const n = async (t: string) => Number((await q(`SELECT count(*)::int AS n FROM "${t}"`))[0]!.n);
+      return { Rotation: await n('Rotation'), RotationMember: await n('RotationMember'), RotationPin: await n('RotationPin'), Override: await n('Override'), AuditLog: await n('AuditLog'), EscalationStep: await n('EscalationStep') };
+    },
+    async rotationPins(rotationId) {
+      return (await q(`SELECT * FROM "RotationPin" WHERE "rotationId" = $1 ORDER BY "startAt"`, [rotationId])).map((r) => ({
+        contactId: r.contactId as string, startAt: dReq(r.startAt), endAt: dReq(r.endAt), kind: (r.kind ?? r.reason ?? null) as string | null }));
+    },
+    async rotationRow(rotationId) {
+      const [r] = await q(`SELECT * FROM "Rotation" WHERE "id" = $1`, [rotationId]);
+      return r ? { version: Number(r.version ?? 0), anchorAt: dReq(r.anchorAt), handoverDow: Number(r.handoverDow), handoverMin: Number(r.handoverMin), name: r.name as string, cadence: r.cadence as string } : null;
+    },
+    async addOverride(o) {
+      await q(`INSERT INTO "Override"("id", "rotationId", "contactId", "startAt", "endAt", "createdBy", "kind", "status") VALUES ($1, $2, $3, $4::timestamptz, $5::timestamptz, 'late', 'COVER', $6::"OverrideStatus")`,
+        [`ov_late_${Math.random().toString(36).slice(2)}`, o.rotationId, o.contactId, iso(o.startAt), iso(o.endAt), o.status]);
     },
     async revealRows() { return (await q(`SELECT * FROM "ContactRevealLog" ORDER BY "at", "id"`)) as Array<Record<string, unknown>>; },
     async breakRevealLog() {

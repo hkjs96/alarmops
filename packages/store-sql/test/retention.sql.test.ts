@@ -171,4 +171,20 @@ describe('retention on Postgres (D-45)', () => {
     await stage(store, 'cus_t', 'SLA_EXPIRY', Date.now() + 60_000, 1);
     expect((await store.retentionCandidates(10)).map((c) => c.customerId)).toEqual(['cus_o']);
   });
+
+  it('RETURN_PERIOD: a customer rotation with a past and a future pin of the customer\'s contact is purged without a foreign-key error; the contact and its pins are gone, the other customer\'s stay', async () => {
+    for (const [cid, ct] of [['cus_t', 'ct_pt'], ['cus_o', 'ct_po']] as const) {
+      await q(`INSERT INTO "Contact"("id", "kind", "customerId", "name", "updatedAt") VALUES ($1, 'CUSTOMER', $2, 'P', now())`, [ct, cid]);
+      await q(`INSERT INTO "Rotation"("id", "scope", "customerId", "name", "cadence", "handoverDow", "handoverMin", "anchorAt") VALUES ($1, 'CUSTOMER', $2, 'own', 'DAILY', 1, 0, '2026-11-09T00:00:00Z')`, [`rot_${cid}`, cid]);
+      await q(`INSERT INTO "RotationMember"("rotationId", "contactId", "order") VALUES ($1, $2, 0)`, [`rot_${cid}`, ct]);
+      await q(`INSERT INTO "RotationPin"("id", "rotationId", "contactId", "startAt", "endAt") VALUES ($1, $2, $3, '2027-01-01T00:00:00Z', '2027-01-02T00:00:00Z'), ($4, $2, $3, '2027-02-01T00:00:00Z', '2027-02-02T00:00:00Z')`,
+        [`pin_a_${cid}`, `rot_${cid}`, ct, `pin_b_${cid}`]);
+    }
+    const r = await stage(store, 'cus_t', 'RETURN_PERIOD');
+    expect(r.skipped).toBeUndefined();
+    expect(await q(`SELECT 1 FROM "Contact" WHERE "id" = 'ct_pt'`)).toEqual([]);
+    expect(await q(`SELECT 1 FROM "RotationPin" WHERE "rotationId" = 'rot_cus_t'`)).toEqual([]);
+    expect(await q(`SELECT 1 FROM "Contact" WHERE "id" = 'ct_po'`)).toHaveLength(1);
+    expect(await q(`SELECT 1 FROM "RotationPin" WHERE "rotationId" = 'rot_cus_o'`)).toHaveLength(2);
+  });
 });
