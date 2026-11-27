@@ -128,6 +128,28 @@ class CustomerStack(unittest.TestCase):
         self.assertEqual(sorted(as_list(deny["Action"])), ["cloudwatch:TagResource", "cloudwatch:UntagResource"])
         self.assertEqual(deny["Condition"], {"ForAnyValue:StringEquals": {"aws:TagKeys": ["ManagedBy"]}})
 
+    def test_alarm_writer_create_is_scoped_to_bracket_names_d63(self):
+        """D-63: the create statement only covers alarm names starting with `[` (the engine's `[{type}] ...` names), so a
+        request tag ManagedBy=AlarmOps cannot overwrite a customer's alarm with another name. Nothing else is broadened."""
+        sts = statements("AlarmWriterRole")
+        by_sid = {s["Sid"]: s for s in sts}
+        sub = lambda tail: {"Fn::Sub": f"arn:${{AWS::Partition}}:cloudwatch:*:${{AWS::AccountId}}:alarm:{tail}"}
+        self.assertEqual(by_sid["CreateAlarmWithManagedByTag"]["Resource"], sub("[*"))
+        self.assertEqual(by_sid["CreateAlarmWithManagedByTag"]["Condition"],
+                         {"StringEquals": {"aws:RequestTag/ManagedBy": "AlarmOps"}})
+        own = by_sid["ChangeOwnAlarms"]
+        self.assertEqual(own["Resource"], sub("*"))
+        self.assertEqual(own["Condition"], {"StringEquals": {"aws:ResourceTag/ManagedBy": "AlarmOps"}})
+        self.assertEqual(sorted(as_list(own["Action"])), ["cloudwatch:DeleteAlarms", "cloudwatch:PutMetricAlarm",
+                                                          "cloudwatch:TagResource", "cloudwatch:UntagResource"])
+        # no other Allow statement names an alarm resource wider than before, and none can write
+        for sid in ("ReadAlarms", "ReadAlarmTags"):
+            self.assertEqual(as_list(by_sid[sid]["Action"]), {"ReadAlarms": ["cloudwatch:DescribeAlarms"],
+                                                              "ReadAlarmTags": ["cloudwatch:ListTagsForResource"]}[sid])
+        self.assertEqual(sorted(by_sid), ["ChangeOwnAlarms", "CreateAlarmWithManagedByTag", "DenyManagedByTagEdits",
+                                          "ReadAlarmTags", "ReadAlarms"])
+        self.assertEqual(by_sid["DenyManagedByTagEdits"]["Resource"], "*")
+
     def test_tag_writer_only_monitoring_key_no_s3_route53(self):
         for s in statements("TagWriterRole"):
             self.assertEqual(s["Effect"], "Allow")

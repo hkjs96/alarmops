@@ -33,6 +33,7 @@ Scenario keys (all optional):
                      AWS_ACCESS_KEY_ID in env are "replica" calls: the credentials must match, and the allow/deny
                      decision comes from the role's stored inline policy (StringEquals + ForAnyValue/ForAllValues on
                      aws:RequestTag/*, aws:ResourceTag/*, aws:TagKeys; explicit Deny wins).
+  (replica model) the policy's Resource patterns are honoured for alarm calls (IAM wildcards `*` and `?` only; `[` is literal).
   cw_overwrite_unmanaged_denied  true: a replica PutMetricAlarm on an existing alarm WITHOUT ManagedBy=AlarmOps is denied
                      (models CloudWatch applying the resource tag on update); false/absent: the policy decides, so a
                      request tag ManagedBy=AlarmOps overwrites it (the suspected hole checked by replica-check (f))
@@ -236,8 +237,15 @@ def _cond_ok(cond, ctx):
     return True
 
 
+def _arn_matches(pattern, arn):
+    """IAM Resource matching: only `*` (any run) and `?` (one char) are wildcards; everything else, `[` included, is literal."""
+    rx = "".join(".*" if c == "*" else "." if c == "?" else re.escape(c) for c in pattern)
+    return re.fullmatch(rx, arn, re.S) is not None
+
+
 def evaluate(policy, action, ctx, ignore_sid=None):
-    """True = allowed. Explicit Deny wins; no matching Allow = implicit deny."""
+    """True = allowed. Explicit Deny wins; no matching Allow = implicit deny. When ctx has "resource_arn", a statement
+    only applies if one of its Resource patterns matches that ARN (no "resource_arn" = Resource is not checked)."""
     import fnmatch
 
     stmts = policy.get("Statement", [])
@@ -250,6 +258,11 @@ def evaluate(policy, action, ctx, ignore_sid=None):
         acts = [acts] if isinstance(acts, str) else acts
         if not any(fnmatch.fnmatch(action.lower(), a.lower()) for a in acts):
             continue
+        if ctx.get("resource_arn") is not None:
+            res = st.get("Resource", "*")
+            res = [res] if isinstance(res, str) else res
+            if not any(_arn_matches(r, ctx["resource_arn"]) for r in res):
+                continue
         if not _cond_ok(st.get("Condition"), ctx):
             continue
         if st.get("Effect") == "Deny":
@@ -389,6 +402,8 @@ def replica_model(scen, service, op, opts, rec, account, first):
                     ignore = "DenyOverwriteUnmanaged"
             for n in names or [None]:
                 ctx = {"request_tags": req, "resource_tags": (st["alarms"].get(n) or {}) if n else {}}
+                if n and op != "describe-alarms":
+                    ctx["resource_arn"] = f"arn:aws:cloudwatch:ap-northeast-2:{account}:alarm:{n}"
                 if (op == "put-metric-alarm" and n not in st["alarms"]
                         and scen.get("cw_create_resource_tags") == "request"):
                     ctx["resource_tags"] = dict(req)   # hypothesis: CloudWatch evaluates aws:ResourceTag from the request tags on create

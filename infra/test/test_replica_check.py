@@ -23,20 +23,23 @@ LONG_RUN = "AlarmOpsRehearsalRunB8Xyz123abcDEF456ghiJKL789"
 ORIG = "AlarmOps-AlarmWriter"
 POLICY_NAME = "manage-alarmops-alarms"
 REPLICA = fake_aws.REPLICA_NAME
-TEST_ALARM = "AlarmOpsRehearsal-replica-test"
+# D-63: managed test alarms start with `[` (the engine's name shape); customer-like unmanaged alarms do not.
+TEST_ALARM = "[AlarmOpsRehearsal] replica-test"
 UNMANAGED = "AlarmOpsRehearsal-replica-unmanaged"
+BRACKET_UNMANAGED = "[AlarmOpsRehearsal] replica-unmanaged-bracket"
 SSO_ROLE = "AWSReservedSSO_AdministratorAccess_0123456789abcdef"
 SSO_ARN = f"arn:aws:sts::{ACCT}:assumed-role/{SSO_ROLE}/someone"
 BOUNDARY = f"arn:aws:iam::{ACCT}:policy/org-boundary"
 CRED_VALUES = (fake_aws.REPLICA_KEY, fake_aws.REPLICA_SECRET, fake_aws.REPLICA_TOKEN)
 
 ALARM_RES = f"arn:aws:cloudwatch:*:{ACCT}:alarm:*"
+BRACKET_RES = f"arn:aws:cloudwatch:*:{ACCT}:alarm:[*"
 # Hand copy of AlarmWriterRole's inline policy in infra/customer-stack/template.yaml (test_sids_match_template guards drift).
 POLICY = {"Version": "2012-10-17", "Statement": [
     {"Sid": "ReadAlarms", "Effect": "Allow", "Action": ["cloudwatch:DescribeAlarms"], "Resource": "*"},
     {"Sid": "ReadAlarmTags", "Effect": "Allow", "Action": ["cloudwatch:ListTagsForResource"], "Resource": ALARM_RES},
     {"Sid": "CreateAlarmWithManagedByTag", "Effect": "Allow", "Action": ["cloudwatch:PutMetricAlarm"],
-     "Resource": ALARM_RES, "Condition": {"StringEquals": {"aws:RequestTag/ManagedBy": "AlarmOps"}}},
+     "Resource": BRACKET_RES, "Condition": {"StringEquals": {"aws:RequestTag/ManagedBy": "AlarmOps"}}},
     {"Sid": "ChangeOwnAlarms", "Effect": "Allow",
      "Action": ["cloudwatch:PutMetricAlarm", "cloudwatch:TagResource", "cloudwatch:UntagResource",
                 "cloudwatch:DeleteAlarms"],
@@ -44,6 +47,9 @@ POLICY = {"Version": "2012-10-17", "Statement": [
     {"Sid": "DenyManagedByTagEdits", "Effect": "Deny", "Action": ["cloudwatch:TagResource", "cloudwatch:UntagResource"],
      "Resource": "*", "Condition": {"ForAnyValue:StringEquals": {"aws:TagKeys": ["ManagedBy"]}}},
 ]}
+# The policy before D-63: the create statement covers every alarm name (overwrite hole measured on 11/26-27).
+OLD_POLICY = copy.deepcopy(POLICY)
+OLD_POLICY["Statement"][2]["Resource"] = ALARM_RES
 # Wrong: PutMetricAlarm allowed without any tag condition.
 WRONG_POLICY = copy.deepcopy(POLICY)
 WRONG_POLICY["Statement"][2].pop("Condition")
@@ -66,7 +72,8 @@ class ReplicaBase(Base):
 
     def scenario(self, policy=POLICY, boundary=None, caller=SSO_ARN, **extra):
         extra.setdefault("iam_roles", roles(policy, boundary))
-        extra.setdefault("cw_overwrite_unmanaged_denied", True)   # CloudWatch denies overwriting a foreign alarm
+        # Real CloudWatch does not deny an overwrite of an untagged alarm by itself (measured 11/26-27): only the policy's
+        # Resource/Condition decide, so cw_overwrite_unmanaged_denied is NOT set by default (D-63).
         self.sb.set_scenario(caller_arn=caller, **extra)
 
     def go(self, confirm=ACCT, extra_args=(), profile=PROFILE):
@@ -89,12 +96,18 @@ class ReplicaBase(Base):
         return {t: ("PASS" if "PASS" in self.row(res, t) else "FAIL" if "FAIL" in self.row(res, t) else "?")
                 for t in "abcdef"}
 
+    def info_row(self, res):
+        rows = [l for l in res.out.splitlines() if l.startswith("| (g)")]
+        self.assertEqual(len(rows), 1, f"row (g) in:\n{res.out}")
+        return rows[0]
+
     def assertCleanedUp(self):
         st = self.state()
         self.assertIsNotNone(st)
         self.assertNotIn(REPLICA, st["roles"], "replica role must be gone")
         self.assertNotIn(TEST_ALARM, st["alarms"])
         self.assertNotIn(UNMANAGED, st["alarms"])
+        self.assertNotIn(BRACKET_UNMANAGED, st["alarms"])
 
 
 class AllPass(ReplicaBase):
@@ -199,7 +212,7 @@ class Failures(ReplicaBase):
         self.assertIn("iam delete-role", ops)
         dels = [c for c in self.sb.calls() if c["op"] == "delete-alarms" and not c["as_replica"]]
         names = {n for c in dels for n in alarm_names_of(c)}
-        self.assertEqual(names, {TEST_ALARM, UNMANAGED})
+        self.assertEqual(names, {TEST_ALARM, UNMANAGED, BRACKET_UNMANAGED})
 
     def test_cleanup_runs_when_assume_role_fails(self):
         self.scenario(assume_fail_first=99)
@@ -314,7 +327,7 @@ class CleanupOnly(ReplicaBase):
         self.assertIn(ORIG, self.state()["roles"], "the original role must never be touched")
         names = {n for c in self.sb.calls() if c["op"] == "delete-alarms" for n in alarm_names_of(c)}
         # --cleanup-only also clears --probe-resource-tag-deny leftovers (test_replica_probe.py checks those names)
-        self.assertEqual({n for n in names if "-probe-" not in n}, {TEST_ALARM, UNMANAGED})
+        self.assertEqual({n for n in names if " probe-" not in n}, {TEST_ALARM, UNMANAGED, BRACKET_UNMANAGED})
         for forbidden in ("create-role", "put-role-policy", "assume-role", "put-metric-alarm"):
             self.assertNotIn(forbidden, [c["op"] for c in self.sb.calls()])
 
@@ -365,8 +378,16 @@ class OverwriteCheck(ReplicaBase):
         self.assertEqual(self.verdicts(res)["f"], "PASS", res.out)
         self.assertEqual(res.code, 0, res.text)
 
+    def test_f_denied_by_the_name_scope_not_by_cloudwatch(self):
+        """D-63: with no CloudWatch-side denial modelled, (f) passes only because the create Resource is `alarm:[*`."""
+        self.scenario()
+        res = self.go()
+        self.assertEqual(self.verdicts(res)["f"], "PASS", res.out)
+        puts = [c for c in self.sb.calls() if c["op"] == "put-metric-alarm" and c["as_replica"] and UNMANAGED in c["argv"]]
+        self.assertEqual(len(puts), 1)
+
     def test_f_allowed_fails_with_findings(self):
-        self.scenario(cw_overwrite_unmanaged_denied=False)
+        self.scenario(policy=OLD_POLICY)   # the pre-D-63 policy: create statement covers every alarm name
         res = self.go()
         self.assertNotEqual(res.code, 0, res.text)
         self.assertEqual(self.verdicts(res)["f"], "FAIL", res.out)
@@ -380,6 +401,38 @@ class OverwriteCheck(ReplicaBase):
         look = [c for c in self.sb.calls() if c["op"] in ("describe-alarms", "list-tags-for-resource")
                 and not c["as_replica"] and UNMANAGED in " ".join(c["argv"])]
         self.assertTrue(look, "the person's own credentials must inspect the alarm after a successful overwrite")
+
+    def test_g_known_limit_is_informational_and_allowed(self):
+        """(g) an untagged alarm whose name starts with `[` can still be overwritten (D-63 residual risk). It is shown
+        but is not a FAIL and does not change the exit code."""
+        self.scenario()
+        res = self.go()
+        self.assertEqual(res.code, 0, res.text)
+        row = self.info_row(res)
+        self.assertIn("알려진 한계(D-63)", row)
+        self.assertIn("ALLOWED", row)
+        self.assertNotIn("FAIL", row)
+        self.assertNotIn("PASS", row)
+        self.assertIn("전부 PASS", res.out)
+        puts = [c for c in self.sb.calls() if c["op"] == "put-metric-alarm" and BRACKET_UNMANAGED in c["argv"]]
+        self.assertEqual([c["as_replica"] for c in puts], [False, True], "person creates it untagged, replica overwrites")
+        self.assertNotIn("--tags", puts[0]["argv"])
+        self.assertIn("Key=ManagedBy,Value=AlarmOps", puts[1]["argv"])
+        self.assertCleanedUp()
+
+    def test_g_denied_is_reported_without_failing(self):
+        self.scenario(cw_overwrite_unmanaged_denied=True)
+        res = self.go()
+        self.assertEqual(res.code, 0, res.text)
+        self.assertIn("DENIED", self.info_row(res))
+
+    def test_g_prepare_failure_does_not_fail_the_run(self):
+        # put-metric-alarm calls: (a)=1 (b)=2 ALARM_U=3 (f)=4 bracket alarm=5
+        self.scenario(fail_nth={"cloudwatch put-metric-alarm": 5})
+        res = self.go()
+        self.assertEqual(res.code, 0, res.text)
+        self.assertIn("준비 실패", self.info_row(res))
+        self.assertCleanedUp()
 
     def test_f_overwrites_the_unmanaged_alarm_with_a_request_tag(self):
         self.scenario()
@@ -638,9 +691,10 @@ class FirstThenCD(ReplicaBase):
         res = self.go()
         order = [m.group(1) for m in re.finditer(r"^\| \(([a-f])\)", res.out, re.M)]
         self.assertEqual(order, list("abcdef"))
+        self.assertEqual(re.findall(r"^\| \(([a-g])\)", res.out, re.M), list("abcdefg"))
 
     def test_overwrite_resets_the_alarm_for_c_and_d(self):
-        self.scenario(cw_overwrite_unmanaged_denied=False)
+        self.scenario(policy=OLD_POLICY)
         res = self.go()
         v = self.verdicts(res)
         self.assertEqual((v["c"], v["d"], v["f"]), ("PASS", "PASS", "FAIL"), res.out)   # not polluted by (f)'s tag
@@ -652,6 +706,7 @@ class FirstThenCD(ReplicaBase):
         self.assertIn(("put-metric-alarm", False), ops[i_f:])     # re-created by the person
 
     def test_c_and_d_allowed_does_not_change_f_denied(self):
+        # LOOSE has no tag condition on ChangeOwnAlarms, so (f) is only PASS if the fake models a CloudWatch-side denial
         self.scenario(policy=self.LOOSE, cw_overwrite_unmanaged_denied=True)
         res = self.go()
         v = self.verdicts(res)
@@ -660,7 +715,7 @@ class FirstThenCD(ReplicaBase):
         self.assertNotEqual(res.code, 0)
 
     def test_c_and_d_allowed_does_not_change_f_allowed(self):
-        self.scenario(policy=self.LOOSE, cw_overwrite_unmanaged_denied=False)
+        self.scenario(policy=self.LOOSE)
         res = self.go()
         v = self.verdicts(res)
         self.assertEqual(v["f"], "FAIL", res.out)
@@ -670,7 +725,7 @@ class FirstThenCD(ReplicaBase):
 
     def test_recreate_failure_marks_c_and_d_as_prepare_failures(self):
         # put-metric-alarm calls: (a)=1 (b)=2 ALARM_U=3 (f)=4 re-create=5
-        self.scenario(cw_overwrite_unmanaged_denied=False, fail_nth={"cloudwatch put-metric-alarm": 5})
+        self.scenario(policy=OLD_POLICY, fail_nth={"cloudwatch put-metric-alarm": 5})
         res = self.go()
         v = self.verdicts(res)
         self.assertEqual(v["f"], "FAIL")
@@ -687,6 +742,10 @@ class Docs(unittest.TestCase):
         block = text.split("  AlarmWriterRole:", 1)[1].split("# ----", 1)[0]
         sids = re.findall(r"Sid: (\w+)", block)
         self.assertEqual(sids, [s["Sid"] for s in POLICY["Statement"]])
+        # D-63: the hand copy's create Resource is the template's `alarm:[*` (after Sub substitution)
+        create = block.split("Sid: CreateAlarmWithManagedByTag", 1)[1].split("Sid:", 1)[0]
+        self.assertIn('Resource: !Sub "arn:${AWS::Partition}:cloudwatch:*:${AWS::AccountId}:alarm:[*"', create)
+        self.assertEqual(POLICY["Statement"][2]["Resource"], f"arn:aws:cloudwatch:*:{ACCT}:alarm:[*")
 
     def test_review_docs(self):
         gl = (REPO / "docs" / "GO-LIVE.md").read_text(encoding="utf-8")

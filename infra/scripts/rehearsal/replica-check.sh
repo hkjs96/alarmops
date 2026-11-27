@@ -3,12 +3,12 @@
 # 사용: bash replica-check.sh --profile rehearsal-b --confirm-account 12자리 [--cleanup-only]
 # 사전 준비: 별도 터미널에서 SSO 로그인(프로필 rehearsal-<이름>). 종료 코드 1~5 는 표가 나오기 전 중단일 수 있다(GO-LIVE 4단계).
 # 원본 AlarmOps-AlarmWriter 의 권한 정책·권한 경계를 그대로 복사한 임시 역할 AlarmOpsRehearsal-WriterReplica 를 만들고,
-# 본인 SSO 역할로 assume 해서 6개((a)~(f))를 확인한다. 끝나면(실패·중단 포함) 만든 것을 모두 지운다.
+# 본인 SSO 역할로 assume 해서 6개((a)~(f))를 확인하고, 정보 행 (g)(D-63 알려진 한계, 종료 코드에 영향 없음)를 덧붙인다. 끝나면(실패·중단 포함) 만든 것을 모두 지운다.
 # 임시 자격증명은 출력·로그·부모 셸 환경변수에 두지 않는다(호출마다 서브셸 안에서만 export).
 # 종료 코드: 전부 PASS 0, 그 밖 1, 인자·안전 관문 거부 2 이상.
 # 선택 모드 --probe-resource-tag-deny: (a)~(f) 표를 돌리지 않고(대신 쓴다), 원본 정책에 명시적 Deny(DenyOverwriteUnmanaged)를 더한 두 변형
 #   (null = Null aws:ResourceTag/ManagedBy, stringnotequals = StringNotEquals)이 "태그 없는 기존 알람 덮어쓰기"만 막고 새 알람 생성·관리 알람
-#   수정·삭제는 막지 않는지 잰다. 측정이라 판정이 "사용 불가"여도 종료 코드 0. 준비·오류로 중단하면 1(안전 관문 거부는 2 이상). 같은 정리 규칙을 쓴다.
+#   수정·삭제는 막지 않는지 잰다. probe 알람 이름은 `[AlarmOpsRehearsal] probe-<변형>-<new|unmanaged|canary|other>`(D-63: `[` 로 시작해야 생성이 닿는다). 측정이라 판정이 "사용 불가"여도 종료 코드 0. 준비·오류로 중단하면 1(안전 관문 거부는 2 이상). 같은 정리 규칙을 쓴다.
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
@@ -35,14 +35,18 @@ if [ "$CLEANUP_ONLY" = 1 ]; then rh_log_open replica-check; else rh_log_open rep
 ORIG_ROLE="AlarmOps-AlarmWriter"
 POLICY_NAME="manage-alarmops-alarms"
 REPLICA="AlarmOpsRehearsal-WriterReplica"
-ALARM_T="AlarmOpsRehearsal-replica-test"
+# D-63: 관리 알람(엔진이 만드는 모양)은 이름이 `[` 로 시작한다. AlarmWriter 의 생성 허용 Resource 가 `alarm:[*` 라서다.
+# ALARM_U 는 고객 알람처럼 `[` 로 시작하지 않는다((f): 덮어쓰기 거부가 기대값). ALARM_V 는 `[` 로 시작하는 태그 없는 알람((g): 알려진 한계).
+# 이름에 공백·대괄호가 있으니 모든 인자는 따옴표로 감싼다(Git Bash).
+ALARM_T="[AlarmOpsRehearsal] replica-test"
 ALARM_U="AlarmOpsRehearsal-replica-unmanaged"
+ALARM_V="[AlarmOpsRehearsal] replica-unmanaged-bracket"
 PROBE_POLICY="probe-deny"
 PROBE_VARIANTS=(null stringnotequals)
-PROBE_SUFFIXES=(new unmanaged canary other)         # probe-* 이름은 이 스크립트 전용 접두어(AlarmOpsRehearsal-probe-)라 시작할 때 지워도 된다
+PROBE_SUFFIXES=(new unmanaged canary other)         # probe 이름은 이 스크립트 전용 접두어("[AlarmOpsRehearsal] probe-")라 시작할 때 지워도 된다. `[` 로 시작해야 원본 정책의 생성 허용(D-63)이 닿는다
 probe_alarm_names() {
   local v x
-  for v in "${PROBE_VARIANTS[@]}"; do for x in "${PROBE_SUFFIXES[@]}"; do printf '%s\n' "AlarmOpsRehearsal-probe-$v-$x"; done; done
+  for v in "${PROBE_VARIANTS[@]}"; do for x in "${PROBE_SUFFIXES[@]}"; do printf '%s\n' "[AlarmOpsRehearsal] probe-$v-$x"; done; done
 }
 PROBE_WAIT="${REHEARSAL_PROBE_WAIT:-20}"            # 정책을 바꾼 뒤 전파 대기(초). 바꾼 Deny가 늦게 퍼지면 p2 가 잘못 ALLOWED 로 나온다
 RETRIES="${REHEARSAL_ASSUME_RETRIES:-12}"           # 12 x 5초 = 약 60초 (IAM 전파)
@@ -114,6 +118,12 @@ rp_code() {
   printf '%s' "${c:-unknown}"
 }
 
+rp_cell_of_last() {  # 직전 rp_exec 결과(실패) → DENIED | ERROR(코드). 오류 메시지는 쓰지 않는다
+  local code
+  code="$(rp_code)"
+  case "$code" in AccessDenied*) printf 'DENIED' ;; *) printf 'ERROR(%s)' "$code" ;; esac
+}
+
 rp_note() {  # 사람에게(stderr)와 로그에 알린다. 이미 마스킹된 문장만 넣을 것
   printf '%s\n' "$1" >&2
   rh_log "$1"
@@ -129,8 +139,8 @@ rp_cleanup() {
   CLEAN_FAIL=0
   rh_say ""
   rh_say "## 정리"
-  rp_exec person cloudwatch delete-alarms --alarm-names "$ALARM_T" "$ALARM_U"
-  if [ "$RP_RC" -eq 0 ]; then rh_say "- 시험 알람 삭제(없으면 건너뜀): $ALARM_T, $ALARM_U"
+  rp_exec person cloudwatch delete-alarms --alarm-names "$ALARM_T" "$ALARM_U" "$ALARM_V"
+  if [ "$RP_RC" -eq 0 ]; then rh_say "- 시험 알람 삭제(없으면 건너뜀): $ALARM_T, $ALARM_U, $ALARM_V"
   else rp_fail_exec "시험 알람 삭제 실패"; CLEAN_FAIL=$((CLEAN_FAIL + 1)); fi
   if [ "$PROBE" = 1 ] || [ "$CLEANUP_ONLY" = 1 ]; then   # 실측 모드 잔여물. 일반 실행은 이 호출을 하지 않는다
     local pn=()
@@ -331,8 +341,8 @@ sys.exit(0 if any(x.get("Key") == "ManagedBy" for x in t) else 1)
   rh_say "|---|---|---|---|---|---|"
   STAR=0; NOTES=""; vi=0
   for v in "${PROBE_VARIANTS[@]}"; do
-    NEW="AlarmOpsRehearsal-probe-$v-new"; UN="AlarmOpsRehearsal-probe-$v-unmanaged"
-    CAN="AlarmOpsRehearsal-probe-$v-canary"; OTH="AlarmOpsRehearsal-probe-$v-other"
+    NEW="[AlarmOpsRehearsal] probe-$v-new"; UN="[AlarmOpsRehearsal] probe-$v-unmanaged"
+    CAN="[AlarmOpsRehearsal] probe-$v-canary"; OTH="[AlarmOpsRehearsal] probe-$v-other"
     # 1) 앞 변형의 Deny 를 지운다. 두 번째부터는 전파를 기다리고 다시 assume 한다(옛 정책이 남아 거짓 "사용 가능"이 나오지 않게)
     rp_exec person iam delete-role-policy --role-name "$REPLICA" --policy-name "$PROBE_POLICY"
     if [ "$RP_RC" -ne 0 ] && ! printf '%s' "$RP_ERR" | grep -q 'NoSuchEntity'; then rp_fail_exec "이전 Deny 정책 삭제 실패"; exit 1; fi
@@ -467,6 +477,7 @@ fi
 
 ARN_T="arn:aws:cloudwatch:${RH_REGION}:${RH_ACCT}:alarm:${ALARM_T}"
 ARN_U="arn:aws:cloudwatch:${RH_REGION}:${RH_ACCT}:alarm:${ALARM_U}"
+ARN_V="arn:aws:cloudwatch:${RH_REGION}:${RH_ACCT}:alarm:${ALARM_V}"
 BASE=(--namespace AlarmOpsRehearsal --metric-name ReplicaCheck --statistic Average --period 60
       --evaluation-periods 1 --threshold 1 --comparison-operator GreaterThanThreshold)
 
@@ -529,7 +540,7 @@ if rp_make_u; then u_prepared=1; fi
 
 # (f) 복제 역할이 태그 없는 기존 알람(ALARM_U)을 ManagedBy 요청 태그로 덮어쓸 수 있는가. (c)(d)보다 먼저 본다:
 #     (c)(d)가 알람 상태(태그·존재)를 바꾸기 전의 깨끗한 알람에서 판정해야 한다. 표에는 (e) 다음에 순서대로 낸다.
-#     CreateAlarmWithManagedByTag 는 요청 태그 조건만 있다. 기존 알람에도 적용되는지는 실측으로만 안다. 설정이 바뀌는지 보려고 임계값을 다르게 보낸다.
+#     CreateAlarmWithManagedByTag 는 요청 태그 조건만 보지만(D-63) Resource 가 alarm:[* 라서 `[` 로 시작하지 않는 ALARM_U 에는 닿지 않는다(기대: 거부). 설정이 바뀌는지 보려고 임계값을 다르게 보낸다.
 F_LABEL="(f) 태그 없는 기존 알람 덮어쓰기(PutMetricAlarm+ManagedBy 요청 태그) → 거부"
 f_overwrote=0
 HOLD=1
@@ -604,6 +615,25 @@ rp_exec replica cloudwatch delete-alarms --alarm-names "$ALARM_T"
 if [ "$RP_RC" -eq 0 ]; then rp_row "(e) ManagedBy=AlarmOps 알람 DeleteAlarms → 성공" PASS "성공"
 else rp_row "(e) ManagedBy=AlarmOps 알람 DeleteAlarms → 성공" FAIL "오류 코드 $(rp_code)"; fi
 rh_say "$HELD"
+
+# (g) 참고(정보 행, 종료 코드에 영향 없음): 이름이 `[` 로 시작하는 태그 없는 알람은 생성 허용(alarm:[*)에 닿아 덮어쓰기가 가능하다(D-63 남는 위험).
+#     보호는 엔진의 사전 점검(NotOwned)뿐이다. FAIL 이 아니라 "알려진 한계"로 보여 준다. 준비·조회 실패도 FAIL 로 치지 않는다.
+G_LABEL="(g) 이름이 [ 로 시작하는 태그 없는 알람 덮어쓰기 → 알려진 한계(D-63)"
+g_row() { rh_say "| $G_LABEL | 정보 | $1 |"; }
+rp_exec person cloudwatch put-metric-alarm --alarm-name "$ALARM_V" "${BASE[@]}"
+if [ "$RP_RC" -ne 0 ]; then
+  g_row "준비 실패: 본인 자격증명으로 알람 생성 오류 코드 $(rp_code). 측정하지 않음"
+else
+  rp_exec replica cloudwatch put-metric-alarm --alarm-name "$ALARM_V" --namespace AlarmOpsRehearsal \
+    --metric-name ReplicaCheck --statistic Average --period 60 --evaluation-periods 1 --threshold 2 \
+    --comparison-operator GreaterThanThreshold --tags Key=ManagedBy,Value=AlarmOps
+  if [ "$RP_RC" -eq 0 ]; then
+    g_row "ALLOWED: 예상된 한계. 엔진의 사전 점검(NotOwned)이 유일한 보호. 고객 안내: 이름이 [ 로 시작하는 알람은 AlarmOps용"
+  else
+    g_cell="$(rp_cell_of_last)"
+    g_row "$g_cell: 이 계정에서는 [ 이름의 태그 없는 알람 덮어쓰기도 막힘(D-63 남는 위험이 더 작음)"
+  fi
+fi
 
 rh_say ""
 if [ "$FAILS" -gt 0 ]; then

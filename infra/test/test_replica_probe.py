@@ -13,7 +13,7 @@ from pathlib import Path
 
 import fake_aws
 from rehearsal_support import ACCT, PROFILE, REPO
-from test_replica_check import (CRED_VALUES, POLICY, POLICY_NAME, REPLICA, SCRIPT, TEST_ALARM, UNMANAGED,
+from test_replica_check import (CRED_VALUES, POLICY, POLICY_NAME, REPLICA, SCRIPT, TEST_ALARM, UNMANAGED, BRACKET_UNMANAGED,
                                 ReplicaBase, alarm_names_of, option, roles)
 
 PROBE_FLAG = "--probe-resource-tag-deny"
@@ -23,12 +23,12 @@ HEADER = "| 변형 | p1 새 알람 생성 | p2 태그없는 알람 덮어쓰기 
 
 
 def probe_names(variant):
-    return f"AlarmOpsRehearsal-probe-{variant}-new", f"AlarmOpsRehearsal-probe-{variant}-unmanaged"
+    return f"[AlarmOpsRehearsal] probe-{variant}-new", f"[AlarmOpsRehearsal] probe-{variant}-unmanaged"
 
 
 def all_probe_names(variant):
-    return probe_names(variant) + (f"AlarmOpsRehearsal-probe-{variant}-canary",
-                                   f"AlarmOpsRehearsal-probe-{variant}-other")
+    return probe_names(variant) + (f"[AlarmOpsRehearsal] probe-{variant}-canary",
+                                   f"[AlarmOpsRehearsal] probe-{variant}-other")
 
 
 def deny_stmt(cond):
@@ -38,6 +38,34 @@ def deny_stmt(cond):
 
 NULL_COND = {"Null": {"aws:ResourceTag/ManagedBy": "true"}}
 SNE_COND = {"StringNotEquals": {"aws:ResourceTag/ManagedBy": "AlarmOps"}}
+
+
+class FakeResourceModel(unittest.TestCase):
+    """The fake must match Resource ARNs like IAM (only * and ? wildcards, `[` literal), or the D-63 tests prove nothing."""
+
+    def ev(self, pattern, name):
+        pol = {"Statement": [{"Effect": "Allow", "Action": "cloudwatch:PutMetricAlarm", "Resource": pattern}]}
+        arn = f"arn:aws:cloudwatch:ap-northeast-2:{ACCT}:alarm:{name}"
+        return fake_aws.evaluate(pol, "cloudwatch:PutMetricAlarm", {"request_tags": {}, "resource_tags": {}, "resource_arn": arn})
+
+    def test_bracket_prefix_is_literal(self):
+        pat = f"arn:aws:cloudwatch:*:{ACCT}:alarm:[*"
+        self.assertTrue(self.ev(pat, "[EC2] web CPUUtilization (TagName: i-1)"))
+        self.assertTrue(self.ev(pat, "[x"))
+        self.assertFalse(self.ev(pat, "customer-alarm"))
+        self.assertFalse(self.ev(pat, "x[EC2] web"))
+        self.assertFalse(self.ev(pat, "E"), "`[*` is not a character class")
+        self.assertFalse(self.ev(pat, "e"))
+
+    def test_star_and_question_mark(self):
+        self.assertTrue(self.ev(f"arn:aws:cloudwatch:*:{ACCT}:alarm:*", "anything"))
+        self.assertTrue(self.ev(f"arn:aws:cloudwatch:*:{ACCT}:alarm:a?c", "abc"))
+        self.assertFalse(self.ev(f"arn:aws:cloudwatch:*:{ACCT}:alarm:a?c", "abbc"))
+
+    def test_other_account_does_not_match_and_no_arn_means_unchecked(self):
+        self.assertFalse(self.ev("arn:aws:cloudwatch:*:999999999999:alarm:*", "x"))
+        pol = {"Statement": [{"Effect": "Allow", "Action": "cloudwatch:*", "Resource": "arn:aws:s3:::nope"}]}
+        self.assertTrue(fake_aws.evaluate(pol, "cloudwatch:PutMetricAlarm", {"request_tags": {}, "resource_tags": {}}))
 
 
 class FakeConditionModel(unittest.TestCase):
@@ -243,7 +271,7 @@ class Probe(ProbeBase):
         self.assertEqual(res.code, 0, res.text)
         names = {n for c in self.sb.calls() if c["op"] == "delete-alarms" and not c["as_replica"]
                  for n in alarm_names_of(c)}
-        self.assertEqual(names, {TEST_ALARM, UNMANAGED})
+        self.assertEqual(names, {TEST_ALARM, UNMANAGED, BRACKET_UNMANAGED})
 
     def test_sighup_runs_cleanup(self):
         import os
@@ -312,7 +340,7 @@ class Reliability(ProbeBase):
                   and option(c["argv"], "--policy-name") == PROBE_POLICY]
         self.assertEqual(len(attach), 2)
         for v, a in zip(VARIANTS, attach):
-            canary = f"AlarmOpsRehearsal-probe-{v}-canary"
+            canary = f"[AlarmOpsRehearsal] probe-{v}-canary"
             idx = [i for i, c in enumerate(calls) if c["as_replica"] and c["op"] == "put-metric-alarm" and canary in c["argv"]]
             self.assertEqual(len(idx), 1, v)
             self.assertIn("Key=ManagedBy,Value=AlarmOps", calls[idx[0]]["argv"])
@@ -330,7 +358,7 @@ class Reliability(ProbeBase):
         self.probe("request")
         calls = self.sb.calls()
         for v in VARIANTS:
-            other = f"AlarmOpsRehearsal-probe-{v}-other"
+            other = f"[AlarmOpsRehearsal] probe-{v}-other"
             made = [c for c in calls if not c["as_replica"] and c["op"] == "put-metric-alarm" and other in c["argv"]]
             self.assertEqual(len(made), 1)
             self.assertIn("Key=ManagedBy,Value=Other", made[0]["argv"])
@@ -358,7 +386,7 @@ class Docs(unittest.TestCase):
         for text in (gl, ct):
             for needle in ("ALLOWED (임계값", "DENIED (확인 필요", "ERROR(준비 실패)", "불안정", "재측정", "카나리"):
                 self.assertIn(needle, text, needle)
-        for needle in ("REHEARSAL_PROBE_WAIT=60", "사용 가능일 때의 모양(예시)", "오류:", "probe-deny", "AlarmOpsRehearsal-probe-"):
+        for needle in ("REHEARSAL_PROBE_WAIT=60", "사용 가능일 때의 모양(예시)", "오류:", "probe-deny", "[AlarmOpsRehearsal] probe-"):
             self.assertIn(needle, gl, needle)
         self.assertIn("[--probe-resource-tag-deny]", (REPO / "infra/scripts/rehearsal/README.md").read_text(encoding="utf-8"))
 
