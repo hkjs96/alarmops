@@ -23,50 +23,63 @@ rh_die() { printf '오류: %s\n' "$(rh_mask "$1")" >&2; exit "${2:-1}"; }
 #  rh_mask_data: 데이터 경로(aws_r 의 stdout 반환. 호출자가 알람·큐 이름, URL 을 파싱한다). 확실한 것만 가린다:
 #    ExternalId 원문, ASIA/AKIA 키 ID, Authorization 키워드 뒤의 스킴+값(Basic·Bearer), 키워드 뒤의 값(security-token,
 #    session_token, secret_access_key, secret_key, access_token, x-amz-sso_bearer_token, bearer, authorization, password;
-#    값은 공백·따옴표·쉼표·&·; 에서 끝난다). 문장 속 "basic monitoring" 같은 일반 영어는 가리지 않는다(스킴 단독 규칙 없음).
+#    키워드와 값 사이에 : 또는 = 가 있을 때만 값으로 본다(공백만 있는 "Password Expiry" 같은 이름은 건드리지 않는다. JSON 의 ": " 형태는 포함).
+#    x-amz-signature·signature 도 키워드다. 값은 공백·따옴표·쉼표·&·; 에서 끝난다). 문장 속 "basic monitoring" 같은 일반 영어는 가리지 않는다(스킴 단독 규칙 없음).
 #    sed 의 I(대소문자 무시) 플래그는 GNU sed 전용이다(Git Bash 포함, BSD/macOS sed 는 다를 수 있다).
 #  rh_mask: 사람에게 보이는 경로(rh_say, rh_log, rh_die, aws_r 의 stderr, rp_mask). rh_mask_data 에 더해 긴 토큰 휴리스틱:
 #    (1) 40자 이상이면서 + / = % 중 하나를 포함, (2) 80자 이상 단일 토큰,
 #    (3) 정확히 40자이고 [A-Za-z0-9/+] 로만 이루어졌으며 대문자·소문자·숫자를 모두 포함(AWS 비밀 액세스 키 모양). - _ . 가 붙은
 #    토큰은 (3) 에서 제외한다(이름·ARN 조각, 앞뒤가 . 인 경우 포함).
 #    긴 이름·ARN·URL 경로가 걸리지 않게 "arn:aws" 를 포함한 단어는 건드리지 않는다. "://" URL 은 ? 앞(경로)만 건너뛰고
-#    ? 뒤(쿼리 값, 예: presigned 서명)는 위 규칙으로 검사한다. awk 는 구간 표현식 {n,} 를 쓰지 않는다(mawk 호환).
+#    ? 뒤(쿼리 값, 예: presigned 서명)는 위 규칙과 "hex 64자 이상 값" 규칙으로 검사한다. URL 의 userinfo(://user:pw@)는 ://****@ 로 가린다(사람 경로만).
+#    정확히 40자 규칙의 "뒤가 ." 예외는 . 다음이 영숫자일 때(점이 있는 이름)만이다. 문장 끝 마침표 앞의 비밀은 가린다. awk 는 구간 표현식 {n,} 를 쓰지 않는다(mawk 호환).
 rh_mask_data() {
   local t="$1"
   if [ -n "$RH_EID" ]; then t="${t//"$RH_EID"/****}"; fi
   t="$(printf '%s\n' "$t" | sed -E \
     -e 's/(ASIA|AKIA)[A-Z0-9]{12,}/****/g' \
-    -e "s/(authorization[\"'=: ]+)(basic|bearer)[ ]+[^[:space:],\"'&;)}]+/\\1****/Ig" \
-    -e "s/(security-token|session_?token|secret_?access_?key|secret_?key|access_?token|x-amz-sso_bearer_token|bearer|authorization|password)[\"'=: ]+[^[:space:],\"'&;)}]+/\\1=****/Ig")"
+    -e "s/(authorization[\"' ]*[=:][=:\"' ]*)(basic|bearer)[ ]+[^[:space:],\"'&;)}]+/\\1****/Ig" \
+    -e "s/(security-token|session_?token|secret_?access_?key|secret_?key|access_?token|x-amz-sso_bearer_token|x-amz-signature|signature|bearer|authorization|password)[\"' ]*[=:][=:\"' ]*[^[:space:],\"'&;)}]+/\\1=****/Ig")"
   printf '%s' "$t"
 }
 
 rh_mask() {
   local t
   t="$(rh_mask_data "$1")"
-  t="$(printf '%s\n' "$t" | awk '
+  t="$(printf '%s\n' "$t" | sed -E 's#(://)[^/@[:space:]]+@#\1****@#g' | awk '
     function isalnum40(tok) {   # 정확히 40자, [A-Za-z0-9/+] 로만, 대문자·소문자·숫자 모두
       return (length(tok) == 40 && tok ~ /^[A-Za-z0-9\/+]+$/ && tok ~ /[A-Z]/ && tok ~ /[a-z]/ && tok ~ /[0-9]/)
     }
-    function maskplain(w,   out, tok, rest, before, after) {
+    function maskplain(w,   out, tok, rest, before, after, after2) {
       out = ""; rest = w
       while (match(rest, /[A-Za-z0-9+\/=%_-]+/)) {
         tok = substr(rest, RSTART, RLENGTH)
         before = (RSTART > 1) ? substr(rest, RSTART - 1, 1) : ""
         after = substr(rest, RSTART + RLENGTH, 1)
+        after2 = substr(rest, RSTART + RLENGTH + 1, 1)
         if ((length(tok) >= 40 && tok ~ /[+\/=%]/) || length(tok) >= 80) tok = "****"
-        else if (before != "." && after != "." && isalnum40(tok)) tok = "****"
+        else if (before != "." && !(after == "." && after2 ~ /[A-Za-z0-9]/) && isalnum40(tok)) tok = "****"
         out = out substr(rest, 1, RSTART - 1) tok
         rest = substr(rest, RSTART + RLENGTH)
       }
       return out rest
+    }
+    function maskquery(q,   n, parts, i, eq, val, out) {   # & 로 나눠 값이 hex 64자 이상이면 가리고(서명 모양) 나머지는 maskplain
+      n = split(q, parts, "&"); out = ""
+      for (i = 1; i <= n; i++) {
+        eq = index(parts[i], "="); val = (eq > 0) ? substr(parts[i], eq + 1) : ""
+        if (eq > 0 && length(val) >= 64 && val ~ /^[0-9A-Fa-f]+$/) parts[i] = substr(parts[i], 1, eq) "****"
+        else parts[i] = maskplain(parts[i])
+        out = out (i > 1 ? "&" : "") parts[i]
+      }
+      return out
     }
     function maskword(w,   q) {
       if (index(w, "arn:aws")) return w
       if (index(w, "://")) {   # URL: 경로는 이름이라 건너뛰고 쿼리 값만 검사한다
         q = index(w, "?")
         if (q == 0) return w
-        return substr(w, 1, q) maskplain(substr(w, q + 1))
+        return substr(w, 1, q) maskquery(substr(w, q + 1))
       }
       return maskplain(w)
     }
@@ -278,7 +291,9 @@ rh_json_array() {
 rh_run_alarms() {
   local q="$1" js cand name arn tags pc
   RH_ALARMS=()
-  js="$(aws_r cloudwatch describe-alarms)" || return 1
+  js="$(aws_r cloudwatch describe-alarms)" || js="$(aws_r cloudwatch describe-alarms)" || return 1   # 일시 오류는 한 번 다시 시도한다
+  # 아래 파이프라인은 파일 맨 위의 set -o pipefail 에 기대어 python 이 실패하면 cand 대입도 실패시켜 return 1 이 되게 한다.
+  # pipefail 이 꺼지면 python 실패가 빈 cand("알람 없음")로 보여 fail-open 이 되므로 그 설정을 지우지 말 것.
   cand="$(printf '%s' "$js" | "$RH_PY" -c '
 import json, sys
 q = sys.argv[1]
