@@ -4,12 +4,12 @@
  * with the same result.
  */
 import { createHash } from 'node:crypto';
-import { incidentMute, type DigestData, type PurgeLogEntry, type Contact, type Leave, type Override, type Rotation, type AuditInput, type DeliveryLog, type IncidentEventInput, type IncidentRow, type MaintenanceWindow, type PagingConfig } from '@alarmops/core';
-import { nodeVisible, type ApiRepository, type ManagedAlarmFilter, type ManagedAlarmRecord, type MonitoringCursor, type MonitoringPage, type ResourceFilter, type ResourceRecord, type AlertMemberRow, type IdempotentEntry, type IncidentFilter, type IncidentPage, type NodeFilter, type NotifiedPerson, type OpenCounts, type OrgTree, type ScopeFilter, type StatusCounts, type UndoRecord, type UserInfo, type Principal, type ResponderOp, type ResponderWriteOutcome, type RespondersState, type RotationsWorld, type ChangeStatusOutcome, type CustomerStatusState, type CustomerStatusValue, type ExportIncidentRow, type RetentionView, type MarkStepOutcome, type OffboardStep, type OffboardStepKey, type OffboardingState, type RevealLogFilter, type RevealLogRow, type RevealWrite, type RevealWriteOutcome, type AccountPatch, type AccountWriteOutcome, type AuditTemplate, type CloudAccountRecord, type ContactPatch, type ContactScopeInfo, type ContactWriteOutcome, type ContactsWorld, type NewAccount, type NewContact, type VerificationIssue, type VerificationLimits, type IssueOutcome, type VerificationLink, type VerificationTaken, type VerifyChannelValue, type CustomerProfile, type CustomerProfilePatch, type CustomerUpdateOutcome, type OrgWriteOutcome, type ProjectRecord, type ServiceRecord, type BindGoogleOutcome, type EnrolOutcome, type NewUser, type UserFilter, type UserPatch, type UserRecord, type UserWriteOutcome, OFFBOARD_STEP_KEYS, normalizeEmail, emailDomain, isFreeMail, planTemplateChange, planTemplateAttach, templateBlocking, attachBlocking, type ResponderTemplateView, type TemplateCreate, type TemplateImpactInput, type TemplateUpdate, type TemplateUpdateOutcome, type TemplateAttachInput, type TemplateAttachOutcome, type TemplateAttachWrite, type TemplateRef, type TemplatePaging } from '@alarmops/api';
-import { PG, isBusyError, pgCode, type SqlExecutor } from './client.js';
+import { handoverOf, incidentMute, type DigestData, type PurgeLogEntry, type Contact, type Leave, type Override, type Rotation, type AuditInput, type DeliveryLog, type IncidentEventInput, type IncidentRow, type MaintenanceWindow, type PagingConfig } from '@alarmops/core';
+import { nodeVisible, type ApiRepository, type ManagedAlarmFilter, type ManagedAlarmRecord, type MonitoringCursor, type MonitoringPage, type ResourceFilter, type ResourceRecord, type AlertMemberRow, type IdempotentEntry, type IncidentFilter, type IncidentPage, type NodeFilter, type NotifiedPerson, type OpenCounts, type OrgTree, type ScopeFilter, type StatusCounts, type UndoRecord, type UserInfo, type Principal, type ResponderOp, type ResponderWriteOutcome, type RespondersState, type RotationsWorld, type ChangeStatusOutcome, type CustomerStatusState, type CustomerStatusValue, type ExportIncidentRow, type RetentionView, type MarkStepOutcome, type OffboardStep, type OffboardStepKey, type OffboardingState, type RevealLogFilter, type RevealLogRow, type RevealWrite, type RevealWriteOutcome, type AccountPatch, type AccountWriteOutcome, type AuditTemplate, type CloudAccountRecord, type ContactPatch, type ContactScopeInfo, type ContactWriteOutcome, type ContactsWorld, type NewAccount, type NewContact, type VerificationIssue, type VerificationLimits, type IssueOutcome, type VerificationLink, type VerificationTaken, type VerifyChannelValue, type CustomerProfile, type CustomerProfilePatch, type CustomerUpdateOutcome, type OrgWriteOutcome, type ProjectRecord, type ServiceRecord, type BindGoogleOutcome, type EnrolOutcome, type NewUser, type UserFilter, type UserPatch, type UserRecord, type UserWriteOutcome, OFFBOARD_STEP_KEYS, normalizeEmail, emailDomain, isFreeMail, planTemplateChange, planTemplateAttach, templateBlocking, attachBlocking, type ResponderTemplateView, type TemplateCreate, type TemplateImpactInput, type TemplateUpdate, type TemplateUpdateOutcome, type TemplateAttachInput, type TemplateAttachOutcome, type TemplateAttachWrite, type TemplateRef, type TemplatePaging, evaluateRotationChange, seesCustomer, type RotationState, type RotationUsageRow, type NewRotation, type RotationCreateOutcome, type RotationUpdate, type RotationUpdateOutcome, type RotationDeleteOutcome } from '@alarmops/api';
+import { PG, ROTATION_RACE_FKS, isBusyError, pgCode, type SqlExecutor } from './client.js';
 import { purgeLogOf } from './retentionSql.js';
 import { CONTACT_COLS, toContact, Params, d, dReq, incidentCols, iso, js, newId, num, toEvent, toIncident, toLog } from './rows.js';
-import { SqlTickStore, insertAudit, toWindow } from './tickRepo.js';
+import { SqlTickStore, insertAudit, loadPins, toWindow } from './tickRepo.js';
 import * as monitoring from './monitoringSql.js';
 
 class Abort<T> { constructor(readonly value: T) {} }
@@ -279,7 +279,7 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
 
   // ───────────────────────────── paging ─────────────────────────────
 
-  async savePagingConfig(cfg: PagingConfig, expectedVersion: number | null, audit: AuditInput): Promise<PagingConfig | 'CONFLICT'> {
+  async savePagingConfig(cfg: PagingConfig, expectedVersion: number | null, audit: AuditInput): Promise<PagingConfig | 'CONFLICT' | { unknownRotation: number }> {
     // R-6: a write without a customer is refused before any SQL runs (a call order always belongs to one customer).
     if (typeof cfg.customerId !== 'string' || !cfg.customerId || audit.customerId !== cfg.customerId) throw new Error('savePagingConfig: customerId is required and must be the audited customer');
     try {
@@ -288,6 +288,14 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
         // A row of the same scope under another customer is "not there" for this caller and blocks the insert.
         const mine = cur && cur.customerId === cfg.customerId ? cur : null;
         if (expectedVersion === null ? !!cur : !mine || mine.version !== expectedVersion) return 'CONFLICT' as const;
+        // D-28: a rotation the steps name must still exist. FOR SHARE in id order: a DELETE /rotations/{id} (FOR UPDATE) either ran first (the rotation is gone: refused
+        // here) or waits for this save to commit (and then finds the step: IN_USE). So no step is left pointing at a missing rotation.
+        const rids = [...new Set(cfg.steps.filter((st) => st.targetType === 'ROTATION' && st.targetId).map((st) => st.targetId as string))].sort();
+        if (rids.length) {
+          const found = new Set((await tx.query(`SELECT "id" FROM "Rotation" WHERE "id" = ANY($1::text[]) ORDER BY "id" FOR SHARE`, [rids])).map((r) => r.id as string));
+          const gone = cfg.steps.findIndex((st) => st.targetType === 'ROTATION' && (!st.targetId || !found.has(st.targetId)));
+          if (gone >= 0) throw new Abort({ unknownRotation: gone });
+        }
         let id = cfg.id;
         let version: number;
         if (mine) {
@@ -312,7 +320,7 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
         return { ...structuredClone(cfg), id, version };
       });
     } catch (err) {
-      if (err instanceof Abort) return err.value as 'CONFLICT';
+      if (err instanceof Abort) return err.value as 'CONFLICT' | { unknownRotation: number };
       if (pgCode(err) === PG.UNIQUE) return 'CONFLICT'; // two creates of the same scope at once
       throw err;
     }
@@ -944,19 +952,184 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
     }
   }
 
+  // ───────────────────────────── rotations (D-28, D-41) ─────────────────────────────
+
+  /** One rotation with members (in order), pins, Override rows, the Leaves of the people involved, their contacts and the customers whose steps name it. */
+  private async rotationStateVia(q: SqlExecutor, rotationId: string, extra: string[] = []): Promise<RotationState | null> {
+    const [r] = await q.query(
+      `SELECT r."id", r."scope", r."customerId", r."name", r."cadence", r."anchorAt", r."version",
+              COALESCE((SELECT jsonb_agg(jsonb_build_object('contactId', m."contactId", 'order', m."order") ORDER BY m."order", m."contactId")
+                          FROM "RotationMember" m WHERE m."rotationId" = r."id"), '[]'::jsonb) AS "members"
+         FROM "Rotation" r WHERE r."id" = $1`, [rotationId]);
+    if (!r) return null;
+    const pins = (await loadPins(q, [rotationId])).get(rotationId) ?? [];
+    const ovRows = await q.query(`SELECT "rotationId", "contactId", "startAt", "endAt", "status", "kind" FROM "Override" WHERE "rotationId" = $1 ORDER BY "startAt", "id"`, [rotationId]);
+    const overrides: Override[] = ovRows.map((o) => ({ rotationId: o.rotationId, contactId: o.contactId, startAt: dReq(o.startAt), endAt: dReq(o.endAt), status: o.status, kind: o.kind ?? null }));
+    const rotation: Rotation = { id: r.id, scope: r.scope, customerId: r.customerId ?? null, name: r.name, cadence: r.cadence, anchorAt: dReq(r.anchorAt), members: r.members, pins, version: Number(r.version) };
+    const people = [...new Set([...rotation.members.map((m) => m.contactId), ...pins.map((p) => p.contactId), ...overrides.map((o) => o.contactId), ...extra])];
+    const lvRows = people.length ? await q.query(`SELECT "contactId", "replacementId", to_char("startDate", 'YYYY-MM-DD') AS "startDate", to_char("endDate", 'YYYY-MM-DD') AS "endDate", "cancelledAt" FROM "Leave" WHERE "contactId" = ANY($1::text[]) ORDER BY "startDate", "id"`, [people]) : [];
+    const leaves: Leave[] = lvRows.map((l) => ({ contactId: l.contactId, replacementId: l.replacementId, startDate: l.startDate, endDate: l.endDate, cancelledAt: d(l.cancelledAt) }));
+    const cids = [...new Set([...people, ...leaves.map((l) => l.replacementId)])];
+    const cRows = cids.length ? await q.query(`SELECT ${CONTACT_COLS} FROM "Contact" WHERE "id" = ANY($1::text[])`, [cids]) : [];
+    const customers = (await q.query(
+      `SELECT DISTINCT c."id", c."name" FROM "EscalationStep" es JOIN "PagingConfig" pc ON pc."id" = es."pagingConfigId" JOIN "Customer" c ON c."id" = pc."customerId"
+        WHERE es."targetType" = 'ROTATION' AND es."targetId" = $1 AND c."status" <> 'TERMINATED' ORDER BY c."name", c."id"`, [rotationId])).map((c) => ({ id: c.id as string, name: c.name as string }));
+    return { rotation, rotations: [rotation], overrides, leaves, contacts: new Map(cRows.map((c) => [c.id as string, toContact(c)])), customers };
+  }
+  async rotationState(rotationId: string, extraContactIds: string[] = []): Promise<RotationState | null> {
+    return this.sql.transaction((tx) => this.rotationStateVia(tx, rotationId, extraContactIds));
+  }
+
+  private async usageVia(q: SqlExecutor, rotationId: string, scope: ScopeFilter | null): Promise<RotationUsageRow[]> {
+    const all = scope === null || scope.customerIds === '*';
+    const ids = scope === null || scope.customerIds === '*' ? [] : [...scope.customerIds];
+    const rows = await q.query(
+      `SELECT c."id" AS "customerId", c."name" AS "customerName", c."slug" AS "customerSlug", c."status"::text AS "customerStatus", pc."id" AS "pagingConfigId",
+              pc."scopeType"::text AS "level", pc."scopeId", es."index",
+              CASE pc."scopeType"::text WHEN 'CUSTOMER' THEN c."name" WHEN 'PROJECT' THEN p."name" ELSE s."name" END AS "scopeName",
+              CASE pc."scopeType"::text WHEN 'PROJECT' THEN p."id" WHEN 'SERVICE' THEN s."projectId" END AS "projectId", s."id" AS "serviceId"
+         FROM "EscalationStep" es JOIN "PagingConfig" pc ON pc."id" = es."pagingConfigId" JOIN "Customer" c ON c."id" = pc."customerId"
+         LEFT JOIN "Project" p ON pc."scopeType"::text = 'PROJECT' AND p."id" = pc."scopeId" AND p."customerId" = pc."customerId"
+         LEFT JOIN "Service" s ON pc."scopeType"::text = 'SERVICE' AND s."id" = pc."scopeId" AND s."customerId" = pc."customerId"
+        WHERE es."targetType" = 'ROTATION' AND es."targetId" = $1 AND ($2::boolean OR c."id" = ANY($3::text[]))
+        ORDER BY c."name", c."id", pc."id", es."index"`, [rotationId, all, ids]);
+    let out: RotationUsageRow[] = rows.map((r) => ({
+      customerId: r.customerId, customerName: r.customerName, customerSlug: r.customerSlug, customerStatus: r.customerStatus as CustomerStatusValue,
+      level: r.level, scopeId: r.scopeId, scopeName: r.scopeName ?? r.scopeId, projectId: r.projectId ?? null, serviceId: r.serviceId ?? null, pagingConfigId: r.pagingConfigId, stepIndex: Number(r.index) + 1,
+    }));
+    if (scope !== null) {
+      const projectOf = new Map(out.filter((o) => o.serviceId).map((o) => [o.serviceId as string, o.projectId as string]));
+      // staff narrowed by sub-scopes only (customers '*') see the customers they have a sub-scope in, and nothing of the others
+      out = out.filter((o) => seesCustomer(scope, o.customerId) && (scope.customerIds !== '*' || scope.subScopes.length === 0 || scope.subScopes.some((x) => x.customerId === o.customerId))
+        && nodeVisible(scope, { customerId: o.customerId, ...(o.projectId ? { projectId: o.projectId } : {}), ...(o.serviceId ? { serviceId: o.serviceId } : {}) }, (sid) => projectOf.get(sid)));
+    }
+    return out;
+  }
+  async rotationUsage(rotationId: string, scope: ScopeFilter): Promise<RotationUsageRow[]> { return this.usageVia(this.sql, rotationId, scope); }
+
+  /** Active INTERNAL staff, or (customerId given) active PAGEABLE Responders of that customer. `lock`: FOR SHARE, so a concurrent contact delete waits. */
+  private async membersOkVia(q: SqlExecutor, customerId: string | null, ids: string[], lock: boolean): Promise<boolean> {
+    if (!ids.length) return false;
+    const rows = await q.query(
+      `SELECT c."id" FROM "Contact" c WHERE c."id" = ANY($1::text[]) AND c."active"
+          AND (c."kind" = 'INTERNAL' OR ($2::text IS NOT NULL AND c."customerId" = $2 AND EXISTS (SELECT 1 FROM "Responder" r WHERE r."customerId" = $2 AND r."contactId" = c."id" AND r."role" = 'PAGEABLE')))
+        ${lock ? 'ORDER BY c."id" FOR SHARE OF c' : ''}`, [ids, customerId]);
+    return rows.length === new Set(ids).size;
+  }
+  async rotationMembersOk(customerId: string | null, ids: string[]): Promise<boolean> { return this.membersOkVia(this.sql, customerId, ids, false); }
+
+  async createRotation(n: NewRotation, audit: AuditTemplate): Promise<RotationCreateOutcome> {
+    try {
+      return await this.sql.transaction(async (tx): Promise<RotationCreateOutcome> => {
+        if (n.customerId !== null) {
+          const [c] = await tx.query(`SELECT "status" FROM "Customer" WHERE "id" = $1 FOR SHARE`, [n.customerId]);
+          if (c?.status === 'TERMINATED') return 'CUSTOMER_TERMINATED';
+        }
+        if (!(await this.membersOkVia(tx, n.customerId, n.members, true))) return 'BAD_MEMBER';
+        const id = newId('rot');
+        const h = handoverOf(n.cadence, n.anchorAt);
+        await tx.query(
+          `INSERT INTO "Rotation"("id", "scope", "customerId", "name", "cadence", "handoverDow", "handoverMin", "anchorAt", "version")
+           VALUES ($1, $2::"RotationScope", $3, $4, $5::"Cadence", $6, $7, $8::timestamptz, 0)`,
+          [id, n.scope, n.customerId, n.name, n.cadence, h.dow ?? new Date(n.anchorAt.getTime() + 9 * 3600_000).getUTCDay(), h.minute, iso(n.anchorAt)]);
+        for (const [order, contactId] of n.members.entries()) await tx.query(`INSERT INTO "RotationMember"("rotationId", "contactId", "order") VALUES ($1, $2, $3)`, [id, contactId, order]);
+        await insertAudit(tx, { ...audit, customerId: n.customerId, targetId: id });
+        return { id };
+      });
+    } catch (err) {
+      if (pgCode(err) === PG.UNIQUE) return 'NAME_EXISTS';
+      if (isBusyError(err, ROTATION_RACE_FKS)) return 'BUSY';
+      throw err;
+    }
+  }
+
+  async updateRotation(u: RotationUpdate, audit: AuditTemplate): Promise<RotationUpdateOutcome> {
+    try {
+      return await this.sql.transaction(async (tx): Promise<RotationUpdateOutcome> => {
+        const [cur] = await tx.query(`SELECT "customerId", "scope", "version" FROM "Rotation" WHERE "id" = $1 FOR UPDATE`, [u.id]);
+        if (!cur) return 'NOT_FOUND';
+        if (Number(cur.version) !== u.expectedVersion) return 'CONFLICT';
+        const customerId = (cur.customerId ?? null) as string | null;
+        const [taken] = await tx.query(`SELECT 1 AS "x" FROM "Rotation" WHERE "customerId" IS NOT DISTINCT FROM $1 AND "name" = $2 AND "id" <> $3`, [customerId, u.name, u.id]);
+        if (taken) return 'NAME_EXISTS';
+        const state = (await this.rotationStateVia(tx, u.id, u.members ?? []))!;
+        const have = new Set(state.rotation.members.map((m) => m.contactId));
+        const added = (u.members ?? []).filter((id) => !have.has(id));
+        if (added.length && !(await this.membersOkVia(tx, customerId, added, true))) return 'BAD_MEMBER';
+        const ev = evaluateRotationChange(state, { name: u.name, members: u.members, handover: u.handover }, u.at);
+        if (!ev.scheduleChanged && !ev.nameChanged) return 'NOOP';
+        if (ev.scheduleChanged && u.previewHash !== null && ev.previewHash !== u.previewHash) return 'STALE';
+        const r = state.rotation;
+        const pinJson = (pins: ReadonlyArray<{ contactId: string; startAt: Date; endAt: Date; reason?: string | null }>) =>
+          pins.map((p) => ({ contactId: p.contactId, startAt: p.startAt.toISOString(), endAt: p.endAt.toISOString(), reason: p.reason ?? null }));
+        const before = { name: r.name, memberIds: r.members.map((m) => m.contactId), handover: handoverOf(r.cadence, r.anchorAt), anchorAt: r.anchorAt.toISOString(), pins: pinJson(r.pins ?? []) };
+        let anchorAt = r.anchorAt;
+        let memberIds = before.memberIds;
+        let pins: ReadonlyArray<{ contactId: string; startAt: Date; endAt: Date; reason?: string | null }> = r.pins ?? [];
+        if (ev.scheduleChanged) {
+          anchorAt = ev.plan.anchorAt; pins = ev.plan.pins;
+          const h = handoverOf(r.cadence, anchorAt);
+          await tx.query(`UPDATE "Rotation" SET "name" = $2, "anchorAt" = $3::timestamptz, "handoverMin" = $4, "handoverDow" = $5, "version" = "version" + 1 WHERE "id" = $1`,
+            [u.id, u.name, iso(anchorAt), h.minute, h.dow ?? new Date(anchorAt.getTime() + 9 * 3600_000).getUTCDay()]);
+          if (ev.membersChanged) {
+            memberIds = ev.members;
+            await tx.query(`DELETE FROM "RotationMember" WHERE "rotationId" = $1`, [u.id]);
+            for (const [order, contactId] of ev.members.entries()) await tx.query(`INSERT INTO "RotationMember"("rotationId", "contactId", "order") VALUES ($1, $2, $3)`, [u.id, contactId, order]);
+          }
+          await tx.query(`DELETE FROM "RotationPin" WHERE "rotationId" = $1`, [u.id]);
+          for (const p of ev.plan.pins) await tx.query(`INSERT INTO "RotationPin"("id", "rotationId", "contactId", "startAt", "endAt", "reason") VALUES ($1, $2, $3, $4::timestamptz, $5::timestamptz, $6)`, [newId('pin'), u.id, p.contactId, iso(p.startAt), iso(p.endAt), p.reason]);
+        } else {
+          await tx.query(`UPDATE "Rotation" SET "name" = $2, "version" = "version" + 1 WHERE "id" = $1`, [u.id, u.name]);
+        }
+        const version = Number(cur.version) + 1;
+        await insertAudit(tx, { ...audit, customerId, targetId: u.id, before, after: { name: u.name, memberIds, handover: handoverOf(r.cadence, anchorAt), anchorAt: anchorAt.toISOString(), pins: pinJson(pins), version } });
+        if (ev.scheduleChanged && cur.scope === 'MSP' && ev.plan.changedRows > 0) {
+          for (const c of state.customers) await insertAudit(tx, { ...audit, customerId: c.id, action: 'rotation.apply', targetId: u.id, before: null, after: { rotationId: u.id, changedRows: ev.plan.changedRows, pins: ev.plan.pins.length } });
+        }
+        return { affected: ev.scheduleChanged ? state.customers.length : 0 };
+      });
+    } catch (err) {
+      if (pgCode(err) === PG.UNIQUE) return 'NAME_EXISTS';
+      if (isBusyError(err, ROTATION_RACE_FKS)) return 'BUSY';
+      throw err;
+    }
+  }
+
+  async deleteRotation(rotationId: string, expectedVersion: number, audit: AuditTemplate): Promise<RotationDeleteOutcome> {
+    try {
+      return await this.sql.transaction(async (tx): Promise<RotationDeleteOutcome> => {
+        const [cur] = await tx.query(`SELECT "customerId", "name", "scope", "version" FROM "Rotation" WHERE "id" = $1 FOR UPDATE`, [rotationId]);
+        if (!cur) return 'NOT_FOUND';
+        if (Number(cur.version) !== expectedVersion) return 'CONFLICT';
+        // every customer counts, terminated ones too; PUT paging holds FOR SHARE on this row while it saves, so a step it adds is seen here
+        const usage = await this.usageVia(tx, rotationId, null);
+        if (usage.length) return { inUse: usage };
+        const [cnt] = await tx.query(`SELECT count(*)::int AS "n" FROM "Override" WHERE "rotationId" = $1`, [rotationId]);
+        const memberIds = (await tx.query(`SELECT "contactId" FROM "RotationMember" WHERE "rotationId" = $1 ORDER BY "order", "contactId"`, [rotationId])).map((m) => m.contactId as string);
+        await tx.query(`DELETE FROM "Rotation" WHERE "id" = $1`, [rotationId]);
+        await insertAudit(tx, { ...audit, customerId: (cur.customerId ?? null) as string | null, targetId: rotationId, before: { name: cur.name, scope: cur.scope, memberIds, overrides: Number(cnt?.n ?? 0) }, after: null });
+        return 'OK';
+      });
+    } catch (err) {
+      if (isBusyError(err, ROTATION_RACE_FKS)) return 'BUSY';
+      throw err;
+    }
+  }
+
   async rotationsWorld(scope: ScopeFilter): Promise<RotationsWorld> {
     const all = scope.customerIds === '*';
     const ids = all ? [] : [...scope.customerIds];
     const rows = await this.sql.query(
-      `SELECT r."id", r."scope", r."customerId", r."name", r."cadence", r."anchorAt",
+      `SELECT r."id", r."scope", r."customerId", r."name", r."cadence", r."anchorAt", r."version",
               COALESCE((SELECT jsonb_agg(jsonb_build_object('contactId', m."contactId", 'order', m."order") ORDER BY m."order", m."contactId")
                           FROM "RotationMember" m WHERE m."rotationId" = r."id"), '[]'::jsonb) AS "members"
          FROM "Rotation" r WHERE r."scope" = 'MSP' OR (r."customerId" IS NOT NULL AND ($1::boolean OR r."customerId" = ANY($2::text[]))) ORDER BY r."name", r."id"`, [all, ids]);
-    const rotations: Rotation[] = rows.map((r) => ({ id: r.id, scope: r.scope, customerId: r.customerId ?? null, name: r.name, cadence: r.cadence, anchorAt: dReq(r.anchorAt), members: r.members }));
+    const pinsOf = await loadPins(this.sql, rows.map((r) => r.id as string));
+    const rotations: Rotation[] = rows.map((r) => ({ id: r.id, scope: r.scope, customerId: r.customerId ?? null, name: r.name, cadence: r.cadence, anchorAt: dReq(r.anchorAt), members: r.members, version: Number(r.version), pins: pinsOf.get(r.id as string) ?? [] }));
     const rids = rotations.map((r) => r.id);
     const ovRows = rids.length ? await this.sql.query(`SELECT "rotationId", "contactId", "startAt", "endAt", "status" FROM "Override" WHERE "rotationId" = ANY($1::text[]) ORDER BY "startAt", "id"`, [rids]) : [];
     const overrides: Override[] = ovRows.map((r) => ({ rotationId: r.rotationId, contactId: r.contactId, startAt: dReq(r.startAt), endAt: dReq(r.endAt), status: r.status }));
-    const people = [...new Set([...rotations.flatMap((r) => r.members.map((m) => m.contactId)), ...overrides.map((o) => o.contactId)])];
+    const people = [...new Set([...rotations.flatMap((r) => [...r.members.map((m) => m.contactId), ...(r.pins ?? []).map((p) => p.contactId)]), ...overrides.map((o) => o.contactId)])];
     const lvRows = people.length ? await this.sql.query(`SELECT "contactId", "replacementId", to_char("startDate", 'YYYY-MM-DD') AS "startDate", to_char("endDate", 'YYYY-MM-DD') AS "endDate", "cancelledAt" FROM "Leave" WHERE "contactId" = ANY($1::text[]) ORDER BY "startDate", "id"`, [people]) : [];
     const leaves: Leave[] = lvRows.map((r) => ({ contactId: r.contactId, replacementId: r.replacementId, startDate: r.startDate, endDate: r.endDate, cancelledAt: d(r.cancelledAt) }));
     const cids = [...new Set([...people, ...leaves.map((l) => l.replacementId)])];
@@ -1387,9 +1560,12 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
       const [used] = await tx.query(
         `SELECT ($2::text IS NOT NULL OR EXISTS (SELECT 1 FROM "Responder" WHERE "contactId" = $1) OR EXISTS (SELECT 1 FROM "RotationMember" WHERE "contactId" = $1)
             OR EXISTS (SELECT 1 FROM "ResponderTemplateMember" WHERE "contactId" = $1) OR EXISTS (SELECT 1 FROM "EscalationStep" WHERE "targetType" = 'PERSON' AND "targetId" = $1)
-            OR EXISTS (SELECT 1 FROM "Leave" WHERE "contactId" = $1 OR "replacementId" = $1) OR EXISTS (SELECT 1 FROM "Override" WHERE "contactId" = $1)) AS "used"`,
-        [contactId, cur.userId ?? null]);
+            OR EXISTS (SELECT 1 FROM "Leave" WHERE "contactId" = $1 OR "replacementId" = $1) OR EXISTS (SELECT 1 FROM "Override" WHERE "contactId" = $1)
+            OR EXISTS (SELECT 1 FROM "RotationPin" WHERE "contactId" = $1 AND "endAt" > $3::timestamptz)) AS "used"`,
+        [contactId, cur.userId ?? null, iso(audit.at)]);
       if (used?.used) return 'IN_USE' as const;
+      // a running or future pin is why somebody is (or will be) on shift: IN_USE above. Only past ones are left; RotationPin.contactId is RESTRICT.
+      await tx.query(`DELETE FROM "RotationPin" WHERE "contactId" = $1`, [contactId]);
       await tx.query(`DELETE FROM "Contact" WHERE "id" = $1 AND "customerId" IS NOT DISTINCT FROM $2`, [contactId, customerId]);
       await insertAudit(tx, { ...audit, customerId, targetId: contactId });
       return 'OK' as const;

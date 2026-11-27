@@ -20,6 +20,7 @@ import { createProject, createService, getCustomer, listCustomers, listProjects,
 import { getResource, listManagedAlarms, listResources, postMonitoring } from './monitoringApi.js';
 import { createUser, getUser, listUsers, patchUser } from './usersApi.js';
 import { createTemplate, listTemplates, patchTemplate, previewCustomerTemplate, previewTemplate, putCustomerTemplate } from './templatesApi.js';
+import { createRotation, deleteRotation, getRotationShifts, getRotationUsage, patchRotation, previewRotation } from './rotationsApi.js';
 import { deleteResponder, getMe, getOncallNow, getPagingHealth, getResponders, listRotations, listStaff, patchResponder, postResponder } from './peopleApi.js';
 
 export interface ApiDeps {
@@ -102,6 +103,13 @@ export const ROUTES: Route[] = [
   // A preview changes nothing: running it again IS the replay, so its body is not kept.
   route('POST', '/responder-templates/:id/preview', (r, d, p) => previewTemplate(r, d, p[0]!), () => false),
   route('GET', '/rotations', (r, d) => listRotations(r, d)),
+  route('POST', '/rotations', (r, d) => createRotation(r, d)),
+  route('GET', '/rotations/:id/shifts', (r, d, p) => getRotationShifts(r, d, p[0]!)),
+  route('GET', '/rotations/:id/usage', (r, d, p) => getRotationUsage(r, d, p[0]!)),
+  // A preview changes nothing: running it again IS the replay, so its body is not kept.
+  route('POST', '/rotations/:id/preview', (r, d, p) => previewRotation(r, d, p[0]!), () => false),
+  route('PATCH', '/rotations/:id', (r, d, p) => patchRotation(r, d, p[0]!)),
+  route('DELETE', '/rotations/:id', (r, d, p) => deleteRotation(r, d, p[0]!)),
   route('GET', '/staff', (r, d) => listStaff(r, d)),
   // D-35. The reveal response carries a contact value: never stored for replay (security review SQL R-7), a second call runs and is logged again.
   route('POST', '/contacts/:id/reveal', (r, d, p) => revealContact(r, d, p[0]!), () => false),

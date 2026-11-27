@@ -19,6 +19,7 @@ import type {
 /** `status` (D-42, D-43): absent = ACTIVE. Read by the session lookup, by ingest and by the tick. */
 /** `legalHold` (D-45): present = held. */
 export interface OrgCustomer { id: string; name: string; slug: string; status?: CustomerStatus; statusChangedAt?: Date | null; legalHold?: { at: Date; byUserId: string; reason: string } | null }
+export interface RotationPinRow { id: string; rotationId: string; contactId: string; startAt: Date; endAt: Date; reason?: string | null }
 export interface OrgProject { id: string; customerId: string; name: string; slug: string }
 export interface OrgService { id: string; customerId: string; projectId: string; name: string; slug: string }
 /** `externalId`/`roleArns`/`disabled`/`purgedAt` (D-45): the connection data the retention job empties; the row itself stays. */
@@ -43,6 +44,8 @@ export class MemoryTickStore implements TickRepository, RetentionRepository {
   contacts = new Map<string, Contact>();
   responders: Responder[] = [];
   rotations = new Map<string, Rotation>();
+  /** RotationPin rows (D-28). `worldOf` hands them to the rotations as `pins`. */
+  rotationPins: RotationPinRow[] = [];
   overrides: Override[] = [];
   leaves: Leave[] = [];
   configs: PagingConfig[] = [];
@@ -159,6 +162,10 @@ export class MemoryTickStore implements TickRepository, RetentionRepository {
         if (g.customerId !== customerId) continue;
         bump('Alert', this.members.get(gid)?.length ?? 0); this.members.delete(gid); this.groups.delete(gid); bump('AlertGroup', 1);
       }
+      // RotationPin.contactId is ON DELETE RESTRICT: the pins of the customer's people (past and future) go first, in the same stage
+      const pinsBefore = this.rotationPins.length;
+      this.rotationPins = this.rotationPins.filter((pin) => { const c = this.contacts.get(pin.contactId); return !(c && c.kind === 'CUSTOMER' && c.customerId === customerId); });
+      bump('RotationPin', pinsBefore - this.rotationPins.length);
       for (const [id, c] of this.contacts) if (c.kind === 'CUSTOMER' && c.customerId === customerId) { this.contacts.delete(id); bump('Contact', 1); }
       const gone = new Set([...this.responders].filter((r) => r.customerId === customerId && !this.contacts.has(r.contactId)).map((r) => r.contactId));
       this.responders = this.responders.filter((r) => !(r.customerId === customerId && gone.has(r.contactId)));
@@ -235,7 +242,7 @@ export class MemoryTickStore implements TickRepository, RetentionRepository {
   configsOf(customerId: string): PagingConfig[] { return structuredClone(this.configs.filter((c) => c.customerId === customerId)); }
   /** Only this customer's people, responders and rotations (plus INTERNAL staff and shared MSP rotations). */
   worldOf(customerId: string): PagingWorld {
-    const rotations = new Map([...this.rotations].filter(([, r]) => r.scope === 'MSP' || r.customerId === customerId));
+    const rotations = new Map([...this.rotations].filter(([, r]) => r.scope === 'MSP' || r.customerId === customerId).map(([id, r]) => [id, this.withPins(r)] as const));
     return {
       customerId,
       contacts: new Map([...this.contacts].filter(([, c]) => c.kind === 'INTERNAL' || c.customerId === customerId)),
@@ -244,6 +251,11 @@ export class MemoryTickStore implements TickRepository, RetentionRepository {
       overrides: this.overrides.filter((o) => rotations.has(o.rotationId)),
       leaves: this.leaves,
     };
+  }
+
+  /** A copy of the rotation with its pins (`Rotation.pins`), the way every loader hands rotations to core. */
+  protected withPins(r: Rotation): Rotation {
+    return { ...r, pins: this.rotationPins.filter((p) => p.rotationId === r.id).map((p) => ({ contactId: p.contactId, startAt: p.startAt, endAt: p.endAt, reason: p.reason ?? null })) };
   }
 
   async commitGroupDelivery(c: GroupDeliveryCommit) {

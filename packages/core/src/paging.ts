@@ -62,8 +62,13 @@ export interface Rotation {
   cadence: 'DAILY' | 'WEEKLY';
   anchorAt: Date; // start of the shift held by members[0]
   members: Array<{ contactId: string; order: number }>;
+  /** RotationPin rows (D-28): a person who holds a stretch of time whatever the schedule says. Loaded by every store that loads rotations. */
+  pins?: RotationPinLike[];
+  /** Rotation.version (If-Match of PATCH/DELETE /rotations/{id}); absent in a world that was built without it. */
+  version?: number;
 }
-export interface Override { rotationId: string; contactId: string; startAt: Date; endAt: Date; status: 'PENDING' | 'ACCEPTED' | 'DECLINED' | 'CANCELLED' }
+export interface RotationPinLike { contactId: string; startAt: Date; endAt: Date; reason?: string | null }
+export interface Override { rotationId: string; contactId: string; startAt: Date; endAt: Date; status: 'PENDING' | 'ACCEPTED' | 'DECLINED' | 'CANCELLED'; kind?: string | null }
 export interface Leave { contactId: string; replacementId: string; startDate: string; endDate: string; cancelledAt?: Date | null } // KST yyyy-mm-dd inclusive
 
 export interface PagingWorld {
@@ -130,10 +135,19 @@ export function shiftAt(r: Rotation, at: Date): ShiftInfo {
 export const orderKey = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : Infinity);
 const cmpOrder = (a: unknown, b: unknown): number => { const x = orderKey(a); const y = orderKey(b); return x < y ? -1 : x > y ? 1 : 0; };
 
-/** On-call = members[shift mod N] → accepted override (latest start wins, R2-3) → active leave (DATA-MODEL §5). */
+/** The pin that covers `at` (D-28), the first one in the given order when pins overlap. */
+export const pinAt = (pins: readonly RotationPinLike[] | undefined, at: Date): RotationPinLike | undefined =>
+  pins?.find((p) => p.startAt.getTime() <= at.getTime() && at.getTime() < p.endAt.getTime());
+
+/** The base timetable B(t): the pin that covers `t`, else members[shift mod N] (no Override, no Leave). */
+export function scheduledAt(r: Rotation, at: Date): string | null {
+  return pinAt(r.pins, at)?.contactId ?? shiftAt(r, at).scheduledContactId;
+}
+
+/** On-call = pin, else members[shift mod N] → accepted override (latest start wins, R2-3) → active leave (DATA-MODEL §5). */
 export function onCallAt(r: Rotation, w: Pick<PagingWorld, 'overrides' | 'leaves'>, at: Date): { contactId: string | null; via: string[] } {
   const via: string[] = [];
-  let id = shiftAt(r, at).scheduledContactId;
+  let id = scheduledAt(r, at);
   if (id) via.push('rotation');
   const ov = w.overrides
     .filter((o) => o.rotationId === r.id && o.status === 'ACCEPTED' && o.startAt.getTime() <= at.getTime() && at.getTime() < o.endAt.getTime())
@@ -284,4 +298,33 @@ export function templateSteps(plan: PagingConfig['plan'], first: { targetType: T
         : [[0, 'SLACK_CHANNEL', P], [15, 'SLACK_CHANNEL', ALL]];
   const list = allAtOnce ? raw.slice(0, -1) : raw;
   return list.map(([atMin, ch, t], index) => ({ index, atMin, targetType: t.targetType, targetId: t.targetId, channels: [ch] }));
+}
+
+const DAY_MS = 86_400_000;
+/** How far `onShift.until` looks ahead; a rotation that never changes holder says exactly now + 62 days. */
+export const UNTIL_HORIZON_DAYS = 62;
+
+/**
+ * The first moment after `now` at which the fully resolved holder (pin → ACCEPTED Override → Leave) of `r` is somebody else, and
+ * who that is. Candidates are the places where any input changes: the shift grid, pin and ACCEPTED Override edges and the KST
+ * midnights where a Leave starts or ends. Nothing changes within the horizon → `until` = now + 62 days exactly and `next` is the
+ * same person. `holder` null (nobody on shift now) → until = now + 62 days as well; the caller shows no shift then.
+ */
+export function onShiftWindow(r: Rotation, w: Pick<PagingWorld, 'overrides' | 'leaves'>, now: Date): { holder: string | null; until: Date; next: string | null } {
+  const end = now.getTime() + UNTIL_HORIZON_DAYS * DAY_MS;
+  const holder = onCallAt(r, w, now).contactId;
+  const cand = new Set<number>();
+  const add = (t: number): void => { if (t > now.getTime() && t <= end) cand.add(t); };
+  const len = SHIFT_MS[r.cadence];
+  const first = Math.floor((now.getTime() - r.anchorAt.getTime()) / len) + 1;
+  for (let k = first; r.anchorAt.getTime() + k * len <= end; k++) add(r.anchorAt.getTime() + k * len);
+  for (const p of r.pins ?? []) { add(p.startAt.getTime()); add(p.endAt.getTime()); }
+  for (const o of w.overrides) if (o.rotationId === r.id && o.status === 'ACCEPTED') { add(o.startAt.getTime()); add(o.endAt.getTime()); }
+  const kstMidnight = (d: string): number => Date.parse(`${d}T00:00:00+09:00`);
+  for (const l of w.leaves) if (!l.cancelledAt) { add(kstMidnight(l.startDate)); add(kstMidnight(l.endDate) + DAY_MS); }
+  for (const t of [...cand].sort((a, b) => a - b)) {
+    const who = onCallAt(r, w, new Date(t)).contactId;
+    if (who !== holder) return { holder, until: new Date(t), next: who };
+  }
+  return { holder, until: new Date(end), next: onCallAt(r, w, new Date(end)).contactId };
 }

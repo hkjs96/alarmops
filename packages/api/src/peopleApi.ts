@@ -7,7 +7,7 @@
  * routes do not exist (the one 404, before any parameter is looked at), like /oncall/paging-path (security Q-1).
  */
 import {
-  isPageableFor, onCallAt, pagingHealth, pagingPath, resolvePagingConfig, sendCapViolation, shiftAt, verifiedAt,
+  handoverOf, isPageableFor, onShiftWindow, orderedMemberIds, pagingHealth, pagingPath, resolvePagingConfig, sendCapViolation, verifiedAt,
   type Contact, type PagingConfig, type PagingWorld, type Responder, type Rotation,
 } from '@alarmops/core';
 import { effectiveRole, inScope, requireAuth, requireRole, scopeOf, type AuthContext } from './auth.js';
@@ -232,16 +232,15 @@ export function deleteResponder(req: ApiRequest, deps: Deps, customerId: string,
 
 // ───────────────────────────── GET /rotations, GET /staff ─────────────────────────────
 
-function rotationSummary(r: Rotation, w: RotationsWorld, now: Date) {
-  const pw = { overrides: w.overrides, leaves: w.leaves };
-  const oc = onCallAt(r, pw, now);
-  const shift = shiftAt(r, now);
-  const nextId = onCallAt(r, pw, shift.end).contactId;
-  const c = oc.contactId ? w.contacts.get(oc.contactId) : undefined;
+/** One rotation as the console shows it. `until` / `next`: when the fully resolved holder (pin, ACCEPTED Override, Leave) first changes, and to whom (D-28). */
+export function rotationSummary(r: Rotation, w: Pick<RotationsWorld, 'overrides' | 'leaves' | 'contacts'>, now: Date) {
+  const win = onShiftWindow(r, { overrides: w.overrides, leaves: w.leaves }, now);
+  const c = win.holder ? w.contacts.get(win.holder) : undefined;
   return {
-    id: r.id, scope: r.scope, ...(r.customerId ? { customerId: r.customerId } : {}), name: r.name,
-    onShift: oc.contactId ? { contactId: oc.contactId, name: c?.name ?? oc.contactId, until: shift.end.toISOString(), channels: c ? channelStates(c, now) : {} } : null,
-    next: nextId ? w.contacts.get(nextId)?.name ?? null : null,
+    id: r.id, scope: r.scope, ...(r.customerId ? { customerId: r.customerId } : {}), name: r.name, cadence: r.cadence, handover: handoverOf(r.cadence, r.anchorAt), version: r.version ?? 0,
+    members: orderedMemberIds(r.members).map((contactId) => ({ contactId, name: w.contacts.get(contactId)?.name ?? contactId })),
+    onShift: win.holder ? { contactId: win.holder, name: c?.name ?? win.holder, until: win.until.toISOString(), channels: c ? channelStates(c, now) : {} } : null,
+    next: win.holder && win.next ? w.contacts.get(win.next)?.name ?? null : null,
   };
 }
 

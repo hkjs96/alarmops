@@ -154,6 +154,9 @@ async function returnPeriod(run: Run, now: string): Promise<void> {
   if (run.partial) return;
   // 3. Customer contacts and portal users. A user that a reveal record points to (FK RESTRICT) is scrubbed instead of deleted.
   const refd = `(EXISTS (SELECT 1 FROM "ContactRevealLog" r WHERE r."actorUserId" = u."id") OR EXISTS (SELECT 1 FROM "BulkChange" b WHERE b."actorId" = u."id"))`;
+  // RotationPin.contactId is ON DELETE RESTRICT: the pins of those people (past and future) go first, whatever rotation they are in.
+  await run.chunked('RotationPin', (n) => `DELETE FROM "RotationPin" WHERE "id" IN (SELECT p."id" FROM "RotationPin" p JOIN "Contact" k ON k."id" = p."contactId"
+      WHERE k."customerId" = $1 AND k."kind" = 'CUSTOMER' AND ${G} LIMIT ${n}) RETURNING 1`);
   await run.chunked('Contact', (n) => `DELETE FROM "Contact" WHERE "id" IN (SELECT "id" FROM "Contact" WHERE "customerId" = $1 AND "kind" = 'CUSTOMER' AND ${G} LIMIT ${n}) RETURNING 1`);
   await run.chunked('User', (n) => `DELETE FROM "User" WHERE "id" IN (SELECT u."id" FROM "User" u WHERE u."customerId" = $1 AND NOT ${refd} AND ${G} LIMIT ${n}) RETURNING 1`);
   await run.chunked('User.scrubbed', (n) => `UPDATE "User" SET "email" = 'purged-' || "id" || '@invalid.invalid', "name" = 'Removed user', "status" = 'DISABLED', "seeAll" = false, "updatedAt" = ${now}

@@ -2,10 +2,12 @@
  * In-memory ApiRepository on top of the tick store, so the API and the tick see one world.
  * Scope is applied inside every read, the same way the SQL adapter must do it. Tests and local runs only.
  */
-import { MemoryTickStore, incidentMute, type DigestData, type PurgeLogEntry, type RetentionStage, parseSnapshot, type AuditInput, type Contact, type IncidentRow, type PagingConfig, type Severity } from '@alarmops/core';
+import { MemoryTickStore, handoverOf, incidentMute, type DigestData, type PurgeLogEntry, type RetentionStage, parseSnapshot, type AuditInput, type Contact, type IncidentRow, type PagingConfig, type Severity } from '@alarmops/core';
 import { inScope, nodeVisible, seesCustomer, type Role, type ScopeFilter } from './auth.js';
 import { emailDomain, normalizeEmail } from './usersApi.js';
 import { isFreeMail } from './onboardingApi.js';
+import { evaluateRotationChange } from './rotationsApi.js';
+import type { NewRotation, RotationCreateOutcome, RotationDeleteOutcome, RotationState, RotationUpdate, RotationUpdateOutcome, RotationUsageRow } from './repo.js';
 import { attachBlocking, planTemplateAttach, planTemplateChange, templateBlocking } from './templatesApi.js';
 import type { ResponderTemplateView, TemplateAttachInput, TemplateAttachOutcome, TemplateAttachWrite, TemplateCreate, TemplateImpactInput, TemplatePaging, TemplateRef, TemplateUpdate, TemplateUpdateOutcome } from './repo.js';
 import type { UserInfo } from './audience.js';
@@ -294,6 +296,9 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     if (typeof cfg.customerId !== 'string' || !cfg.customerId || audit.customerId !== cfg.customerId) throw new Error('savePagingConfig: customerId is required and must be the audited customer');
     const i = this.configs.findIndex((c) => c.customerId === cfg.customerId && c.scopeType === cfg.scopeType && c.scopeId === cfg.scopeId);
     if (expectedVersion === null ? i >= 0 : i < 0 || this.configs[i]!.version !== expectedVersion) return 'CONFLICT' as const;
+    // D-28: a rotation the steps name must still exist (the SQL store re-reads them under a row lock)
+    const gone = cfg.steps.findIndex((st) => st.targetType === 'ROTATION' && (!st.targetId || !this.rotations.has(st.targetId)));
+    if (gone >= 0) return { unknownRotation: gone };
     const key = `${cfg.customerId}|${cfg.scopeType}|${cfg.scopeId}`;
     const stored: PagingConfig = { ...structuredClone(cfg), version: (expectedVersion ?? this.configTombstones.get(key) ?? 0) + 1 };
     if (i >= 0) this.configs[i] = stored; else this.configs.push(stored);
@@ -584,8 +589,11 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     if (!c || (c.customerId ?? null) !== customerId) return 'NOT_FOUND' as const;
     const named = this.configs.some((cfg) => cfg.steps.some((st) => st.targetType === 'PERSON' && st.targetId === c.id));
     const used = this.responders.some((r) => r.contactId === c.id) || [...this.rotations.values()].some((r) => r.members.some((m) => m.contactId === c.id))
-      || this.leaves.some((l) => l.contactId === c.id || l.replacementId === c.id) || this.overrides.some((o) => o.contactId === c.id) || [...this.users.values()].some((u) => u.contactId === c.id) || named;
+      || this.leaves.some((l) => l.contactId === c.id || l.replacementId === c.id) || this.overrides.some((o) => o.contactId === c.id) || [...this.users.values()].some((u) => u.contactId === c.id) || named
+      // a running or future rotation pin is the reason somebody is (or will be) on shift: not removed silently
+      || this.rotationPins.some((p) => p.contactId === c.id && p.endAt.getTime() > audit.at.getTime());
     if (used) return 'IN_USE' as const;
+    this.rotationPins = this.rotationPins.filter((p) => p.contactId !== c.id); // only past ones are left: they go with the person (RotationPin FK is RESTRICT)
     this.contacts.delete(c.id);
     this.contactScopes = this.contactScopes.filter((s) => s.contactId !== c.id);
     for (const [h, v] of this.verifications) if (v.contactId === c.id) this.verifications.delete(h);
@@ -1035,9 +1043,118 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     this.audits.push({ ...audit, before: { templateId: from?.id ?? null }, after: { templateId: to?.id ?? null, added: plan.joins, removed: plan.leaves } });
     return { version, templateId: w.toTemplateId, joins: plan.joins.length, leaves: plan.leaves.length, skippedInactive: plan.skippedInactive };
   }
+  // ── rotations (D-28, D-41) ──
+  private rotationStateSync(id: string, extra: string[] = []): RotationState | null {
+    const base = this.rotations.get(id);
+    if (!base) return null;
+    const rotation = { ...structuredClone(base), pins: structuredClone(this.withPins(base).pins ?? []), version: base.version ?? 0 };
+    const overrides = structuredClone(this.overrides.filter((o) => o.rotationId === id));
+    const ids = new Set([...rotation.members.map((m) => m.contactId), ...(rotation.pins ?? []).map((p) => p.contactId), ...overrides.map((o) => o.contactId), ...extra]);
+    const leaves = structuredClone(this.leaves.filter((l) => ids.has(l.contactId)));
+    for (const l of leaves) ids.add(l.replacementId);
+    const contacts = new Map([...ids].map((cid) => this.contacts.get(cid)).filter((c): c is Contact => !!c).map((c) => [c.id, structuredClone(c)]));
+    const customers = [...new Set(this.configs.filter((c) => c.steps.some((st) => st.targetType === 'ROTATION' && st.targetId === id)).map((c) => c.customerId))]
+      .filter((cid) => (this.customers.get(cid)?.status ?? 'ACTIVE') !== 'TERMINATED')
+      .map((cid) => ({ id: cid, name: this.customers.get(cid)?.name ?? cid })).sort((a, b) => a.name.localeCompare(b.name) || (a.id < b.id ? -1 : 1));
+    return { rotation, rotations: [rotation], overrides, leaves, contacts, customers };
+  }
+  async rotationState(rotationId: string, extraContactIds: string[] = []): Promise<RotationState | null> { return this.rotationStateSync(rotationId, extraContactIds); }
+  private usageRows(rotationId: string, visible: (customerId: string, projectId: string | null, serviceId: string | null) => boolean): RotationUsageRow[] {
+    const out: RotationUsageRow[] = [];
+    for (const cfg of this.configs) {
+      const cus = this.customers.get(cfg.customerId);
+      if (!cus) continue;
+      const projectId = cfg.scopeType === 'PROJECT' ? cfg.scopeId : cfg.scopeType === 'SERVICE' ? this.services.get(cfg.scopeId)?.projectId ?? null : null;
+      const serviceId = cfg.scopeType === 'SERVICE' ? cfg.scopeId : null;
+      if (!visible(cfg.customerId, projectId, serviceId)) continue;
+      const scopeName = cfg.scopeType === 'CUSTOMER' ? cus.name : cfg.scopeType === 'PROJECT' ? this.projects.get(cfg.scopeId)?.name ?? cfg.scopeId : this.services.get(cfg.scopeId)?.name ?? cfg.scopeId;
+      for (const st of cfg.steps) {
+        if (st.targetType === 'ROTATION' && st.targetId === rotationId) {
+          out.push({ customerId: cus.id, customerName: cus.name, customerSlug: cus.slug, customerStatus: cus.status ?? 'ACTIVE', level: cfg.scopeType, scopeId: cfg.scopeId, scopeName, projectId, serviceId, pagingConfigId: cfg.id, stepIndex: st.index + 1 });
+        }
+      }
+    }
+    return out;
+  }
+  async rotationUsage(rotationId: string, scope: ScopeFilter): Promise<RotationUsageRow[]> {
+    // staff narrowed by sub-scopes only (customers '*') see the customers they have a sub-scope in, and nothing of the others
+    return this.usageRows(rotationId, (customerId, projectId, serviceId) => seesCustomer(scope, customerId)
+      && (scope.customerIds !== '*' || scope.subScopes.length === 0 || scope.subScopes.some((x) => x.customerId === customerId))
+      && nodeVisible(scope, { customerId, ...(projectId ? { projectId } : {}), ...(serviceId ? { serviceId } : {}) }, (sid) => this.services.get(sid)?.projectId));
+  }
+  async rotationMembersOk(customerId: string | null, ids: string[]): Promise<boolean> {
+    return ids.length > 0 && ids.every((id) => {
+      const c = this.contacts.get(id);
+      if (!c || !c.active) return false;
+      if (c.kind === 'INTERNAL') return true;
+      return customerId !== null && c.customerId === customerId && this.responders.some((r) => r.customerId === customerId && r.contactId === id && r.role === 'PAGEABLE');
+    });
+  }
+  private rotationNameTaken(customerId: string | null, name: string, exceptId: string | null): boolean {
+    return [...this.rotations.values()].some((r) => r.id !== exceptId && (r.customerId ?? null) === customerId && r.name === name);
+  }
+  async createRotation(n: NewRotation, audit: AuditTemplate): Promise<RotationCreateOutcome> {
+    if (n.customerId !== null && (this.customers.get(n.customerId)?.status ?? 'ACTIVE') === 'TERMINATED') return 'CUSTOMER_TERMINATED';
+    if (this.rotationNameTaken(n.customerId, n.name, null)) return 'NAME_EXISTS';
+    if (!(await this.rotationMembersOk(n.customerId, n.members))) return 'BAD_MEMBER';
+    const id = this.nextId('rot');
+    const h = handoverOf(n.cadence, n.anchorAt);
+    this.rotations.set(id, { id, scope: n.scope, customerId: n.customerId, name: n.name, cadence: n.cadence, anchorAt: new Date(n.anchorAt), version: 0,
+      members: n.members.map((contactId, order) => ({ contactId, order })), handoverDow: h.dow ?? new Date(n.anchorAt.getTime() + 9 * 3600_000).getUTCDay(), handoverMin: h.minute } as never);
+    this.audits.push({ ...audit, customerId: n.customerId, targetId: id });
+    return { id };
+  }
+  async updateRotation(u: RotationUpdate, audit: AuditTemplate): Promise<RotationUpdateOutcome> {
+    const cur = this.rotations.get(u.id);
+    if (!cur) return 'NOT_FOUND';
+    if ((cur.version ?? 0) !== u.expectedVersion) return 'CONFLICT';
+    if (this.rotationNameTaken(cur.customerId ?? null, u.name, u.id)) return 'NAME_EXISTS';
+    const have = new Set(cur.members.map((m) => m.contactId));
+    const added = (u.members ?? []).filter((id) => !have.has(id));
+    if (added.length && !(await this.rotationMembersOk(cur.customerId ?? null, added))) return 'BAD_MEMBER';
+    const state = this.rotationStateSync(u.id, u.members ?? [])!;
+    const ev = evaluateRotationChange(state, { name: u.name, members: u.members, handover: u.handover }, u.at);
+    if (!ev.scheduleChanged && !ev.nameChanged) return 'NOOP';
+    if (ev.scheduleChanged && u.previewHash !== null && ev.previewHash !== u.previewHash) return 'STALE';
+    const snap = (r: { name: string; anchorAt: Date; members: Array<{ contactId: string }>; cadence: 'DAILY' | 'WEEKLY' }, pins: Array<{ contactId: string; startAt: Date; endAt: Date; reason?: string | null }>) => ({
+      name: r.name, memberIds: r.members.map((m) => m.contactId), handover: handoverOf(r.cadence, r.anchorAt), anchorAt: r.anchorAt.toISOString(),
+      pins: pins.map((p) => ({ contactId: p.contactId, startAt: p.startAt.toISOString(), endAt: p.endAt.toISOString(), reason: p.reason ?? null })),
+    });
+    const before = snap(cur, state.rotation.pins ?? []);
+    cur.name = u.name;
+    if (ev.scheduleChanged) {
+      cur.anchorAt = new Date(ev.plan.anchorAt);
+      const h = handoverOf(cur.cadence, cur.anchorAt);
+      Object.assign(cur, { handoverMin: h.minute, handoverDow: h.dow ?? new Date(cur.anchorAt.getTime() + 9 * 3600_000).getUTCDay() });
+      if (ev.membersChanged) cur.members = ev.members.map((contactId, order) => ({ contactId, order }));
+      this.rotationPins = this.rotationPins.filter((p) => p.rotationId !== u.id);
+      for (const p of ev.plan.pins) this.rotationPins.push({ id: this.nextId('pin'), rotationId: u.id, contactId: p.contactId, startAt: p.startAt, endAt: p.endAt, reason: p.reason });
+    }
+    cur.version = (cur.version ?? 0) + 1;
+    const pinsAfter = this.rotationPins.filter((p) => p.rotationId === u.id);
+    this.audits.push({ ...audit, customerId: cur.customerId ?? null, targetId: u.id, before, after: { ...snap(cur, pinsAfter), version: cur.version } });
+    const apply = ev.scheduleChanged && cur.scope === 'MSP' && ev.plan.changedRows > 0;
+    if (apply) {
+      for (const c of state.customers) this.audits.push({ ...audit, customerId: c.id, action: 'rotation.apply', targetId: u.id, before: null, after: { rotationId: u.id, changedRows: ev.plan.changedRows, pins: ev.plan.pins.length } });
+    }
+    return { affected: ev.scheduleChanged ? state.customers.length : 0 };
+  }
+  async deleteRotation(rotationId: string, expectedVersion: number, audit: AuditTemplate): Promise<RotationDeleteOutcome> {
+    const cur = this.rotations.get(rotationId);
+    if (!cur) return 'NOT_FOUND';
+    if ((cur.version ?? 0) !== expectedVersion) return 'CONFLICT';
+    const usage = this.usageRows(rotationId, () => true);
+    if (usage.length) return { inUse: usage };
+    const overrides = this.overrides.filter((o) => o.rotationId === rotationId).length;
+    this.rotations.delete(rotationId);
+    this.overrides = this.overrides.filter((o) => o.rotationId !== rotationId);
+    this.rotationPins = this.rotationPins.filter((p) => p.rotationId !== rotationId);
+    this.audits.push({ ...audit, customerId: cur.customerId ?? null, targetId: rotationId, before: { name: cur.name, scope: cur.scope, memberIds: cur.members.map((m) => m.contactId), overrides }, after: null });
+    return 'OK';
+  }
   async rotationsWorld(scope: ScopeFilter): Promise<RotationsWorld> {
-    const rotations = [...this.rotations.values()].filter((r) => r.scope === 'MSP' || (r.customerId != null && seesCustomer(scope, r.customerId))).map((r) => structuredClone(r));
-    const ids = new Set(rotations.flatMap((r) => r.members.map((m) => m.contactId)));
+    const rotations = [...this.rotations.values()].filter((r) => r.scope === 'MSP' || (r.customerId != null && seesCustomer(scope, r.customerId))).map((r) => ({ ...structuredClone(r), pins: structuredClone(this.withPins(r).pins ?? []) }));
+    const ids = new Set(rotations.flatMap((r) => [...r.members.map((m) => m.contactId), ...(r.pins ?? []).map((p) => p.contactId)]));
     const ovs = this.overrides.filter((o) => rotations.some((r) => r.id === o.rotationId));
     for (const o of ovs) ids.add(o.contactId);
     const leaves = this.leaves.filter((l) => ids.has(l.contactId));

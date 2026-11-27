@@ -215,6 +215,32 @@ export type TemplateAttachOutcome =
 /** Rotations a caller may see (MSP ones + those of customers in the scope) with what decides who is on shift. */
 export interface RotationsWorld { rotations: Rotation[]; overrides: Override[]; leaves: Leave[]; contacts: Map<string, Contact> }
 
+/** One rotation with what its handover plan and its summary need (pins are in `rotation.pins`, the stored version in `rotation.version`). */
+export interface RotationState extends RotationsWorld {
+  rotation: Rotation;
+  /** Non-terminated customers with a step that points at the rotation, name order (effect or not). */
+  customers: Array<{ id: string; name: string }>;
+}
+/** A step that names a rotation: the customer, the node (customer / project / service) of its call order and the 1-based step number. */
+export interface RotationUsageRow {
+  customerId: string; customerName: string; customerSlug: string; customerStatus: CustomerStatusValue;
+  level: 'CUSTOMER' | 'PROJECT' | 'SERVICE'; scopeId: string; scopeName: string; projectId: string | null; serviceId: string | null;
+  pagingConfigId: string; stepIndex: number;
+}
+export interface NewRotation { scope: 'MSP' | 'CUSTOMER'; customerId: string | null; name: string; cadence: 'DAILY' | 'WEEKLY'; anchorAt: Date; members: string[]; actorId: string; at: Date }
+export type RotationCreateOutcome = { id: string } | 'NAME_EXISTS' | 'BAD_MEMBER' | 'CUSTOMER_TERMINATED' | 'BUSY';
+/**
+ * `members` / `handover` null = not part of the request. The store decides inside its transaction (row lock, version check, plan
+ * recomputed from what it reads there) whether the schedule changes; `previewHash` null = none was sent (allowed for CUSTOMER rotations).
+ * 'NOOP': nothing differs from what is stored (nothing written). 'STALE': the plan no longer hashes to `previewHash`.
+ */
+export interface RotationUpdate {
+  id: string; expectedVersion: number; name: string; members: string[] | null; handover: { minute: number; dow?: number } | null;
+  previewHash: string | null; actorId: string; at: Date;
+}
+export type RotationUpdateOutcome = { affected: number } | 'NOT_FOUND' | 'CONFLICT' | 'STALE' | 'NAME_EXISTS' | 'BAD_MEMBER' | 'NOOP' | 'BUSY';
+export type RotationDeleteOutcome = 'OK' | 'NOT_FOUND' | 'CONFLICT' | { inUse: RotationUsageRow[] } | 'BUSY';
+
 // ── customer status / offboarding (D-42, D-43) ──
 export type CustomerStatusValue = 'ACTIVE' | 'SUSPENDED' | 'TERMINATED';
 export const OFFBOARD_STEP_KEYS = ['PAGING_STOPPED', 'ALARMS_DELETED', 'CUSTOMER_STACK_REMOVED', 'ACCOUNTS_DISABLED', 'BUS_ALLOWLIST_REMOVED'] as const;
@@ -412,7 +438,7 @@ export interface ApiRepository {
    * Versions never restart (N-3): a row created again after a delete continues after the deleted row's last
    * version (soft delete or a version sequence per (customer, scope)), so an If-Match from before the delete can never match.
    */
-  savePagingConfig(cfg: PagingConfig, expectedVersion: number | null, audit: AuditInput): Promise<PagingConfig | 'CONFLICT'>;
+  savePagingConfig(cfg: PagingConfig, expectedVersion: number | null, audit: AuditInput): Promise<PagingConfig | 'CONFLICT' | { unknownRotation: number }>;
   deletePagingConfig(id: string, expectedVersion: number, audit: AuditInput): Promise<'OK' | 'CONFLICT'>;
   /** Any contact by id — used to tell CROSS_CUSTOMER from "unknown" when validating a step target. Never returned to the client. */
   getContact(contactId: string): Promise<Contact | null>;
@@ -461,6 +487,27 @@ export interface ApiRepository {
   rotationsWorld(scope: ScopeFilter): Promise<RotationsWorld>;
   /** Active MSP staff contacts (kind INTERNAL), name order. */
   staffContacts(): Promise<Contact[]>;
+
+  // ── rotation reads and writes (D-28, D-41) ──
+  /**
+   * One rotation (any scope — the caller gates it) with its members in order, its pins, its Override rows, the Leaves of the people involved and the contacts
+   * (members, pin holders, override holders, leave replacements and `extraContactIds`). null: no such rotation.
+   */
+  rotationState(rotationId: string, extraContactIds?: string[]): Promise<RotationState | null>;
+  /** Steps that name the rotation, only for customers inside `scope` (in the query) and, for sub-scoped staff, nodes `nodeVisible` to them. Terminated customers count. */
+  rotationUsage(rotationId: string, scope: ScopeFilter): Promise<RotationUsageRow[]>;
+  /** Are all `ids` allowed as members: active INTERNAL staff, or (customerId given) active PAGEABLE Responders of that customer. */
+  rotationMembersOk(customerId: string | null, ids: string[]): Promise<boolean>;
+  /** One transaction: Rotation (version 0) + members + `rotation.create` audit. */
+  createRotation(n: NewRotation, audit: AuditTemplate): Promise<RotationCreateOutcome>;
+  /**
+   * One transaction: Rotation row FOR UPDATE, version check, new members re-validated, `planRotationChange` + hash re-computed from what is read there
+   * (STALE when it differs from `previewHash`), then Rotation + members + pins replaced and audit rows written (`rotation.update`, and one
+   * `rotation.apply` per affected customer of an MSP rotation whose timetable changed). `audit` is the template of the `rotation.update` row.
+   */
+  updateRotation(u: RotationUpdate, audit: AuditTemplate): Promise<RotationUpdateOutcome>;
+  /** One transaction: Rotation row FOR UPDATE, version check, IN_USE when any customer's step names it (terminated customers included), else delete (+ audit). */
+  deleteRotation(rotationId: string, expectedVersion: number, audit: AuditTemplate): Promise<RotationDeleteOutcome>;
 
   // ── customer status / offboarding (D-43) ──
   /** Caller has already checked the customer is visible. */
