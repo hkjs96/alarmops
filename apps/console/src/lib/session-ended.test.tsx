@@ -103,13 +103,14 @@ describe("every server action goes through callAction", () => {
   const actionFiles = files.filter((f) => /^\s*["']use server["']/.test(readFileSync(f, "utf8")));
   const names = actionFiles.flatMap((f) => [...readFileSync(f, "utf8").matchAll(/^export async function (\w+)/gm)].map((m) => m[1]!));
 
-  it("finds the actions (ack, resolve, escalate, bulk, undo, call-order save, own steps, Responders, customer status, offboarding)", () => {
+  it("finds the actions (ack, resolve, escalate, bulk, undo, call-order save, own steps, Responders, templates, customer status, offboarding)", () => {
     expect(names.sort()).toEqual([
       "accountStatusAction", "ackIncident", "addResponder", "addUserAccount", "changeCustomerStatus", "changeUserAccount", "checkAccountAction",
       "confirmVerificationAction", "createAccountAction", "createContactAction", "createCustomerAction", "createProjectAction",
-      "createServiceAction", "escalateIncident", "executeBulk", "listAccountsAction", "listContactsAction", "markOffboardingStep", "previewBulk",
-      "removeOwnSteps", "removeResponder", "resolveIncident", "revealContact", "saveCallOrder", "setCapabilityAction", "setLegalHold",
-      "setMonitoring", "setResponderRole", "undoBulk", "verifyBulkAction", "verifyContactAction",
+      "createServiceAction", "createTemplate", "escalateIncident", "executeBulk", "listAccountsAction", "listContactsAction",
+      "listTemplatesForCustomer", "markOffboardingStep", "previewBulk", "previewCustomerTemplate", "previewTemplate",
+      "removeOwnSteps", "removeResponder", "resolveIncident", "revealContact", "saveCallOrder", "saveTemplate", "setCapabilityAction",
+      "setCustomerTemplate", "setLegalHold", "setMonitoring", "setResponderRole", "undoBulk", "verifyBulkAction", "verifyContactAction",
     ]);
   });
   it("no client file calls one of them outside callAction(() => …)", () => {
