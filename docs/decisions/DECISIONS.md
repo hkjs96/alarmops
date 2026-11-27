@@ -2,7 +2,7 @@
 
 계획서: AlarmOps PoC 계획서 v3 (https://claude.ai/artifact/3Kvfvq3tHmGBiDp3WhVxf4). 결정이 바뀌면 이 파일과 계획서를 같이 고친다.
 
-이 문서는 PoC에서 확정된 결정 D-01~D-62를 주제별로 모은 것이다. 구현은 여기서 어긋나지 않는다.
+이 문서는 PoC에서 확정된 결정 D-01~D-63을 주제별로 모은 것이다. 구현은 여기서 어긋나지 않는다.
 
 - 맨 위 색인에서 ID를 눌러 그 결정으로 간다. 색인의 요약은 찾기 위한 이름표이고, 기준은 각 절의 **결정** 문구다.
 - 결정마다 **결정** · **이유** · **확정일**(질문·이슈 번호 포함)을 적는다. 개정·대체·잠정 표시와 취소선은 원문 그대로 둔다.
@@ -75,6 +75,7 @@
 | [D-60](#d-60) | 개발 프로세스: 만든 에이전트는 검수하지 않고, 실행 결과 검증과 CI 증거로 판정 | 11/24 |
 | [D-61](#d-61) | 운영 DB(Supabase)와 콘솔 함수는 서울 리전에 둔다 | 11/25 |
 | [D-62](#d-62) | 위험이 낮은 PR은 허브가 병합하고, 나머지는 사람이 승인한다 | 11/26 |
+| [D-63](#d-63) | AlarmWriter의 알람 생성 허용은 이름이 `[`로 시작하는 알람으로만 좁힌다 | 11/27 |
 
 <a id="topic-1"></a>
 
@@ -1065,6 +1066,19 @@ D-60에서 쓰는 방식:
   - CI에 secrets나 OIDC를 붙이면 새 테스트 low 정책을 다시 본다.
   - 문서만 바뀐 low PR은 CI 테스트 job이 돌지 않는다(ci-changes의 docs_only). 이 경우 관문 1의 증거는 `risk` job과 문서 빌드뿐이다. 운영 단계(D-59 "다시 볼 때")에서 다시 정한다.
 - **확정일**: 11/26 (사용자 결정, A안)
+
+<a id="d-63"></a>
+
+### D-63 AlarmWriter의 알람 생성 허용은 이름이 `[`로 시작하는 알람으로만 좁힌다
+
+- **결정(A안)**: 고객 연결 스택 AlarmWriter 정책의 `CreateAlarmWithManagedByTag` 문장 `Resource`를 `arn:${AWS::Partition}:cloudwatch:*:${AWS::AccountId}:alarm:[*`로 좁힌다. `ChangeOwnAlarms`(`aws:ResourceTag/ManagedBy=AlarmOps`)는 그대로 둔다. 알람 이름 규칙(D-08)은 바꾸지 않는다. 엔진이 만드는 이름은 항상 `[{type}] ...`이다(`services/alarm-engine/src/alarm_engine/naming.py` `alarm_name`). IAM `Resource`의 와일드카드는 `*`와 `?`뿐이라 `[`는 글자 그대로다.
+- **이유(11/26-27 테스트 계정 실측, `replica-check.sh`)**:
+  - 기존 정책에서는 `PutMetricAlarm`에 요청 태그 `ManagedBy=AlarmOps`를 달면, 태그 없는 기존 고객 알람의 이름으로 그 알람을 덮어쓸 수 있었다(임계값 1→2 변경, 갱신 때 태그는 무시됨). `CreateAlarmWithManagedByTag`가 `aws:RequestTag`만 보기 때문이다.
+  - 탐침(`--probe-resource-tag-deny`): `aws:ResourceTag/ManagedBy`가 없을 때 막는 명시적 Deny(`Null` 또는 `StringNotEquals`)는 새 알람 생성도 막는다(CloudWatch가 생성 때 `aws:ResourceTag`를 빈 값으로 본다). 그래서 쓸 수 없다.
+- **남는 위험**: 이름이 `[`로 시작하는 태그 없는 알람(기존 alert-manager의 알람도 같은 모양이다. 고객이 그렇게 이름 지을 수도 있다)은 여전히 덮어쓸 수 있다. 이 경우 보호는 엔진의 사전 점검(`NotOwned`, `aws.py`)뿐이다. `NotOwned`는 엔진 코드 안의 점검이라 중앙 자격증명이 탈취되면 `[` 이름 알람의 설정(`AlarmActions`·`ActionsEnabled` 포함)이 바뀔 수 있다. 삭제와 태그 변경은 여전히 막힌다. 고객 안내: 이름이 `[`로 시작하는 알람은 AlarmOps/MSP용으로 예약한다.
+- **바뀌는 것**: `infra/customer-stack/template.yaml`(기존 고객 스택은 갱신해야 적용), `infra/scripts/rehearsal/replica-check.sh`(시험 알람 이름, (f) 기대값 PASS, 정보 행 (g)). 엔진 코드는 바뀌지 않는다(생성 이름이 이미 `[`로 시작).
+- **다시 볼 때**: 엔진 이름 형식을 `[`로 시작하지 않게 바꾸려 할 때, 고객이 `[` 이름 알람을 쓴다고 할 때, CloudWatch가 생성 때 리소스 태그를 평가하는 방식이 바뀔 때.
+- **확정일**: 11/27 (사용자 결정, A안)
 
 ## 이전을 쉽게 만드는 개발 원칙 (D-09에 딸림)
 1. Postgres 표준 기능만. Supabase Auth·Realtime·Storage·Edge Functions, `auth.uid()` 기반 권한 규칙 금지. 로그인은 앱에서 Google SSO.

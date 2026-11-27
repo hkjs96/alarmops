@@ -66,7 +66,7 @@ sys.exit(0 if t.get("AlarmOpsRehearsal") == "true" and t.get("AlarmOpsRehearsalR
     i=0
     while [ "$i" -lt "${#names[@]}" ]; do
       chunk=("${names[@]:$i:50}")
-      if aws_r cloudwatch delete-alarms --alarm-names "${chunk[@]}" >/dev/null; then
+      if aws_r cloudwatch delete-alarms --alarm-names "$(rh_json_array "${chunk[@]}")" >/dev/null; then
         rh_say "알람 삭제: ${chunk[*]}"
       else
         rh_say "FAIL: delete-alarms"; status=1

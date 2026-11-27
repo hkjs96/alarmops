@@ -316,7 +316,7 @@ Resources:
     Properties:
       RoleName: AlarmOps-AlarmWriter
       PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
-      Description: AlarmOps creates/updates CloudWatch alarms and deletes only alarms tagged ManagedBy=AlarmOps.
+      Description: AlarmOps creates alarms named [..] with ManagedBy=AlarmOps, updates and deletes only alarms tagged ManagedBy=AlarmOps.
       MaxSessionDuration: 3600
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -341,10 +341,15 @@ Resources:
                 Resource: !Sub "arn:${AWS::Partition}:cloudwatch:*:${AWS::AccountId}:alarm:*"
               # Create: one PutMetricAlarm call whose Tags include ManagedBy=AlarmOps (aws:RequestTag).
               # There is deliberately NO TagResource permission that can add ManagedBy to an existing alarm.
+              # D-63: Resource is limited to alarm names starting with "[" (the engine's names are always "[{type}] ...").
+              # aws:RequestTag alone let a request tag ManagedBy=AlarmOps overwrite an untagged customer alarm of the same
+              # name (PutMetricAlarm ignores tags on update; measured 11/26-27), and a Deny on a missing aws:ResourceTag also
+              # blocks new alarms. In IAM Resource ARNs "[" is a literal (only * and ? are wildcards). Residual risk: an
+              # untagged alarm whose name starts with "[" is protected only by the engine's pre-check (NotOwned).
               - Sid: CreateAlarmWithManagedByTag
                 Effect: Allow
                 Action: [cloudwatch:PutMetricAlarm]
-                Resource: !Sub "arn:${AWS::Partition}:cloudwatch:*:${AWS::AccountId}:alarm:*"
+                Resource: !Sub "arn:${AWS::Partition}:cloudwatch:*:${AWS::AccountId}:alarm:[*"
                 Condition:
                   StringEquals: { "aws:RequestTag/ManagedBy": AlarmOps }
               # Update, tag (Severity, AlarmOps:Console:*), untag and delete: only alarms that already carry ManagedBy=AlarmOps.

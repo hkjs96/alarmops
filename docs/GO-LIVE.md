@@ -755,7 +755,7 @@ http://localhost:3107/auth/dev-login?as=admin
      bash infra/scripts/rehearsal/replica-check.sh --profile rehearsal-b --confirm-account 12자리
      ```
      - 하는 일: 원본 `AlarmOps-AlarmWriter`의 권한 정책(`manage-alarmops-alarms`)과 권한 경계를 읽어 그대로 복사한 임시 역할 `AlarmOpsRehearsal-WriterReplica`(태그 `AlarmOpsRehearsal=true`)를 만든다. 신뢰 대상은 본인 SSO 역할의 정확한 ARN 하나뿐이다(와일드카드 없음. 프로필이 SSO 역할이 아니거나 `iam:GetRole`로 그 ARN을 읽지 못하면 아무것도 만들지 않고 멈춘다). 그 역할을 assume 해서 아래 6개를 본다. 원본 역할·정책이 없으면 거부하고, 임시 역할이 이미 있으면 덮어쓰지 않고 멈춘다. `AWS_ENDPOINT_URL*`, `AWS_CONFIG_FILE`, `AWS_SHARED_CREDENTIALS_FILE`, `AWS_CA_BUNDLE`가 설정된 터미널에서는 거부한다.
-     - 기대하는 표(전부 PASS여야 종료 코드 0):
+     - 기대하는 표((a)~(f) 전부 PASS여야 종료 코드 0. (g)는 정보 행이라 종료 코드에 영향이 없다):
 
        | 항목 | 결과 | 비고 |
        |---|---|---|
@@ -765,9 +765,19 @@ http://localhost:3107/auth/dev-login?as=admin
        | (d) 태그 없는 알람 DeleteAlarms → 거부 (#87 미확인 항목) | PASS | AccessDenied |
        | (e) ManagedBy=AlarmOps 알람 DeleteAlarms → 성공 | PASS | 성공 |
        | (f) 태그 없는 기존 알람 덮어쓰기(PutMetricAlarm+ManagedBy 요청 태그) → 거부 | PASS | AccessDenied |
+       | (g) 이름이 [ 로 시작하는 태그 없는 알람 덮어쓰기 → 알려진 한계(D-63) | 정보 | ALLOWED: 예상된 한계. 엔진의 사전 점검(NotOwned)이 유일한 보호. … |
 
-     - (c)(d)(f)의 태그 없는 알람 `AlarmOpsRehearsal-replica-unmanaged`는 본인 자격증명으로 만든다. 시험 알람은 `AlarmOpsRehearsal-replica-test`다. (f)는 같은 이름에 `ManagedBy=AlarmOps` 요청 태그를 달아 덮어쓰기를 시도한다. 성공하면 FAIL이고, 비고에 "기존 고객 알람 덮어쓰기 가능: template.yaml CreateAlarmWithManagedByTag 보완 필요"와 임계값·태그가 실제로 바뀌었는지가 적힌다.
-     - **보완안 실측(선택, (f)가 FAIL일 때)**: 같은 터미널에서 다음을 실행한다. (a)~(f) 표 대신 아래 표만 낸다.
+     - **D-63 이후 (f)의 기대값은 PASS다.** 생성 허용(`CreateAlarmWithManagedByTag`)의 `Resource`가 `alarm:[*`라서, 이름이 `[`로 시작하지 않는 고객 알람은 요청 태그를 달아도 덮어쓸 수 없다. 11/26-27 실측(옛 정책)에서는 (f)가 FAIL이었다(임계값 1→2 변경). (f)가 FAIL이면 그 계정의 스택이 아직 옛 템플릿이다(아래 "B 계정 스택 갱신"). (g)는 이름이 `[`로 시작하는 태그 없는 알람이라 덮어쓰기가 `ALLOWED`로 나오는 것이 정상이며 "알려진 한계(D-63)"로만 표시한다(FAIL 아님). 보호는 엔진의 사전 점검(`NotOwned`)뿐이다. (g)가 `ALLOWED`가 아닌 값을 내면 의미는 다음과 같다. `DENIED`: 이 계정에서는 `[` 이름의 덮어쓰기도 막힌다(위험이 더 작다는 뜻이라 조치할 것 없음, 표를 허브에 보낸다). `ERROR(코드)`: 거부가 아닌 다른 오류(표를 허브에 보낸다). `준비 실패`: 본인 자격증명으로 (g)용 알람을 만들지 못해 측정하지 못했다(다시 실행). 어느 경우도 종료 코드와 (a)~(f) 판정에는 영향이 없다. **고객 안내: 이름이 `[`로 시작하는 알람은 AlarmOps/MSP용으로 예약된다.** 고객이 그런 이름의 알람을 직접 만들지 않게 안내한다.
+     - **B 계정 스택 갱신(D-63 템플릿 반영, 사람이 한다. 병합 뒤 replica-check 를 다시 돌리기 전에)**: 중앙 스택은 병합 시 자동 배포되지만 고객 스택(`alarmops-customer`)은 자동으로 바뀌지 않는다. 별도 터미널에서 SSO 로그인 후 최신 `main`을 받은 저장소에서 처음 설치할 때와 **같은 값**으로 `install.sh`를 다시 실행한다. 스택에 `AlarmOpsRehearsal=true` 태그가 있으면 `update-stack`으로 갱신한다(없으면 거부).
+       ```
+       git checkout main && git pull
+       aws sso login --profile rehearsal-b
+       REHEARSAL_EXTERNAL_ID=<처음 설치 때의 값 그대로> bash infra/scripts/rehearsal/install.sh --profile rehearsal-b --confirm-account 12자리
+       ```
+       ExternalId는 7-1에서 적어 둔 값을 쓴다(CloudFormation `alarmops-customer` 스택의 파라미터 탭에서도 확인할 수 있다). 다르게 넣으면 신뢰 정책 조건이 바뀌어 중앙이 역할을 맡지 못한다(콘솔 연결 확인 7-4가 실패). **`install.sh`는 파라미터 4개(`CentralRoleArn`, `CentralEventBusArn`, `ExternalId`, `EnableAlarmWriter=true`)만 넘긴다. 콘솔에서 다른 파라미터(`EnableTagWriter`, `PermissionsBoundaryArn`, `AlarmScope` 등)를 바꿨다면 갱신 때 기본값으로 돌아간다.** 시험 계정에서 그렇게 바꿨는지 먼저 확인한다. 이미 최신 템플릿인 스택에 다시 돌리면 `No updates are to be performed`와 `FAIL: update-stack 실패`가 나오는데 정상이다("막혔을 때" 표). 갱신이 끝나면(`OK: 설치 완료`) 콘솔에서 7-4 연결 확인이 OK인지 본 뒤 위 `replica-check.sh`를 다시 돌려 (f) PASS·(g) 정보 행을 확인한다. 바뀌는 것은 AlarmWriter 역할의 인라인 정책(`CreateAlarmWithManagedByTag`의 `Resource`)과 역할 설명뿐이고 역할은 교체되지 않는다. 실고객 계정은 사람이 콘솔 CloudFormation → 스택 → 업데이트 → 현재 템플릿 바꾸기(새 `template.yaml` 올리기) → 파라미터는 이전 값 그대로 → `CAPABILITY_NAMED_IAM` 확인 순서로 갱신한다. 에이전트는 하지 않는다.
+
+     - (c)(d)(f)의 태그 없는 알람 `AlarmOpsRehearsal-replica-unmanaged`는 본인 자격증명으로 만든다. 시험 알람은 `[AlarmOpsRehearsal] replica-test`다. (f)는 같은 이름에 `ManagedBy=AlarmOps` 요청 태그를 달아 덮어쓰기를 시도한다. 관리 시험 알람과 (g)용 알람은 엔진 이름 모양대로 `[`로 시작한다(`[AlarmOpsRehearsal] replica-test`, `[AlarmOpsRehearsal] replica-unmanaged-bracket`). 성공하면 FAIL이고, 비고에 "기존 고객 알람 덮어쓰기 가능: template.yaml CreateAlarmWithManagedByTag 보완 필요"와 임계값·태그가 실제로 바뀌었는지가 적힌다.
+     - **보완안 실측(선택, 위 스택 갱신 후에도 (f)가 FAIL일 때)**: 같은 터미널에서 다음을 실행한다. (a)~(f) 표 대신 아래 표만 낸다.
        ```
        aws sso login --profile rehearsal-b
        bash infra/scripts/rehearsal/replica-check.sh --profile rehearsal-b --confirm-account 12자리 --probe-resource-tag-deny
@@ -797,11 +807,11 @@ http://localhost:3107/auth/dev-login?as=admin
        | `불안정` | p2 를 `REHEARSAL_PROBE_WAIT` 간격으로 두 번 쟀는데 결과가 다르거나, 카나리가 기대와 달라 Deny 가 반영됐는지 모른다 | 판정하지 않는다. `REHEARSAL_PROBE_WAIT=60`으로 다시 돌린다(판정 칸은 "재측정") |
        | 판정 `재측정` | 위 `불안정` 때문에 판정을 내지 않았다 | 같음 |
 
-       카나리와 안정성(변형마다): (1) 앞 변형의 `probe-deny`를 지우고(두 번째 변형부터는 대기·재-assume 한 뒤) **Deny 없는 상태의 카나리**를 본다. 본인 자격증명으로 만든 태그 없는 `-canary` 알람을 복제 역할이 `ManagedBy` 요청 태그로 덮어쓰기가 ALLOWED 여야 한다(원본 정책의 구멍이 그대로 보여야 하고 옛 Deny 가 남지 않았다는 뜻). 아니면 `오류: 카나리 실패` 로 종료 코드 1로 멈춘다. 첫 변형에서 이렇게 멈추면 원본 정책에 덮어쓰기 구멍이 없다는 뜻일 가능성이 크다(일반 모드 (f)가 PASS인지 본다). 이때는 대기를 늘려도 소용없으니 `오류:` 줄과 종료 코드만 보낸다. (2) 변형을 붙이고 대기·재-assume 한 뒤 **Deny 카나리**를 본다. 본인 자격증명이 `ManagedBy=Other` 로 만든 `-other` 알람의 덮어쓰기는 `null` 에서 ALLOWED(리소스 태그가 있어 `Null` 조건이 안 걸리고 원본 정책이 허용), `stringnotequals` 에서 DENIED(`Other` 는 `AlarmOps` 가 아니라서)여야 한다. 기대와 다르면 Deny 가 반영되지 않았을 수 있어 p2 를 `불안정`으로 표시한다. (3) p2 는 `REHEARSAL_PROBE_WAIT` 간격으로 두 번 재서 같을 때만 판정한다. 시작할 때 probe 알람 이름 전부(`AlarmOpsRehearsal-probe-<변형>-new`·`-unmanaged`·`-canary`·`-other`)를 본인 자격증명으로 지운다(이 접두어는 이 스크립트 전용이라 지워도 된다). 태그 없이 만든 알람에 `ManagedBy` 태그가 보이면 준비 실패(종료 코드 1)다. 일반 모드의 `AlarmOpsRehearsal-replica-test`·`-unmanaged` 는 기존 동작 그대로다.
+       카나리와 안정성(변형마다): (1) 앞 변형의 `probe-deny`를 지우고(두 번째 변형부터는 대기·재-assume 한 뒤) **Deny 없는 상태의 카나리**를 본다. 본인 자격증명으로 만든 태그 없는 `-canary` 알람을 복제 역할이 `ManagedBy` 요청 태그로 덮어쓰기가 ALLOWED 여야 한다(원본 정책의 구멍이 그대로 보여야 하고 옛 Deny 가 남지 않았다는 뜻). 아니면 `오류: 카나리 실패` 로 종료 코드 1로 멈춘다. 첫 변형에서 이렇게 멈추면 원본 정책에 덮어쓰기 구멍이 없다는 뜻일 가능성이 크다(일반 모드 (f)가 PASS인지 본다). 이때는 대기를 늘려도 소용없으니 `오류:` 줄과 종료 코드만 보낸다. (2) 변형을 붙이고 대기·재-assume 한 뒤 **Deny 카나리**를 본다. 본인 자격증명이 `ManagedBy=Other` 로 만든 `-other` 알람의 덮어쓰기는 `null` 에서 ALLOWED(리소스 태그가 있어 `Null` 조건이 안 걸리고 원본 정책이 허용), `stringnotequals` 에서 DENIED(`Other` 는 `AlarmOps` 가 아니라서)여야 한다. 기대와 다르면 Deny 가 반영되지 않았을 수 있어 p2 를 `불안정`으로 표시한다. (3) p2 는 `REHEARSAL_PROBE_WAIT` 간격으로 두 번 재서 같을 때만 판정한다. 시작할 때 probe 알람 이름 전부(`[AlarmOpsRehearsal] probe-<변형>-new`·`-unmanaged`·`-canary`·`-other`, 이름이 `[`로 시작해야 원본 정책의 생성 허용이 닿는다)를 본인 자격증명으로 지운다(이 접두어는 이 스크립트 전용이라 지워도 된다). 태그 없이 만든 알람에 `ManagedBy` 태그가 보이면 준비 실패(종료 코드 1)다. 일반 모드의 시험 알람(`[AlarmOpsRehearsal] replica-test`, `AlarmOpsRehearsal-replica-unmanaged`, `[AlarmOpsRehearsal] replica-unmanaged-bracket`)은 따로 지운다.
 
        p2 가 ALLOWED 이거나 `불안정`·`재측정`이면 같은 명령을 `REHEARSAL_PROBE_WAIT=60` 을 앞에 붙여 한 번 더 돌린다(IAM 전파가 느린 경우를 걸러낸다). 그래도 같으면 두 번의 표를 모두 보낸다.
        **표가 일부만 나오고 끝나는 경우**: 준비 실패·카나리 실패·assume 실패 등이면 표의 앞 변형 행만 나오고 `오류:` 줄과 종료 코드 1로 끝난다. 그때는 표(있는 만큼)와 그 아래 사유 줄, `오류:` 줄, 종료 코드만 허브에 보낸다.
-     - 끝나면(실패·Ctrl+C·터미널 닫기 포함) 시험 알람 두 개(실측 모드는 probe 알람 8개: 변형 2 × new·unmanaged·canary·other 도), 인라인 정책(`probe-deny` 포함), 임시 역할을 스스로 지운다. 정리 실패 경고가 나오면 같은 명령에 `--cleanup-only`를 붙여 다시 돌린다.
+     - 끝나면(실패·Ctrl+C·터미널 닫기 포함) 시험 알람 세 개(`[AlarmOpsRehearsal] replica-test`, `AlarmOpsRehearsal-replica-unmanaged`, `[AlarmOpsRehearsal] replica-unmanaged-bracket`; 실측 모드는 probe 알람 8개: 변형 2 × new·unmanaged·canary·other 도), 인라인 정책(`probe-deny` 포함), 임시 역할을 스스로 지운다. 정리 실패 경고가 나오면 같은 명령에 `--cleanup-only`를 붙여 다시 돌린다.
      - 임시 자격증명은 출력·로그에 나오지 않는다. 로그는 `rehearsal-logs/<profile>/replica-check.md`(올리지 않는다).
      - **표가 나오기 전에 멈추는 경우**: 종료 코드 1~5와 `오류:` 줄이 나온다. 2는 인자·환경변수·확인 계정 거부, 3은 중앙·개발·거부 목록 계정, 4는 프로필이 SSO 역할이 아님, 5는 임시 역할이 이미 있음, 1은 그 밖의 오류(원본 역할·정책 없음, 호출 실패 등)다. 이 코드는 `verify.sh`의 종료 코드 2(SKIP 있음)와 뜻이 다르다. 이때는 `오류:` 줄과 종료 코드만 허브에 보낸다.
      - 표에 FAIL이 있으면 허브에는 **표만** 보낸다. 표의 오류 코드 말고 다른 출력·로그·자격증명은 보내지 않는다.
@@ -844,7 +854,9 @@ http://localhost:3107/auth/dev-login?as=admin
 | 실측 `replica-check.sh`: 표에 `(준비) 복제 역할 assume` 또는 `(준비) 정책 전파(DescribeAlarms)` FAIL | IAM 전파가 느리다. 환경변수 `REHEARSAL_ASSUME_RETRIES`(기본 12, 5초 간격)를 늘려(예: 36) 다시 실행한다. 그래도 같은 오류 코드면 그 코드만 허브에 보낸다 |
 | 실측: `오류: 역할 AlarmOpsRehearsal-WriterReplica 가 이미 있다`(종료 코드 5) | 이전 실행의 잔여물이다. 같은 명령에 `--cleanup-only`를 붙여 정리하고 다시 실행한다 |
 | 실측: `AlarmOpsRehearsal=true 태그가 없어 지우지 않는다` | 같은 이름의 다른 사람이 만든 역할이다. 지우지 않는다. 콘솔에서 누가 만들었는지 확인하고 허브에 알린다 |
-| 실측 (f) FAIL "기존 고객 알람 덮어쓰기 가능" | 정책 결함이다(남의 알람을 `ManagedBy` 요청 태그로 덮어쓸 수 있음). 고객 스택에 AlarmWriter를 켜기 전에 허브에 표를 보내 `template.yaml`의 `CreateAlarmWithManagedByTag` 보완을 이슈로 만든다. 보완안(명시적 Deny) 후보를 재려면 `--probe-resource-tag-deny`로 다시 실행해(복제 역할 정리 후) 나온 변형 표를 허브에 보낸다 |
+| 실측 (f) FAIL "기존 고객 알람 덮어쓰기 가능" | D-63 이후에는 그 계정의 스택이 D-63 이전 템플릿이라는 뜻일 가능성이 크다. 위 4단계 "B 계정 스택 갱신"으로 스택을 갱신하고 다시 돌린다(이미 최신이면 `No updates are to be performed`). 갱신한 뒤에도 FAIL이면 정책 결함이니 고객 스택에 AlarmWriter를 켜기 전에 허브에 표를 보낸다 |
+| 설치: 이미 갱신된 스택에 `install.sh`를 다시 돌리면 `No updates are to be performed`와 `FAIL: update-stack 실패` | 이미 최신 템플릿이라 바꿀 것이 없다는 뜻이라 정상이다. 아무것도 하지 않는다 |
+| 실측·정리: `Error parsing parameter '--alarm-names': Invalid JSON` | AWS CLI 는 리스트형 인자 값이 `[`로 시작하면 JSON 으로 읽는다. 스크립트는 이름을 JSON 배열(`rh_json_array`)로 넘기므로 최신 `main`을 받은 스크립트인지 확인한다. 직접 지울 때도 `--alarm-names '["[이름] ..."]'` 처럼 JSON 배열로 넘긴다 |
 | 실측 `replica-check.sh`: `환경변수 AWS_CA_BUNDLE 가 설정되어 있다`(또는 `AWS_ENDPOINT_URL*`, `AWS_CONFIG_FILE`, `AWS_SHARED_CREDENTIALS_FILE`)로 거부, 종료 코드 2 | 임시 자격증명이 엉뚱한 곳으로 가지 않게 막은 것이다. 그 터미널에서만 `unset AWS_CA_BUNDLE`(해당 변수)을 하고 다시 실행한다. 회사 TLS 검사 때문에 unset 하면 AWS 호출이 실패하면 허브에 문의한다 |
 
 ### 배경 (읽지 않아도 된다)
@@ -1017,6 +1029,9 @@ npm ci --ignore-scripts && npm run build:lambda -w @alarmops/ingest && npm run b
    | `RemediatorCallerRoleArn` | 비워 둔다 | `EnableRemediator`가 `true`일 때만 필요 |
 
 - 고객이 경계(`PermissionsBoundaryArn`)를 쓰면 연결 점검(Reader·이벤트 전달)을 돌려 AccessDenied가 없는지 확인한다.
+- **고객에게 함께 안내할 것(D-63)**:
+  - (a) 이름이 `[`로 시작하는 알람은 AlarmOps/MSP용으로 예약된다. 고객이 그런 이름으로 알람을 직접 만들지 않아야 하며, 그런 이름의 알람은 AlarmOps가 설정을 덮어쓸 수 있다(AlarmWriter를 켠 경우).
+  - (b) D-63 이전 템플릿으로 이미 설치한 고객은 스택을 갱신해야 한다. CloudFormation 콘솔 → 해당 스택(`alarmops-customer`) → 업데이트 → 기존 템플릿 바꾸기(새 `template.yaml` 올리기) → 파라미터는 이전 값 그대로 유지 → `CAPABILITY_NAMED_IAM` 승인 후 제출. 자세한 것은 `infra/customer-stack/README.md`의 "기존 스택 갱신".
 
 3. 고객 담당자가 할 일:
    1. 자기 AWS 콘솔에서 리전을 **서울(ap-northeast-2)** 로 바꾼다.
