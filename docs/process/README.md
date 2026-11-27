@@ -11,6 +11,8 @@
 
 워크플로는 전체 단계가 필요한 PR(권한·IAM·DB·워크플로·새 기능)에만 쓴다.
 
+구현 지시를 쓸 때는 `docs/process/pitfalls.md`의 해당 영역 항목을 지시문에 붙인다(11/27, 검토 왕복을 줄이려고 둔다).
+
 ## 형식 근거 (Claude Code 공식 문서 sub-agents, 11/24 확인)
 - 파일 = YAML frontmatter + 본문(시스템 프롬프트). 필수는 `name`, `description`뿐이다.
 - `description`은 "언제 맡길지"를 짧게. 모든 설명의 합이 15,000 토큰을 넘으면 경고가 난다.
