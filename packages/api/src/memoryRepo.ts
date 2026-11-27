@@ -860,7 +860,8 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
       .sort((a, b) => (a.r.order ?? 0) - (b.r.order ?? 0) || (a.r.contactId < b.r.contactId ? -1 : 1))
       .map(({ r, src }) => ({ contactId: r.contactId, role: r.role, source: src?.source ?? 'DIRECT' as const, templateId: src?.templateId ?? null, templateName: src?.templateName ?? null, order: r.order ?? 0 }));
     const scopes = this.contactScopes.filter((s) => s.customerId === customerId).map((s) => ({ contactId: s.contactId, scopeType: s.scopeType, scopeId: s.scopeId, scopeName: name(s.scopeType, s.scopeId), role: s.role }));
-    return { version: this.respondersVersion.get(customerId) ?? 0, templateId: this.customerTemplate.get(customerId) ?? null, entries, scopes };
+    const templateId = this.customerTemplate.get(customerId) ?? null;
+    return { version: this.respondersVersion.get(customerId) ?? 0, templateId, templateName: templateId ? this.templates.get(templateId)?.name ?? null : null, entries, scopes };
   }
   async writeResponders(customerId: string, expectedVersion: number, op: ResponderOp, audit: AuditInput): Promise<ResponderWriteOutcome> {
     if (audit.customerId !== customerId) throw new Error('writeResponders: audit must be for the same customer');
@@ -944,7 +945,7 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     if (!t) return 'NOT_FOUND';
     if (t.version !== u.expectedVersion) return 'CONFLICT';
     if ([...this.templates.values()].some((x) => x.id !== t.id && x.name === u.proposal.name)) return 'NAME_EXISTS';
-    if (!this.staffOk(u.proposal.members)) return 'BAD_MEMBER';
+    if (!this.staffOk(u.proposal.members.filter((m) => !t.members.includes(m)))) return 'BAD_MEMBER'; // only people being added
     const plan = planTemplateChange(this.impactInput(t, u.proposal.members), u.proposal);
     if (plan.previewHash !== u.previewHash) return 'STALE';
     const blocking = templateBlocking(this.impactInput(t, u.proposal.members), plan, u.at);
@@ -978,7 +979,7 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
   // ── one customer's template (D-64) ──
   private templateRef(id: string | null): TemplateRef | null {
     const t = id ? this.templates.get(id) : undefined;
-    return t ? { id: t.id, name: t.name, version: t.version, members: [...t.members] } : null;
+    return t ? { id: t.id, name: t.name, version: t.version, members: [...t.members], inactive: [...t.members].filter((m) => !this.contacts.get(m)?.active) } : null;
   }
   private attachInput(customerId: string, from: TemplateRef | null, to: TemplateRef | null): TemplateAttachInput {
     const ids = [...new Set([...(from?.members ?? []), ...(to?.members ?? [])])];
@@ -1032,7 +1033,7 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     const version = w.expectedVersion + 1;
     this.respondersVersion.set(w.customerId, version);
     this.audits.push({ ...audit, before: { templateId: from?.id ?? null }, after: { templateId: to?.id ?? null, added: plan.joins, removed: plan.leaves } });
-    return { version, templateId: w.toTemplateId, joins: plan.joins.length, leaves: plan.leaves.length };
+    return { version, templateId: w.toTemplateId, joins: plan.joins.length, leaves: plan.leaves.length, skippedInactive: plan.skippedInactive };
   }
   async rotationsWorld(scope: ScopeFilter): Promise<RotationsWorld> {
     const rotations = [...this.rotations.values()].filter((r) => r.scope === 'MSP' || (r.customerId != null && seesCustomer(scope, r.customerId))).map((r) => structuredClone(r));

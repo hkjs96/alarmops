@@ -61,6 +61,54 @@ export function templatesContract(make: MakeFixture<Repo>): void {
   };
   const respondersOf = async (cid: string) => body(await w.call(ADMIN, 'GET', `/customers/${cid}/responders`));
 
+  describe('GET /customers/{id}/responders carries the customer template (#178)', () => {
+    it('templateId and templateName are the customer\'s template, whether or not any member came in DIRECT; null when none', async () => {
+      w = await tworld(make, (seed) => { seed.customers.set('cus_bare', { id: 'cus_bare', name: 'Bare Co', slug: 'bare' }); });
+      // Hanbit: Junho was added directly, Haeun comes from the template
+      expect(await respondersOf('cus_hanbit')).toMatchObject({ templateId: T, templateName: 'Infra core' });
+      expect((await respondersOf('cus_hanbit')).staff.map((s: any) => s.source).sort()).toContain('DIRECT');
+      const bare = await respondersOf('cus_bare');
+      expect([bare.templateId, bare.templateName]).toEqual([null, null]);
+      await fixtureRename('Infra core 2');
+      expect(await respondersOf('cus_mirae')).toMatchObject({ templateId: T, templateName: 'Infra core 2' });
+    });
+
+    it('a customer with a template but no member rows still names it', async () => {
+      w = await tworld(make, (seed) => {
+        seed.customers.set('cus_empty', { id: 'cus_empty', name: 'Empty Co', slug: 'empty' });
+        seed.customerTemplate.set('cus_empty', T);
+      });
+      const r = await respondersOf('cus_empty');
+      expect([r.staff.length, r.templateId, r.templateName]).toEqual([0, T, 'Infra core']);
+    });
+  });
+
+  const fixtureRename = async (name: string) => {
+    const members = ['ct_haeun', 'ct_junho'];
+    const p = body(await w.call(ADMIN, 'POST', `/responder-templates/${T}/preview`, { body: { name, members } }));
+    const r = await w.call(ADMIN, 'PATCH', `/responder-templates/${T}`, { body: { name, members, previewHash: p.previewHash }, headers: im(0) });
+    expect(r.status).toBe(200);
+  };
+
+  describe('a member deactivated since it was added (#176)', () => {
+    const inactiveJunho = (seed: MemoryApiStore): void => { seed.contacts.set('ct_junho', { ...seed.contacts.get('ct_junho')!, active: false }); };
+    it('a rename-only PATCH succeeds (name only, or the same member list sent back); only newly added people must be active staff', async () => {
+      w = await tworld(make, inactiveJunho);
+      const rename = async (extra: Record<string, unknown>, version: number, name: string) => {
+        const p = await w.call(ADMIN, 'POST', `/responder-templates/${T}/preview`, { body: { name, ...extra } });
+        expect(p.status).toBe(200);
+        return w.call(ADMIN, 'PATCH', `/responder-templates/${T}`, { body: { name, ...extra, previewHash: body(p).previewHash }, headers: im(version) });
+      };
+      const a = await rename({}, 0, 'Infra core v2');
+      expect([a.status, body(a).name]).toEqual([200, 'Infra core v2']);
+      const b = await rename({ members: ['ct_haeun', 'ct_junho'] }, 1, 'Infra core v3');
+      expect([b.status, body(b).name]).toEqual([200, 'Infra core v3']);
+      // a newly added person is still checked
+      const c = await w.call(ADMIN, 'POST', `/responder-templates/${T}/preview`, { body: { members: ['ct_haeun', 'ct_junho', 'ct_nobody'] } });
+      expect([c.status, body(c).error.code]).toEqual([400, 'VALIDATION_FAILED']);
+    });
+  });
+
   describe('GET /responder-templates', () => {
     it('any MSP staff role reads; members and customers (terminated left out), no contact values', async () => {
       w = await tworld(make);
@@ -327,7 +375,7 @@ export function templatesContract(make: MakeFixture<Repo>): void {
       const r = await put('cus_fresh', T, 0);
       expect(r.status).toBe(200);
       expect(r.headers.etag).toBe('"1"');
-      expect(body(r)).toEqual({ customerId: 'cus_fresh', templateId: T, version: 1, joins: 2, leaves: 0 });
+      expect(body(r)).toEqual({ customerId: 'cus_fresh', templateId: T, version: 1, joins: 2, leaves: 0, skippedInactive: [] });
       expect(await rows('cus_fresh')).toEqual([['ct_haeun', 'TEMPLATE', T], ['ct_junho', 'TEMPLATE', T]]);
       const got = await respondersOf('cus_fresh');
       expect([got.templateId, got.version]).toEqual([T, 1]);
@@ -345,7 +393,7 @@ export function templatesContract(make: MakeFixture<Repo>): void {
       expect(pr).toMatchObject({ from: { id: T }, to: null, totals: { joins: 0, leaves: 1 } });
       expect(pr.effects.map((e: any) => [e.kind, e.contactId])).toEqual([['LEAVES', 'ct_haeun'], ['STAYS_DIRECT', 'ct_junho']]);
       const r = await put('cus_hanbit', null, 0);
-      expect([r.status, body(r)]).toEqual([200, { customerId: 'cus_hanbit', templateId: null, version: 1, joins: 0, leaves: 1 }]);
+      expect([r.status, body(r)]).toEqual([200, { customerId: 'cus_hanbit', templateId: null, version: 1, joins: 0, leaves: 1, skippedInactive: [] }]);
       expect(await rows('cus_hanbit')).toEqual([['ct_junho', 'DIRECT', null], ['ct_minjae', 'DIRECT', null]]);
       expect((await respondersOf('cus_hanbit')).templateId).toBeNull();
       expect(JSON.stringify(await respondersOf('cus_mirae'))).toBe(others);
@@ -381,7 +429,7 @@ export function templatesContract(make: MakeFixture<Repo>): void {
       w = await tworld(make, d64);
       const n = (await w.fx.audits()).length;
       const same = await put('cus_mirae', T, 0);
-      expect([same.status, body(same)]).toEqual([200, { customerId: 'cus_mirae', templateId: T, version: 0, joins: 0, leaves: 0 }]);
+      expect([same.status, body(same)]).toEqual([200, { customerId: 'cus_mirae', templateId: T, version: 0, joins: 0, leaves: 0, skippedInactive: [] }]);
       const none = await put('cus_fresh', null, 0);
       expect([none.status, body(none).version]).toEqual([200, 0]);
       expect((await w.fx.audits()).length).toBe(n);
@@ -516,6 +564,50 @@ export function templatesContract(make: MakeFixture<Repo>): void {
       const a2 = await put('cus_hanbit', null, 0);
       const p2 = await w.call(ADMIN, 'PATCH', `/responder-templates/${T}`, { body: { members: ['ct_haeun', 'ct_minjae'], previewHash: body(await preview(['ct_haeun', 'ct_minjae'])).previewHash }, headers: im(1) });
       for (const r of [a2, p2]) expect([r.status, body(r).error.code, r.headers['retry-after']]).toEqual([503, 'BUSY', '1']);
+    });
+  });
+  describe('11/27 attaching skips inactive staff and says who was skipped (#176)', () => {
+    const junhoOut = (seed: MemoryApiStore): void => { d64(seed); seed.contacts.set('ct_junho', { ...seed.contacts.get('ct_junho')!, active: false }); };
+    it('preview and response list the skipped person; only the active member joins; audit added has the active only', async () => {
+      w = await tworld(make, junhoOut);
+      const pr = body(await cpreview('cus_fresh', T));
+      expect(pr.skippedInactive).toEqual([{ contactId: 'ct_junho', name: 'Junho Park' }]);
+      expect(pr.effects.map((e: any) => [e.kind, e.contactId])).toEqual([['JOINS', 'ct_haeun']]);
+      expect(pr.totals).toMatchObject({ joins: 1, leaves: 0 });
+      const r = await put('cus_fresh', T, 0);
+      expect(r.status).toBe(200);
+      expect(body(r)).toEqual({ customerId: 'cus_fresh', templateId: T, version: 1, joins: 1, leaves: 0, skippedInactive: [{ contactId: 'ct_junho', name: 'Junho Park' }] });
+      expect(await rows('cus_fresh')).toEqual([['ct_haeun', 'TEMPLATE', T]]);
+      expect((await w.fx.audits()).find((a) => a.customerId === 'cus_fresh')).toMatchObject({ after: { templateId: T, added: ['ct_haeun'], removed: [] } });
+    });
+
+    it('a template whose members are all inactive still attaches (nobody joins, everyone listed as skipped); an empty list otherwise', async () => {
+      w = await tworld(make, (seed) => { junhoOut(seed); seed.contacts.set('ct_haeun', { ...seed.contacts.get('ct_haeun')!, active: false }); });
+      const pr = body(await cpreview('cus_fresh', T));
+      expect(pr.skippedInactive.map((x: any) => x.contactId)).toEqual(['ct_haeun', 'ct_junho']);
+      expect(pr.effects).toEqual([]);
+      const r = await put('cus_fresh', T, 0);
+      expect([r.status, body(r).joins, body(r).skippedInactive.length]).toEqual([200, 0, 2]);
+      w = await tworld(make, d64);
+      expect(body(await cpreview('cus_fresh', T)).skippedInactive).toEqual([]);
+    });
+
+    it('a stale preview: deactivating a member after the preview changes the hash (PREVIEW_STALE), nothing is written', async () => {
+      w = await tworld(make, d64);
+      const p = body(await cpreview('cus_fresh', T));
+      await w.fx.patchContact('ct_junho', { active: false });
+      const r = await w.call(ADMIN, 'PUT', cpath('cus_fresh'), { body: { templateId: T, previewHash: p.previewHash }, headers: im(0) });
+      expect([r.status, body(r).error.code]).toEqual([409, 'PREVIEW_STALE']);
+      expect(await rows('cus_fresh')).toEqual([]);
+    });
+
+    it('template update propagation adds active people only (new members must be active) and leaves an inactive old member alone', async () => {
+      w = await tworld(make, junhoOut);
+      const members = ['ct_haeun', 'ct_junho', 'ct_minjae'];
+      const r = await save(members);
+      expect(r.status).toBe(200);
+      expect((await rows('cus_mirae')).map((x: any) => x[0])).toContain('ct_minjae');
+      expect((await rows('cus_mirae')).map((x: any) => x[0])).toContain('ct_junho'); // existing row of the now-inactive member stays
     });
   });
 }

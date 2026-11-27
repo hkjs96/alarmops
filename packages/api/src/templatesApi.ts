@@ -133,7 +133,7 @@ export const busy = (): ApiError => new ApiError(503, 'BUSY', 'The system was bu
 // ───────────────────────────── attach / detach / switch one customer (D-64) ─────────────────────────────
 
 const hashAttach = (input: TemplateAttachInput, effects: TemplateEffect[]): string => createHash('sha256').update(stable({
-  customerId: input.customer.id, from: input.from?.id ?? null, to: input.to?.id ?? null, toVersion: input.to?.version ?? null,
+  customerId: input.customer.id, from: input.from?.id ?? null, to: input.to?.id ?? null, toVersion: input.to?.version ?? null, skipped: [...(input.to?.inactive ?? [])].sort(),
   effects: effects.map((e) => ({ kind: e.kind, contactId: e.contactId, stepIndex: e.stepIndex ?? null })),
 })).digest('hex');
 
@@ -151,9 +151,11 @@ export function planTemplateAttach(input: TemplateAttachInput): TemplateAttachPl
   const leaves: string[] = [];
   const retarget: string[] = [];
   const joins: string[] = [];
-  if ((from?.id ?? null) === (to?.id ?? null)) return { effects, joins, leaves, retarget, totals: { joins: 0, leaves: 0, warnings: 0 }, previewHash: hashAttach(input, effects) };
+  const skippedInactive: Array<{ contactId: string; name: string }> = [];
+  if ((from?.id ?? null) === (to?.id ?? null)) return { effects, joins, leaves, retarget, skippedInactive, totals: { joins: 0, leaves: 0, warnings: 0 }, previewHash: hashAttach(input, effects) };
   const oldIds = from?.members ?? [];
   const newIds = to?.members ?? [];
+  const inactive = new Set(to?.inactive ?? []);
   for (const id of [...oldIds].sort(byId)) {
     const row = rowOf(id);
     if (!row) continue;
@@ -168,12 +170,14 @@ export function planTemplateAttach(input: TemplateAttachInput): TemplateAttachPl
   for (const id of [...newIds].sort(byId)) {
     if (retarget.includes(id)) continue;
     const row = rowOf(id);
-    if (!row) { joins.push(id); effects.push({ kind: 'JOINS', contactId: id, name: nameOf(id) }); }
+    if (!row && inactive.has(id)) skippedInactive.push({ contactId: id, name: nameOf(id) }); // 11/27: inactive staff are skipped, like a direct add
+    else if (!row) { joins.push(id); effects.push({ kind: 'JOINS', contactId: id, name: nameOf(id) }); }
     else if (row.source === 'DIRECT') effects.push({ kind: 'ALREADY_DIRECT', contactId: id, name: nameOf(id) });
   }
+  skippedInactive.sort((a, b) => a.name.localeCompare(b.name) || byId(a.contactId, b.contactId));
   effects.sort((a, b) => KIND_RANK[a.kind] - KIND_RANK[b.kind] || a.name.localeCompare(b.name) || byId(a.contactId, b.contactId));
   const count = (k: TemplateEffect['kind']) => effects.filter((e) => e.kind === k).length;
-  return { effects, joins, leaves, retarget, totals: { joins: joins.length, leaves: leaves.length, warnings: count('STEP_NAMES') }, previewHash: hashAttach(input, effects) };
+  return { effects, joins, leaves, retarget, skippedInactive, totals: { joins: joins.length, leaves: leaves.length, warnings: count('STEP_NAMES') }, previewHash: hashAttach(input, effects) };
 }
 
 export function attachBlocking(input: TemplateAttachInput, plan: TemplateAttachPlan, now: Date): TemplateBlocking[] {
@@ -222,7 +226,8 @@ async function readProposal(req: ApiRequest, deps: Deps, cur: ResponderTemplateV
   if (b.name === undefined && b.members === undefined) throw invalid('members', 'name or members is required.');
   const name = b.name === undefined ? cur.name : readName(b.name);
   const members = b.members === undefined ? cur.members.map((m) => m.contactId) : readMembers(b.members);
-  if (b.members !== undefined) await assertStaff(deps, members);
+  // only people being added must be active staff (a rename must not fail because an existing member was deactivated)
+  if (b.members !== undefined) await assertStaff(deps, members.filter((id) => !cur.members.some((m) => m.contactId === id)));
   return { name, members };
 }
 
@@ -336,7 +341,7 @@ export async function previewCustomerTemplate(req: ApiRequest, deps: Deps, custo
   const plan = planTemplateAttach(input);
   return ok({
     customerId: customer.id, version: input.customer.version, from: ref(input.from), to: ref(input.to), effects: plan.effects, totals: plan.totals,
-    blocking: attachBlocking(input, plan, deps.now()), previewHash: plan.previewHash,
+    skippedInactive: plan.skippedInactive, blocking: attachBlocking(input, plan, deps.now()), previewHash: plan.previewHash,
   });
 }
 
@@ -348,7 +353,7 @@ export async function putCustomerTemplate(req: ApiRequest, deps: Deps, customerI
   if (typeof hash !== 'string' || !/^[0-9a-f]{64}$/.test(hash)) throw invalid('previewHash', 'previewHash from the preview of this change is required.');
   const input = await attachInput(deps, customer.id, to);
   if (version !== input.customer.version) throw versionConflict('The Responders', input.customer.version);
-  if ((input.from?.id ?? null) === (input.to?.id ?? null)) return ok({ customerId: customer.id, templateId: to, version: input.customer.version, joins: 0, leaves: 0 }, { etag: `"${input.customer.version}"` });
+  if ((input.from?.id ?? null) === (input.to?.id ?? null)) return ok({ customerId: customer.id, templateId: to, version: input.customer.version, joins: 0, leaves: 0, skippedInactive: [] }, { etag: `"${input.customer.version}"` });
   const now = deps.now();
   const kind = to === null ? 'detach' : input.from ? 'switch' : 'attach';
   const r = await deps.repo.setCustomerTemplate({ customerId: customer.id, toTemplateId: to, expectedVersion: version, previewHash: hash, actorId: auth.userId, at: now }, {
@@ -362,5 +367,5 @@ export async function putCustomerTemplate(req: ApiRequest, deps: Deps, customerI
   if (r === 'CONFLICT') throw versionConflict('The Responders', (await deps.repo.respondersState(customer.id)).version);
   if (r === 'STALE') throw new ApiError(409, 'PREVIEW_STALE', 'The template or the customer changed after the preview. Preview again.', { currentVersion: (await deps.repo.respondersState(customer.id)).version });
   if ('blocking' in r) throw blockedError(r.blocking);
-  return ok({ customerId: customer.id, templateId: r.templateId, version: r.version, joins: r.joins, leaves: r.leaves }, { etag: `"${r.version}"` });
+  return ok({ customerId: customer.id, templateId: r.templateId, version: r.version, joins: r.joins, leaves: r.leaves, skippedInactive: r.skippedInactive }, { etag: `"${r.version}"` });
 }

@@ -135,7 +135,7 @@ export interface PersonScopeRow { contactId: string; scopeType: 'CUSTOMER' | 'PR
  * The Responders list of one customer. `version` is the list's optimistic-lock version (API-CONTRACT §8.3
  * "Responders 버전"): it goes up by one with every write through `writeResponders` and never restarts.
  */
-export interface RespondersState { version: number; templateId: string | null; entries: ResponderEntry[]; scopes: PersonScopeRow[] }
+export interface RespondersState { version: number; templateId: string | null; templateName: string | null; entries: ResponderEntry[]; scopes: PersonScopeRow[] }
 
 export type ResponderOp =
   | { kind: 'add'; contactId: string; role: 'PAGEABLE' | 'NOTIFY_ONLY' }
@@ -188,7 +188,8 @@ export interface TemplateUpdate { id: string; expectedVersion: number; proposal:
 export type TemplateUpdateOutcome = { view: ResponderTemplateView; affected: number } | { blocking: TemplateBlocking[] } | 'NOT_FOUND' | 'CONFLICT' | 'STALE' | 'NAME_EXISTS' | 'BAD_MEMBER' | 'BUSY';
 
 /** Attach / detach / switch the template of ONE customer (D-64). `from`/`to`: null = no template. */
-export interface TemplateRef { id: string; name: string; version: number; members: string[] }
+/** `inactive`: the members that are not active staff now (11/27: attaching skips them; they are listed in the preview and response). */
+export interface TemplateRef { id: string; name: string; version: number; members: string[]; inactive?: string[] }
 export interface TemplateAttachInput {
   customer: {
     id: string; name: string; status: 'ACTIVE' | 'SUSPENDED' | 'TERMINATED'; templateId: string | null; version: number;
@@ -201,11 +202,13 @@ export interface TemplateAttachInput {
 }
 export interface TemplateAttachPlan {
   effects: TemplateEffect[]; joins: string[]; leaves: string[]; retarget: string[];
+  /** New-template members without a row here that are inactive staff: not added (11/27). Name order. */
+  skippedInactive: Array<{ contactId: string; name: string }>;
   totals: { joins: number; leaves: number; warnings: number }; previewHash: string;
 }
 export interface TemplateAttachWrite { customerId: string; toTemplateId: string | null; expectedVersion: number; previewHash: string; actorId: string; at: Date }
 export type TemplateAttachOutcome =
-  | { version: number; templateId: string | null; joins: number; leaves: number }
+  | { version: number; templateId: string | null; joins: number; leaves: number; skippedInactive: Array<{ contactId: string; name: string }> }
   | { blocking: TemplateBlocking[] }
   | 'NOT_FOUND' | 'NO_TEMPLATE' | 'TERMINATED' | 'CONFLICT' | 'STALE' | 'BUSY';
 
@@ -451,7 +454,7 @@ export interface ApiRepository {
    * TERMINATED customer, check the Responders version, re-read the inputs, compare the hash, refuse a blocking change, then set
    * `responderTemplateId`, add/remove/retarget the template rows and write ONE customer audit row (targetType 'Responders': the version moves).
    * `audit.customerId` must be `customerId`; `action`/`before`/`after` are filled by the store from the plan.
-   * 'BUSY': a deadlock or serialization failure — nothing was written.
+   * 'BUSY': a deadlock, serialization failure, lock/statement timeout or a foreign-key race — nothing was written.
    */
   setCustomerTemplate(w: TemplateAttachWrite, audit: AuditInput): Promise<TemplateAttachOutcome>;
   /** MSP rotations + rotations of the customers in `scope` (CUSTOMER rotations only inside the scope). */
