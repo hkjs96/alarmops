@@ -120,6 +120,54 @@ export async function assertNoRowShift(page: Page, o: NoRowShift): Promise<RowBo
 }
 
 /**
+ * "Keep the row you were looking at" (#172, decision 11/27). When a panel closes the list widens and its rows lay out
+ * again, so the scroll offset alone says nothing about whether the row you were reading is still where your eyes were.
+ * This compares the anchor row's top in the VIEWPORT before the press and again at each settle time, whatever the page
+ * or an inner column scrolled meanwhile. It never skips: a missing anchor row, or no anchor to pick, fails.
+ *
+ * The anchor is the row `preferKey` while it is on screen, otherwise the topmost row that is on screen.
+ */
+export interface AnchorHeld {
+  name: string;
+  rows: string;
+  /** the row that was being edited (`data-row-key`) */
+  preferKey: string;
+  at: Locator;
+  then?: () => Promise<void>;
+  settleMs?: number[];
+  tolerancePx?: number;
+}
+const viewportTop = (page: Page, rows: string, key: string): Promise<number | null> => page.evaluate(([sel, k]) => {
+  const el = [...document.querySelectorAll<HTMLElement>(sel!)].find((e) => e.dataset.rowKey === k && e.getClientRects().length > 0);
+  return el ? Math.round(el.getBoundingClientRect().top * 10) / 10 : null;
+}, [rows, key] as const);
+
+export async function assertAnchorRowHeld(page: Page, o: AnchorHeld): Promise<{ key: string; top: number }> {
+  await noScrollAnchoring(page);
+  // the anchor is chosen where the user is looking: the row being edited if it is on screen, else the topmost visible row
+  const anchor = await page.evaluate(([sel, pref]) => {
+    const vh = window.innerHeight;
+    const vis = [...document.querySelectorAll<HTMLElement>(sel!)].filter((e) => e.getClientRects().length > 0).map((e) => ({ k: e.dataset.rowKey ?? "", r: e.getBoundingClientRect() }))
+      .filter((x) => x.k && x.r.bottom > 0 && x.r.top < vh);
+    const p = vis.find((x) => x.k === pref) ?? vis.sort((a, b) => a.r.top - b.r.top)[0];
+    return p ? { key: p.k, top: Math.round(p.r.top * 10) / 10 } : null;
+  }, [o.rows, o.preferKey] as const);
+  expect(anchor, `${o.name}: there is a row on screen to hold`).not.toBeNull();
+  const b = (await o.at.boundingBox())!;
+  await page.mouse.click(Math.round(b.x + b.width / 2), Math.round(b.y + b.height / 2));
+  await o.then?.();
+  let waited = 0;
+  for (const ms of o.settleMs ?? [0, 700, 1600]) {
+    await page.waitForTimeout(ms - waited);
+    waited = ms;
+    const top = await viewportTop(page, o.rows, anchor!.key);
+    expect(top, `${o.name} +${ms}ms: the row that was being looked at (${anchor!.key}) is still in the list`).not.toBeNull();
+    expect(Math.abs(top! - anchor!.top), `${o.name} +${ms}ms: ${anchor!.key} was ${anchor!.top}px from the top of the view, now ${top}px`).toBeLessThanOrEqual(o.tolerancePx ?? 2);
+  }
+  return anchor!;
+}
+
+/**
  * The second half of the rule: pressing the same spot again within 600 ms does nothing, whatever is there by then.
  * `count` reads the number that must not change (rows not gone, requests sent, …).
  */

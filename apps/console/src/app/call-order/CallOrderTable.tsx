@@ -1,11 +1,12 @@
 "use client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { Mark, customerHasProblem, cx, useStableRows } from "@alarmops/design-system";
 import type { CallOrderRow, PagingPathStep } from "@/lib/api/types";
 import { STYLE_LABEL, callOrderPath, firstName, howText, parseScopeKey, partsText, repeatText, targetParts } from "@/lib/call-order/model";
 import { setEditIntent, takeFocusRow } from "@/lib/call-order/flags";
+import { settleRow, takeHeldRow } from "@/lib/call-order/row-anchor";
 import { useShell } from "@/components/ShellContext";
 
 type Row = CallOrderRow & { id: string };
@@ -76,6 +77,14 @@ export function CallOrderTable({ rows, listQuery, openKey, filterKey }: { rows: 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
+
+  // after a save or a close the row that was being looked at is at the same place in the view (#172): the panel noted it
+  // before it left, the list corrects the scroll once it has its wider layout
+  useLayoutEffect(() => {
+    if (openKey) return;
+    const a = takeHeldRow();
+    return a ? settleRow(a) : undefined;
+  }, [openKey]);
 
   // after a save or a close the focus is back on the row that was open (E18)
   useEffect(() => {
