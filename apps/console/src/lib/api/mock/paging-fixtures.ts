@@ -14,7 +14,9 @@ import { planSteps } from "../../call-order/model";
 import { customers34, type FxCustomer } from "./scope-fixtures";
 
 type Ch = Partial<Record<ContactChannelKey, ChannelState>>;
-export interface FxContact { id: string; kind: "STAFF" | "CUSTOMER"; customerId?: string; name: string; title: string; channels: Ch; emailMasked?: string; phoneMasked?: string }
+export interface FxContact { id: string; kind: "STAFF" | "CUSTOMER"; customerId?: string; name: string; title: string; channels: Ch; emailMasked?: string; phoneMasked?: string;
+  /** staff only: false = deactivated. Missing means active. A template attach skips them (API-CONTRACT §8.3, 11/27) */
+  active?: boolean }
 export interface FxStoredConfig extends PagingConfigInput { id: string; scopeType: ScopeLevelName; scopeId: string; version: number; updatedByName: string | null; updatedAt: string | null }
 export interface FxPerson { contactId: string; role: CustomerPersonRole; extras: ("APPROVER" | "PORTAL_USER")[]; scope: LevelRef }
 export interface FxCustomerPaging {

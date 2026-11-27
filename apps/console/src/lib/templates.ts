@@ -109,3 +109,10 @@ export function templateErrorText(f: Failure, ctx: ErrorContext & { name?: strin
 }
 /** the failures that mean "what you looked at is out of date": the screen offers Reload / Preview again */
 export const isOutOfDate = (code: string): boolean => code === "VERSION_CONFLICT" || code === "PREVIEW_STALE";
+
+/** The people an attach skipped because they are inactive (API-CONTRACT §8.3, 11/27). Empty when nobody was skipped. */
+export function skippedInactiveText(skipped: readonly { name: string }[], tense: "preview" | "saved"): string {
+  if (skipped.length === 0) return "";
+  const names = skipped.map((s) => s.name).join(", ");
+  return tense === "preview" ? `Skipped (inactive): ${names} — they won't be added.` : `Skipped (inactive): ${names} — not added.`;
+}
