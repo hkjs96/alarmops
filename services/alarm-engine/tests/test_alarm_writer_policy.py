@@ -89,7 +89,29 @@ def test_guard_rejects_managedby_in_tag_and_untag():
     with pytest.raises(ForbiddenTagKey):
         w._tag(cw.arn("x"), [{"Key": "ManagedBy", "Value": "AlarmOps"}])
     assert cw.calls == []
+    assert cw.writes() == []   # only the read-only existence check ran; no PutMetricAlarm
+    assert not any(c == "put_metric_alarm" for c, _ in cw.calls)
 
 
 def test_naming_managed_by_value_matches_iam_policy():
     assert naming.MANAGED_BY == "AlarmOps"   # template.yaml aws:RequestTag/ManagedBy, aws:ResourceTag/ManagedBy
+
+
+def test_create_with_non_bracket_name_raises_before_any_aws_call(world, monkeypatch):
+    """D-63: IAM allows creation only for `alarm:[*`; the engine fails fast instead of AccessDenied in a real account."""
+    from alarm_engine.aws import ForbiddenAlarmName
+
+    seen = []
+    orig = AlarmWriter.put
+
+    def spy(self, d, **kw):
+        seen.append(d)
+        return orig(self, d, **kw)
+
+    monkeypatch.setattr(AlarmWriter, "put", spy)
+    _, cw = first_sync(world)
+    cw.calls.clear()
+    with pytest.raises(ForbiddenAlarmName, match="D-63"):
+        orig(AlarmWriter(cw, ACCOUNT_ID), seen[0], name="EC2 web-1 CPUUtilization", severity="SEV-3")
+    assert cw.writes() == []   # only the read-only existence check ran; no PutMetricAlarm
+    assert not any(c == "put_metric_alarm" for c, _ in cw.calls)

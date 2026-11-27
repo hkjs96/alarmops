@@ -126,7 +126,7 @@
 ### D-07 (역할 분리, ExternalId)
 2. 현재 고객 역할은 **하나**(`MonitoringRole`)에 읽기·알람 쓰기·태그 쓰기가 모두 있고, 신뢰 정책이 `arn:aws:iam::{Central}:root` 전체이며 **ExternalId 없음**(`template.yaml:56-67`, 중앙 assume_role이 ExternalId를 안 넘긴다고 주석). → Reader / EventForwarder(기존 `AlertForwardRole` 대응) / AlarmWriter(선택)로 분리, ExternalId 필수, 특정 중앙 역할 ARN만 신뢰.
 3. **TagWriter 없음**: 현재 태그 쓰기 statement(`tag:TagResources/UntagResources`, 서비스별 태깅 19개, 조건 없는 `s3:PutBucketTagging`·`route53:ChangeTagsForResource`, `template.yaml:158-230`)를 전부 제거. 그 결과 **콘솔 Monitoring 토글이 태그를 쓸 수 없다** → 감시 의도 저장 위치를 새로 정해야 함(결정 필요: 고객이 IaC로 태그 / 중앙 DB 의도 + 우리 알람). monitoring-tag-contract의 "태그가 의도" 원칙과 충돌.
-4. AlarmWriter 권한: `PutMetricAlarm`, `TagResource`(알람), `DeleteAlarms`(ManagedBy 조건 유지). AlarmWriter가 없는 고객은 알람 생성·동기화·고아 정리를 건너뛰고 읽기만(모드 표시 필요).
+4. AlarmWriter 권한: `PutMetricAlarm`, `TagResource`(알람), `DeleteAlarms`(ManagedBy 조건 유지). AlarmWriter가 없는 고객은 알람 생성·동기화·고아 정리를 건너뛰고 읽기만(모드 표시 필요). 생성은 이름이 `[`로 시작하는 알람만 허용(D-63)되므로 엔진은 생성 직전에 이를 점검해 어긋나면 `ForbiddenAlarmName`으로 중단한다.
 5. Auto-Remediation(MODIFY 시 EC2/RDS stop, ELB 삭제)은 쓰기 권한이 큰 동작이라 역할 목록에 없다 → 이식 대상에서 제외하거나 별도 결정(추정: PoC 범위 밖).
 6. 중앙 계정 알람에는 ManagedBy 삭제 가드가 없으므로, 소유 판정(메타데이터)이 유일한 방어선 — 유지.
 
