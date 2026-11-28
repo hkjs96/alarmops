@@ -42,10 +42,55 @@ export function scrollParent(el: HTMLElement): HTMLElement | null {
   return null;
 }
 
+/**
+ * The place the list was at when the panel opened. Opening goes to another route, so `.page` (the list's scroller) is a new
+ * element that starts at 0 (1440), and the window is sent to the top (390). It also outlives the open panel: at 390 the panel
+ * replaces the list, so on close there is no row to measure and this is the only record of where the user was.
+ */
+let opened: RowAnchor | null = null;
+
+/**
+ * Whether the user has scrolled the list since the last time a panel opened: a wheel step, a touch drag, a scroll key, a
+ * drag on the scrollbar. A page that a script scrolled (or that the browser scrolled to bring a pressed row into view) is
+ * not a place the user chose to be: opening a row from the top must still leave the list at the top (#172, #184).
+ */
+let userScrolled = false;
+const SCROLL_KEYS = new Set(["PageUp", "PageDown", "Home", "End", "ArrowUp", "ArrowDown", " ", "Tab"]);
+export function trackUserScroll(): () => void {
+  const mark = () => { userScrolled = true; };
+  const key = (e: KeyboardEvent) => { if (SCROLL_KEYS.has(e.key)) userScrolled = true; };
+  // a press on the scroller itself (not on something inside it) is its scrollbar
+  const bar = (e: PointerEvent) => { const t = e.target as HTMLElement | null; if (t && t.scrollHeight > t.clientHeight && /auto|scroll/.test(getComputedStyle(t).overflowY)) userScrolled = true; };
+  window.addEventListener("wheel", mark, { capture: true, passive: true });
+  window.addEventListener("touchmove", mark, { capture: true, passive: true });
+  window.addEventListener("keydown", key, true);
+  window.addEventListener("pointerdown", bar, true);
+  return () => {
+    window.removeEventListener("wheel", mark, true);
+    window.removeEventListener("touchmove", mark, true);
+    window.removeEventListener("keydown", key, true);
+    window.removeEventListener("pointerdown", bar, true);
+  };
+}
+
+/** Called by the list right before it asks the router to open a panel. The list the user scrolled is what is noted. */
+export function noteOpen(preferKey: string, root: ParentNode = document): void {
+  const a = pickAnchor(boxes(root), window.innerHeight, preferKey);
+  held = opened = a && userScrolled && isScrolled(a.key, root) ? a : null;
+  userScrolled = false;
+}
+
+/** The list mounted with a panel it was not opened from (deep link, reload, another screen): nothing to remember. */
+export function forgetOpened(): void { if (!held) opened = null; }
+
+/** The list is back with no panel: the note of where it was is spent. */
+export function clearOpened(): void { opened = null; }
+
 /** Called by the panel right before it asks the router to leave. Replaces any earlier note. */
 export function holdRow(preferKey: string, root: ParentNode = document): void {
   const a = pickAnchor(boxes(root), window.innerHeight, preferKey);
-  held = a && isScrolled(a.key, root) ? a : null;
+  // no row in view: the list is not on screen (390: the panel replaces it), so keep the place noted when the panel opened
+  held = a ? (isScrolled(a.key, root) ? a : null) : opened;
 }
 
 /**
@@ -94,10 +139,21 @@ export function settleRow(anchor: RowAnchor, ms = 600, root: ParentNode = docume
   };
   for (const ev of INPUTS) window.addEventListener(ev, stop, { capture: true, passive: true });
   const t0 = performance.now();
+  // where the scroll was left by the last correction: a different place (not the top) is the user's wheel step that the
+  // browser scrolled before its event reached us (#184): leave it, never take it back
+  const spot = () => {
+    const el = [...root.querySelectorAll<HTMLElement>(ROWS)].find((e) => e.dataset.rowKey === anchor.key && e.getClientRects().length > 0);
+    const sp = el ? scrollParent(el) : null;
+    return el ? (sp ? sp.scrollTop : window.scrollY) : null;
+  };
   restoreRow(anchor, root);
+  let mine = spot();
   const tick = () => {
     if (stopped) return;
+    const at = spot();
+    if (mine !== null && at !== null && at > 0.5 && Math.abs(at - mine) > 1) { stop(); return; }
     restoreRow(anchor, root);
+    mine = spot();
     if (performance.now() - t0 >= ms) { stop(); return; }
     raf = requestAnimationFrame(tick);
   };
