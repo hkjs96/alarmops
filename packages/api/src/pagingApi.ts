@@ -176,6 +176,8 @@ async function putConfig(req: ApiRequest, deps: Deps, auth: AuthContext, custome
   const saved = await deps.repo.savePagingConfig({ ...next, renotifyAfterAckSec: cur?.renotifyAfterAckSec ?? null }, cur ? cur.version : null,
     audit(req, auth, now, cur ? 'paging.update' : 'paging.create', id, customerId, cur ? { version: cur.version, steps: stepsOut(cur.steps), repeatCount: cur.repeatCount } : null, { steps: stepsOut(next.steps), repeatCount: next.repeatCount, style: next.style, plan: next.plan }));
   if (saved === 'CONFLICT') throw versionConflict('The call order');
+  // D-28: a rotation the steps name was deleted between the check above and the save (the store re-checks under a row lock): the same 400 as an unknown rotation.
+  if ('unknownRotation' in saved) throw invalid(`steps[${saved.unknownRotation}].targetId`, 'Unknown rotation.');
   return ok(view(saved, world, now), { etag: `"${saved.version}"` }, cur ? 200 : 201);
 }
 

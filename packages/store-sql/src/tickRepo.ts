@@ -18,7 +18,7 @@ import {
   CLAIM_LEASE_SEC, CLOCK_SKEW_LIMIT_MS, LANE_CHANNELS, LANES, MAX_ATTEMPTS, RELEASE_HOLD_MAX_SEC, RETRY_DELAYS_SEC, claimReserve, policyFromRow, sanitizeProviderError,
   type AuditInput, type Contact, type CustomerStatus, type DeliveryLog, type DeliveryReason, type GroupDeliveryCommit, type GroupMember, type GroupRow, type HeartbeatRow,
   type HeartbeatWrite, type IncidentCommit, type IncidentEventInput, type IncidentRow, type Leave, type MaintenanceWindow, type NotificationIntent,
-  type NotificationJob, type Override, type PagingConfig, type PagingWorld, type ResolutionInput, type Responder, type Rotation, type SenderKind,
+  type NotificationJob, type Override, type PagingConfig, type RotationPinLike, type PagingWorld, type ResolutionInput, type Responder, type Rotation, type SenderKind,
   type SuppressionPolicy, type TickJob, type RetentionRepository, type RetentionCandidate, type RetentionStage, type StageResult, type TickRepository, TICK_JOBS, MAX_MEMBERS,
 } from '@alarmops/core';
 import { PG, pgCode, type SqlClient, type SqlExecutor, type SqlRow } from './client.js';
@@ -32,6 +32,18 @@ const ALL_CHANNELS = Object.values(LANE_CHANNELS).flat();
 const SLACK_CHANNEL_KINDS = ['SLACK_BOT', 'SLACK_WEBHOOK'];
 /** `(ARRAY[30,60,120,300,600])[attempt]` — retryAt() of core as SQL. */
 const RETRY_SQL = `(ARRAY[${RETRY_DELAYS_SEC.join(',')}])`;
+
+/** RotationPin rows of the given rotations (D-28), start order: handed to core as `Rotation.pins` by every loader, so every path reads one timetable. */
+export async function loadPins(q: SqlExecutor, rotationIds: string[]): Promise<Map<string, RotationPinLike[]>> {
+  const out = new Map<string, RotationPinLike[]>();
+  if (!rotationIds.length) return out;
+  for (const r of await q.query(`SELECT "rotationId", "contactId", "startAt", "endAt", "reason" FROM "RotationPin" WHERE "rotationId" = ANY($1::text[]) ORDER BY "startAt", "id"`, [rotationIds])) {
+    const list = out.get(r.rotationId as string) ?? [];
+    list.push({ contactId: r.contactId, startAt: dReq(r.startAt), endAt: dReq(r.endAt), reason: r.reason ?? null });
+    out.set(r.rotationId as string, list);
+  }
+  return out;
+}
 
 export class SqlTickStore implements TickRepository, RetentionRepository {
   constructor(protected readonly sql: SqlClient) {}
@@ -186,15 +198,16 @@ export class SqlTickStore implements TickRepository, RetentionRepository {
     ]);
     const rotationIds = rotationRows.map((r) => r.id as string);
     const contactIds = contactRows.map((r) => r.id as string);
-    const [overrideRows, leaveRows] = await Promise.all([
+    const [overrideRows, leaveRows, pinsOf] = await Promise.all([
       rotationIds.length ? q.query(`SELECT "rotationId", "contactId", "startAt", "endAt", "status" FROM "Override" WHERE "rotationId" = ANY($1::text[]) ORDER BY "startAt", "id"`, [rotationIds]) : Promise.resolve([] as SqlRow[]),
       // Leave dates are KST calendar days (inclusive); they travel as 'yyyy-mm-dd' strings.
       contactIds.length ? q.query(`SELECT "contactId", "replacementId", to_char("startDate", 'YYYY-MM-DD') AS "startDate", to_char("endDate", 'YYYY-MM-DD') AS "endDate", "cancelledAt" FROM "Leave" WHERE "contactId" = ANY($1::text[]) ORDER BY "startDate", "id"`, [contactIds]) : Promise.resolve([] as SqlRow[]),
+      loadPins(q, rotationIds),
     ]);
     for (const customerId of new Set(customerIds)) {
       const contacts = new Map<string, Contact>(contactRows.filter((r) => r.kind === 'INTERNAL' || r.customerId === customerId).map((r) => [r.id as string, toContact(r)]));
       const rotations = new Map<string, Rotation>(rotationRows.filter((r) => r.scope === 'MSP' || r.customerId === customerId).map((r) => [r.id as string, {
-        id: r.id, scope: r.scope, customerId: r.customerId ?? null, name: r.name, cadence: r.cadence, anchorAt: dReq(r.anchorAt), members: r.members,
+        id: r.id, scope: r.scope, customerId: r.customerId ?? null, name: r.name, cadence: r.cadence, anchorAt: dReq(r.anchorAt), members: r.members, pins: pinsOf.get(r.id as string) ?? [],
       }]));
       const configs: PagingConfig[] = cfgRows.filter((r) => r.customerId === customerId).map((r) => ({
         id: r.id, customerId: r.customerId, scopeType: r.scopeType, scopeId: r.scopeId, style: r.style, plan: r.plan, edited: r.edited, repeatCount: r.repeatCount,

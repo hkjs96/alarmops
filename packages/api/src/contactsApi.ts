@@ -314,7 +314,7 @@ export async function deleteContact(req: ApiRequest, deps: Deps, contactId: stri
     at: deps.now(), actorType: 'USER', actorId: a.auth.userId, action: 'contact.delete', targetType: 'Contact', before: { kind: c.kind, active: c.active }, after: null, requestId: req.requestId,
   });
   if (r === 'NOT_FOUND') throw notFound();
-  if (r === 'IN_USE') throw new ApiError(409, 'IN_USE', 'This person is still a responder, a rotation member or named in a step. Remove them there first (or deactivate the contact).');
+  if (r === 'IN_USE') throw new ApiError(409, 'IN_USE', 'This person is still a responder, a rotation member, a running or future rotation pin, or named in a step. Remove them there first (or deactivate the contact).');
   return ok({ id: c.id, deleted: true });
 }
 

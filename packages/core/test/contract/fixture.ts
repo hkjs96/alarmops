@@ -56,6 +56,14 @@ export interface StoreFixture<R extends TickRepository = TickRepository> {
   revealRows?(): Promise<Array<Record<string, unknown>>>;
   /** From now on every ContactRevealLog write fails (a trigger / a switch); `close()` removes it. */
   breakRevealLog?(): Promise<void>;
+  /** Rotation tables (MemoryApiStore / SqlApiStore only): row counts, so a test can say "nothing was written". */
+  rotationCounts?(): Promise<{ Rotation: number; RotationMember: number; RotationPin: number; Override: number; AuditLog: number; EscalationStep: number }>;
+  /** RotationPin rows of one rotation by start time. `kind` is the row's reason column (e.g. KEEP_OVERRIDE), whatever the store calls it. */
+  rotationPins?(rotationId: string): Promise<Array<{ contactId: string; startAt: Date; endAt: Date; kind: string | null }>>;
+  /** The stored Rotation row: version, anchorAt and the stored handover columns. */
+  rotationRow?(rotationId: string): Promise<{ version: number; anchorAt: Date; handoverDow: number; handoverMin: number; name: string; cadence: string } | null>;
+  /** An Override row written after `make` (someone asked for cover while a preview was open). */
+  addOverride?(o: { rotationId: string; contactId: string; startAt: Date; endAt: Date; status: 'PENDING' | 'ACCEPTED' | 'DECLINED' | 'CANCELLED' }): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -96,6 +104,23 @@ export function memoryFixture<S extends MemoryTickStore>(store: S): StoreFixture
     async audits() { return structuredClone(store.audits); },
     async revealRows() { return structuredClone((store as unknown as { revealLogs?: Array<Record<string, unknown>> }).revealLogs ?? []); },
     async breakRevealLog() { (store as unknown as { failRevealWrites: boolean }).failRevealWrites = true; },
+    async rotationCounts() {
+      const m = store as unknown as { rotationPins?: unknown[]; overrides: unknown[]; audits: unknown[]; configs: Array<{ steps: unknown[] }>; rotations: Map<string, { members: unknown[] }> };
+      return {
+        Rotation: m.rotations.size, RotationMember: [...m.rotations.values()].reduce((n, r) => n + r.members.length, 0), RotationPin: m.rotationPins?.length ?? 0,
+        Override: m.overrides.length, AuditLog: m.audits.length, EscalationStep: m.configs.reduce((n, c) => n + c.steps.length, 0),
+      };
+    },
+    async rotationPins(rotationId) {
+      const pins = ((store as unknown as { rotationPins?: Array<Record<string, any>> }).rotationPins ?? []).filter((p) => p.rotationId === rotationId);
+      return pins.map((p) => ({ contactId: p.contactId, startAt: new Date(p.startAt ?? p.startsAt), endAt: new Date(p.endAt ?? p.endsAt), kind: (p.kind ?? p.reason ?? null) as string | null }))
+        .sort((a, b) => a.startAt.getTime() - b.startAt.getTime());
+    },
+    async rotationRow(rotationId) {
+      const r = (store.rotations.get(rotationId) as unknown as Record<string, any> | undefined);
+      return r ? { version: r.version ?? 0, anchorAt: new Date(r.anchorAt), handoverDow: r.handoverDow ?? 1, handoverMin: r.handoverMin ?? 0, name: r.name, cadence: r.cadence } : null;
+    },
+    async addOverride(o) { store.overrides.push({ ...o }); },
     async close() { /* nothing to release */ },
   };
 }

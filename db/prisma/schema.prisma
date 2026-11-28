@@ -516,6 +516,7 @@ model Contact {
   responders      Responder[]
   templateMembers ResponderTemplateMember[]
   rotationMembers RotationMember[]
+  rotationPins    RotationPin[]
   overrides       Override[]
   leaves          Leave[]                   @relation("LeaveContact")
   leaveCovers     Leave[]                   @relation("LeaveReplacement")
@@ -1257,8 +1258,11 @@ model Rotation {
   handoverMin Int              @db.SmallInt
   anchorAt    DateTime         @db.Timestamptz(3)
   timezone    String           @default("Asia/Seoul")
+  /// If-Match / ETag of PATCH and DELETE /rotations/{id}; +1 on every change of name, members or handover.
+  version     Int              @default(0)
   members     RotationMember[]
   overrides   Override[]
+  pins        RotationPin[]
 
   // UQ(customerId, name) NULLS NOT DISTINCT — raw SQL
 }
@@ -1271,6 +1275,25 @@ model RotationMember {
   order      Int
 
   @@id([rotationId, contactId])
+}
+
+/// A stretch of time on which one person holds the rotation whatever the schedule says (D-28: a handover/order change never
+/// moves the person on shift; a cover request on a later shift keeps its holder). Wins over members[shift mod N]. No overlaps
+/// per rotation (checked by the API). Replaced as a whole on every handover/order change. RLS like every table (D-40).
+model RotationPin {
+  id         String   @id @default(cuid())
+  rotationId String
+  rotation   Rotation @relation(fields: [rotationId], references: [id], onDelete: Cascade)
+  contactId  String
+  contact    Contact  @relation(fields: [contactId], references: [id], onDelete: Restrict)
+  startAt    DateTime @db.Timestamptz(3)
+  endAt      DateTime @db.Timestamptz(3)
+  reason     String? // CURRENT_SHIFT | KEEP_OVERRIDE (CHECK — raw SQL)
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([rotationId, startAt])
+  @@index([contactId])
+  // CHECK (startAt < endAt) — raw SQL
 }
 
 model Override {

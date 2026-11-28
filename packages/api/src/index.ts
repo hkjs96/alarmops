@@ -19,3 +19,4 @@ export { slugFromName, freeSlug, roleArn, newExternalId } from './onboardingApi.
 export { revealStanding, revealFlags, REVEAL_LIMITS, REASON_MAX as REVEAL_REASON_MAX, VIEWER_RESPONDER_MAY_REVEAL } from './revealApi.js';
 export { resourceItem, alarmItem } from './monitoringApi.js';
 export { planTemplateChange, planTemplateAttach, templateBlocking, attachBlocking, blockReasons, TEMPLATE_NAME_MAX, TEMPLATE_MEMBERS_MAX } from './templatesApi.js';
+export { evaluateRotationChange, usageBody, ROTATION_NAME_MAX, ROTATION_MEMBERS_MAX } from './rotationsApi.js';

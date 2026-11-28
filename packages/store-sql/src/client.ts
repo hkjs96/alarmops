@@ -59,16 +59,18 @@ export const pgCode = (e: unknown): string | undefined => {
 };
 /** Foreign keys a template save can lose a race on (a contact deleted between the read and the insert; both ON DELETE CASCADE). */
 export const TEMPLATE_RACE_FKS: readonly string[] = ['Responder_contactId_fkey', 'ResponderTemplateMember_contactId_fkey'];
+/** Foreign keys a rotation write can lose a race on (a contact deleted between the read and the insert of a member or a pin). */
+export const ROTATION_RACE_FKS: readonly string[] = ['RotationMember_contactId_fkey', 'RotationPin_contactId_fkey'];
 /**
  * Failures of a template save that wrote nothing and are safe to repeat: deadlock, serialization failure, lock_timeout (55P03),
  * statement_timeout (57014), and a foreign-key violation (23503) on one of `TEMPLATE_RACE_FKS` only. Any other 23503 (e.g. a
  * deleted actor on an audit/BulkChange row) fails the same way on every retry, so it surfaces instead of becoming BUSY.
  */
-export const isBusyError = (e: unknown): boolean => {
+export const isBusyError = (e: unknown, raceFks: readonly string[] = TEMPLATE_RACE_FKS): boolean => {
   const code = pgCode(e);
   if (code === PG.FK_VIOLATION) {
     const c = (e as { constraint?: unknown } | null)?.constraint;
-    return typeof c === 'string' && TEMPLATE_RACE_FKS.includes(c);
+    return typeof c === 'string' && raceFks.includes(c);
   }
   return code === PG.DEADLOCK || code === PG.SERIALIZATION || code === PG.LOCK_NOT_AVAILABLE || code === PG.QUERY_CANCELED;
 };
