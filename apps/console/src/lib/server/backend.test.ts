@@ -15,4 +15,10 @@ describe("backend() start-up", () => {
     expect(() => backend(ENV)).toThrow(/does not match/);
     expect(pgClient).not.toHaveBeenCalled();
   });
+  it("a publisher config error (queue URL and role set, expected account missing) throws before any pg pool is created", () => {
+    const env = { DATABASE_URL: ENV.DATABASE_URL, ALARM_COMMANDS_QUEUE_URL: "https://sqs.ap-northeast-2.amazonaws.com/123456789012/q", AWS_ROLE_ARN: "arn:aws:iam::123456789012:role/console" };
+    expect(() => backend(env)).toThrow(/EXPECTED_ACCOUNT/);
+    expect(() => backend(env)).toThrow(/EXPECTED_ACCOUNT/);
+    expect(pgClient).not.toHaveBeenCalled();
+  });
 });
