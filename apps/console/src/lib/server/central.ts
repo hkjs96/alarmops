@@ -1,14 +1,21 @@
 import type { CentralValues } from "../onboarding";
 
 type Env = Record<string, string | undefined>;
-const ROLE_RE = /^arn:aws[a-z-]*:iam::[0-9]{12}:role\/[A-Za-z0-9+=,.@_/-]{1,512}$/;
+const ROLE_RE = /^arn:(aws|aws-cn|aws-us-gov):iam::[0-9]{12}:role\/(?!.*\.\.)[A-Za-z0-9+=,.@_/-]{1,512}$/;
 const BUS_RE = /^arn:(aws|aws-cn|aws-us-gov):events:[a-z]{2}(-[a-z]+)+-[0-9]:[0-9]{12}:event-bus\/[A-Za-z0-9._-]{1,256}$/;
+/** The partition and the region of an event-bus ARN must agree (cn-* only in aws-cn, us-gov-* only in aws-us-gov). */
+function partitionMatchesRegion(arn: string): boolean {
+  const [, partition, service, region] = arn.split(":");
+  if (service !== "events") return true;
+  const expected = region!.startsWith("cn-") ? "aws-cn" : region!.startsWith("us-gov-") ? "aws-us-gov" : "aws";
+  return partition === expected;
+}
 const warned = new Set<string>();
 
 function pick(env: Env, name: string, re: RegExp): string | null {
   const v = env[name]?.trim();
   if (!v) return null;
-  if (re.test(v)) return v;
+  if (re.test(v) && partitionMatchesRegion(v)) return v;
   // once per variable, and never the value
   if (!warned.has(name)) { warned.add(name); console.warn(`[console config] ${name} is not a valid ARN for this use and is ignored: the connection kit shows it as missing`); }
   return null;

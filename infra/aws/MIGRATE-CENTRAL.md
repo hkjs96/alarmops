@@ -249,7 +249,7 @@
 | `packages/api/src/onboardingApi.ts` `roleArn()` | `AWS_PARTITION`(기본 `aws`)을 따른다(#189). 콘솔이 `createApi({ partition })`로 넘긴다(#97). `AWS_PARTITION`과 큐 URL 파티션이 다르면 콘솔이 시작하지 않는다 | 없다 | 해결됨 |
 | `packages/api/src/sqsCommandPublisher.ts` | 큐 URL은 어느 리전이든 통과한다(#189) | 콘솔 SQS 클라이언트(`sqs-client.ts`)도 URL의 리전으로 만든다(#97) | 없다 | 해결됨 |
 | `infra/customer-stack/template.yaml` 35행 | 해결됨(#97): `CentralEventBusArn` 패턴이 모든 리전과 파티션 `aws`·`aws-cn`·`aws-us-gov`를 받는다. 서울·`aws` 값은 그대로 통과한다 | 없다. 다른 리전의 버스로 옮겨도 파라미터만 업데이트하면 된다(역할 교체 없음). 콘솔 연결 키트의 `BUS_RE`도 모든 리전을 받는다(#97) | - |
-| `apps/console/src/lib/server/central.ts` 4·5행 | 해결됨(#97): `ROLE_RE`는 `arn:aws[a-z-]*:iam::`, `BUS_RE`는 `(aws\|aws-cn\|aws-us-gov)`와 모든 리전을 받는다(고객 스택 패턴과 같다) | 없다 | 해결됨 |
+| `apps/console/src/lib/server/central.ts` 4·5행 | 해결됨(#97): `ROLE_RE`·`BUS_RE` 모두 파티션 `aws`·`aws-cn`·`aws-us-gov`만 받고, `BUS_RE`는 모든 리전을 받되 파티션과 리전이 맞아야 한다(`cn-*`는 aws-cn, `us-gov-*`는 aws-us-gov). 고객 스택의 역할 ARN 패턴(`aws[a-z-]*`)은 더 넓다(#191) | 없다 | 해결됨 |
 | `apps/console/src/lib/server/sqs-client.ts` | 해결됨(#97): 리전을 `parseQueueUrl(ALARM_COMMANDS_QUEUE_URL).region`에서 읽는다. URL이 비면 클라이언트가 없고 요청은 503 | 없다 | 해결됨 |
 | `packages/api/src/memoryRepo.ts` 384·385행 | `arn:aws:iam::`, 기본 리전 | 시험용 메모리 저장소. 영향 없다 | - |
 | `infra/customer-stack/template.yaml` 25·51행 | 설명문 예시의 `arn:aws:...`, 계정 ID | 설명일 뿐 | - |
@@ -269,7 +269,7 @@
 
 1. 해결됨(#97): 콘솔이 `createApi({ partition })`를 넘긴다(`AWS_PARTITION`, 없으면 큐 URL의 파티션, 둘이 다르면 시작 시 오류).
 2. 해결됨(#97): 콘솔 SQS 클라이언트가 큐 URL의 리전을 쓰고, `BUS_RE`가 모든 리전을 받는다.
-3. 해결됨(#97): `ROLE_RE`는 `aws[a-z-]*`, `BUS_RE`는 `(aws|aws-cn|aws-us-gov)`로 고객 스택 패턴과 맞췄다.
+3. 해결됨(#97): `ROLE_RE`·`BUS_RE`가 세 파티션만 받는다(`BUS_RE`는 리전과 파티션도 맞춘다). 고객 스택의 역할 ARN 패턴은 #191에서 다룬다.
 4. (infra) `bus-allowlist`는 `CENTRAL_BUS_DEPLOY_ROLE_ARN`이 가리키는 한 계정의 버스만 바꾼다. 옛 버스에서 제거하려면 변수를 되돌려야 한다(2-5). 필요하면 대상을 고르는 입력을 만든다.
 5. (허브) D-58은 파라미터를 둘만 적었다. Remediator를 켠 고객은 `RemediatorCallerRoleArn`까지 셋이다(3-1). D-58 문구 보강 여부를 정한다.
 

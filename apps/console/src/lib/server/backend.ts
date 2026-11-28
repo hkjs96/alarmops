@@ -37,11 +37,12 @@ export function backend(env: Record<string, string | undefined> = process.env): 
   if (g.__aoBackend) return g.__aoBackend;
   const cfg = databaseConfig(env);
   if (!cfg) throw new NotConfiguredError("DATABASE_URL");
-  const client = pgClient({ connectionString: cfg.url, pooler: cfg.pooler, max: cfg.max });
-  const repo = new ConsoleStore(client);
+  // Everything that can throw on configuration runs BEFORE the pool exists: a bad value must not leak a pool per request.
   const { config, warnings } = loadApiConfig(env);
   for (const w of warnings) console.warn(`[api config] ${w}`);
-  const partition = resolvePartition(env); // throws at start-up when AWS_PARTITION and the queue URL disagree
+  const partition = resolvePartition(env); // throws when AWS_PARTITION and the queue URL disagree
+  const client = pgClient({ connectionString: cfg.url, pooler: cfg.pooler, max: cfg.max });
+  const repo = new ConsoleStore(client);
   const api = createApi({
     repo, config, partition, retention: retention(env), commands: commands(env), verificationSecret: verificationSecret(env),
     log: (level, msg, data) => console[level === "error" ? "error" : "warn"](`[api] ${msg}`, data ?? {}),

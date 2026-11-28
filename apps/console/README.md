@@ -95,7 +95,7 @@ Production deploys only through `.github/workflows/deploy-console.yml` (D-53; se
 
 | Variable | Meaning |
 |---|---|
-| `CENTRAL_ROLE_ARN` | **Plain, runtime** (not a secret, not needed by the build; the deploy check does not require it). ARN of the central IAM role (`arn:aws[a-z-]*:iam::<12 digits>:role/…`), output `CentralRoleArn` of the central deployment. Invalid → treated as unset with one warning (no value). |
-| `CENTRAL_EVENT_BUS_ARN` | **Plain, runtime.** ARN of the central event bus, any region (`arn:<aws|aws-cn|aws-us-gov>:events:<region>:<12 digits>:event-bus/…`), output `CentralBusArn`. |
+| `CENTRAL_ROLE_ARN` | **Plain, runtime** (not a secret, not needed by the build; the deploy check does not require it). ARN of the central IAM role (`arn:<aws|aws-cn|aws-us-gov>:iam::<12 digits>:role/…`, no `..` in the path), output `CentralRoleArn` of the central deployment. Invalid → treated as unset with one warning (no value). |
+| `CENTRAL_EVENT_BUS_ARN` | **Plain, runtime.** ARN of the central event bus, any region (`arn:<aws|aws-cn|aws-us-gov>:events:<region>:<12 digits>:event-bus/…`; the region must belong to the partition: `cn-*` with aws-cn, `us-gov-*` with aws-us-gov), output `CentralBusArn`. |
 | `REMEDIATOR_CALLER_ROLE_ARN` | **Plain, runtime.** ARN of the separate IAM role that runs approved remediations; needed only for a customer that turns Remediator on. |
 | `VERIFY_HASH_SECRET` | **Sensitive, runtime only** (not needed by the build; the deploy check does not require it, it is not visible to `vercel pull`). ≥ 32 characters. Keys the per-destination send cap of verification links. Unset or shorter: the API answers 503 `NOT_CONFIGURED` to a link request (nothing sent). Links also need a sender (`createApi({ verification })`, #39), which does not exist yet: until then `POST /contacts/{id}/verify` with `link` answers 503 `VERIFICATION_UNAVAILABLE` and the page offers manual verification. |

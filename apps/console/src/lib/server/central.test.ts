@@ -37,4 +37,20 @@ describe("centralValues patterns (D-58)", () => {
     ]) expect(centralValues({ CENTRAL_EVENT_BUS_ARN: b }).centralBusArn).toBeNull();
     expect(centralValues({ CENTRAL_ROLE_ARN: `arn:aws:iam::${ACCT}:user/x` }).centralRoleArn).toBeNull();
   });
+
+  it("ROLE_RE allows only the three partitions and no `..` in the path", () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    for (const arn of [
+      `arn:aws-iso:iam::${ACCT}:role/x`, `arn:aws-iso-b:iam::${ACCT}:role/x`, `arn:awsfoo:iam::${ACCT}:role/x`, `arn:aws-:iam::${ACCT}:role/x`,
+      `arn:aws:iam::${ACCT}:role/a/../b`, `arn:aws:iam::${ACCT}:role/..`,
+    ]) expect(centralValues({ CENTRAL_ROLE_ARN: arn }).centralRoleArn).toBeNull();
+    expect(centralValues({ CENTRAL_ROLE_ARN: `arn:aws:iam::${ACCT}:role/path/to/role.v1` }).centralRoleArn).not.toBeNull();
+  });
+
+  it("BUS_RE: partition and region must agree", () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    for (const [p, r] of [["aws-cn", "us-east-1"], ["aws-cn", "ap-northeast-2"], ["aws-us-gov", "us-east-1"], ["aws", "cn-north-1"], ["aws", "us-gov-west-1"]] as const)
+      expect(centralValues({ CENTRAL_EVENT_BUS_ARN: busIn(p, r) }).centralBusArn).toBeNull();
+    expect(centralValues({ CENTRAL_EVENT_BUS_ARN: busIn("aws-cn", "cn-northwest-1") }).centralBusArn).not.toBeNull();
+  });
 });
