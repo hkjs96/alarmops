@@ -499,6 +499,31 @@ export function rotationsContract(make: MakeFixture<Repo>): void {
       await expectNone(before);
     });
 
+    it('a CUSTOMER rotation with a legacy step of another customer: usage, preview and PATCH show and count only its own customer', async () => {
+      await open((s) => { s.configs.push(config('cus_mirae', [step(0, 0, 'ROTATION', 'rot_hanbit', ['SMS'])], { scopeType: 'PROJECT', scopeId: 'prj_core', id: 'pc_legacy_cross' })); });
+      const leaks = (r: ApiResponse) => { const t = JSON.stringify(body(r)); for (const x of ['cus_mirae', 'Mirae', 'mirae', 'pc_legacy_cross']) expect(t, x).not.toContain(x); };
+      const u = await w.call(ADMIN, 'GET', '/rotations/rot_hanbit/usage');
+      expect([u.status, usageRows(body(u))]).toEqual([200, [['cus_hanbit', 'CUSTOMER', 'cus_hanbit', '1']]]);
+      leaks(u);
+      const p = await pv('rot_hanbit', { members: ['ct_sora', 'ct_dohyun'] });
+      expect([p.status, body(p).totals.customers, body(p).customers.map((c: any) => c.id)]).toEqual([200, 1, ['cus_hanbit']]);
+      leaks(p);
+      const r = await patch('rot_hanbit', { members: ['ct_sora', 'ct_dohyun'], previewHash: body(p).previewHash }, 0);
+      expect(r.status).toBe(200);
+      leaks(r);
+      expect((await w.fx.audits()).filter((a) => a.action === 'rotation.apply')).toHaveLength(0);
+    });
+
+    it('a NOTIFY_ONLY Responder cannot be added as a member of a CUSTOMER rotation: 400 on members, nothing written', async () => {
+      await open();
+      const c = await w.call(ADMIN, 'POST', '/rotations', { body: { scope: 'CUSTOMER', customerId: 'cus_mirae', name: 'Mirae own', cadence: 'DAILY', handover: { minute: 540 }, members: ['ct_yuna'] } });
+      expect(c.status).toBe(201);
+      const before = await counts();
+      const r = await patch(body(c).id, { members: ['ct_yuna', 'ct_seojun'] }, 0);
+      expect([r.status, hasField(r, 'members')]).toEqual([400, true]);
+      await expectNone(before);
+    });
+
     it('a CUSTOMER rotation that only another customer\'s legacy step points at is 409 IN_USE with no customers listed (nothing of the other customer leaks)', async () => {
       await open((s) => {
         s.configs.splice(s.configs.findIndex((c) => c.customerId === 'cus_hanbit'), 1, config('cus_hanbit', [step(0, 0, 'ALL_RESPONDERS', null, ['SMS'])], { style: 'ALL_AT_ONCE' }));

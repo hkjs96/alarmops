@@ -975,14 +975,16 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
     const cRows = cids.length ? await q.query(`SELECT ${CONTACT_COLS} FROM "Contact" WHERE "id" = ANY($1::text[])`, [cids]) : [];
     const customers = (await q.query(
       `SELECT DISTINCT c."id", c."name" FROM "EscalationStep" es JOIN "PagingConfig" pc ON pc."id" = es."pagingConfigId" JOIN "Customer" c ON c."id" = pc."customerId"
-        WHERE es."targetType" = 'ROTATION' AND es."targetId" = $1 AND c."status" <> 'TERMINATED' ORDER BY c."name", c."id"`, [rotationId])).map((c) => ({ id: c.id as string, name: c.name as string }));
+        WHERE es."targetType" = 'ROTATION' AND es."targetId" = $1 AND c."status" <> 'TERMINATED'
+          AND (($2::text) = 'MSP' OR pc."customerId" = $3) ORDER BY c."name", c."id"`, [rotationId, rotation.scope, rotation.customerId])).map((c) => ({ id: c.id as string, name: c.name as string }));
     return { rotation, rotations: [rotation], overrides, leaves, contacts: new Map(cRows.map((c) => [c.id as string, toContact(c)])), customers };
   }
   async rotationState(rotationId: string, extraContactIds: string[] = []): Promise<RotationState | null> {
     return this.sql.transaction((tx) => this.rotationStateVia(tx, rotationId, extraContactIds));
   }
 
-  private async usageVia(q: SqlExecutor, rotationId: string, scope: ScopeFilter | null): Promise<RotationUsageRow[]> {
+  /** `ownOnly`: of a CUSTOMER rotation only the rows of its own customer (an MSP rotation: every customer). The delete check passes false: any customer's step blocks. */
+  private async usageVia(q: SqlExecutor, rotationId: string, scope: ScopeFilter | null, ownOnly = false): Promise<RotationUsageRow[]> {
     const all = scope === null || scope.customerIds === '*';
     const ids = scope === null || scope.customerIds === '*' ? [] : [...scope.customerIds];
     const rows = await q.query(
@@ -991,10 +993,12 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
               CASE pc."scopeType"::text WHEN 'CUSTOMER' THEN c."name" WHEN 'PROJECT' THEN p."name" ELSE s."name" END AS "scopeName",
               CASE pc."scopeType"::text WHEN 'PROJECT' THEN p."id" WHEN 'SERVICE' THEN s."projectId" END AS "projectId", s."id" AS "serviceId"
          FROM "EscalationStep" es JOIN "PagingConfig" pc ON pc."id" = es."pagingConfigId" JOIN "Customer" c ON c."id" = pc."customerId"
+         JOIN "Rotation" ro ON ro."id" = es."targetId"
          LEFT JOIN "Project" p ON pc."scopeType"::text = 'PROJECT' AND p."id" = pc."scopeId" AND p."customerId" = pc."customerId"
          LEFT JOIN "Service" s ON pc."scopeType"::text = 'SERVICE' AND s."id" = pc."scopeId" AND s."customerId" = pc."customerId"
         WHERE es."targetType" = 'ROTATION' AND es."targetId" = $1 AND ($2::boolean OR c."id" = ANY($3::text[]))
-        ORDER BY c."name", c."id", pc."id", es."index"`, [rotationId, all, ids]);
+          AND (NOT $4::boolean OR ro."scope" = 'MSP' OR ro."customerId" = pc."customerId")
+        ORDER BY c."name", c."id", pc."id", es."index"`, [rotationId, all, ids, ownOnly]);
     let out: RotationUsageRow[] = rows.map((r) => ({
       customerId: r.customerId, customerName: r.customerName, customerSlug: r.customerSlug, customerStatus: r.customerStatus as CustomerStatusValue,
       level: r.level, scopeId: r.scopeId, scopeName: r.scopeName ?? r.scopeId, projectId: r.projectId ?? null, serviceId: r.serviceId ?? null, pagingConfigId: r.pagingConfigId, stepIndex: Number(r.index) + 1,
@@ -1007,7 +1011,7 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
     }
     return out;
   }
-  async rotationUsage(rotationId: string, scope: ScopeFilter): Promise<RotationUsageRow[]> { return this.usageVia(this.sql, rotationId, scope); }
+  async rotationUsage(rotationId: string, scope: ScopeFilter): Promise<RotationUsageRow[]> { return this.usageVia(this.sql, rotationId, scope, true); }
 
   /**
    * Active INTERNAL staff, or (customerId given) active PAGEABLE Responders of that customer. `lock`: Contact rows FOR SHARE, then (customer people only)
@@ -1060,9 +1064,10 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
    * wait on anyone. The customer status change takes Customer FOR UPDATE and never a Rotation lock, so no cycle. Called with the Rotation row already locked.
    */
   private async customerTerminatedUnderShare(tx: SqlExecutor, scope: unknown, customerId: string | null): Promise<boolean> {
-    if (scope !== 'CUSTOMER' || customerId === null) return false;
+    if (scope !== 'CUSTOMER') return false;
+    if (customerId === null) throw new Error('a CUSTOMER rotation without a customerId');
     const [c] = await tx.query(`SELECT "status"::text AS "status" FROM "Customer" WHERE "id" = $1 FOR SHARE`, [customerId]);
-    return c?.status === 'TERMINATED';
+    return !c || c.status === 'TERMINATED'; // fail closed: no customer row is as good as ended
   }
 
   async updateRotation(u: RotationUpdate, audit: AuditTemplate): Promise<RotationUpdateOutcome> {
