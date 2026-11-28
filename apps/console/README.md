@@ -74,7 +74,8 @@ Production deploys only through `.github/workflows/deploy-console.yml` (D-53; se
 
 | Variable | Meaning |
 |---|---|
-| `ALARM_COMMANDS_QUEUE_URL` | `https://sqs.ap-northeast-2.amazonaws.com/<12-digit account>/<queue>`. Unset: no publisher, terminating a customer answers 503 `COMMANDS_UNAVAILABLE` (nothing changes). Malformed: the API refuses to start. |
+| `ALARM_COMMANDS_QUEUE_URL` | `https://sqs.<region>.amazonaws.com[.cn]/<12-digit account>/<queue>` (`.cn` host only with a `cn-*` region). The SQS client uses the region of this URL (D-58). Unset: no publisher, terminating a customer answers 503 `COMMANDS_UNAVAILABLE` (nothing changes). Malformed: the API refuses to start. |
+| `AWS_PARTITION` | **Config, optional**, default `aws` (leave it unset for the commercial partition). One of `aws`, `aws-cn`, `aws-us-gov`; used for the customer role ARNs the API builds (`createApi({ partition })`). When the queue URL is set and its partition differs, the console refuses to start. Unset: the partition of the queue URL, else `aws`. Any other value refuses to start. |
 | `ALARM_COMMANDS_EXPECTED_ACCOUNT` | 12-digit account that must own the queue; required when the URL is set. |
 | `AWS_ROLE_ARN` | **Deployed Vercel runtime only: never set it in local dev, CI or an agent session** (the OIDC helper may fall back to the Vercel CLI / a developer login). IAM role the console assumes with Vercel OIDC (`awsCredentialsProvider` from `@vercel/functions/oidc`, no access keys, D-49). Permission: `sqs:SendMessage` on that queue only. Queue URL set without it: the publisher stays off (fail closed, a warning is logged). The AWS SDK is imported on the first send only. |
 | `RETENTION_RETURN_DAYS` / `RETENTION_AUDIT_DAYS` / `RETENTION_SLA_DAYS` | optional, defaults 30 / 730 / 1826; floors 7 / 90 / 365; bad values are ignored with a warning. One config object (`lib/server/wiring.ts`) is shared by the API (export window, schedule on the deletion record) and the tick's daily retention job. |
@@ -94,7 +95,7 @@ Production deploys only through `.github/workflows/deploy-console.yml` (D-53; se
 
 | Variable | Meaning |
 |---|---|
-| `CENTRAL_ROLE_ARN` | **Plain, runtime** (not a secret, not needed by the build; the deploy check does not require it). ARN of the central IAM role (`arn:aws:iam::<12 digits>:role/…`), output `CentralRoleArn` of the central deployment. Invalid → treated as unset with one warning (no value). |
-| `CENTRAL_EVENT_BUS_ARN` | **Plain, runtime.** ARN of the central event bus in ap-northeast-2 (`arn:aws:events:ap-northeast-2:<12 digits>:event-bus/…`), output `CentralBusArn`. |
+| `CENTRAL_ROLE_ARN` | **Plain, runtime** (not a secret, not needed by the build; the deploy check does not require it). ARN of the central IAM role (`arn:aws[a-z-]*:iam::<12 digits>:role/…`), output `CentralRoleArn` of the central deployment. Invalid → treated as unset with one warning (no value). |
+| `CENTRAL_EVENT_BUS_ARN` | **Plain, runtime.** ARN of the central event bus, any region (`arn:<aws|aws-cn|aws-us-gov>:events:<region>:<12 digits>:event-bus/…`), output `CentralBusArn`. |
 | `REMEDIATOR_CALLER_ROLE_ARN` | **Plain, runtime.** ARN of the separate IAM role that runs approved remediations; needed only for a customer that turns Remediator on. |
 | `VERIFY_HASH_SECRET` | **Sensitive, runtime only** (not needed by the build; the deploy check does not require it, it is not visible to `vercel pull`). ≥ 32 characters. Keys the per-destination send cap of verification links. Unset or shorter: the API answers 503 `NOT_CONFIGURED` to a link request (nothing sent). Links also need a sender (`createApi({ verification })`, #39), which does not exist yet: until then `POST /contacts/{id}/verify` with `link` answers 503 `VERIFICATION_UNAVAILABLE` and the page offers manual verification. |

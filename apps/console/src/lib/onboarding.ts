@@ -142,7 +142,7 @@ export function kitParams(a: Pick<AccountRecord, "externalId" | "alarmWriterEnab
   const out: KitParam[] = [
     { name: "CentralRoleArn", value: c.centralRoleArn ?? "<missing: ask whoever ran the central deployment (deploy-central) for CentralRoleArn>", placeholder: !c.centralRoleArn, note: "The one AlarmOps role the stack trusts." },
     { name: "ExternalId", value: a.externalId ?? "", placeholder: false, note: "Made for this connection. Give it to the customer only." },
-    { name: "CentralEventBusArn", value: c.centralBusArn ?? "<missing: ask whoever ran the central deployment (deploy-central) for CentralBusArn>", placeholder: !c.centralBusArn, note: "Where the stack sends events (ap-northeast-2)." },
+    { name: "CentralEventBusArn", value: c.centralBusArn ?? "<missing: ask whoever ran the central deployment (deploy-central) for CentralBusArn>", placeholder: !c.centralBusArn, note: "The central event bus the stack sends events to." },
     { name: "EnableAlarmWriter", value: String(a.alarmWriterEnabled), placeholder: false, note: "" },
     { name: "EnableTagWriter", value: String(a.tagWriterEnabled), placeholder: false, note: "" },
     { name: "EnableRemediator", value: String(a.remediatorEnabled), placeholder: false, note: "" },

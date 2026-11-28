@@ -1,4 +1,4 @@
-import { commandPublisherFromEnv, type CommandPublisher } from "@alarmops/api";
+import { commandPublisherFromEnv, parseQueueUrl, partitionFromEnv, type CommandPublisher, type Partition } from "@alarmops/api";
 import { retentionConfigFromEnv, type RetentionConfig } from "@alarmops/core";
 import { sqsClientFromEnv } from "./sqs-client";
 
@@ -32,4 +32,19 @@ export function commands(env: Env = process.env): CommandPublisher | undefined {
   const client = sqsClientFromEnv(env);
   if (!client) { console.warn("[api config] ALARM_COMMANDS_QUEUE_URL is set but AWS_ROLE_ARN is not: terminating a customer stays unavailable"); return undefined; }
   return commandPublisherFromEnv(env, { client });
+}
+
+/**
+ * AWS partition for the role ARNs the API derives (D-58). `AWS_PARTITION` when set, else the partition of the queue URL,
+ * else `aws`. Both present and different -> throws at start-up: a `.com.cn` queue with `AWS_PARTITION` unset must not
+ * silently build `arn:aws:` roles (aws and aws-us-gov share a host form, so the URL alone cannot prove it either).
+ * An unknown `AWS_PARTITION` value or a malformed queue URL also throws.
+ */
+export function resolvePartition(env: Env = process.env): Partition {
+  const fromEnv = env.AWS_PARTITION?.trim() ? partitionFromEnv(env) : undefined;
+  const url = env.ALARM_COMMANDS_QUEUE_URL?.trim();
+  const parsed = url ? parseQueueUrl(url) : undefined;
+  if (url && !parsed) throw new Error("ALARM_COMMANDS_QUEUE_URL must be https://sqs.<region>.amazonaws.com[.cn]/<account>/<queue>[.fifo]");
+  if (fromEnv && parsed && fromEnv !== parsed.partition) throw new Error("AWS_PARTITION does not match the partition of ALARM_COMMANDS_QUEUE_URL");
+  return fromEnv ?? parsed?.partition ?? "aws";
 }
