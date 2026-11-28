@@ -302,6 +302,7 @@ export async function patchRotation(req: ApiRequest, deps: Deps, id: string): Pr
   });
   if (out === 'BUSY') throw busy();
   if (out === 'NOT_FOUND') throw notFound();
+  if (out === 'CUSTOMER_TERMINATED') throw terminated(); // the customer ended between the gate and the write
   if (out === 'NOOP') return reply(0);
   if (out === 'NAME_EXISTS') throw new ApiError(409, 'ALREADY_EXISTS', 'A rotation with that name already exists.');
   if (out === 'BAD_MEMBER') throw invalid('members', 'members must be active people who can be paged for this rotation.');
@@ -326,6 +327,7 @@ export async function deleteRotation(req: ApiRequest, deps: Deps, id: string): P
   });
   if (out === 'BUSY') throw busy();
   if (out === 'NOT_FOUND') throw notFound();
+  if (out === 'CUSTOMER_TERMINATED') throw terminated();
   if (out === 'CONFLICT') throw versionConflict('The rotation', (await deps.repo.rotationState(id))?.rotation.version ?? 0);
   if (typeof out === 'object') throw new ApiError(409, 'IN_USE', 'Customers still page this rotation. Change their call orders first.', { usage: usageBody(id, out.inUse, state.rotation.scope === 'MSP') });
   return ok({ id, deleted: true });

@@ -73,6 +73,58 @@ describe('rotation PATCH: retry-safe failures are BUSY', () => {
   });
 });
 
+const INSERT_ROTATION = /INSERT INTO "Rotation"\(/;
+const RENAME_ROTATION = /UPDATE "Rotation" SET "name"/;
+const NAME_KEY = 'Rotation_customerId_name_key';
+
+describe('a unique violation on a rotation write is a taken name only when it is the name constraint', () => {
+  const run = async (when: RegExp, constraint: string | undefined, act: (api: ReturnType<typeof createApi>, w: Awaited<ReturnType<typeof rworld>>) => Promise<ApiResponse>) => {
+    const w = await rworld(make);
+    try {
+      const before = JSON.stringify(await w.fx.rotationCounts!());
+      const api = createApi({ repo: new SqlApiStore(failing(db.client, '23505', when, constraint)), now: () => w.now });
+      const r = await act(api, w);
+      expect(JSON.stringify(await w.fx.rotationCounts!())).toBe(before);
+      return r;
+    } finally { await w.fx.close(); }
+  };
+  const create = (api: ReturnType<typeof createApi>) => api.handle({ method: 'POST', path: '/rotations', auth: ADMIN, requestId: 'req_u1',
+    body: { scope: 'MSP', name: 'Weekend desk', cadence: 'DAILY', handover: { minute: 540 }, members: ['ct_haeun', 'ct_junho'] } });
+  const rename = (api: ReturnType<typeof createApi>) => api.handle({ method: 'PATCH', path: '/rotations/rot_abc', auth: ADMIN, body: { name: 'Renamed desk' }, headers: im(0), requestId: 'req_u2' });
+
+  it('POST: 23505 on Rotation_customerId_name_key is 409 ALREADY_EXISTS', async () => {
+    const r = await run(INSERT_ROTATION, NAME_KEY, (api) => create(api));
+    expect([r.status, body(r).error.code]).toEqual([409, 'ALREADY_EXISTS']);
+  });
+  it('PATCH rename: 23505 on Rotation_customerId_name_key is 409 ALREADY_EXISTS', async () => {
+    const r = await run(RENAME_ROTATION, NAME_KEY, (api) => rename(api));
+    expect([r.status, body(r).error.code]).toEqual([409, 'ALREADY_EXISTS']);
+  });
+  it.each([undefined, 'Rotation_pkey', 'RotationMember_pkey'])('POST and PATCH: 23505 on another constraint (%s) is a 500, not a taken name', async (constraint) => {
+    expect((await run(INSERT_ROTATION, constraint, (api) => create(api))).status).toBe(500);
+    expect((await run(RENAME_ROTATION, constraint, (api) => rename(api))).status).toBe(500);
+  });
+});
+
+describe('members of a CUSTOMER rotation are checked under a lock on their Responder rows', () => {
+  it('a create reads the Responder rows FOR SHARE (a concurrent delete or NOTIFY_ONLY change cannot slip past the check)', async () => {
+    const w = await rworld(make);
+    try {
+      const seen: string[] = [];
+      const spy: SqlClient = {
+        ...db.client, query: (t, p) => db.client.query(t, p), now: () => db.client.now(),
+        transaction: (fn) => db.client.transaction((tx: SqlExecutor) => fn({ query: (t, p) => { seen.push(t); return tx.query(t as never, p as never) as never; } })),
+      } as SqlClient;
+      const api = createApi({ repo: new SqlApiStore(spy), now: () => w.now });
+      const c = await api.handle({ method: 'POST', path: '/rotations', auth: ADMIN, requestId: 'req_l1',
+        body: { scope: 'CUSTOMER', customerId: 'cus_hanbit', name: 'Hanbit night', cadence: 'WEEKLY', handover: { dow: 1, minute: 540 }, members: ['ct_dohyun', 'ct_sora'] } });
+      expect(c.status).toBe(201);
+      const lockedResponders = (t: string) => /FROM "Responder"/.test(t) && /FOR SHARE/.test(t) && !/EXISTS \(SELECT 1 FROM "Responder"/.test(t);
+      expect(seen.filter(lockedResponders).length).toBeGreaterThan(0);
+    } finally { await w.fx.close(); }
+  });
+});
+
 describe('DELETE /rotations/{id} against PUT /customers/{id}/paging', () => {
   it('every run ends as (DELETE 200 + PUT 400 on steps[0].targetId) or (PUT 200 + DELETE 409 IN_USE); no step is left pointing at a missing rotation', async () => {
     const seen = new Set<string>();

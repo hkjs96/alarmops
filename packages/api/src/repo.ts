@@ -238,8 +238,9 @@ export interface RotationUpdate {
   id: string; expectedVersion: number; name: string; members: string[] | null; handover: { minute: number; dow?: number } | null;
   previewHash: string | null; actorId: string; at: Date;
 }
-export type RotationUpdateOutcome = { affected: number } | 'NOT_FOUND' | 'CONFLICT' | 'STALE' | 'NAME_EXISTS' | 'BAD_MEMBER' | 'NOOP' | 'BUSY';
-export type RotationDeleteOutcome = 'OK' | 'NOT_FOUND' | 'CONFLICT' | { inUse: RotationUsageRow[] } | 'BUSY';
+export type RotationUpdateOutcome = { affected: number } | 'NOT_FOUND' | 'CONFLICT' | 'STALE' | 'NAME_EXISTS' | 'BAD_MEMBER' | 'NOOP' | 'BUSY' | 'CUSTOMER_TERMINATED';
+/** `inUse.inUse` of a CUSTOMER rotation lists the rows of its own customer only (steps of another customer from legacy data still block the delete, but are not shown). */
+export type RotationDeleteOutcome = 'OK' | 'NOT_FOUND' | 'CONFLICT' | { inUse: RotationUsageRow[] } | 'BUSY' | 'CUSTOMER_TERMINATED';
 
 // ── customer status / offboarding (D-42, D-43) ──
 export type CustomerStatusValue = 'ACTIVE' | 'SUSPENDED' | 'TERMINATED';

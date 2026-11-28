@@ -297,7 +297,12 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     const i = this.configs.findIndex((c) => c.customerId === cfg.customerId && c.scopeType === cfg.scopeType && c.scopeId === cfg.scopeId);
     if (expectedVersion === null ? i >= 0 : i < 0 || this.configs[i]!.version !== expectedVersion) return 'CONFLICT' as const;
     // D-28: a rotation the steps name must still exist (the SQL store re-reads them under a row lock)
-    const gone = cfg.steps.findIndex((st) => st.targetType === 'ROTATION' && (!st.targetId || !this.rotations.has(st.targetId)));
+    // another customer's CUSTOMER rotation counts as unknown here too (the API answers CROSS_CUSTOMER first; this is the recheck under the lock)
+    const gone = cfg.steps.findIndex((st) => {
+      if (st.targetType !== 'ROTATION') return false;
+      const r = st.targetId ? this.rotations.get(st.targetId) : undefined;
+      return !r || (r.scope === 'CUSTOMER' && r.customerId !== cfg.customerId);
+    });
     if (gone >= 0) return { unknownRotation: gone };
     const key = `${cfg.customerId}|${cfg.scopeType}|${cfg.scopeId}`;
     const stored: PagingConfig = { ...structuredClone(cfg), version: (expectedVersion ?? this.configTombstones.get(key) ?? 0) + 1 };
@@ -1044,6 +1049,11 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     return { version, templateId: w.toTemplateId, joins: plan.joins.length, leaves: plan.leaves.length, skippedInactive: plan.skippedInactive };
   }
   // ── rotations (D-28, D-41) ──
+  /** Fail closed: a customer that is not there counts as ended, like a TERMINATED one (a missing status on a seeded row is ACTIVE). */
+  private customerEnded(customerId: string | null | undefined): boolean {
+    const c = customerId ? this.customers.get(customerId) : undefined;
+    return !c || c.status === 'TERMINATED';
+  }
   private rotationStateSync(id: string, extra: string[] = []): RotationState | null {
     const base = this.rotations.get(id);
     if (!base) return null;
@@ -1053,8 +1063,10 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     const leaves = structuredClone(this.leaves.filter((l) => ids.has(l.contactId)));
     for (const l of leaves) ids.add(l.replacementId);
     const contacts = new Map([...ids].map((cid) => this.contacts.get(cid)).filter((c): c is Contact => !!c).map((c) => [c.id, structuredClone(c)]));
+    // a CUSTOMER rotation counts its own customer only (a legacy step of another customer is neither shown nor audited); a missing or terminated customer is out
     const customers = [...new Set(this.configs.filter((c) => c.steps.some((st) => st.targetType === 'ROTATION' && st.targetId === id)).map((c) => c.customerId))]
-      .filter((cid) => (this.customers.get(cid)?.status ?? 'ACTIVE') !== 'TERMINATED')
+      .filter((cid) => base.scope !== 'CUSTOMER' || cid === base.customerId)
+      .filter((cid) => !this.customerEnded(cid))
       .map((cid) => ({ id: cid, name: this.customers.get(cid)?.name ?? cid })).sort((a, b) => a.name.localeCompare(b.name) || (a.id < b.id ? -1 : 1));
     return { rotation, rotations: [rotation], overrides, leaves, contacts, customers };
   }
@@ -1078,7 +1090,8 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
   }
   async rotationUsage(rotationId: string, scope: ScopeFilter): Promise<RotationUsageRow[]> {
     // staff narrowed by sub-scopes only (customers '*') see the customers they have a sub-scope in, and nothing of the others
-    return this.usageRows(rotationId, (customerId, projectId, serviceId) => seesCustomer(scope, customerId)
+    const own = this.rotations.get(rotationId);
+    return this.usageRows(rotationId, (customerId, projectId, serviceId) => (own?.scope !== 'CUSTOMER' || customerId === own.customerId) && seesCustomer(scope, customerId)
       && (scope.customerIds !== '*' || scope.subScopes.length === 0 || scope.subScopes.some((x) => x.customerId === customerId))
       && nodeVisible(scope, { customerId, ...(projectId ? { projectId } : {}), ...(serviceId ? { serviceId } : {}) }, (sid) => this.services.get(sid)?.projectId));
   }
@@ -1094,7 +1107,7 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     return [...this.rotations.values()].some((r) => r.id !== exceptId && (r.customerId ?? null) === customerId && r.name === name);
   }
   async createRotation(n: NewRotation, audit: AuditTemplate): Promise<RotationCreateOutcome> {
-    if (n.customerId !== null && (this.customers.get(n.customerId)?.status ?? 'ACTIVE') === 'TERMINATED') return 'CUSTOMER_TERMINATED';
+    if (n.customerId !== null && this.customerEnded(n.customerId)) return 'CUSTOMER_TERMINATED';
     if (this.rotationNameTaken(n.customerId, n.name, null)) return 'NAME_EXISTS';
     if (!(await this.rotationMembersOk(n.customerId, n.members))) return 'BAD_MEMBER';
     const id = this.nextId('rot');
@@ -1108,6 +1121,7 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     const cur = this.rotations.get(u.id);
     if (!cur) return 'NOT_FOUND';
     if ((cur.version ?? 0) !== u.expectedVersion) return 'CONFLICT';
+    if (cur.scope === 'CUSTOMER' && this.customerEnded(cur.customerId)) return 'CUSTOMER_TERMINATED';
     if (this.rotationNameTaken(cur.customerId ?? null, u.name, u.id)) return 'NAME_EXISTS';
     const have = new Set(cur.members.map((m) => m.contactId));
     const added = (u.members ?? []).filter((id) => !have.has(id));
@@ -1143,8 +1157,10 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     const cur = this.rotations.get(rotationId);
     if (!cur) return 'NOT_FOUND';
     if ((cur.version ?? 0) !== expectedVersion) return 'CONFLICT';
+    if (cur.scope === 'CUSTOMER' && this.customerEnded(cur.customerId)) return 'CUSTOMER_TERMINATED';
+    // every customer's step counts (terminated ones too); of a CUSTOMER rotation only its own customer's rows are shown
     const usage = this.usageRows(rotationId, () => true);
-    if (usage.length) return { inUse: usage };
+    if (usage.length) return { inUse: cur.scope === 'CUSTOMER' ? usage.filter((u) => u.customerId === cur.customerId) : usage };
     const overrides = this.overrides.filter((o) => o.rotationId === rotationId).length;
     this.rotations.delete(rotationId);
     this.overrides = this.overrides.filter((o) => o.rotationId !== rotationId);
