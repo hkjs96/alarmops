@@ -648,6 +648,18 @@ export function rotationsContract(make: MakeFixture<Repo>): void {
       expect(got).toEqual([B, B, C]);
     });
 
+    it('handover change of exactly half a cycle (DAILY 09:00 -> 21:00, +12h) counts as a delay: B keeps [Tue 09:00, Wed 21:00), C starts Wed 21:00 and is next', async () => {
+      await open();
+      const r = await apply('rot_abc', { handover: { minute: 1260 } }, 0);
+      expect(r.status).toBe(200);
+      const WED21 = kst('2026-11-11T21:00'), THU21 = kst('2026-11-12T21:00');
+      expect(await pinList('rot_abc')).toEqual([[B, iso(TUE09), iso(WED21)]]);
+      const rows = await rowsOf('rot_abc', TUE09, THU21);
+      expect(rows.map((x) => [x.start, x.end, x.contactId])).toEqual([[iso(TUE09), iso(WED21), B], [iso(WED21), iso(THU21), C]]);
+      const g = await getRot('rot_abc');
+      expect([g.onShift.contactId, g.onShift.until, g.next]).toEqual([B, iso(WED21), NAME[C]]);
+    });
+
     it('every path reads the pins the same: tick snapshot, /oncall/paging-path nowIds and /oncall/now rotations[].onShift at Wed 09:30 (inside the pin) all say B', async () => {
       await open();
       expect((await apply('rot_abc', { handover: { minute: 600 } }, 0)).status).toBe(200);
