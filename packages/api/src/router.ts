@@ -4,6 +4,7 @@
  */
 import { createHash } from 'node:crypto';
 import { IDEMPOTENCY_MAX_PER_USER, errorTag, type RetentionConfig } from '@alarmops/core';
+import { isPartition, type Partition } from './partition.js';
 import { strictApiConfig, type ApiConfig } from './audience.js';
 import { requireAuth, scopeKey } from './auth.js';
 import { ApiError, assertCleanInput, errorResponse, header, isRecord, notFound, type ApiRequest, type ApiResponse } from './http.js';
@@ -28,6 +29,8 @@ export interface ApiDeps {
   now?: () => Date;
   /** `alarm-commands` queue (D-43 OFFBOARD_ACCOUNT). Without it a TERMINATED change is refused (503) before any write. */
   commands?: CommandPublisher;
+  /** AWS partition for derived role ARNs (D-58). Default aws; build with partitionFromEnv(process.env). */
+  partition?: Partition;
   /** D-45 retention periods (default DEFAULT_RETENTION; build with `retentionConfigFromEnv(process.env)`). Decides the CSV export window and the schedule shown with the purge log. */
   retention?: RetentionConfig;
   /**
@@ -42,7 +45,7 @@ export interface ApiDeps {
   log?: (level: 'warn' | 'error', msg: string, data?: Record<string, unknown>) => void;
 }
 
-type Handler = (req: ApiRequest, deps: { repo: ApiRepository; now: () => Date; config: ApiConfig; commands?: CommandPublisher; retention?: RetentionConfig; verification?: VerificationSender; verificationSecret?: string; log?: ApiDeps['log'] }, p: string[]) => Promise<ApiResponse>;
+type Handler = (req: ApiRequest, deps: { repo: ApiRepository; now: () => Date; config: ApiConfig; commands?: CommandPublisher; partition?: Partition; retention?: RetentionConfig; verification?: VerificationSender; verificationSecret?: string; log?: ApiDeps['log'] }, p: string[]) => Promise<ApiResponse>;
 interface Route {
   method: ApiRequest['method']; pattern: string[]; run: Handler;
   /** true → no session is required (the credential is in the path: GET /verify/{token}). Everything else answers 401 without one. */
@@ -190,8 +193,14 @@ const stable = (v: unknown): string =>
 /** `/verify/<token>` carries a credential in the path: it must never reach a log line. */
 export const loggablePath = (path: string): string => path.replace(/(\/verify\/)[^/?#]*/g, '$1[token]');
 
+/** A partition handed to createApi must be one of the three; anything else throws at start-up instead of building bad ARNs. */
+function checkedPartition(p: unknown): Partition {
+  if (!isPartition(p)) throw new Error('partition must be one of aws, aws-cn, aws-us-gov');
+  return p;
+}
+
 export function createApi(deps: ApiDeps) {
-  const inner = { repo: deps.repo, now: deps.now ?? (() => new Date()), config: strictApiConfig(deps.config), commands: deps.commands, retention: deps.retention, verification: deps.verification, verificationSecret: deps.verificationSecret, log: deps.log };
+  const inner = { repo: deps.repo, now: deps.now ?? (() => new Date()), config: strictApiConfig(deps.config), commands: deps.commands, partition: deps.partition === undefined ? undefined : checkedPartition(deps.partition), retention: deps.retention, verification: deps.verification, verificationSecret: deps.verificationSecret, log: deps.log };
   async function handle(req: ApiRequest): Promise<ApiResponse> {
     try {
       const m = match(req.method, req.path);

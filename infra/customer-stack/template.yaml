@@ -31,8 +31,8 @@ Parameters:
     AllowedPattern: '^[A-Za-z0-9+=,.@:/_-]+$'
   CentralEventBusArn:
     Type: String
-    Description: ARN of the central AlarmOps event bus (ap-northeast-2) that receives forwarded events.
-    AllowedPattern: '^arn:aws[a-z-]*:events:ap-northeast-2:[0-9]{12}:event-bus/[A-Za-z0-9._-]+$'
+    Description: ARN of the central AlarmOps event bus (any region; partition aws, aws-cn or aws-us-gov) that receives forwarded events.
+    AllowedPattern: '^arn:(aws|aws-cn|aws-us-gov):events:[a-z]{2}(-[a-z]+)+-[0-9]:[0-9]{12}:event-bus/[A-Za-z0-9._-]+$'
   RemediatorCallerRoleArn:
     Type: String
     Default: ""
