@@ -107,11 +107,25 @@ describe("every server action goes through callAction", () => {
     expect(names.sort()).toEqual([
       "accountStatusAction", "ackIncident", "addResponder", "addUserAccount", "changeCustomerStatus", "changeUserAccount", "checkAccountAction",
       "confirmVerificationAction", "createAccountAction", "createContactAction", "createCustomerAction", "createProjectAction",
-      "createServiceAction", "createTemplate", "escalateIncident", "executeBulk", "listAccountsAction", "listContactsAction",
-      "listTemplatesForCustomer", "markOffboardingStep", "previewBulk", "previewCustomerTemplate", "previewTemplate",
-      "removeOwnSteps", "removeResponder", "resolveIncident", "revealContact", "saveCallOrder", "saveTemplate", "setCapabilityAction",
+      "createRotation", "createServiceAction", "createTemplate", "deleteRotation", "escalateIncident", "executeBulk", "listAccountsAction", "listContactsAction",
+      "listTemplatesForCustomer", "markOffboardingStep", "previewBulk", "previewCustomerTemplate", "previewRotation", "previewTemplate",
+      "removeOwnSteps", "removeResponder", "resolveIncident", "revealContact", "saveCallOrder", "saveRotation", "saveTemplate", "setCapabilityAction",
       "setCustomerTemplate", "setLegalHold", "setMonitoring", "setResponderRole", "undoBulk", "verifyBulkAction", "verifyContactAction",
     ]);
+  });
+  it("the rotation actions are among them, and RotationsScreen never calls one outside callAction(() => …)", () => {
+    for (const n of ["createRotation", "deleteRotation", "previewRotation", "saveRotation"]) expect(names).toContain(n);
+    const screen = files.find((f) => /call-order[\\/]rotations[\\/]RotationsScreen\.tsx$/.test(f));
+    expect(screen, "RotationsScreen.tsx exists under app/call-order/rotations").toBeDefined();
+    const text = readFileSync(screen!, "utf8");
+    expect(text).toMatch(/^\s*["']use client["']/);
+    const bare = text.split("\n").flatMap((line, n) => {
+      if (/^\s*(import|export)\b/.test(line) || /^\s*(\/\/|\*|\/\*)/.test(line)) return [];
+      return ["createRotation", "deleteRotation", "previewRotation", "saveRotation"].filter((a) => new RegExp(`\\b${a}\\(`).test(line) && !/callAction\(\(\) => /.test(line)).map((a) => `${n + 1} ${a}`);
+    });
+    expect(bare).toEqual([]);
+    // it does use them (a screen that calls nothing would pass the check above for nothing)
+    for (const a of ["saveRotation", "previewRotation", "createRotation", "deleteRotation"]) expect(text, a).toMatch(new RegExp(`callAction\\(\\(\\) => ${a}\\(`));
   });
   it("no client file calls one of them outside callAction(() => …)", () => {
     const bare: string[] = [];

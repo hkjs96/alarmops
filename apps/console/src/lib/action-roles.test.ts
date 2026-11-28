@@ -19,10 +19,11 @@ vi.mock("@/lib/auth", () => ({
 vi.mock("@/lib/api", () => ({ getApi: async () => (state.api as (sub: string) => ConsoleApi)(state.sub!) }));
 
 import { addResponder, removeOwnSteps, removeResponder, saveCallOrder, setResponderRole } from "@/app/call-order/actions";
+import { createRotation, deleteRotation, previewRotation, saveRotation } from "@/app/call-order/rotations/actions";
 import { ackIncident, escalateIncident, executeBulk, previewBulk, resolveIncident, undoBulk } from "@/app/incidents/actions";
 
-const WRITES = ["putPaging", "putPagingOverride", "deletePagingOverride", "addResponder", "patchResponder", "removeResponder", "ack", "resolve", "escalate", "bulkPreview", "bulkExecute", "bulkUndo"] as const;
-const READS = ["scopeTree", "getResponders", "listRotations", "listStaff"] as const;
+const WRITES = ["putPaging", "putPagingOverride", "deletePagingOverride", "addResponder", "patchResponder", "removeResponder", "ack", "resolve", "escalate", "bulkPreview", "bulkExecute", "bulkUndo", "createRotation", "previewRotation", "saveRotation", "deleteRotation"] as const;
+const READS = ["scopeTree", "getResponders", "listRotations", "listStaff", "getRotationUsage", "getRotationShifts"] as const;
 let calls: string[] = [];
 let store: ReturnType<typeof createStore>;
 const as = (who: "admin" | "operator" | "viewer" | "nobody") => { state.sub = { admin: "usr-haeun", operator: "usr-minjae", viewer: "usr-sora", nobody: null }[who]; };
@@ -86,6 +87,42 @@ describe("call order and Responders writes are for admins", () => {
     as("nobody");
     expect(await removeResponder("hanbit", "con-x", 1)).toMatchObject({ ok: false, code: "UNAUTHORIZED" });
     expect(await ackIncident("inc_1", 1)).toMatchObject({ ok: false, code: "UNAUTHORIZED" });
+    expect(calls).toEqual([]);
+  });
+});
+
+describe("rotation writes are for admins", () => {
+  const read = async () => { as("admin"); const api = (state.api as (s: string) => ConsoleApi)("usr-haeun"); return api.listRotations(); };
+
+  it.each(["operator", "viewer"] as const)("an admin's rotation requests replayed under a %s session are refused before the API is touched", async (who) => {
+    const before = await read();
+    const night = before.find((r) => r.id === "rot_night")!;
+    const swapped = [night.members[0]!, night.members[2]!, night.members[1]!, ...night.members.slice(3)].map((m) => m.contactId);
+    const requests = [
+      () => createRotation({ scope: "MSP", name: "Replay desk", cadence: "DAILY", handover: { minute: 540 }, members: swapped.slice(0, 2) }),
+      () => previewRotation("rot_night", { members: swapped }),
+      () => saveRotation("rot_night", { members: swapped }, night.version, "a".repeat(64)),
+      () => deleteRotation("rot_night", night.version),
+      // role before anything else: a made-up rotation and a malformed body get the same answer as a real one
+      () => deleteRotation("rot_no_such", 1),
+      () => saveRotation("rot_no_such", {}, -1, "not a hash"),
+    ];
+    as(who);
+    calls = [];
+    for (const send of requests) expect(await send()).toEqual(refused);
+    expect(calls).toEqual([]);
+    expect(await read()).toEqual(before);
+  });
+
+  it("the same requests from an admin reach the API", async () => {
+    calls = [];
+    expect(await previewRotation("rot_night", { name: "MSP night desk (renamed)" })).toMatchObject({ ok: true });
+    expect(calls).toEqual(["previewRotation"]);
+  });
+
+  it("without a session nothing is asked at all", async () => {
+    as("nobody");
+    expect(await deleteRotation("rot_night", 1)).toMatchObject({ ok: false, code: "UNAUTHORIZED" });
     expect(calls).toEqual([]);
   });
 });
