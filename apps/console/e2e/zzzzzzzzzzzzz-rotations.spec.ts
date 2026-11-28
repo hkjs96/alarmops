@@ -4,7 +4,7 @@
 // kept together and leave the order as noted. Page parts it reads (data-testid): rot-segment (the shared rotations), rot-order, rot-member
 // (a person of the order, with Move … up / Move … down buttons), rot-preview-row, rot-next-shift, rot-save, rot-save-why, rot-result,
 // rot-error, rot-reload, rot-why, rot-used-row (data-status, data-selected), rot-cust-row, rot-new, rot-new-name, rot-add-select, rot-add,
-// rot-create, rot-create-error, rot-delete, rot-in-use.
+// rot-create, rot-create-error, rot-delete, rot-in-use, rot-affected, and [data-badge] (one member badge in a Customer rotations row).
 import { test, expect, type Browser, type Page } from "@playwright/test";
 import { appReady } from "./helpers/ready";
 
@@ -22,6 +22,7 @@ const order = async (page: Page) => (await members(page).allInnerTexts()).map((t
 const edit = (page: Page) => page.getByRole("button", { name: "Edit members & order" });
 /** moves the person in 2nd place one down, i.e. swaps 2 and 3 */
 const swap23 = async (page: Page) => { await members(page).nth(1).getByRole("button", { name: /^Move .* down$/ }).click(); };
+const terminatedRows = async (page: Page) => page.locator('[data-testid="rot-used-row"][data-status="TERMINATED"]').count();
 const terminatedFree = async (page: Page) => page.locator('[data-testid="rot-used-row"]:not([data-status="TERMINATED"])').count();
 
 test.describe("read-only for staff who are not admins", () => {
@@ -81,7 +82,12 @@ test.describe("reading", () => {
     await noHScroll(page);
     const cards = page.getByTestId("rot-cust-row");
     await expect(cards.first()).toBeVisible();
+    expect(await cards.count()).toBeGreaterThanOrEqual(2);
+    // cards, not a table: no table rows and no header row are shown
+    await expect(page.locator('tr[data-testid="rot-cust-row"], [data-testid="rot-cust-row"][role="row"]')).toHaveCount(0);
+    await expect(page.getByRole("columnheader")).toHaveCount(0);
     for (const c of await cards.all()) {
+      expect(await c.locator("[data-badge]").count(), "every card has member badges").toBeGreaterThan(0);
       const box = await c.boundingBox();
       expect(box!.width).toBeLessThanOrEqual(390);
       // every badge ends inside the card
@@ -176,6 +182,22 @@ test.describe("delete", () => {
 });
 
 test.describe("saving a change that reaches many customers", () => {
+  test("setup: rot_night has a TERMINATED customer in Used by, so N below cannot be the whole usage", async ({ page }) => {
+    await signIn(page, PATH);
+    if ((await terminatedRows(page)) === 0) {
+      // the default mock has no terminated customer on rot_night; terminate Ara Games (nothing else in the suite owns it)
+      await signIn(page, "/customers/ara");
+      await page.getByTestId("cs-change").click();
+      await page.getByTestId("cs-terminate").click();
+      await page.getByTestId("cs-reason").fill("Contract ended");
+      await page.getByTestId("cs-confirm-name").fill("Ara Games");
+      await confirmBtn(page).click();
+      await expect(page.getByTestId("customer-status")).toHaveAttribute("data-status", "TERMINATED");
+      await signIn(page, PATH);
+    }
+    expect(await terminatedRows(page)).toBeGreaterThan(0);
+  });
+
   test("swap 2 and 3: the customers and Next before → after first, one confirmation, then the result and the new order", async ({ page }) => {
     await signIn(page, PATH);
     expect(await order(page)).toEqual(["Haeun Kim", "Junho Park", "Jiwoo Han"]);
@@ -187,10 +209,13 @@ test.describe("saving a change that reaches many customers", () => {
     await expect(page.getByTestId("rot-preview-row").first()).toContainText("Kept");
     const n = await terminatedFree(page);
     expect(n).toBeGreaterThan(0);
+    const total = await page.getByTestId("rot-used-row").count();
+    expect(n, "a TERMINATED customer is in Used by but not in N").toBeLessThan(total);
     await expect(page.getByTestId("rot-affected")).toContainText("Mirae Pay");
     const save = page.getByTestId("rot-save");
     await expect(save).toBeEnabled();
     await expect(save).toHaveText(`Save rotation for ${n} customers`);
+    await expect(save).not.toHaveText(`Save rotation for ${total} customers`);
     await save.click();
     await expect(dialog(page)).toHaveCount(1);
     await confirmBtn(page).click();

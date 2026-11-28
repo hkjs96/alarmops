@@ -63,10 +63,10 @@ const preview = (version = 4, hash = "a".repeat(64)) => ({
   totals: { customers: 2, changedRows: 6, pins: 0 },
 });
 
-const mount = (role: Role = "ADMIN", over: { rotations?: RotationSummary[]; sel?: Record<string, unknown>; kind?: "INTERNAL" | "CUSTOMER" } = {}) => {
+const mount = (role: Role = "ADMIN", over: { rotations?: RotationSummary[]; sel?: Record<string, unknown>; kind?: "INTERNAL" | "CUSTOMER"; usage?: typeof USAGE } = {}) => {
   const node = (rotations: RotationSummary[]) => (
     <ShellContext.Provider value={{ user: { id: "u", name: "U", role, kind: over.kind }, sel: over.sel ?? {}, toast: vi.fn(), clearToast: vi.fn(), setLeaveGuard: vi.fn(), requestLeave: (p: () => void) => p() } as unknown as ShellApi}>
-      <RotationsScreen rotations={rotations} staff={STAFF} usage={USAGE} shifts={SHIFTS} />
+      <RotationsScreen rotations={rotations} staff={STAFF} usage={over.usage ?? USAGE} shifts={SHIFTS} />
     </ShellContext.Provider>
   );
   const r = render(node(over.rotations ?? [NIGHT, HANBIT, LUMEN]));
@@ -118,6 +118,16 @@ describe("editing", () => {
     expect(act_.save).toHaveBeenCalledTimes(1);
     expect(act_.save).toHaveBeenCalledWith("rot_night", { members: ["ct_haeun", "ct_jiwoo", "ct_junho"] }, 4, "a".repeat(64));
     expect(Object.keys(act_.save.mock.calls[0]![1] as object)).not.toContain("cadence");
+  });
+
+  it("N in 'Save rotation for N customers' is the usage customers that are not TERMINATED, not a constant, the whole usage or preview.totals", async () => {
+    const usage = { ...USAGE, customers: [...USAGE.customers, { id: "cus_kumho", name: "Kumho Steel", slug: "kumho", status: "TERMINATED", steps: [{ pagingConfigId: "pc_cus_kumho", level: "CUSTOMER", scopeId: "cus_kumho", stepIndex: 1, shared: true }] }] };
+    // totals and the preview's customer list deliberately count all three, so only the usage can give 2
+    act_.preview.mockResolvedValue({ ok: true, data: { ...preview(4), customers: [...preview(4).customers, { id: "cus_kumho", name: "Kumho Steel" }], totals: { customers: 3, changedRows: 6, pins: 0 } } });
+    mount("ADMIN", { usage } as never);
+    await editAndSwap();
+    expect(screen.getByTestId("rot-save")).toHaveTextContent("Save rotation for 2 customers");
+    expect(screen.getByTestId("rot-save")).not.toHaveTextContent("3 customers");
   });
 
   it("a preview of another version: Save is off, the VERSION_CONFLICT words are shown, nothing is saved", async () => {
