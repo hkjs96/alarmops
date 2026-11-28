@@ -1121,7 +1121,7 @@ npm ci --ignore-scripts && npm run build:lambda -w @alarmops/ingest && npm run b
 | `bus-allowlist`: 자격 증명 단계에서 실패 | `central-bus` 환경 변수 `CENTRAL_BUS_DEPLOY_ROLE_ARN`이 없거나, 역할 신뢰의 `sub`가 `environment:central-bus`가 아니다. 4-2 |
 | `bus-allowlist`: `The stack has no BusName output` | 버스 스택이 옛 템플릿이다. 지금의 `infra/aws/central-bus.yaml`로 먼저 갱신한다 |
 | 고객 스택 생성 실패: `ExternalId` | 16자 미만이거나 비어 있다. 7-1에서 발급된 값을 그대로 넣는다 |
-| 고객 스택 생성 실패: `CentralEventBusArn` | 서울 리전 버스 ARN이 아니다. 출력 `CentralBusArn`을 그대로 넣는다 |
+| 고객 스택 생성 실패: `CentralEventBusArn` | 버스 ARN 형식이 아니다(`arn:<파티션>:events:<리전>:<12자리 계정>:event-bus/<이름>`, 파티션은 `aws`·`aws-cn`·`aws-us-gov`). 출력 `CentralBusArn`을 그대로 넣는다 |
 | 연결 확인에서 `Trust policy rejects our role — check ExternalId` | 고객이 넣은 `ExternalId`나 `CentralRoleArn`이 다르다. 고객이 스택 파라미터를 고친다 |
 | 연결 확인에서 EventForwarder가 계속 `WAITING FOR THE FIRST EVENT` | ① 아직 전달 대상 이벤트가 없었다: 7-4의 5번(`Monitoring=off` 태그). `Team=…` 같은 다른 키는 고객 쪽 규칙이 거른다. ② 그래도 안 되면 계정이 버스 허용 목록에 있는지, 스택의 `CentralEventBusArn`이 맞는지 본다 |
 | 알람은 울렸는데 인시던트가 안 열림 | ① 7-2를 스택 설치 뒤에 했다: 허용 전 이벤트는 버려진다. 알람 상태를 한 번 더 바꾼다. ② 틱이 멈췄다: 3-5의 4번으로 확인한다 |
