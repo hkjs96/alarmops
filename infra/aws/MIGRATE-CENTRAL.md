@@ -5,7 +5,7 @@
 - 고객은 스택을 **다시 설치하지 않는다.** 스택을 **업데이트**하고 파라미터만 바꾼다.
 - ExternalId는 그대로 쓴다. 고객 쪽 역할 ARN도 바뀌지 않는다.
 - 사람이 한다. AWS 콘솔과 본인 터미널 작업은 SSO·MFA로 한다. 에이전트에게 시키지 않는다.
-- 이 문서는 새 중앙도 서울(`ap-northeast-2`)·상용 파티션(`aws`)이라고 본다. 아니면 5절의 "후속"이 먼저다.
+- 콘솔·`packages/api`·고객 스택에는 고정된 리전·파티션이 없다(#97). 다만 중앙 배포 워크플로(`deploy-central.yml`·`bus-allowlist.yml`의 `AWS_REGION`)와 `infra/scripts`(trust-change, rehearsal)는 서울 고정이라, 서울 밖으로 옮기려면 이것부터 바꾼다(#195). 새 중앙이 다른 리전·파티션이면 콘솔의 `ALARM_COMMANDS_QUEUE_URL`과 `AWS_PARTITION`을 함께 맞춘다(둘이 어긋나면 콘솔이 시작하지 않는다). 이 문서의 예시는 서울·`aws` 기준이다.
 - 참조: `docs/GO-LIVE.md` 4단계, `infra/aws/deploy-role-policy.md`, `infra/aws/README.md`, `infra/customer-stack/README.md`
 
 ## 한눈에 보기
@@ -242,36 +242,37 @@
 
 ## 5. 하드코딩 점검 결과
 
-범위: `infra/`, `services/`, `packages/api/src`, `.github/`. 방법: 12자리 숫자, `ap-northeast-2`, `us-east-1`, `arn:aws:`, `"aws"`를 grep했다. 테스트 파일은 뺐다. 콘솔 두 곳은 범위 밖이지만 같은 문제라 적었다.
+범위: `infra/`, `services/`, `packages/api/src`, `.github/`. 방법: 12자리 숫자, `ap-northeast-2`, `us-east-1`, `arn:aws:`, `"aws"`를 grep했다. 테스트 파일은 뺐다. 콘솔 두 곳도 함께 적었다(#97에서 해결).
 
 | 위치 | 하드코딩 | 옮길 때 영향 | 후속 |
 |---|---|---|---|
-| `packages/api/src/onboardingApi.ts` `roleArn()` | `AWS_PARTITION`(기본 `aws`)을 따른다(#189). 콘솔이 아직 `partition`을 넘기지 않아 실제로는 `aws` | 상용 파티션 안에서는 없다. 콘솔 연결 전에 다른 파티션(GovCloud·중국) 고객이면 틀린 ARN이 DB에 저장된다 | 1 |
-| `packages/api/src/sqsCommandPublisher.ts` | 큐 URL은 어느 리전이든 통과한다(#189) | 콘솔 SQS 클라이언트(`sqs-client.ts` 22행)는 아직 서울 고정이라, 서울 밖 URL이면 시작은 되고 첫 전송에서 실패한다 | 2 |
-| `infra/customer-stack/template.yaml` 35행 | 해결됨(#97): `CentralEventBusArn` 패턴이 모든 리전과 파티션 `aws`·`aws-cn`·`aws-us-gov`를 받는다. 서울·`aws` 값은 그대로 통과한다 | 없다. 다른 리전의 버스로 옮겨도 파라미터만 업데이트하면 된다(역할 교체 없음). 단, 콘솔 연결 키트는 `BUS_RE`를 풀 때까지 서울 값만 보여 준다 | - |
-| `apps/console/src/lib/server/central.ts` 4·5행 (범위 밖) | `ROLE_RE`가 `arn:aws:iam::`, `BUS_RE`가 `ap-northeast-2` 고정 | 새 값이 안 맞으면 키트에서 값이 빠진다. 상용·서울이면 없다 | 2, 3 |
-| `apps/console/src/lib/server/sqs-client.ts` 22행 (범위 밖) | SQS 클라이언트 리전 `ap-northeast-2` | 다른 리전이면 큐와 어긋난다 | 2 |
+| `packages/api/src/onboardingApi.ts` `roleArn()` | `AWS_PARTITION`(기본 `aws`)을 따른다(#189). 콘솔이 `createApi({ partition })`로 넘긴다(#97). `AWS_PARTITION`과 큐 URL 파티션이 다르면 콘솔이 시작하지 않는다 | 없다 | 해결됨 |
+| `packages/api/src/sqsCommandPublisher.ts` | 큐 URL은 어느 리전이든 통과한다(#189) | 없다. 콘솔 SQS 클라이언트(`sqs-client.ts`)도 URL의 리전으로 만든다(#97) | 해결됨 |
+| `infra/customer-stack/template.yaml` 35행 | 해결됨(#97): `CentralEventBusArn` 패턴이 모든 리전과 파티션 `aws`·`aws-cn`·`aws-us-gov`를 받는다. 서울·`aws` 값은 그대로 통과한다 | 없다. 다른 리전의 버스로 옮겨도 파라미터만 업데이트하면 된다(역할 교체 없음). 콘솔 연결 키트의 `BUS_RE`도 모든 리전을 받는다(#97) | - |
+| `apps/console/src/lib/server/central.ts` 4·5행 | 해결됨(#97): `ROLE_RE`·`BUS_RE` 모두 파티션 `aws`·`aws-cn`·`aws-us-gov`만 받고, `BUS_RE`는 모든 리전을 받되 파티션과 리전이 맞아야 한다(`cn-*`는 aws-cn, `us-gov-*`는 aws-us-gov). 고객 스택의 역할 ARN 패턴(`aws[a-z-]*`)은 더 넓다(#191) | 없다 | 해결됨 |
+| `apps/console/src/lib/server/sqs-client.ts` | 해결됨(#97): 리전을 `parseQueueUrl(ALARM_COMMANDS_QUEUE_URL).region`에서 읽는다. URL이 비면 클라이언트가 없고 요청은 503 | 없다 | 해결됨 |
 | `packages/api/src/memoryRepo.ts` 384·385행 | `arn:aws:iam::`, 기본 리전 | 시험용 메모리 저장소. 영향 없다 | - |
 | `infra/customer-stack/template.yaml` 25·51행 | 설명문 예시의 `arn:aws:...`, 계정 ID | 설명일 뿐 | - |
 | `services/ingest/src/lambda/runtime.ts` 39행, `services/alarm-engine/.../wiring.py` 52·79행 | `AWS_REGION`이 없을 때 `ap-northeast-2` | Lambda에는 항상 `AWS_REGION`이 있다 | - |
 | `services/alarm-engine/.../pg_repository.py` 90행, `aws.py` 86행, `dimensions.py` 31행 | 고객 계정의 `regions`가 비면 `ap-northeast-2` | 고객 리소스 리전 기본값이다. 중앙 위치와 무관 | - |
 | `services/alarm-engine/.../resource_types/cloudfront.py`·`route53.py`·`waf.py`, `collectors/groups.py` 408행, `offboard.py` 33행, `handler.py` 147행 | `us-east-1` | CloudFront·Route 53 같은 글로벌 서비스의 지표 리전이다. 중앙 위치와 무관 | 정상 |
 | `services/alarm-engine/.../collectors/core.py` 75행 `partition_of()` | 고객 Reader 역할 ARN에서 파티션을 읽고, 없을 때만 `aws` | 좋은 방식이다. 영향 없다 | 정상 |
-| `.github/workflows/deploy-central.yml` 49행, `bus-allowlist.yml` 49행 | `AWS_REGION: ap-northeast-2` | 서울 안에서는 없다. 계정 ID는 없다(ARN은 환경 변수) | 정상 |
+| `.github/workflows/deploy-central.yml` 64행, `bus-allowlist.yml` 50행 | `AWS_REGION: ap-northeast-2` | 서울 안에서는 없다. 서울 밖으로 옮기면 바꿔야 한다. 계정 ID는 없다(ARN은 환경 변수) | 6 |
 | `infra/aws/central.yaml`, `central-bus.yaml` | 계정 ID·리전·파티션 없음. `AWS::Partition`, `AWS::AccountId` 사용 | 영향 없다 | 정상 |
 | `infra/aws/deploy-role-policy.md` | `<ACCOUNT_ID>`, `<REGION>`, `<PARTITION>` 자리표시자 | 새 계정 값으로 채운다(1절) | 정상 |
 
-결론: 서울 리전·상용 파티션 안에서 계정만 옮기면 코드를 고치지 않아도 된다. 계정 ID 하드코딩은 찾지 못했다(테스트 제외).
+결론: 콘솔·`packages/api`·고객 스택에는 고정된 리전·파티션이 남지 않았다(#97). 중앙 배포 워크플로와 `infra/scripts`는 아직 서울 고정이다(후속 6). 서울·상용 파티션 안에서 계정만 옮기면 코드를 고치지 않아도 된다. 계정 ID 하드코딩은 찾지 못했다(테스트 제외).
 
 ### 후속
 
-코드는 이 이슈에서 고치지 않는다. 필요하면 이슈를 따로 만든다.
+1~3은 코드로 해결했다. 4·5는 필요하면 이슈를 따로 만든다. 6은 #195.
 
-1. (backend) `roleArn()`의 파티션: packages/api는 완료(#189, `AWS_PARTITION`). 콘솔이 `createApi({ partition })`로 넘기는 연결이 남았다.
-2. (console) 리전을 `ap-northeast-2`로 고정한 곳이 둘 남았다(콘솔 SQS 클라이언트, 콘솔 `BUS_RE`). 서울 밖으로 옮길 계획이 생기면 같이 푼다. 큐 URL 정규식은 #189에서, 고객 스택의 `CentralEventBusArn` 패턴은 #190에서 풀었다.
-3. (console) `central.ts`의 `ROLE_RE`·`BUS_RE`가 파티션 `aws`를 고정한다. `ROLE_RE`는 고객 스택의 역할 ARN 패턴처럼 `aws[a-z-]*`로, `BUS_RE`는 `CentralEventBusArn` 패턴처럼 `(aws|aws-cn|aws-us-gov)`로 맞춘다.
+1. 해결됨(#97): 콘솔이 `createApi({ partition })`를 넘긴다(`AWS_PARTITION`, 없으면 큐 URL의 파티션, 둘이 다르면 시작 시 오류).
+2. 해결됨(#97): 콘솔 SQS 클라이언트가 큐 URL의 리전을 쓰고, `BUS_RE`가 모든 리전을 받는다.
+3. 해결됨(#97): `ROLE_RE`·`BUS_RE`가 세 파티션만 받는다(`BUS_RE`는 리전과 파티션도 맞춘다). 고객 스택의 역할 ARN 패턴은 #191에서 다룬다.
 4. (infra) `bus-allowlist`는 `CENTRAL_BUS_DEPLOY_ROLE_ARN`이 가리키는 한 계정의 버스만 바꾼다. 옛 버스에서 제거하려면 변수를 되돌려야 한다(2-5). 필요하면 대상을 고르는 입력을 만든다.
 5. (허브) D-58은 파라미터를 둘만 적었다. Remediator를 켠 고객은 `RemediatorCallerRoleArn`까지 셋이다(3-1). D-58 문구 보강 여부를 정한다.
+6. (infra) 중앙 배포 워크플로(`deploy-central.yml` 64행, `bus-allowlist.yml` 50행의 `AWS_REGION`)와 스크립트(`infra/scripts/trust-change.sh` 14행 `TC_REGION`, `rehearsal/common.sh` 7행, `rehearsal/install.sh`·`preflight.sh`의 버스 정규식, `setup-github-environments.sh` 37행 기본값), `deploy-role-policy.md`가 서울을 가정한다. 서울 밖으로 옮기기 전에 푼다(#195).
 
 ## 6. 되돌리기
 

@@ -77,7 +77,7 @@ describe("pure helpers", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const ok = centralValues({ CENTRAL_ROLE_ARN: "arn:aws:iam::111122223333:role/AlarmOpsCentral-Engine", CENTRAL_EVENT_BUS_ARN: "arn:aws:events:ap-northeast-2:111122223333:event-bus/alarmops-central" });
     expect(ok).toMatchObject({ centralRoleArn: expect.any(String), centralBusArn: expect.any(String), remediatorCallerRoleArn: null });
-    const bad = centralValues({ CENTRAL_ROLE_ARN: "arn:aws:iam::111122223333:root", CENTRAL_EVENT_BUS_ARN: "arn:aws:events:us-east-1:111122223333:event-bus/x", REMEDIATOR_CALLER_ROLE_ARN: "secret-looking-value" });
+    const bad = centralValues({ CENTRAL_ROLE_ARN: "arn:aws:iam::111122223333:root", CENTRAL_EVENT_BUS_ARN: "arn:aws-iso:events:us-east-1:111122223333:event-bus/x", REMEDIATOR_CALLER_ROLE_ARN: "secret-looking-value" });
     expect(bad).toEqual({ centralRoleArn: null, centralBusArn: null, remediatorCallerRoleArn: null });
     expect(warn.mock.calls.flat().join(" ")).not.toContain("secret-looking-value");
     warn.mockRestore();

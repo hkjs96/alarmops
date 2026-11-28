@@ -4,7 +4,7 @@ import { authFromPrincipal, createApi, normalizeAuth, loadApiConfig, type ApiReq
 import { SqlApiStore, pgClient } from "@alarmops/store-sql";
 import { NotConfiguredError } from "../mode";
 import { databaseConfig } from "./db-config";
-import { commands, retention, verificationSecret } from "./wiring";
+import { commands, resolvePartition, retention, verificationSecret } from "./wiring";
 import { toResponse } from "./response";
 
 export { toResponse };
@@ -37,12 +37,17 @@ export function backend(env: Record<string, string | undefined> = process.env): 
   if (g.__aoBackend) return g.__aoBackend;
   const cfg = databaseConfig(env);
   if (!cfg) throw new NotConfiguredError("DATABASE_URL");
-  const client = pgClient({ connectionString: cfg.url, pooler: cfg.pooler, max: cfg.max });
-  const repo = new ConsoleStore(client);
+  // Everything that can throw on configuration runs BEFORE the pool exists: a bad value must not leak a pool per request.
   const { config, warnings } = loadApiConfig(env);
   for (const w of warnings) console.warn(`[api config] ${w}`);
+  const partition = resolvePartition(env); // throws when AWS_PARTITION and the queue URL disagree
+  const retentionConfig = retention(env);
+  const commandPublisher = commands(env); // throws on a bad queue URL / missing expected account
+  const verifySecret = verificationSecret(env);
+  const client = pgClient({ connectionString: cfg.url, pooler: cfg.pooler, max: cfg.max });
+  const repo = new ConsoleStore(client);
   const api = createApi({
-    repo, config, retention: retention(env), commands: commands(env), verificationSecret: verificationSecret(env),
+    repo, config, partition, retention: retentionConfig, commands: commandPublisher, verificationSecret: verifySecret,
     log: (level, msg, data) => console[level === "error" ? "error" : "warn"](`[api] ${msg}`, data ?? {}),
   });
   g.__aoBackend = { repo, api, close: () => client.close?.() ?? Promise.resolve() };

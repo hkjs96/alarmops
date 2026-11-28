@@ -258,6 +258,7 @@
 | `ALARM_COMMANDS_QUEUE_URL` | GO-LIVE 4-5 | Config | 4단계 후 |
 | `ALARM_COMMANDS_EXPECTED_ACCOUNT` | GO-LIVE 4-5 | Config | 4단계 후 |
 | `AWS_ROLE_ARN` | GO-LIVE 4-5(Vercel OIDC 역할, D-49) | Config | 4단계 후 |
+| `AWS_PARTITION` | `aws`·`aws-cn`·`aws-us-gov`. 기본 `aws`이므로 상용 파티션이면 넣지 않는다. 넣지 않으면 큐 URL의 파티션을 쓴다. 세 값이 아니면(예: 대문자 `AWS`) 또는 큐 URL의 파티션과 다르면 콘솔이 시작하지 않는다(D-58). 넣을 때 Vercel이 예약 이름이라며 거부하면 넣지 말고 큐 URL만으로 파티션을 정한다(`.amazonaws.com.cn`→`aws-cn`, `us-gov-*`→`aws-us-gov`). | Config | 선택 |
 | `CENTRAL_ROLE_ARN` | 중앙 배포 출력 `CentralRoleArn`. 고객 연결 키트에 쓴다(`apps/console/README.md`) | Config | 4단계 후 |
 | `CENTRAL_EVENT_BUS_ARN` | 중앙 배포 출력 `CentralBusArn`. 고객 연결 키트에 쓴다 | Config | 4단계 후 |
 | `REMEDIATOR_CALLER_ROLE_ARN` | 중앙 배포 출력 | Config | 4단계 후, Remediator 쓸 때만 |
