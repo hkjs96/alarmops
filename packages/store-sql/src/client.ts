@@ -57,6 +57,10 @@ export const pgCode = (e: unknown): string | undefined => {
   const c = (e as { code?: unknown } | null)?.code;
   return typeof c === 'string' ? c : undefined;
 };
+/** A 23505 on one named unique index (any other unique violation is a bug or a different rule: the caller rethrows it). */
+export const isUniqueOn = (e: unknown, constraint: string): boolean => pgCode(e) === PG.UNIQUE && (e as { constraint?: unknown } | null)?.constraint === constraint;
+/** The unique index on a rotation's name within one customer (MSP rotations: customerId NULL, NULLS NOT DISTINCT). */
+export const ROTATION_NAME_KEY = 'Rotation_customerId_name_key';
 /** Foreign keys a template save can lose a race on (a contact deleted between the read and the insert; both ON DELETE CASCADE). */
 export const TEMPLATE_RACE_FKS: readonly string[] = ['Responder_contactId_fkey', 'ResponderTemplateMember_contactId_fkey'];
 /** Foreign keys a rotation write can lose a race on (a contact deleted between the read and the insert of a member or a pin). */

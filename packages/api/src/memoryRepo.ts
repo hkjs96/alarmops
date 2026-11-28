@@ -297,7 +297,12 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     const i = this.configs.findIndex((c) => c.customerId === cfg.customerId && c.scopeType === cfg.scopeType && c.scopeId === cfg.scopeId);
     if (expectedVersion === null ? i >= 0 : i < 0 || this.configs[i]!.version !== expectedVersion) return 'CONFLICT' as const;
     // D-28: a rotation the steps name must still exist (the SQL store re-reads them under a row lock)
-    const gone = cfg.steps.findIndex((st) => st.targetType === 'ROTATION' && (!st.targetId || !this.rotations.has(st.targetId)));
+    // another customer's CUSTOMER rotation counts as unknown here too (the API answers CROSS_CUSTOMER first; this is the recheck under the lock)
+    const gone = cfg.steps.findIndex((st) => {
+      if (st.targetType !== 'ROTATION') return false;
+      const r = st.targetId ? this.rotations.get(st.targetId) : undefined;
+      return !r || (r.scope === 'CUSTOMER' && r.customerId !== cfg.customerId);
+    });
     if (gone >= 0) return { unknownRotation: gone };
     const key = `${cfg.customerId}|${cfg.scopeType}|${cfg.scopeId}`;
     const stored: PagingConfig = { ...structuredClone(cfg), version: (expectedVersion ?? this.configTombstones.get(key) ?? 0) + 1 };
@@ -1108,6 +1113,7 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     const cur = this.rotations.get(u.id);
     if (!cur) return 'NOT_FOUND';
     if ((cur.version ?? 0) !== u.expectedVersion) return 'CONFLICT';
+    if (cur.scope === 'CUSTOMER' && cur.customerId && (this.customers.get(cur.customerId)?.status ?? 'ACTIVE') === 'TERMINATED') return 'CUSTOMER_TERMINATED';
     if (this.rotationNameTaken(cur.customerId ?? null, u.name, u.id)) return 'NAME_EXISTS';
     const have = new Set(cur.members.map((m) => m.contactId));
     const added = (u.members ?? []).filter((id) => !have.has(id));
@@ -1143,8 +1149,10 @@ export class MemoryApiStore extends MemoryTickStore implements ApiRepository {
     const cur = this.rotations.get(rotationId);
     if (!cur) return 'NOT_FOUND';
     if ((cur.version ?? 0) !== expectedVersion) return 'CONFLICT';
+    if (cur.scope === 'CUSTOMER' && cur.customerId && (this.customers.get(cur.customerId)?.status ?? 'ACTIVE') === 'TERMINATED') return 'CUSTOMER_TERMINATED';
+    // every customer's step counts (terminated ones too); of a CUSTOMER rotation only its own customer's rows are shown
     const usage = this.usageRows(rotationId, () => true);
-    if (usage.length) return { inUse: usage };
+    if (usage.length) return { inUse: cur.scope === 'CUSTOMER' ? usage.filter((u) => u.customerId === cur.customerId) : usage };
     const overrides = this.overrides.filter((o) => o.rotationId === rotationId).length;
     this.rotations.delete(rotationId);
     this.overrides = this.overrides.filter((o) => o.rotationId !== rotationId);

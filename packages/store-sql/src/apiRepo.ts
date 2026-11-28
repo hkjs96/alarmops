@@ -6,7 +6,7 @@
 import { createHash } from 'node:crypto';
 import { handoverOf, incidentMute, type DigestData, type PurgeLogEntry, type Contact, type Leave, type Override, type Rotation, type AuditInput, type DeliveryLog, type IncidentEventInput, type IncidentRow, type MaintenanceWindow, type PagingConfig } from '@alarmops/core';
 import { nodeVisible, type ApiRepository, type ManagedAlarmFilter, type ManagedAlarmRecord, type MonitoringCursor, type MonitoringPage, type ResourceFilter, type ResourceRecord, type AlertMemberRow, type IdempotentEntry, type IncidentFilter, type IncidentPage, type NodeFilter, type NotifiedPerson, type OpenCounts, type OrgTree, type ScopeFilter, type StatusCounts, type UndoRecord, type UserInfo, type Principal, type ResponderOp, type ResponderWriteOutcome, type RespondersState, type RotationsWorld, type ChangeStatusOutcome, type CustomerStatusState, type CustomerStatusValue, type ExportIncidentRow, type RetentionView, type MarkStepOutcome, type OffboardStep, type OffboardStepKey, type OffboardingState, type RevealLogFilter, type RevealLogRow, type RevealWrite, type RevealWriteOutcome, type AccountPatch, type AccountWriteOutcome, type AuditTemplate, type CloudAccountRecord, type ContactPatch, type ContactScopeInfo, type ContactWriteOutcome, type ContactsWorld, type NewAccount, type NewContact, type VerificationIssue, type VerificationLimits, type IssueOutcome, type VerificationLink, type VerificationTaken, type VerifyChannelValue, type CustomerProfile, type CustomerProfilePatch, type CustomerUpdateOutcome, type OrgWriteOutcome, type ProjectRecord, type ServiceRecord, type BindGoogleOutcome, type EnrolOutcome, type NewUser, type UserFilter, type UserPatch, type UserRecord, type UserWriteOutcome, OFFBOARD_STEP_KEYS, normalizeEmail, emailDomain, isFreeMail, planTemplateChange, planTemplateAttach, templateBlocking, attachBlocking, type ResponderTemplateView, type TemplateCreate, type TemplateImpactInput, type TemplateUpdate, type TemplateUpdateOutcome, type TemplateAttachInput, type TemplateAttachOutcome, type TemplateAttachWrite, type TemplateRef, type TemplatePaging, evaluateRotationChange, seesCustomer, type RotationState, type RotationUsageRow, type NewRotation, type RotationCreateOutcome, type RotationUpdate, type RotationUpdateOutcome, type RotationDeleteOutcome } from '@alarmops/api';
-import { PG, ROTATION_RACE_FKS, isBusyError, pgCode, type SqlExecutor } from './client.js';
+import { PG, ROTATION_NAME_KEY, ROTATION_RACE_FKS, isBusyError, isUniqueOn, pgCode, type SqlExecutor } from './client.js';
 import { purgeLogOf } from './retentionSql.js';
 import { CONTACT_COLS, toContact, Params, d, dReq, incidentCols, iso, js, newId, num, toEvent, toIncident, toLog } from './rows.js';
 import { SqlTickStore, insertAudit, loadPins, toWindow } from './tickRepo.js';
@@ -292,7 +292,9 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
         // here) or waits for this save to commit (and then finds the step: IN_USE). So no step is left pointing at a missing rotation.
         const rids = [...new Set(cfg.steps.filter((st) => st.targetType === 'ROTATION' && st.targetId).map((st) => st.targetId as string))].sort();
         if (rids.length) {
-          const found = new Set((await tx.query(`SELECT "id" FROM "Rotation" WHERE "id" = ANY($1::text[]) ORDER BY "id" FOR SHARE`, [rids])).map((r) => r.id as string));
+          // scope and customerId are read under the same lock: another customer's CUSTOMER rotation is "unknown" for this save (as the API's CROSS_CUSTOMER gate would say)
+          const found = new Set((await tx.query(`SELECT "id", "scope", "customerId" FROM "Rotation" WHERE "id" = ANY($1::text[]) ORDER BY "id" FOR SHARE`, [rids]))
+            .filter((r) => r.scope !== 'CUSTOMER' || r.customerId === cfg.customerId).map((r) => r.id as string));
           const gone = cfg.steps.findIndex((st) => st.targetType === 'ROTATION' && (!st.targetId || !found.has(st.targetId)));
           if (gone >= 0) throw new Abort({ unknownRotation: gone });
         }
@@ -1007,14 +1009,23 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
   }
   async rotationUsage(rotationId: string, scope: ScopeFilter): Promise<RotationUsageRow[]> { return this.usageVia(this.sql, rotationId, scope); }
 
-  /** Active INTERNAL staff, or (customerId given) active PAGEABLE Responders of that customer. `lock`: FOR SHARE, so a concurrent contact delete waits. */
+  /**
+   * Active INTERNAL staff, or (customerId given) active PAGEABLE Responders of that customer. `lock`: Contact rows FOR SHARE, then (customer people only)
+   * their Responder rows FOR SHARE, both in id order (the order a contact delete takes them: Contact, then the cascade to Responder). So a concurrent
+   * contact delete, or a change of the Responder to NOTIFY_ONLY, either commits first (READ COMMITTED re-checks the row: it is not counted) or waits for this write.
+   */
   private async membersOkVia(q: SqlExecutor, customerId: string | null, ids: string[], lock: boolean): Promise<boolean> {
     if (!ids.length) return false;
     const rows = await q.query(
-      `SELECT c."id" FROM "Contact" c WHERE c."id" = ANY($1::text[]) AND c."active"
-          AND (c."kind" = 'INTERNAL' OR ($2::text IS NOT NULL AND c."customerId" = $2 AND EXISTS (SELECT 1 FROM "Responder" r WHERE r."customerId" = $2 AND r."contactId" = c."id" AND r."role" = 'PAGEABLE')))
-        ${lock ? 'ORDER BY c."id" FOR SHARE OF c' : ''}`, [ids, customerId]);
-    return rows.length === new Set(ids).size;
+      `SELECT c."id", c."kind"::text AS "kind" FROM "Contact" c WHERE c."id" = ANY($1::text[]) AND c."active"
+          AND (c."kind" = 'INTERNAL' OR ($2::text IS NOT NULL AND c."customerId" = $2)) ${lock ? 'ORDER BY c."id" FOR SHARE OF c' : ''}`, [ids, customerId]);
+    const people = rows.filter((r) => r.kind !== 'INTERNAL').map((r) => r.id as string);
+    let pageable = 0;
+    if (people.length && customerId !== null) {
+      pageable = (await q.query(
+        `SELECT r."contactId" FROM "Responder" r WHERE r."customerId" = $2 AND r."contactId" = ANY($1::text[]) AND r."role" = 'PAGEABLE' ${lock ? 'ORDER BY r."contactId" FOR SHARE' : ''}`, [people, customerId])).length;
+    }
+    return rows.length - people.length + pageable === new Set(ids).size && pageable === people.length;
   }
   async rotationMembersOk(customerId: string | null, ids: string[]): Promise<boolean> { return this.membersOkVia(this.sql, customerId, ids, false); }
 
@@ -1037,10 +1048,21 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
         return { id };
       });
     } catch (err) {
-      if (pgCode(err) === PG.UNIQUE) return 'NAME_EXISTS';
+      if (isUniqueOn(err, ROTATION_NAME_KEY)) return 'NAME_EXISTS'; // any other 23505 is not "name taken": it surfaces
       if (isBusyError(err, ROTATION_RACE_FKS)) return 'BUSY';
       throw err;
     }
+  }
+
+  /**
+   * Lock order of rotation writes: Rotation row (FOR UPDATE; FOR SHARE in a call order save), THEN the Customer row FOR SHARE (a CUSTOMER rotation only) — the
+   * order PATCH and DELETE take. createRotation takes Customer FOR SHARE before it inserts its (new, so unlockable by others) Rotation row, which cannot
+   * wait on anyone. The customer status change takes Customer FOR UPDATE and never a Rotation lock, so no cycle. Called with the Rotation row already locked.
+   */
+  private async customerTerminatedUnderShare(tx: SqlExecutor, scope: unknown, customerId: string | null): Promise<boolean> {
+    if (scope !== 'CUSTOMER' || customerId === null) return false;
+    const [c] = await tx.query(`SELECT "status"::text AS "status" FROM "Customer" WHERE "id" = $1 FOR SHARE`, [customerId]);
+    return c?.status === 'TERMINATED';
   }
 
   async updateRotation(u: RotationUpdate, audit: AuditTemplate): Promise<RotationUpdateOutcome> {
@@ -1050,6 +1072,7 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
         if (!cur) return 'NOT_FOUND';
         if (Number(cur.version) !== u.expectedVersion) return 'CONFLICT';
         const customerId = (cur.customerId ?? null) as string | null;
+        if (await this.customerTerminatedUnderShare(tx, cur.scope, customerId)) return 'CUSTOMER_TERMINATED';
         const [taken] = await tx.query(`SELECT 1 AS "x" FROM "Rotation" WHERE "customerId" IS NOT DISTINCT FROM $1 AND "name" = $2 AND "id" <> $3`, [customerId, u.name, u.id]);
         if (taken) return 'NAME_EXISTS';
         const state = (await this.rotationStateVia(tx, u.id, u.members ?? []))!;
@@ -1089,7 +1112,7 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
         return { affected: ev.scheduleChanged ? state.customers.length : 0 };
       });
     } catch (err) {
-      if (pgCode(err) === PG.UNIQUE) return 'NAME_EXISTS';
+      if (isUniqueOn(err, ROTATION_NAME_KEY)) return 'NAME_EXISTS'; // any other 23505 is not "name taken": it surfaces
       if (isBusyError(err, ROTATION_RACE_FKS)) return 'BUSY';
       throw err;
     }
@@ -1101,9 +1124,11 @@ export class SqlApiStore extends SqlTickStore implements ApiRepository {
         const [cur] = await tx.query(`SELECT "customerId", "name", "scope", "version" FROM "Rotation" WHERE "id" = $1 FOR UPDATE`, [rotationId]);
         if (!cur) return 'NOT_FOUND';
         if (Number(cur.version) !== expectedVersion) return 'CONFLICT';
-        // every customer counts, terminated ones too; PUT paging holds FOR SHARE on this row while it saves, so a step it adds is seen here
+        if (await this.customerTerminatedUnderShare(tx, cur.scope, (cur.customerId ?? null) as string | null)) return 'CUSTOMER_TERMINATED';
+        // every customer counts, terminated ones too; PUT paging holds FOR SHARE on this row while it saves, so a step it adds is seen here.
+        // Of a CUSTOMER rotation only its own customer's rows are shown (a step of another customer from legacy data still blocks, but its name and slug are not given out).
         const usage = await this.usageVia(tx, rotationId, null);
-        if (usage.length) return { inUse: usage };
+        if (usage.length) return { inUse: cur.scope === 'CUSTOMER' ? usage.filter((u) => u.customerId === cur.customerId) : usage };
         const [cnt] = await tx.query(`SELECT count(*)::int AS "n" FROM "Override" WHERE "rotationId" = $1`, [rotationId]);
         const memberIds = (await tx.query(`SELECT "contactId" FROM "RotationMember" WHERE "rotationId" = $1 ORDER BY "order", "contactId"`, [rotationId])).map((m) => m.contactId as string);
         await tx.query(`DELETE FROM "Rotation" WHERE "id" = $1`, [rotationId]);

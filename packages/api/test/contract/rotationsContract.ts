@@ -117,6 +117,7 @@ export function rotationsContract(make: MakeFixture<Repo>): void {
     const pins = await w.fx.rotationPins!(id);
     for (let i = 1; i < pins.length; i++) expect(pins[i]!.startAt.getTime()).toBeGreaterThanOrEqual(pins[i - 1]!.endAt.getTime());
   };
+  const tmpl = (action: string) => ({ at: TUE12, actorType: 'USER' as const, actorId: 'usr_minjae', action, targetType: 'Rotation', before: null, after: null, requestId: 'req_store' });
   const usageRows = (b: any): string[][] => b.customers.flatMap((c: any) => c.steps.map((n: any) => [c.id, n.level, n.scopeId, String(n.stepIndex)]));
   const getRot = async (id: string) => {
     const r = await w.call(ADMIN, 'GET', '/rotations');
@@ -274,6 +275,15 @@ export function rotationsContract(make: MakeFixture<Repo>): void {
       expect(usageRows(body(await w.call(ADMIN, 'GET', '/rotations/rot_hanbit/usage')))).toEqual([['cus_hanbit', 'CUSTOMER', 'cus_hanbit', '1']]);
     });
 
+    it('usage steps carry pagingConfigId (the seeded config of that customer) and shared: true for an MSP rotation, false for a CUSTOMER rotation', async () => {
+      await open();
+      const msp = body(await w.call(ADMIN, 'GET', '/rotations/rot_abc/usage'));
+      const stepsOf = (b: any) => b.customers.flatMap((c: any) => c.steps.map((n: any) => [c.id, n.pagingConfigId, n.shared]));
+      expect(stepsOf(msp).sort()).toEqual([['cus_hanbit', 'pc_cus_hanbit_CUSTOMER', true], ['cus_mirae', 'pc_cus_mirae_CUSTOMER', true]]);
+      const cus = body(await w.call(ADMIN, 'GET', '/rotations/rot_hanbit/usage'));
+      expect(stepsOf(cus)).toEqual([['cus_hanbit', 'pc_cus_hanbit_CUSTOMER', false]]);
+    });
+
     it('a narrowed staff member reading an MSP rotation\'s usage sees only the visible customers; the hidden one leaves no id, name or count', async () => {
       await open();
       for (const who of [nList('VIEWER'), nSub('ADMIN')]) {
@@ -394,6 +404,15 @@ export function rotationsContract(make: MakeFixture<Repo>): void {
       expect((await w.fx.rotationRow!('rot_abc'))!.version).toBe(0);
     });
 
+    it('a name-only PATCH of an MSP rotation writes one rotation.update and no rotation.apply', async () => {
+      await open();
+      const before = (await w.fx.audits()).length;
+      const r = await patch('rot_abc', { name: 'ABC desk (renamed)' }, 0);
+      expect([r.status, body(r).name, body(r).version, body(r).affected]).toEqual([200, 'ABC desk (renamed)', 1, 0]);
+      const audits = (await w.fx.audits()).slice(before);
+      expect(audits.map((a) => a.action)).toEqual(['rotation.update']);
+    });
+
     it('a cadence different from the stored one is 400 on cadence (version and rows unchanged); the same cadence is no error; scope and customerId keys are unknown keys', async () => {
       await open();
       const before = await counts();
@@ -469,6 +488,40 @@ export function rotationsContract(make: MakeFixture<Repo>): void {
       await expectNone(before);
     });
 
+    it('a CUSTOMER rotation: details.usage lists only its own customer, even when legacy data has another customer\'s step pointing at it; still 409', async () => {
+      await open((s) => { s.configs.push(config('cus_mirae', [step(0, 0, 'ROTATION', 'rot_hanbit', ['SMS'])], { scopeType: 'PROJECT', scopeId: 'prj_core', id: 'pc_legacy_cross' })); });
+      const before = await counts();
+      const r = await w.call(ADMIN, 'DELETE', '/rotations/rot_hanbit', { headers: im(0) });
+      expect([r.status, err(r).code]).toEqual([409, 'IN_USE']);
+      expect(usageRows(err(r).details.usage)).toEqual([['cus_hanbit', 'CUSTOMER', 'cus_hanbit', '1']]);
+      const text = JSON.stringify(err(r));
+      for (const leak of ['cus_mirae', 'Mirae', 'mirae', 'pc_legacy_cross']) expect(text).not.toContain(leak);
+      await expectNone(before);
+    });
+
+    it('a CUSTOMER rotation that only another customer\'s legacy step points at is 409 IN_USE with no customers listed (nothing of the other customer leaks)', async () => {
+      await open((s) => {
+        s.configs.splice(s.configs.findIndex((c) => c.customerId === 'cus_hanbit'), 1, config('cus_hanbit', [step(0, 0, 'ALL_RESPONDERS', null, ['SMS'])], { style: 'ALL_AT_ONCE' }));
+        s.configs.push(config('cus_mirae', [step(0, 0, 'ROTATION', 'rot_hanbit', ['SMS'])], { scopeType: 'PROJECT', scopeId: 'prj_core', id: 'pc_legacy_cross' }));
+      });
+      const before = await counts();
+      const r = await w.call(ADMIN, 'DELETE', '/rotations/rot_hanbit', { headers: im(0) });
+      expect([r.status, err(r).code, err(r).details.usage.customers]).toEqual([409, 'IN_USE', []]);
+      expect(JSON.stringify(err(r))).not.toMatch(/mirae|Mirae/);
+      await expectNone(before);
+    });
+
+    it('store level: update and delete of a CUSTOMER rotation of a TERMINATED customer are CUSTOMER_TERMINATED and write nothing (the customer ended after the API gate)', async () => {
+      await open((s) => { s.configs.splice(s.configs.findIndex((c) => c.customerId === 'cus_hanbit'), 1); s.customers.get('cus_hanbit')!.status = 'TERMINATED'; });
+      const before = await counts();
+      const u = await w.fx.repo.updateRotation({ id: 'rot_hanbit', expectedVersion: 0, name: 'Renamed', members: null, handover: null, previewHash: null, actorId: 'usr_minjae', at: TUE12 }, tmpl('rotation.update'));
+      expect(u).toBe('CUSTOMER_TERMINATED');
+      const d = await w.fx.repo.deleteRotation('rot_hanbit', 0, tmpl('rotation.delete'));
+      expect(d).toBe('CUSTOMER_TERMINATED');
+      await expectNone(before);
+      expect((await w.fx.rotationRow!('rot_hanbit'))).toMatchObject({ version: 0, name: 'Hanbit on-call' });
+    });
+
     it('without references: 200, the rotation with its members, pins and overrides is gone, one rotation.delete audit row', async () => {
       await open();
       const c = body(await w.call(ADMIN, 'POST', '/rotations', { body: MSP_BODY }));
@@ -497,6 +550,18 @@ export function rotationsContract(make: MakeFixture<Repo>): void {
       const u = await put('cus_mirae', 'rot_nope', 1);
       expect([u.status, err(u).code]).toEqual([400, 'VALIDATION_FAILED']);
       expect(err(u).details.fields[0]).toMatchObject({ field: 'steps[0].targetId', message: 'Unknown rotation.' });
+    });
+    it('store level: the recheck refuses another customer\'s CUSTOMER rotation like an unknown one (unknownRotation: the step index), and writes nothing', async () => {
+      await open();
+      const before = await counts();
+      const cfg = config('cus_mirae', [step(0, 0, 'ROTATION', 'rot_abc', ['SMS']), step(1, 10, 'ROTATION', 'rot_hanbit', ['SMS'])], { style: 'CUSTOM' });
+      const r = await w.fx.repo.savePagingConfig(cfg, 1, { ...tmpl('paging.update'), customerId: 'cus_mirae', targetId: cfg.id });
+      expect(r).toEqual({ unknownRotation: 1 });
+      await expectNone(before);
+      expect(body(await w.call(ADMIN, 'GET', '/customers/cus_mirae/paging')).version).toBe(1);
+      const own = config('cus_hanbit', [step(0, 0, 'ROTATION', 'rot_hanbit', ['SMS']), step(1, 10, 'ROTATION', 'rot_abc', ['SMS'])], { style: 'CUSTOM' });
+      const ok = await w.fx.repo.savePagingConfig(own, 1, { ...tmpl('paging.update'), customerId: 'cus_hanbit', targetId: own.id });
+      expect(ok).toMatchObject({ version: 2 });
     });
     it('a rotation that was just deleted is 400 on steps[0].targetId and the PagingConfig version stays', async () => {
       await open();
@@ -546,6 +611,22 @@ export function rotationsContract(make: MakeFixture<Repo>): void {
       expect(audits.filter((a) => a.action === 'rotation.update')).toHaveLength(1);
       const applied = audits.filter((a) => a.action === 'rotation.apply');
       expect(applied.map((a) => a.customerId).sort()).toEqual(['cus_hanbit', 'cus_mirae']);
+    });
+  });
+
+  describe('affected customers of an MSP schedule change', () => {
+    it('rotation.apply goes to the non-terminated customers that page the rotation only (not to one that does not, not to a terminated one); affected equals that number', async () => {
+      await open((s) => {
+        s.customers.set('cus_idle', { id: 'cus_idle', name: 'Idle Co', slug: 'idle' });
+        s.customers.set('cus_old', { id: 'cus_old', name: 'Old Co', slug: 'old', status: 'TERMINATED' });
+        s.configs.push(config('cus_idle', [step(0, 0, 'ALL_RESPONDERS', null, ['SMS'])], { style: 'ALL_AT_ONCE' }), config('cus_old', [step(0, 0, 'ROTATION', 'rot_abc', ['SMS'])], { style: 'SHARED_ROTATION' }));
+      });
+      const before = (await w.fx.audits()).length;
+      const r = await apply('rot_abc', { members: [A, C, B] }, 0);
+      expect([r.status, body(r).affected]).toEqual([200, 2]);
+      const audits = (await w.fx.audits()).slice(before);
+      expect(audits.filter((a) => a.action === 'rotation.apply').map((a) => a.customerId).sort()).toEqual(['cus_hanbit', 'cus_mirae']);
+      expect(audits.filter((a) => a.action === 'rotation.update')).toHaveLength(1);
     });
   });
 
