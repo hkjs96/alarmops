@@ -2,9 +2,15 @@ import { defineConfig } from "@playwright/test";
 
 // PORT: 3107 by default; set another one when 3107 is taken by a server that is not yours.
 const PORT = Number(process.env.PORT ?? 3107);
+// A second server runs the e2e-only fixture variant (E2E_FIXTURE=blocked-saves: a customer whose template changes the server refuses,
+// src/lib/api/mock/e2e-fixtures.ts). The default server and its fixture are untouched, so no default number changes.
+const PORT_BLOCKED = Number(process.env.PORT_BLOCKED ?? PORT + 1);
+const BLOCKED_SPEC = /blocked-saves\.spec\.ts$/;
 // A server left on the port has a mock store that earlier runs already changed, and unrelated tests fail on it
 // (QA 재점검 P3-E). In CI, or with PW_NO_REUSE=1, the run starts its own server and fails if the port is taken.
 const REUSE = !(process.env.CI || process.env.PW_NO_REUSE === "1");
+// SSO_ALLOWED_DOMAINS: the staff fence the Users screen warns about (no sign-in happens in the mock run)
+const BASE_ENV = { MOCK_API: "1", E2E_ALLOW_MOCK: "1", SSO_ALLOWED_DOMAINS: "msp.example" };
 export default defineConfig({
   testDir: "./e2e",
   timeout: 60_000,
@@ -12,17 +18,27 @@ export default defineConfig({
   workers: 1,
   use: { baseURL: `http://localhost:${PORT}` },
   projects: [
-    { name: "chromium", use: { browserName: "chromium" } },
+    { name: "chromium", use: { browserName: "chromium" }, testIgnore: BLOCKED_SPEC },
+    // the variant fixture: only its own spec, on its own server
+    { name: "blocked-saves", use: { browserName: "chromium", baseURL: `http://localhost:${PORT_BLOCKED}` }, testMatch: BLOCKED_SPEC },
     // Safari has no scroll anchoring: the no-row-shift rule is run there as well when WebKit is installed
     // (`npx playwright install webkit`, then PW_WEBKIT=1). Only the spec that measures rows without scroll anchoring.
     ...(process.env.PW_WEBKIT === "1" ? [{ name: "webkit", use: { browserName: "webkit" as const }, testMatch: /zzzz-no-anchor\.spec\.ts$/ }] : []),
   ],
-  webServer: {
-    command: `npx next start -p ${PORT}`,
-    url: `http://localhost:${PORT}/login`,
-    reuseExistingServer: REUSE,
-    // SSO_ALLOWED_DOMAINS: the staff fence the Users screen warns about (no sign-in happens in the mock run)
-    env: { MOCK_API: "1", E2E_ALLOW_MOCK: "1", SSO_ALLOWED_DOMAINS: "msp.example" },
-    timeout: 120_000,
-  },
+  webServer: [
+    {
+      command: `npx next start -p ${PORT}`,
+      url: `http://localhost:${PORT}/login`,
+      reuseExistingServer: REUSE,
+      env: BASE_ENV,
+      timeout: 120_000,
+    },
+    {
+      command: `npx next start -p ${PORT_BLOCKED}`,
+      url: `http://localhost:${PORT_BLOCKED}/login`,
+      reuseExistingServer: REUSE,
+      env: { ...BASE_ENV, E2E_FIXTURE: "blocked-saves" },
+      timeout: 120_000,
+    },
+  ],
 });

@@ -54,7 +54,7 @@ export function createTemplatesApi(x: Ctx): TemplatesApi {
     if (x.store.busy > 0) { x.store.busy -= 1; throw x.err(503, "BUSY", "The system was busy with another change. Send the same request again.", { retryAfterSec: 0 }); }
   };
   const nameOf = (id: string): string => paging.contacts[id]?.name ?? id;
-  const staffIds = (): Set<string> => new Set(Object.values(paging.contacts).filter((c) => c.kind === "STAFF").map((c) => c.id));
+  const staffIds = (): Set<string> => new Set(Object.values(paging.contacts).filter((c) => c.kind === "STAFF" && c.active !== false).map((c) => c.id));
 
   const live = (c: FxCustomer) => !x.terminated().has(c.id);
   const usersOf = (templateId: string) => x.customers.filter((c) => live(c) && paging.byCustomer[c.id]?.templateId === templateId);
@@ -158,6 +158,7 @@ export function createTemplatesApi(x: Ctx): TemplatesApi {
     const effects: TemplateEffect[] = [];
     let joins = 0;
     let leaves = 0;
+    const skipped: { contactId: string; name: string }[] = [];
     if (from !== to) {
       const rows = rowsOf(c);
       const row = (i: string) => rows.find((r) => r.contactId === i);
@@ -176,13 +177,16 @@ export function createTemplatesApi(x: Ctx): TemplatesApi {
       for (const i of [...newIds].sort(byId)) {
         if (oldIds.includes(i) && row(i)?.source === "TEMPLATE" && row(i)?.templateId === from) continue;
         const r = row(i);
+        // an inactive member is skipped, unless this customer already has a row for them (that row stays as it is)
+        if (!r && paging.contacts[i]?.active === false) { skipped.push({ contactId: i, name: nameOf(i) }); continue; }
         if (!r) { joins += 1; effects.push({ kind: "JOINS", contactId: i, name: nameOf(i) }); } else if (r.source === "DIRECT") effects.push({ kind: "ALREADY_DIRECT", contactId: i, name: nameOf(i) });
       }
       sortEffects(effects);
+      skipped.sort((a, b) => a.name.localeCompare(b.name) || byId(a.contactId, b.contactId));
     }
     const blocking = from === to ? [] : flat([{ customerId: c.id, reasons: blockReasons(c, hypo({ customerId: c.id, attach: to }), joins > 0 || leaves > 0) }]);
-    const previewHash = sha({ customerId: c.id, from, to, toVersion: to ? paging.templates[to]!.version ?? 0 : null, effects: effects.map((e) => [e.kind, e.contactId, e.stepIndex ?? null]) });
-    return { from: ref(from), to: ref(to), effects, joins, leaves, totals: { joins, leaves, warnings: effects.filter((e) => e.kind === "STEP_NAMES").length }, blocking, previewHash };
+    const previewHash = sha({ customerId: c.id, from, to, toVersion: to ? paging.templates[to]!.version ?? 0 : null, effects: effects.map((e) => [e.kind, e.contactId, e.stepIndex ?? null]), skipped: skipped.map((s) => s.contactId) });
+    return { from: ref(from), to: ref(to), effects, skippedInactive: skipped, joins, leaves, totals: { joins, leaves, warnings: effects.filter((e) => e.kind === "STEP_NAMES").length }, blocking, previewHash };
   }
 
   // ---- input
@@ -278,7 +282,7 @@ export function createTemplatesApi(x: Ctx): TemplatesApi {
       return withBusyRetry(async () => {
         busy();
         const plan = planAttach(c, to);
-        return structuredClone({ customerId: c.id, version: paging.byCustomer[c.id]!.respondersVersion, from: plan.from, to: plan.to, effects: plan.effects, totals: plan.totals, blocking: plan.blocking, previewHash: plan.previewHash });
+        return structuredClone({ customerId: c.id, version: paging.byCustomer[c.id]!.respondersVersion, from: plan.from, to: plan.to, effects: plan.effects, skippedInactive: plan.skippedInactive, totals: plan.totals, blocking: plan.blocking, previewHash: plan.previewHash });
       }, async () => {});
     },
     async putCustomerTemplate(customerId, templateId, o) {
@@ -288,13 +292,13 @@ export function createTemplatesApi(x: Ctx): TemplatesApi {
         busy();
         if (typeof o.previewHash !== "string" || !/^[0-9a-f]{64}$/.test(o.previewHash)) throw invalid("previewHash from the preview of this change is required.", "previewHash");
         if (o.version !== cp.respondersVersion) throw x.err(409, "VERSION_CONFLICT", "The Responders were updated by someone else.", { currentVersion: cp.respondersVersion });
-        if (cp.templateId === to) return { customerId: c.id, templateId: to, version: cp.respondersVersion, joins: 0, leaves: 0 };
+        if (cp.templateId === to) return { customerId: c.id, templateId: to, version: cp.respondersVersion, joins: 0, leaves: 0, skippedInactive: [] };
         const plan = planAttach(c, to);
         if (plan.previewHash !== o.previewHash) throw x.err(409, "PREVIEW_STALE", "The template or the customer changed after the preview. Preview again.", { currentVersion: cp.respondersVersion });
         if (plan.blocking.length) throw blockedError(plan.blocking);
         cp.templateId = to;
         // the template rows of the old template are gone with it; a direct row of someone the new template names too stays direct
-        return { customerId: c.id, templateId: to, version: ++cp.respondersVersion, joins: plan.joins, leaves: plan.leaves };
+        return { customerId: c.id, templateId: to, version: ++cp.respondersVersion, joins: plan.joins, leaves: plan.leaves, skippedInactive: plan.skippedInactive };
       }, async () => {});
     },
   };

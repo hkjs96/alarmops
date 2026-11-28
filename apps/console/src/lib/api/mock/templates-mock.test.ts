@@ -272,6 +272,56 @@ describe("a customer attaches, detaches or switches its template", () => {
     expect((await tpl(api, "Infra core")).customers.map((c) => c.name)).toContain("Daon Retail");
   });
 
+  it("GET Responders names the attached template (templateName), also when every member of it was added directly; null with null templateId", async () => {
+    const store = createStore();
+    const api = as(store);
+    const [mirae, eden, daon] = [await customerId(api, "mirae"), await customerId(api, "eden"), await customerId(api, "daon")];
+    expect(await api.getResponders(mirae)).toMatchObject({ templateId: "core", templateName: "Infra core" });
+    expect(await api.getResponders(eden)).toMatchObject({ templateId: null, templateName: null });
+    // Infra core is attached to Daon, and all three of its members are direct rows there: no TEMPLATE row, the name still comes through
+    store.paging.byCustomer[daon]!.templateId = "core";
+    store.paging.byCustomer[daon]!.staff = ["ct_haeun", "ct_junho", "ct_minjae"];
+    const res = await api.getResponders(daon);
+    expect(res.staff.every((x) => x.source === "DIRECT")).toBe(true);
+    expect(res).toMatchObject({ templateId: "core", templateName: "Infra core" });
+  });
+
+  it("attach skips inactive staff: listed by name in the preview and the result, not joined; a person this customer already has a row for is not skipped", async () => {
+    const store = createStore();
+    const api = as(store);
+    store.paging.contacts.ct_sora!.active = false;
+    store.paging.contacts.ct_jiwoo!.active = false;
+    const night = await tpl(api, "Night backup"); // Jiwoo Han, Sora Yoon: both inactive now
+    const daon = await customerId(api, "daon");
+    const p = await api.previewCustomerTemplate(daon, night.id);
+    expect(p.skippedInactive).toEqual([{ contactId: "ct_jiwoo", name: "Jiwoo Han" }, { contactId: "ct_sora", name: "Sora Yoon" }]);
+    expect(p.totals.joins).toBe(0);
+    expect(p.effects.filter((e) => e.kind === "JOINS")).toEqual([]);
+    const r = await api.putCustomerTemplate(daon, night.id, { version: p.version, previewHash: p.previewHash });
+    expect(r.skippedInactive.map((x) => x.name)).toEqual(["Jiwoo Han", "Sora Yoon"]);
+    expect(r.joins).toBe(0);
+    expect((await api.getResponders(daon)).staff.map((x) => x.name)).toEqual(["Junho Park", "Minjae Lee"]);
+    // Haneul Air has Sora as a direct row: not skipped there, and the other one is
+    const haneul = await customerId(api, "haneul");
+    const q = await api.previewCustomerTemplate(haneul, night.id);
+    expect(q.skippedInactive.map((x) => x.name)).toEqual(["Jiwoo Han"]);
+    expect(q.effects.map((e) => `${e.kind}:${e.name}`)).toContain("ALREADY_DIRECT:Sora Yoon");
+    // nobody skipped: an empty list
+    expect((await api.previewCustomerTemplate(daon, null)).skippedInactive).toEqual([]);
+    expect((await api.previewCustomerTemplate(await customerId(api, "mirae"), "core")).skippedInactive).toEqual([]);
+  });
+
+  it("a member who turns inactive between the preview and the save makes the preview stale (409 PREVIEW_STALE)", async () => {
+    const store = createStore();
+    const api = as(store);
+    const night = await tpl(api, "Night backup");
+    const daon = await customerId(api, "daon");
+    const p = await api.previewCustomerTemplate(daon, night.id);
+    expect(p.skippedInactive).toEqual([]);
+    store.paging.contacts.ct_sora!.active = false;
+    expect((await code(api.putCustomerTemplate(daon, night.id, { version: p.version, previewHash: p.previewHash }))).code).toBe("PREVIEW_STALE");
+  });
+
   it("detach: the template's rows leave, the direct ones stay (STAYS_DIRECT); detaching again changes nothing", async () => {
     const store = createStore();
     const api = as(store);

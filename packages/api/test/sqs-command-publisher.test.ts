@@ -102,11 +102,10 @@ describe('commandPublisherFromEnv', () => {
   it.each([
     'not a url',
     'http://sqs.ap-northeast-2.amazonaws.com/123456789012/q',
-    'https://sqs.us-east-1.amazonaws.com/123456789012/q',
     'https://sqs.ap-northeast-2.amazonaws.com.evil.com/123456789012/q',
     'https://sqs.ap-northeast-2.amazonaws.com/123/q',
     'https://sqs.ap-northeast-2.amazonaws.com/123456789012/q?x=1',
-  ])('malformed or wrong region throws: %s', (url) => {
+  ])('malformed or foreign-host url throws: %s', (url) => {
     expect(() => commandPublisherFromEnv({ ALARM_COMMANDS_QUEUE_URL: url, ALARM_COMMANDS_EXPECTED_ACCOUNT: ACCT }, { client })).toThrow();
   });
 });

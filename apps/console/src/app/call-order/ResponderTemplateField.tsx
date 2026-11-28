@@ -6,7 +6,7 @@ import type { CustomerTemplatePreview, ResponderTemplate } from "@/lib/api/types
 import { BlockedBox, EffectList } from "@/components/TemplateEffects";
 import { useShell } from "@/components/ShellContext";
 import { callAction } from "@/lib/session-ended";
-import { blockedCustomers, isOutOfDate, templateErrorText } from "@/lib/templates";
+import { blockedCustomers, isOutOfDate, skippedInactiveText, templateErrorText } from "@/lib/templates";
 import { listTemplatesForCustomer, previewCustomerTemplate, setCustomerTemplate } from "./actions";
 import "@/components/template-effects.css";
 
@@ -86,7 +86,8 @@ export function ResponderTemplateField({ customer, customerName, templateId, tem
     setOpen(false);
     onApplied(r.data.version);
     const words = kind === "detach" ? `${templateName ?? "The template"} detached from ${customerName}` : kind === "attach" ? `${toName} attached to ${customerName}` : `${customerName} now uses ${toName}`;
-    shell.toast(`${words} · ${r.data.joins} joined, ${r.data.leaves} left`, {
+    const skippedNote = skippedInactiveText(r.data.skippedInactive, "saved");
+    shell.toast(`${words} · ${r.data.joins} joined, ${r.data.leaves} left${skippedNote ? ` · ${skippedNote}` : ""}`, {
       label: "Undo",
       onAction: async () => {
         const p = await callAction(() => previewCustomerTemplate(customer, from === NONE ? null : from));
@@ -104,7 +105,7 @@ export function ResponderTemplateField({ customer, customerName, templateId, tem
 
   return (
     <div className="co-tplf" data-testid="co-template" data-template={templateId ?? ""}>
-      <span className="sm" id={`${id}-cur`}>Template: {templateId ? <b data-testid="co-template-name">{templateName ?? "a template"}</b> : <span data-testid="co-template-name">none</span>}</span>
+      <span className="sm" id={`${id}-cur`}>Template: {templateId ? <b data-testid="co-template-name">{templateName}</b> : <span data-testid="co-template-name">none</span>}</span>
       <button type="button" ref={btn} className="btn sm" data-testid="co-template-change" disabled={Boolean(disabledWhy)} aria-describedby={disabledWhy ? `${id}-why` : `${id}-cur`}
         aria-haspopup="dialog" onClick={() => { void begin(); }}>
         {templateId ? "Change template…" : "Attach a template…"}
@@ -130,6 +131,7 @@ export function ResponderTemplateField({ customer, customerName, templateId, tem
                   <p className="sm" data-testid="co-template-totals"><b>{customerName}</b>: {ready.totals.joins} will join, {ready.totals.leaves} will leave{ready.totals.warnings ? `, ${ready.totals.warnings} call order step${ready.totals.warnings === 1 ? "" : "s"} still name someone who leaves` : ""}.</p>
                   <BlockedBox blocked={blocked} testId="co-template-blocked" />
                   <EffectList effects={ready.effects} testId="co-template-effects" />
+                  {ready.skippedInactive.length > 0 ? <p className="sm mut" data-testid="co-template-skipped">{skippedInactiveText(ready.skippedInactive, "preview")}</p> : null}
                 </>
               ) : null}
             </div>

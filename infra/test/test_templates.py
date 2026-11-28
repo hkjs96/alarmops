@@ -1139,13 +1139,48 @@ class CustomerStackBoundary(unittest.TestCase):
             pat = p.get("AllowedPattern", "")
             self.assertNotIn("arn:aws:", pat, name)
             if "arn:" in pat:
-                self.assertIn("arn:aws[a-z-]*:", pat, name)
+                # #97: the bus ARN names the three partitions explicitly; the rest keep the open prefix
+                self.assertTrue("arn:aws[a-z-]*:" in pat or "arn:(aws|aws-cn|aws-us-gov):" in pat, name)
 
     def test_no_organizations_or_stackset_dependency(self):
         raw = (ROOT / "customer-stack" / "template.yaml").read_text(encoding="utf-8")
         for needle in ("PrincipalOrgID", "PrincipalOrgPaths", "organizations:", "AWS::Organizations",
                        "StackSet", "AWS::ControlTower"):
             self.assertNotIn(needle, raw)
+
+class CustomerStackCentralBusRegion(unittest.TestCase):
+    """#97 / D-58: the central bus may live in any region and partition; the customer stack stays in the customer's region."""
+
+    PAT = re.compile(T["Parameters"]["CentralEventBusArn"]["AllowedPattern"])
+
+    def test_accepts_seoul_aws_unchanged(self):
+        self.assertTrue(self.PAT.fullmatch("arn:aws:events:ap-northeast-2:111122223333:event-bus/alarmops-central"))
+
+    def test_accepts_other_regions_and_partitions(self):
+        for ok in ("arn:aws:events:us-east-1:111122223333:event-bus/alarmops-central",
+                   "arn:aws:events:eu-central-1:111122223333:event-bus/a.b_c-d",
+                   "arn:aws:events:ap-southeast-4:111122223333:event-bus/x",
+                   "arn:aws-cn:events:cn-north-1:111122223333:event-bus/alarmops-central",
+                   "arn:aws-us-gov:events:us-gov-west-1:111122223333:event-bus/alarmops-central"):
+            self.assertTrue(self.PAT.fullmatch(ok), ok)
+
+    def test_rejects_malformed_and_other_services(self):
+        for bad in ("", "arn:aws:events:us-east-1:1111:event-bus/x",
+                    "arn:aws:events:us-east-1:111122223333:rule/x",
+                    "arn:aws:events:us-east-1:111122223333:event-bus/",
+                    "arn:aws:events::111122223333:event-bus/x",
+                    "arn:aws:events:useast1:111122223333:event-bus/x",
+                    "arn:aws:events:us-east-1:111122223333:event-bus/x/y",
+                    "arn:aws:sqs:us-east-1:111122223333:event-bus/x",
+                    "arn:aws:events:us-east-1:111122223333:event-bus/x\n",
+                    "arn:awsx:events:us-east-1:111122223333:event-bus/x",
+                    "arn:awsx:events:ap-northeast-2:111122223333:event-bus/x",
+                    "arn:aws-iso:events:us-east-1:111122223333:event-bus/x",
+                    "arn:aws:events:*:111122223333:event-bus/x"):
+            self.assertIsNone(self.PAT.fullmatch(bad), bad)
+
+    def test_description_does_not_fix_a_region(self):
+        self.assertNotIn("ap-northeast-2", T["Parameters"]["CentralEventBusArn"]["Description"])
 
 
 if __name__ == "__main__":

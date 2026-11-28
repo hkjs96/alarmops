@@ -5,6 +5,7 @@ import { isSlug } from "../../validate";
 import * as fx from "./fixtures";
 import { customers14, customers34, type FxCustomer } from "./scope-fixtures";
 import { createPaging, type FxPaging } from "./paging-fixtures";
+import { applyBlockedSavesFixture, BLOCKED_SAVES, fixtureVariant } from "./e2e-fixtures";
 import { createPagingApi, directoryOf, hasOwnSteps, healthOf } from "./paging-mock";
 import { createStatusApi, createStatusStore, type StatusStore } from "./status-mock";
 import { createRevealApi, createRevealStore, type RevealStore } from "./reveal-mock";
@@ -49,8 +50,10 @@ const RANK: Record<Role, number> = { VIEWER: 0, OPERATOR: 1, ADMIN: 2 };
 export function createStore(opts: { customers?: 14 | 34 } = {}): Store {
   // a copy: onboarding adds customers, projects and services to it, and the fixtures are shared by every store
   const customers = structuredClone(opts.customers === 34 ? customers34 : customers14);
+  const paging = createPaging(customers);
+  if (fixtureVariant() === BLOCKED_SAVES) applyBlockedSavesFixture(customers, paging); // e2e only, off unless E2E_FIXTURE is set
   return {
-    customers, paging: createPaging(customers), customerStatus: createStatusStore(), reveals: createRevealStore(customers), retention: createRetentionStore(), users: createUsersStore(),
+    customers, paging, customerStatus: createStatusStore(), reveals: createRevealStore(customers), retention: createRetentionStore(), users: createUsersStore(),
     onboarding: createOnboardingStore(),
     monitoring: createMonitoringStore(customers),
     templates: createTemplatesStore(),

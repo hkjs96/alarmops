@@ -341,7 +341,7 @@ export function RespondersCard({ customer, customerName, services, responders, s
 
         {portal ? null : (
           <ResponderTemplateField customer={customer} customerName={customerName} templateId={responders.templateId} disabledWhy={why}
-            templateName={responders.staff.find((p) => p.source === "TEMPLATE")?.templateName ?? null}
+            templateName={responders.templateName}
             onApplied={(v) => { ver.current = Math.max(ver.current, v); }} />
         )}
         <div className="ov co-resp-g">MSP staff ({responders.staff.length})</div>

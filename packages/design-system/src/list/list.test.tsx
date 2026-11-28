@@ -123,6 +123,20 @@ describe("ConfirmDialog", () => {
     render(dlg({ defaultFocus: "confirm" }));
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Remove Junho Park from Daon Retail" }));
   });
+  it("Tab cycles through every field inside, a select included, not only the buttons", () => {
+    render(
+      <ConfirmDialog open title="Template of Daon Retail" confirmLabel="Attach" cancelLabel="Cancel" confirmDisabled onConfirm={() => undefined} onCancel={() => undefined}>
+        <select aria-label="Template"><option>none</option><option>Infra core</option></select>
+      </ConfirmDialog>,
+    );
+    const cancel = screen.getByRole("button", { name: "Cancel" });
+    const sel = screen.getByRole("combobox", { name: "Template" });
+    expect(document.activeElement).toBe(cancel);
+    fireEvent.keyDown(cancel, { key: "Tab" });
+    expect(document.activeElement).toBe(sel);
+    fireEvent.keyDown(sel, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(cancel);
+  });
   it("a warning is shown first, as an alert", () => {
     render(dlg({ warning: "After this, nobody for Daon Retail is reached." }));
     const w = screen.getByTestId("confirm-warning");

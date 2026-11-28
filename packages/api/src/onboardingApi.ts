@@ -20,8 +20,9 @@ import { adminCustomer, type CommandPublisher } from './customerApi.js';
 import { rateLimited, withoutUndefined, ApiError, invalid, isRecord, notFound, ok, validation, type ApiRequest, type ApiResponse } from './http.js';
 import type { AccountPatch, ApiRepository, CloudAccountRecord, EnvironmentValue, NewAccount, RoleStatusValue } from './repo.js';
 import { RESERVED_SLUGS, slugProblem } from './slug.js';
+import { DEFAULT_PARTITION, type Partition } from './partition.js';
 
-interface Deps { repo: ApiRepository; now: () => Date; commands?: CommandPublisher; log?: (level: 'warn' | 'error', msg: string, data?: Record<string, unknown>) => void }
+interface Deps { repo: ApiRepository; now: () => Date; commands?: CommandPublisher; partition?: Partition; log?: (level: 'warn' | 'error', msg: string, data?: Record<string, unknown>) => void }
 
 const ENVIRONMENTS: readonly EnvironmentValue[] = ['PRD', 'STG', 'DEV'];
 const REGION_RE = /^[a-z]{2}(-[a-z]+)+-\d$/;
@@ -110,7 +111,8 @@ export async function createCustomer(req: ApiRequest, deps: Deps): Promise<ApiRe
 
 /** Role names of infra/customer-stack/template.yaml (`AlarmOps-<Role>`). */
 const ROLE_NAMES = { reader: 'AlarmOps-Reader', eventForwarder: 'AlarmOps-EventForwarder', alarmWriter: 'AlarmOps-AlarmWriter', tagWriter: 'AlarmOps-TagWriter', remediator: 'AlarmOps-Remediator' } as const;
-export const roleArn = (awsAccountId: string, role: keyof typeof ROLE_NAMES): string => `arn:aws:iam::${awsAccountId}:role/${ROLE_NAMES[role]}`;
+/** `partition` comes from configuration (AWS_PARTITION, default `aws`), never from a request (D-58). */
+export const roleArn = (awsAccountId: string, role: keyof typeof ROLE_NAMES, partition: Partition = DEFAULT_PARTITION): string => `arn:${partition}:iam::${awsAccountId}:role/${ROLE_NAMES[role]}`;
 /** 256 bits; AWS accepts 2-1224 characters of [\w+=,.@:/-]. */
 export const newExternalId = (): string => `ao-${randomBytes(32).toString('hex')}`;
 
@@ -195,10 +197,10 @@ export async function createAccount(req: ApiRequest, deps: Deps, customerId: str
   const a: NewAccount = {
     awsAccountId, alias: f.alias ?? null, environment: f.environment ?? null, regions: f.regions ?? ['ap-northeast-2'], serviceId: f.serviceId ?? null,
     externalId: newExternalId(),
-    readerRoleArn: roleArn(awsAccountId, 'reader'), eventForwarderRoleArn: roleArn(awsAccountId, 'eventForwarder'),
-    alarmWriterRoleArn: enabled.alarmWriterEnabled ? roleArn(awsAccountId, 'alarmWriter') : null,
-    tagWriterRoleArn: enabled.tagWriterEnabled ? roleArn(awsAccountId, 'tagWriter') : null,
-    remediatorRoleArn: enabled.remediatorEnabled ? roleArn(awsAccountId, 'remediator') : null,
+    readerRoleArn: roleArn(awsAccountId, 'reader', deps.partition), eventForwarderRoleArn: roleArn(awsAccountId, 'eventForwarder', deps.partition),
+    alarmWriterRoleArn: enabled.alarmWriterEnabled ? roleArn(awsAccountId, 'alarmWriter', deps.partition) : null,
+    tagWriterRoleArn: enabled.tagWriterEnabled ? roleArn(awsAccountId, 'tagWriter', deps.partition) : null,
+    remediatorRoleArn: enabled.remediatorEnabled ? roleArn(awsAccountId, 'remediator', deps.partition) : null,
     ...enabled,
   };
   const r = await deps.repo.createAccount(customer.id, a, {
@@ -222,7 +224,7 @@ export async function patchAccount(req: ApiRequest, deps: Deps, accountId: strin
   for (const k of CAPS) {
     if (f[k] === undefined) continue;
     const role = CAP_ROLE[k];
-    patch[ARN_FIELD[role]] = f[k] ? roleArn(account.awsAccountId, role) : null;
+    patch[ARN_FIELD[role]] = f[k] ? roleArn(account.awsAccountId, role, deps.partition) : null;
   }
   const changed = Object.fromEntries(Object.entries(f));
   const before = Object.fromEntries(Object.keys(f).map((k) => [k, (account as unknown as Record<string, unknown>)[k]]));
