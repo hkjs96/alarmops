@@ -27,7 +27,7 @@ function failing(client: SqlClient, code: string, when: RegExp, constraint?: str
   } as SqlClient;
 }
 const im = (v: number) => ({ 'if-match': String(v) });
-const make = (seed: MemoryApiStore) => sqlFixture(db, seed);
+const make: Parameters<typeof rworld>[0] = (seed) => sqlFixture(db, seed);
 const header = (r: ApiResponse, name: string): string | undefined => Object.entries(r.headers).find(([k]) => k.toLowerCase() === name)?.[1] as string | undefined;
 
 const INSERT_MEMBER = /INSERT INTO "RotationMember"/;
